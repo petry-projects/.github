@@ -146,13 +146,21 @@ Never have two agents working in the same working directory simultaneously.
 1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
 3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
-4. **Branch from the default branch.** Workspaces branch from `origin/HEAD` (the repository's default remote branch). Never branch from another agent's branch.
+4. **Branch from the default branch.** Workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch.
 5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes.
 6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
 
+### Detecting File Overlap
+
+Before launching parallel agents, verify that stories won't modify the same files:
+
+1. Review each story's acceptance criteria and implementation scope for shared files
+2. Use `git log --stat` on recent similar changes to identify likely touched files
+3. If any overlap is detected or uncertain, serialize the stories — do not run them in parallel
+
 ### Worktree Naming Convention
 
-Use descriptive worktree names that identify the scope. The name you choose flows into the branch name automatically.
+Use descriptive worktree names that identify the scope. For tools that auto-generate branch names from your input (see table below), the name you choose flows into the branch name automatically.
 
 | Tool | You provide | Branch created |
 |------|------------|----------------|
@@ -173,7 +181,7 @@ Examples: `S-3.1-hive-health-card`, `fix-auth-token-expiry`, `S-2.4-offline-sync
 ```yaml
 ---
 name: S-3.1-hive-health-card
-isolation: worktree
+isolation: "worktree"
 ---
 ```
 
@@ -199,10 +207,12 @@ cd .worktrees/<name>
 
 - Git worktrees are fresh checkouts — gitignored files (`.env`, `.env.local`) are NOT copied automatically.
 - For Claude Code: add a **`.worktreeinclude`** file at the repo root listing gitignored files that should be copied into new worktrees:
-  ```
+
+  ```text
   .env
   .env.local
   ```
+
 - After entering a worktree, **install dependencies** (`npm install`, `go mod download`, etc.) before starting work.
 
 ### Cleanup
@@ -210,9 +220,12 @@ cd .worktrees/<name>
 - If the worktree has **no changes**, it is automatically removed when the agent session ends (Claude Code, Cursor).
 - If the worktree has **uncommitted changes**, the agent MUST commit or discard before exiting. Do not leave dirty worktrees.
 - After a PR is merged, remove the worktree and its branch:
+
   ```bash
   git worktree remove <worktree-path>
-  git branch -d <branch-name>
+  git branch -d <branch-name>  # safe delete; may fail after squash/rebase merges
+  # If the above fails and you've confirmed the PR is merged:
+  git branch -D <branch-name>
   ```
 
 ### Repository Configuration
