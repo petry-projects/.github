@@ -40,6 +40,75 @@ Pre-commit hooks may not run in agent sessions — apply formatting and checks m
 
 ---
 
+## Coding Standards & Principles
+
+All repositories MUST follow these software engineering principles. They apply to every language, framework, and layer in the stack. Repository-level AGENTS.md or CLAUDE.md files may specify how each principle maps to project-specific patterns — those specifics take precedence over the general guidance here.
+
+### SOLID Principles
+
+| Principle | Rule | What it means in practice |
+|-----------|------|---------------------------|
+| **Single Responsibility (SRP)** | Every module, class, or function has exactly one reason to change | Split files that mix concerns (e.g., HTTP handling + business logic + persistence). Each layer owns its own responsibility. |
+| **Open/Closed (OCP)** | Extend behavior through new implementations, not by modifying existing code | Use interfaces, strategy patterns, or composition. Avoid editing stable modules to add new variants. |
+| **Liskov Substitution (LSP)** | Subtypes must be substitutable for their base types without breaking callers | Ensure implementations honor the full contract of their interface — preconditions, postconditions, and invariants. |
+| **Interface Segregation (ISP)** | Clients should not depend on methods they don't use | Prefer small, focused interfaces over large ones. Split fat interfaces into cohesive groups. |
+| **Dependency Inversion (DIP)** | Depend on abstractions, not concretions | High-level policy code MUST NOT import low-level infrastructure directly. Inject dependencies via constructors or configuration. |
+
+### CLEAN Code
+
+- **Meaningful names.** Variables, functions, classes, and files must reveal intent. No abbreviations unless they are universally understood in the domain (e.g., `id`, `url`, `db`).
+- **Small functions.** Each function does one thing, at one level of abstraction. If a function needs a comment to explain what it does, it should be renamed or split.
+- **Minimal arguments.** Prefer fewer function parameters. If a function requires many arguments, consider grouping related parameters into a value object or configuration type.
+- **No side-effect surprises.** Functions that appear to be queries must not mutate state. Clearly separate commands (state changes) from queries (reads).
+- **Consistent formatting.** Formatting is enforced by the project's configured tooling (see Pre-Commit Quality Checks). Do not manually override or fight the formatter.
+- **Error handling is not an afterthought.** Handle errors at the appropriate layer. Don't swallow exceptions silently. Don't return `null` when an error type is more expressive.
+
+### DRY — Don't Repeat Yourself
+
+- **Eliminate knowledge duplication.** Every piece of business knowledge or logic must have a single, authoritative source. If the same rule exists in two places, extract it.
+- **DRY applies to knowledge, not code.** Two blocks of code that look identical but represent different domain concepts are NOT duplication — do not merge them. Two blocks that look different but encode the same business rule ARE duplication — unify them.
+- **Premature abstraction is worse than duplication.** Wait until you have at least three concrete instances before extracting a shared abstraction. Two similar cases do not justify a generic helper.
+
+### DDD — Domain-Driven Design
+
+- **Ubiquitous language.** Use the same terminology in code, tests, specs, and conversation. If the domain calls it a "market" or "session", the code uses `Market` or `Session` — not `item` or `context`.
+- **Bounded contexts.** Each major subdomain has clear boundaries. Code in one context must not directly depend on the internals of another. Communicate across contexts through well-defined interfaces or events.
+- **Aggregate roots.** Enforce invariants through aggregate roots. External code accesses an aggregate's children only through the root.
+- **Value objects.** Use typed value objects (branded types, newtypes, or equivalent) for identifiers, quantities, and domain-specific data. Avoid passing raw primitives (`string`, `int`) when a domain type adds safety and meaning.
+- **Repository pattern.** Persistence is abstracted behind repository interfaces that the domain defines. Infrastructure implements those interfaces. Domain code never imports ORM, SQL, or storage libraries directly.
+
+### KISS — Keep It Simple
+
+- Choose the simplest solution that satisfies the current requirements.
+- Avoid clever code. Readable, boring code is better than compact, clever code.
+- Do not add layers of abstraction, configuration, or indirection until complexity demands it.
+
+### YAGNI — You Aren't Gonna Need It
+
+- Do not build features, abstractions, or configuration for hypothetical future requirements.
+- Implement exactly what the current story or task requires — no more.
+- If a future need arises, it will be specified in a future story with its own tests and acceptance criteria.
+
+### Defensive Coding at System Boundaries
+
+- **Validate all external input.** Data from users, APIs, files, environment variables, and message queues must be validated and sanitized at the system boundary before entering domain logic.
+- **Trust internal code.** Once data has crossed a validated boundary, do not re-validate at every function call. Excessive internal checks add noise without value.
+- **Fail fast.** When an invariant is violated, fail immediately with a clear error rather than propagating bad state.
+
+### Separation of Concerns
+
+- **Layered architecture.** Maintain clear boundaries between domain logic, application/use-case orchestration, and infrastructure (I/O, persistence, external services).
+- **Direction of dependencies.** Dependencies always point inward — infrastructure depends on application, application depends on domain. Never the reverse.
+- **No framework bleed.** Framework-specific types and annotations stay at the infrastructure/adapter layer. Domain and application layers must be framework-agnostic.
+
+### Code Organization
+
+- **Co-locate related code.** Tests live next to the code they test. Types live near the code that uses them. Avoid scattering related files across distant directories.
+- **No barrel files** unless the project explicitly requires them. Re-export files (`index.ts`, `__init__.py`) add indirection and circular dependency risk.
+- **Consistent file naming.** Follow the repository's documented naming convention for source files, test files, components, and modules.
+
+---
+
 ## Pull Request Reviews
 
 - When addressing PR review comments, **mark each resolved comment thread as Resolved** on GitHub after the fix is pushed.
