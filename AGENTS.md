@@ -366,7 +366,6 @@ reason, a UI banner ("Showing cached data from 2h ago"), a metric increment on a
 3. NEVER report a task as complete if any step errored. Report the actual state — including what failed and why — even when the failure is inconvenient.
 4. When adding a fallback, ALWAYS make it observable: log line, response flag, metric, or user-visible indicator.
 5. When a test fails, fix the underlying cause. Do not delete, skip, or relax the assertion to make it pass.
-
 ### Separation of Concerns
 
 - **Layered architecture.** Maintain clear boundaries between domain logic, application/use-case orchestration, and infrastructure (I/O, persistence, external services).
@@ -424,7 +423,6 @@ drop old column in a separate, human-approved change. Never combine add and drop
 7. ALWAYS use additive changes by default. Deprecate, then remove later in a separate change.
 8. NEVER combine a destructive database migration (drop column, drop table, change type) with other changes in the same commit or PR.
 9. When uncertain whether something is breaking, treat it as breaking. False positives are cheap. False negatives break production.
-
 ### Code Organization
 
 - **Co-locate related code.** Tests live next to the code they test. Types live near the code that uses them. Avoid scattering related files across distant directories.
@@ -432,6 +430,7 @@ drop old column in a separate, human-approved change. Never combine add and drop
 - **Consistent file naming.** Follow the repository's documented naming convention for source files, test files, components, and modules.
 
 ---
+
 ## Pull Request Reviews
 
 - When addressing PR review comments, **mark each resolved comment thread as Resolved** on GitHub after the fix is pushed.
