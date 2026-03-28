@@ -135,6 +135,107 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 
 ---
 
+## Multi-Agent Isolation — Git Worktrees
+
+When multiple agents work on the same repository concurrently, they MUST use **isolated workspaces** to prevent conflicts. Git worktrees are the industry-standard isolation primitive — used by Claude Code, Cursor, Windsurf, Augment Intent, and dmux. Cloud agents (OpenAI Codex, GitHub Copilot, Devin) use containers or ephemeral environments that provide equivalent isolation.
+
+Never have two agents working in the same working directory simultaneously.
+
+### Rules
+
+1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
+2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
+3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
+4. **Branch from the default branch.** Workspaces branch from `origin/HEAD` (the repository's default remote branch). Never branch from another agent's branch.
+5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes.
+6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
+
+### Worktree Naming Convention
+
+Use descriptive worktree names that identify the scope. The name you choose flows into the branch name automatically.
+
+| Tool | You provide | Branch created |
+|------|------------|----------------|
+| Claude Code (`--worktree <name>`) | `S-3.1-hive-health-card` | `worktree-S-3.1-hive-health-card` |
+| Claude Code subagent (`isolation: "worktree"`) | Agent `name` field | `worktree-<name>` |
+| GitHub Copilot coding agent | Task description | `copilot/<descriptive-name>` (auto) |
+| Cursor parallel agents | Prompt | `feat-N-<random>` (auto) |
+| Manual worktree | Full branch name | Whatever you specify |
+
+**Name format:** `<story-or-task-id>-<short-description>`
+
+Examples: `S-3.1-hive-health-card`, `fix-auth-token-expiry`, `S-2.4-offline-sync-banner`
+
+### Tool-Specific Setup
+
+**Claude Code subagents** — set `isolation: "worktree"` in the agent definition:
+
+```yaml
+---
+name: S-3.1-hive-health-card
+isolation: worktree
+---
+```
+
+**Claude Code CLI sessions** — start in a named worktree:
+
+```bash
+claude --worktree S-3.1-hive-health-card
+```
+
+**GitHub Copilot coding agent** — assign a task via GitHub Issues or the Copilot panel. Copilot creates its own branch (`copilot/...`) and ephemeral environment automatically.
+
+**OpenAI Codex** — use worktree mode in the Codex app, or assign tasks to the cloud agent which runs in isolated containers.
+
+**Manual worktree** (for tools without built-in support):
+
+```bash
+git worktree add .worktrees/<name> -b agent/<story-id>-<description>
+cd .worktrees/<name>
+# run agent session here
+```
+
+### Environment & Dependencies
+
+- Git worktrees are fresh checkouts — gitignored files (`.env`, `.env.local`) are NOT copied automatically.
+- For Claude Code: add a **`.worktreeinclude`** file at the repo root listing gitignored files that should be copied into new worktrees:
+  ```
+  .env
+  .env.local
+  ```
+- After entering a worktree, **install dependencies** (`npm install`, `go mod download`, etc.) before starting work.
+
+### Cleanup
+
+- If the worktree has **no changes**, it is automatically removed when the agent session ends (Claude Code, Cursor).
+- If the worktree has **uncommitted changes**, the agent MUST commit or discard before exiting. Do not leave dirty worktrees.
+- After a PR is merged, remove the worktree and its branch:
+  ```bash
+  git worktree remove <worktree-path>
+  git branch -d <branch-name>
+  ```
+
+### Repository Configuration
+
+Add worktree directories to the project's `.gitignore`:
+
+```gitignore
+# Agent worktrees
+.claude/worktrees/
+.worktrees/
+```
+
+### Coordination Checklist (for humans orchestrating multiple agents)
+
+Before launching parallel agents, verify:
+- [ ] Each agent has a distinct story/task assignment
+- [ ] No two agents will modify the same files
+- [ ] Shared dependencies (lockfiles, generated types) are up to date on the default branch before agents start
+- [ ] If stories share a dependency file, run them sequentially, not in parallel
+- [ ] No more than 3–5 agents are running concurrently on the same repository
+
+---
+
 ## Agent Operation Guidance
 
 - Prefer interactive or dev commands when iterating; avoid running production-only commands from an agent session.
