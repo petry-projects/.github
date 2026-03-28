@@ -50,7 +50,7 @@ All repositories MUST follow these software engineering principles. They apply t
 |-----------|------|---------------------------|
 | **Single Responsibility (SRP)** | Every module, class, or function has exactly one reason to change | Split files that mix concerns (e.g., HTTP handling + business logic + persistence). Each layer owns its own responsibility. |
 | **Open/Closed (OCP)** | Extend behavior through new implementations, not by modifying existing code | Use interfaces, strategy patterns, or composition. Avoid editing stable modules to add new variants. |
-| **Liskov Substitution (LSP)** | Subtypes must be substitutable for their base types without breaking callers | Ensure implementations honour the full contract of their interface — preconditions, postconditions, and invariants. |
+| **Liskov Substitution (LSP)** | Subtypes must be substitutable for their base types without breaking callers | Ensure implementations honor the full contract of their interface — preconditions, postconditions, and invariants. |
 | **Interface Segregation (ISP)** | Clients should not depend on methods they don't use | Prefer small, focused interfaces over large ones. Split fat interfaces into cohesive groups. |
 | **Dependency Inversion (DIP)** | Depend on abstractions, not concretions | High-level policy code MUST NOT import low-level infrastructure directly. Inject dependencies via constructors or configuration. |
 
@@ -101,7 +101,7 @@ All repositories MUST follow these software engineering principles. They apply t
 - **Direction of dependencies.** Dependencies always point inward — infrastructure depends on application, application depends on domain. Never the reverse.
 - **No framework bleed.** Framework-specific types and annotations stay at the infrastructure/adapter layer. Domain and application layers must be framework-agnostic.
 
-### Code Organisation
+### Code Organization
 
 - **Co-locate related code.** Tests live next to the code they test. Types live near the code that uses them. Avoid scattering related files across distant directories.
 - **No barrel files** unless the project explicitly requires them. Re-export files (`index.ts`, `__init__.py`) add indirection and circular dependency risk.
