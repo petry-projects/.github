@@ -25,7 +25,7 @@ Before every commit, agents MUST run and pass the project's full check suite. At
 1. **Format** — run the project's formatter (e.g., `prettier`, `gofmt`)
 2. **Lint** — run the project's linter with zero warnings/errors
 3. **Type check** — if applicable (e.g., `tsc --noEmit`)
-4. **Tests** — run the full test suite with coverage
+4. **Tests** — run the full test suite with coverage (during iteration, run specific tests for speed — see Agent Operation Guidance)
 
 Pre-commit hooks may not run in agent sessions — apply formatting and checks manually.
 
@@ -44,9 +44,11 @@ Pre-commit hooks may not run in agent sessions — apply formatting and checks m
 
 - When addressing PR review comments, **mark each resolved comment thread as Resolved** on GitHub after the fix is pushed.
 - Use the GitHub GraphQL API via `gh api graphql` with the `resolveReviewThread` mutation:
+
   ```bash
   gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_..."}) { thread { id isResolved } } }'
   ```
+
   Retrieve thread IDs first with a `reviewThreads` query on the pull request.
 - Resolve all addressed threads in one pass after pushing the fix commit.
 
@@ -137,7 +139,7 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 
 - Prefer interactive or dev commands when iterating; avoid running production-only commands from an agent session.
 - Keep dependencies and lockfiles in sync.
-- Prefer small, focused commands — run specific tests rather than the full suite when iterating.
+- Prefer small, focused commands — run specific tests rather than the full suite when iterating (the full suite is still required before committing; see Pre-Commit Quality Checks).
 - Document project-specific dev/test/run commands and required environment variables in the repo's own AGENTS.md or README.
 
 ---
