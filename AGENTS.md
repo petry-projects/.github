@@ -442,6 +442,7 @@ drop old column in a separate, human-approved change. Never combine add and drop
   gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_..."}) { thread { id isResolved } } }'
   ```
 
+
   Retrieve thread IDs first with a `reviewThreads` query on the pull request.
 - Resolve all addressed threads in one pass after pushing the fix commit.
 
