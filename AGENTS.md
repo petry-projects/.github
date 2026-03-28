@@ -40,16 +40,6 @@ Pre-commit hooks may not run in agent sessions — apply formatting and checks m
 
 ---
 
-## CI Quality Gates
-
-- **Iterate until all CI checks pass.** Before requesting review or marking a PR as ready:
-  - Run all checks locally (format, lint, typecheck, tests, coverage)
-  - If any check fails in CI, investigate locally, fix the issue, and re-run
-  - Continue iterating until all checks pass both locally and in CI
-- Never bypass CI gates or weaken thresholds to make a PR pass.
-
----
-
 ## Pull Request Reviews
 
 - When addressing PR review comments, **mark each resolved comment thread as Resolved** on GitHub after the fix is pushed.
@@ -70,9 +60,76 @@ Pre-commit hooks may not run in agent sessions — apply formatting and checks m
 
 ---
 
-## Planning Artifacts
+## BMAD Method — Spec-Driven Development
 
-Repositories using the BMAD method store planning documents in `_bmad-output/planning-artifacts/`. Always consult these before implementing — they contain PRDs, architecture decisions, UX specs, and epics/stories.
+All project repositories MUST install and use the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) to enforce **Spec-Driven Development (SDD)**. BMAD provides structured agents, workflows, and planning artifacts that ensure every feature is fully specified before implementation begins.
+
+### Setup
+
+- Install BMAD in every new repo: `npx bmad-method install`
+- Keep BMAD up to date: `npx bmad-method install` (re-run periodically)
+
+### Required Workflow
+
+1. **Plan before you build.** Every feature, epic, or significant change MUST have planning artifacts before implementation starts. Use BMAD agents (PM, Architect, UX Designer) to produce them.
+2. **Planning artifacts live in `_bmad-output/planning-artifacts/`** and include:
+   - Product Brief — vision, target users, success criteria
+   - PRD — functional and non-functional requirements
+   - Architecture — technical decisions, component design, data model
+   - UX Design Specification — user flows, wireframes, accessibility
+   - Epics & Stories — implementation-ready backlog with acceptance criteria
+3. **Always consult planning artifacts before implementing.** They are the source of truth for what to build and how. If artifacts are missing or outdated, update them first — do not implement against stale specs.
+4. **Use BMAD stories for implementation.** Stories created via `bmad-create-story` contain all context an agent needs. Use `bmad-dev-story` to execute them.
+5. **Validate readiness before sprints.** Run `bmad-check-implementation-readiness` to ensure specs are complete before starting implementation work.
+
+### BMAD Agents Available
+
+Use BMAD's specialized agents via their slash commands: `bmad-pm` (Product Manager), `bmad-architect` (Solution Architect), `bmad-ux-designer` (UX Designer), `bmad-dev` (Developer), `bmad-tea` (Test Architect), `bmad-qa` (QA), `bmad-sm` (Scrum Master), and others. Run `bmad-help` for guidance on which agent or workflow to use next.
+
+---
+
+## CI Quality Gates — Required Checks
+
+All repositories MUST configure and enforce the following CI checks. PRs cannot be merged until all checks pass.
+
+### Security & Code Analysis
+
+| Check | Tool | Purpose |
+|-------|------|---------|
+| **Static analysis (SAST)** | [CodeQL](https://github.com/github/codeql-action) | Detect security vulnerabilities, bugs, and anti-patterns |
+| **Code quality** | [SonarCloud](https://sonarcloud.io/) | Maintainability, reliability, security hotspots, duplication |
+
+### Automated Code Review
+
+| Check | Tool | Purpose |
+|-------|------|---------|
+| **AI code review** | [CodeRabbit](https://coderabbit.ai/) | Automated PR review for logic errors, best practices, and suggestions |
+| **AI code review** | [GitHub Copilot](https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review) | Copilot code review for security, performance, and correctness |
+
+### Code Quality
+
+| Check | Tool | Purpose |
+|-------|------|---------|
+| **Linting** | Project linter (ESLint, golangci-lint, etc.) | Zero warnings, zero errors |
+| **Formatting** | Project formatter (Prettier, gofmt, etc.) | Consistent code style |
+| **Type checking** | Language type checker (tsc, etc.) | Type safety (where applicable) |
+
+### Testing
+
+| Check | Tool | Purpose |
+|-------|------|---------|
+| **Unit & integration tests** | Project test framework (Jest, Vitest, etc.) | All tests must pass |
+| **Code coverage** | Coverage reporter | Must meet repo-defined thresholds; PRs that reduce coverage are rejected |
+
+### Enforcement
+
+- All checks above are configured as **required status checks** on the default branch.
+- **Iterate until all CI checks pass.** Before requesting review or marking a PR as ready:
+  - Run all checks locally (format, lint, typecheck, tests, coverage)
+  - If any check fails in CI, investigate locally, fix the issue, and re-run
+  - Continue iterating until all checks pass both locally and in CI
+- Never bypass CI gates or weaken thresholds to make a PR pass.
+- Address CodeRabbit and Copilot review comments the same way you address human reviewer comments — fix or explicitly justify skipping with a reply.
 
 ---
 
@@ -88,4 +145,5 @@ Repositories using the BMAD method store planning documents in `_bmad-output/pla
 ## References
 
 - AGENTS.md convention: https://agents.md/
+- BMAD Method: https://github.com/bmad-code-org/BMAD-METHOD
 - Organization: https://github.com/petry-projects
