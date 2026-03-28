@@ -432,7 +432,6 @@ drop old column in a separate, human-approved change. Never combine add and drop
 - **Consistent file naming.** Follow the repository's documented naming convention for source files, test files, components, and modules.
 
 ---
-
 ## Pull Request Reviews
 
 - When addressing PR review comments, **mark each resolved comment thread as Resolved** on GitHub after the fix is pushed.
