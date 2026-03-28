@@ -13,7 +13,7 @@ This file defines cross-cutting development standards for all repositories in th
 - **NEVER use `.skip()` to avoid failing tests.** If tests fail, fix them. If functionality cannot be directly tested, extract testable logic and test the extraction.
 - **NEVER add coverage-ignore comments** (e.g., `/* istanbul ignore next */`, `/* c8 ignore next */`, `// v8 ignore next`) to artificially boost coverage. If code is difficult to test, improve mocking strategies or adjust thresholds instead.
 - Unit tests MUST be fast, deterministic, and not access external networks.
-- Integration tests are allowed but MUST be clearly marked and skippable in CI.
+- Integration tests are allowed but MUST be clearly marked. They may be skipped locally during rapid iteration, but CI MUST always run them (for example, in a separate job or scheduled workflow).
 - Mock external services using project-provided helpers where available.
 
 ---
