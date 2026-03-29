@@ -8,7 +8,6 @@ This file defines cross-cutting development standards for all repositories in th
 
 ## Project Context
 
-- **Primary languages:** TypeScript, HTML, Markdown. Individual repos may also use Go, Terraform, or other languages as specified in their own AGENTS.md.
 - **Assume brownfield.** When exploring a repo, check for existing source code before assuming it is greenfield. Look at all directories, worktrees, and non-main branches before concluding that code does not exist.
 
 ---
