@@ -258,7 +258,7 @@ Never have two agents working in the same working directory simultaneously.
 1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
 3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
-4. **Branch from the default branch.** Workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch.
+4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic Development](#stacked-prs-for-epic-development)). Workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when Epics are part of a declared stack and the child Epic branches from its parent Epic's branch.
 5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes.
 6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
 
@@ -368,6 +368,241 @@ Before launching parallel agents, verify:
 - [ ] Shared dependencies (lockfiles, generated types) are up to date on the default branch before agents start
 - [ ] If stories share a dependency file, run them sequentially, not in parallel
 - [ ] No more than 3–5 agents are running concurrently on the same repository
+
+---
+
+## Stacked PRs for Epic Development
+
+When a project has multiple Epics with **sequential dependencies** — where Epic 2 builds on the foundation laid by Epic 1, Epic 3 extends Epic 2, and so on — the standard "branch from main" model forces each Epic to wait for the previous Epic's PR to fully merge before work can begin. Stacked PRs eliminate this bottleneck by letting each Epic's branch build on the previous Epic's branch, forming a chain that merges bottom-up.
+
+Each Epic produces a **single PR** containing all of that Epic's stories. The stack is a chain of Epic-level PRs:
+
+```
+main ← Epic-1-PR ← Epic-2-PR ← Epic-3-PR ← Epic-4-PR
+```
+
+> **When to use stacked PRs:** Only when Epics have true sequential dependencies — i.e., Epic 2 cannot compile or pass tests without Epic 1's code. If Epics are independent, use the standard parallel workflow (one agent per Epic, all branching from `main`).
+
+### How It Works
+
+Each Epic gets one long-lived **integration branch**. Multiple agents work stories concurrently in separate worktrees that branch from the Epic branch, then merge their completed stories back into it. The Epic branch accumulates all story work and becomes one PR in the stack.
+
+| PR | Source branch | Target branch |
+|----|---------------|---------------|
+| Epic 1 PR | `epic-1/foundation` | `main` |
+| Epic 2 PR | `epic-2/core-features` | `epic-1/foundation` |
+| Epic 3 PR | `epic-3/integrations` | `epic-2/core-features` |
+| Epic 4 PR | `epic-4/polish` | `epic-3/integrations` |
+
+When Epic 1's PR merges into `main`, Epic 2's PR is retargeted to `main`, and so on up the stack.
+
+### Rules for Stacked Epic PRs
+
+1. **One PR per Epic.** Each Epic produces exactly one PR. All stories within the Epic are merged into the Epic's integration branch.
+2. **Stacks are strictly linear.** No branching within a stack (no diamond or tree shapes). One parent Epic, one child Epic.
+3. **Maximum stack depth: 4 Epics.** Deeper stacks become fragile and painful to rebase. If a project has more than 4 sequential Epics, look for opportunities to merge intermediate Epics before continuing.
+4. **Parallel agents within an Epic.** Multiple agents CAN work on stories within the same Epic concurrently — each in its own worktree branching from the Epic branch. The standard multi-agent isolation rules apply: no two agents modify the same file. Story worktrees merge back into the Epic branch when complete.
+5. **Sprints within an Epic may overlap.** If Sprint 2's stories are independent of Sprint 1's stories, agents may work on both sprints concurrently. Only serialize sprints when later stories depend on earlier ones.
+6. **Independent Epic stacks CAN run in parallel.** If your project has two separate dependency chains (e.g., Epics A1→A2 and Epics B1→B2), run those stacks concurrently with separate agents. The standard multi-agent isolation rules apply — no overlapping file ownership across stacks.
+7. **File ownership within a stack is cumulative.** Files touched by Epic 1 may also be touched by Epic 2 (that's the nature of sequential dependency). Ensure agents in the child Epic coordinate with the parent Epic's completed state.
+8. **Bottom-up merge order is mandatory.** Always merge the bottom Epic PR first, then retarget the next Epic PR to `main`, and so on. Never merge out of order.
+
+### Workflow — Planning the Stack
+
+Before any agent starts, the orchestrator (human or planning agent) identifies the Epic dependency order and documents the stack plan:
+
+```markdown
+## Project Stack Plan
+1. Epic 1 — Foundation: data model, core types, DB schema (base → main)
+2. Epic 2 — Core Features: service layer, business logic (base → Epic 1)
+3. Epic 3 — Integrations: API endpoints, external services (base → Epic 2)
+4. Epic 4 — Polish: UI refinements, error handling, docs (base → Epic 3)
+```
+
+Each Epic should list its stories, and the plan should call out which files/modules each Epic owns.
+
+### Workflow — Implementing the Stack
+
+**Step 1: Create the Epic integration branch.** The orchestrator (or first agent) creates the Epic branch from its parent:
+
+```bash
+# Epic 1 branches from main
+git checkout main && git pull origin main
+git checkout -b epic-1/foundation
+git push -u origin epic-1/foundation
+
+# Open the Epic PR (initially empty or with scaffolding)
+gh pr create --base main --title "Epic 1: Foundation" --body "..." --draft
+```
+
+**Step 2: Agents work stories in parallel worktrees.** Each agent creates a story worktree branching from the Epic branch:
+
+```bash
+# Agent 1 — Story S-1.1
+git worktree add .worktrees/S-1.1-data-model -b epic-1/S-1.1-data-model origin/epic-1/foundation
+
+# Agent 2 — Story S-1.2 (concurrent, no file overlap with S-1.1)
+git worktree add .worktrees/S-1.2-core-types -b epic-1/S-1.2-core-types origin/epic-1/foundation
+
+# Agent 3 — Story S-1.3 (concurrent, no file overlap)
+git worktree add .worktrees/S-1.3-db-schema -b epic-1/S-1.3-db-schema origin/epic-1/foundation
+```
+
+Each agent implements its story, runs quality checks, and pushes.
+
+**Step 3: Merge stories back into the Epic branch.** As stories complete, merge them into the Epic integration branch:
+
+```bash
+# Merge completed story into the Epic branch
+git checkout epic-1/foundation
+git merge origin/epic-1/S-1.1-data-model
+git push origin epic-1/foundation
+
+# Later stories may need to rebase onto the updated Epic branch before merging
+git checkout epic-1/S-1.3-db-schema
+git rebase origin/epic-1/foundation
+# resolve any conflicts, then merge back
+```
+
+Alternatively, story branches can be merged via short-lived PRs targeting the Epic branch for lightweight code review within the Epic.
+
+**Step 4: Create the next Epic branch.** Once the previous Epic branch has enough foundation (stories merged), create the next Epic:
+
+```bash
+# Epic 2 branches from Epic 1
+git checkout epic-1/foundation && git pull origin epic-1/foundation
+git checkout -b epic-2/core-features
+git push -u origin epic-2/core-features
+gh pr create --base epic-1/foundation --title "Epic 2: Core Features" --body "..." --draft
+```
+
+Agents then work Epic 2's stories in parallel worktrees branching from `epic-2/core-features`, following the same pattern.
+
+**Step 5: Repeat** for each subsequent Epic in the stack.
+
+### Workflow — Merging the Stack
+
+1. **Merge the bottom PR** (Epic 1 → `main`) using the repo's standard merge strategy.
+2. **Retarget the next PR** to `main`:
+   ```bash
+   gh pr edit <epic-2-PR-number> --base main
+   ```
+3. **Rebase the next branch** onto `main` to incorporate the merge and resolve any squash/rebase differences:
+   ```bash
+   # In the Epic 2 worktree
+   git fetch origin main
+   git rebase origin/main
+   git push --force-with-lease
+   ```
+4. **Review and merge Epic 2** → `main`. Repeat for Epic 3, Epic 4, etc.
+
+### Workflow — Handling Changes to a Lower Epic PR
+
+If a reviewer requests changes to a lower Epic PR (e.g., Epic 1), the agent making fixes MUST propagate changes upward:
+
+1. Make the fix on Epic 1's branch and push.
+2. For each child branch in order, rebase onto the updated parent:
+   ```bash
+   # In Epic 2 worktree
+   git fetch origin epic-1/foundation
+   git rebase origin/epic-1/foundation
+   # Resolve any conflicts
+   git push --force-with-lease
+   ```
+3. Repeat for Epic 3 if it exists (rebasing onto Epic 2's updated branch), and so on.
+
+If conflicts are extensive, consider collapsing the stack — merge what you can into `main` and rebuild the remaining Epics from there.
+
+### Story and Sprint Organization Within an Epic
+
+The Epic branch is an **integration branch** — it accumulates completed stories. Agents do not work directly on the Epic branch. Instead, each agent works in its own story worktree that branches from the Epic branch.
+
+**Sprint-level organization:**
+
+Epics are typically broken into Sprints, each containing a set of stories. Within a Sprint, all stories with no file overlap can be worked in parallel by separate agents. Across Sprints:
+
+- **Independent Sprints** (no data/API dependency between them) — run concurrently.
+- **Dependent Sprints** (Sprint 2 stories require Sprint 1 output) — run sequentially. Merge all Sprint 1 stories into the Epic branch before Sprint 2 agents branch from it.
+
+```
+Epic 1 branch (integration)
+├── Sprint 1 (parallel agents)
+│   ├── Agent 1 → S-1.1 worktree
+│   ├── Agent 2 → S-1.2 worktree
+│   └── Agent 3 → S-1.3 worktree
+│   (all merge back into Epic branch)
+├── Sprint 2 (parallel agents, after Sprint 1 merges)
+│   ├── Agent 1 → S-1.4 worktree
+│   └── Agent 2 → S-1.5 worktree
+│   (merge back into Epic branch)
+└── Epic PR → targets parent Epic branch or main
+```
+
+**Story worktree naming convention:**
+
+```
+.worktrees/<epic-id>-<story-id>-<description>
+```
+
+Branch name: `<epic-id>/<story-id>-<description>`
+
+Examples: `epic-1/S-1.1-data-model`, `epic-2/S-2.3-auth-middleware`
+
+**Merging stories back into the Epic branch:**
+
+Stories can be integrated via direct merge or via short-lived PRs targeting the Epic branch:
+
+| Method | When to use |
+|--------|-------------|
+| **Direct merge** (`git merge`) | Small team, high trust, fast iteration |
+| **Story PRs** (PR targeting Epic branch) | Larger team, want per-story review before integration |
+
+Either way, the Epic-level PR in the stack is the final gate for review and CI before merging into the parent Epic or `main`.
+
+### Combining Stacked Epics with Parallel Agents
+
+Stacked PRs and parallel agents operate at different levels and are fully complementary:
+
+| Level | Parallelism | Constraint |
+|-------|-------------|------------|
+| **Across independent Epic chains** | Full parallel — separate stacks run concurrently | No file overlap between chains |
+| **Across Epics in the same stack** | Sequential — child Epic starts after parent Epic branch is stable | Child branches from parent |
+| **Within an Epic (across Sprints)** | Parallel if Sprints are independent; sequential if dependent | Dependent Sprints wait for prior Sprint to merge into Epic branch |
+| **Within a Sprint** | Full parallel — multiple agents, one story each | No file overlap between stories |
+
+Example — a project with two Epic chains and six agents:
+
+| Agent | Chain | Epic | Sprint | Story | Branch base | Status |
+|-------|-------|------|--------|-------|-------------|--------|
+| Agent 1 | A | Epic 1 | Sprint 1 | S-1.1 (data model) | `epic-1/foundation` | Active |
+| Agent 2 | A | Epic 1 | Sprint 1 | S-1.2 (core types) | `epic-1/foundation` | Active (parallel) |
+| Agent 3 | A | Epic 1 | Sprint 1 | S-1.3 (db schema) | `epic-1/foundation` | Active (parallel) |
+| Agent 4 | B | Epic 3 | Sprint 1 | S-3.1 (auth) | `epic-3/auth` | Active (parallel, different chain) |
+| Agent 5 | B | Epic 3 | Sprint 1 | S-3.2 (sessions) | `epic-3/auth` | Active (parallel) |
+| Agent 6 | A | Epic 2 | — | — | `epic-1/foundation` | Waiting (parent Epic incomplete) |
+
+Once Agents 1–3 merge their stories into `epic-1/foundation`, Agent 6 can begin Epic 2's stories. Meanwhile, Agents 4–5 continue independently on Chain B.
+
+### Stack Coordination Checklist
+
+Before starting a stacked Epic workflow, verify:
+- [ ] Epics have genuine sequential dependencies (not just conceptual ordering)
+- [ ] Stack depth is 4 or fewer Epics
+- [ ] Stack plan is documented with Epic order, parent relationships, and Sprint breakdown
+- [ ] Each Epic's file/module ownership is identified — no overlap across parallel stacks
+- [ ] Within each Epic, stories are assigned to Sprints with file overlap analysis complete
+- [ ] Stories within each Sprint have no file overlap (safe for parallel agents)
+- [ ] Dependent Sprints are clearly marked — they wait for prior Sprint to merge into Epic branch
+- [ ] Stories within each Epic are scoped and ready for implementation (BMAD artifacts complete)
+- [ ] No more than 3–5 agents are running concurrently across all active Epics in the repository
+
+### Tooling Notes
+
+- **GitHub natively supports stacked PRs** — each PR targets a non-default base branch. The PR diff shows only the changes introduced by that Epic, not the full stack.
+- **`gh` CLI** supports `--base` for targeting parent branches and `gh pr edit --base` for retargeting after merges.
+- **Graphite, git-town, and spr** are dedicated stacked PR tools that automate rebasing and retargeting. Consider adopting one if stacks become a frequent workflow.
+- **CI runs on each PR independently.** Ensure CI is configured to run against the PR's base branch, not just `main`. Most CI systems (GitHub Actions, etc.) handle this correctly by default.
+- **PR review is incremental.** Reviewers see only the diff between the Epic branch and its parent — not the entire stack. This keeps reviews focused and manageable.
 
 ---
 
