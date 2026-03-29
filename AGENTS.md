@@ -242,6 +242,7 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 ### Branch Protection & SonarCloud
 
 - This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
+- With `enforce_admins` enabled, even repository administrators cannot bypass required status checks, including SonarCloud quality gates. All PRs must pass CI before merging.
 
 ---
 
