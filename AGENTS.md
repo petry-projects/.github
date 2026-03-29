@@ -258,7 +258,7 @@ Never have two agents working in the same working directory simultaneously.
 1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
 3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
-4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic Development](#stacked-prs-for-epic-development)). Workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when Epics are part of a declared stack and the child Epic branches from its parent Epic's branch.
+4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic Development](#stacked-prs-for-epic-development)). Outside a stacked-Epic workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when (a) Epics are part of a declared stack and the child Epic branches from its parent Epic's branch, or (b) story worktrees/branches are created from the Epic integration branch as defined in the stacked-PR workflow.
 5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes.
 6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
 
@@ -377,7 +377,7 @@ When a project has multiple Epics with **sequential dependencies** — where Epi
 
 Each Epic produces a **single PR** containing all of that Epic's stories. The stack is a chain of Epic-level PRs:
 
-```
+```text
 main ← Epic-1-PR ← Epic-2-PR ← Epic-3-PR ← Epic-4-PR
 ```
 
@@ -453,15 +453,17 @@ Each agent implements its story, runs quality checks, and pushes.
 **Step 3: Merge stories back into the Epic branch.** As stories complete, merge them into the Epic integration branch:
 
 ```bash
-# Merge completed story into the Epic branch
+# Merge completed story into the Epic branch (run from the Epic integration worktree)
 git checkout epic-1/foundation
+git fetch origin epic-1/S-1.1-data-model
 git merge origin/epic-1/S-1.1-data-model
 git push origin epic-1/foundation
 
-# Later stories may need to rebase onto the updated Epic branch before merging
-git checkout epic-1/S-1.3-db-schema
+# Later stories may need to rebase onto the updated Epic branch before merging.
+# Run this from within the S-1.3 story worktree, where epic-1/S-1.3-db-schema is already checked out:
+git fetch origin epic-1/foundation
 git rebase origin/epic-1/foundation
-# resolve any conflicts, then merge back
+# resolve any conflicts in the story worktree, then merge the updated story branch back into epic-1/foundation
 ```
 
 Alternatively, story branches can be merged via short-lived PRs targeting the Epic branch for lightweight code review within the Epic.
@@ -484,16 +486,20 @@ Agents then work Epic 2's stories in parallel worktrees branching from `epic-2/c
 
 1. **Merge the bottom PR** (Epic 1 → `main`) using the repo's standard merge strategy.
 2. **Retarget the next PR** to `main`:
+
    ```bash
    gh pr edit <epic-2-PR-number> --base main
    ```
+
 3. **Rebase the next branch** onto `main` to incorporate the merge and resolve any squash/rebase differences:
+
    ```bash
    # In the Epic 2 worktree
    git fetch origin main
    git rebase origin/main
    git push --force-with-lease
    ```
+
 4. **Review and merge Epic 2** → `main`. Repeat for Epic 3, Epic 4, etc.
 
 ### Workflow — Handling Changes to a Lower Epic PR
@@ -502,6 +508,7 @@ If a reviewer requests changes to a lower Epic PR (e.g., Epic 1), the agent maki
 
 1. Make the fix on Epic 1's branch and push.
 2. For each child branch in order, rebase onto the updated parent:
+
    ```bash
    # In Epic 2 worktree
    git fetch origin epic-1/foundation
@@ -509,6 +516,7 @@ If a reviewer requests changes to a lower Epic PR (e.g., Epic 1), the agent maki
    # Resolve any conflicts
    git push --force-with-lease
    ```
+
 3. Repeat for Epic 3 if it exists (rebasing onto Epic 2's updated branch), and so on.
 
 If conflicts are extensive, consider collapsing the stack — merge what you can into `main` and rebuild the remaining Epics from there.
@@ -524,7 +532,7 @@ Epics are typically broken into Sprints, each containing a set of stories. Withi
 - **Independent Sprints** (no data/API dependency between them) — run concurrently.
 - **Dependent Sprints** (Sprint 2 stories require Sprint 1 output) — run sequentially. Merge all Sprint 1 stories into the Epic branch before Sprint 2 agents branch from it.
 
-```
+```text
 Epic 1 branch (integration)
 ├── Sprint 1 (parallel agents)
 │   ├── Agent 1 → S-1.1 worktree
@@ -540,7 +548,7 @@ Epic 1 branch (integration)
 
 **Story worktree naming convention:**
 
-```
+```text
 .worktrees/<epic-id>-<story-id>-<description>
 ```
 
@@ -612,6 +620,19 @@ Before starting a stacked Epic workflow, verify:
 - Keep dependencies and lockfiles in sync.
 - Prefer small, focused commands — run specific tests rather than the full suite when iterating (the full suite is still required before committing; see Pre-Commit Quality Checks).
 - Document project-specific dev/test/run commands and required environment variables in the repo's own AGENTS.md or README.
+- Every repository-level AGENTS.md or README MUST include sections following this template:
+
+  ```markdown
+  ## Local Development Commands
+  - Install: `<install command>`
+  - Dev run: `<dev command>`
+  - Test: `<test command>`
+  - Lint: `<lint command>`
+  - Typecheck (if applicable): `<typecheck command>`
+
+  ## Required Environment Variables
+  - `VAR_NAME`: purpose, allowed values, example
+  ```
 
 ---
 
