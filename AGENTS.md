@@ -16,8 +16,8 @@ This file defines cross-cutting development standards for all repositories in th
 
 ### Branch Creation
 
-- **Always base new branches off `main`** (not off other feature or PR branches) unless explicitly told otherwise.
-- Before creating a branch, run:
+- **Always base new branches off the default branch (`main`)** (not off other feature or PR branches) unless explicitly told otherwise.
+- Before creating a branch, ensure your working directory is clean (commit or stash any changes), then run:
 
   ```bash
   git checkout main && git pull origin main
@@ -25,7 +25,7 @@ This file defines cross-cutting development standards for all repositories in th
 
 ### Branch Switching
 
-- **Before switching branches, always commit or stash current work.** Uncommitted changes can be lost during branch switches.
+- **Before switching branches, always commit or stash current work.** Git usually prevents checkouts that would overwrite local changes, but forced operations (e.g., `git checkout -f` or `git reset --hard`) or resolving conflicts incorrectly can cause you to lose or misplace work.
 - After switching, verify you are on the correct branch with `git branch --show-current` before making any changes.
 
 ---
@@ -242,8 +242,8 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 ### Branch Protection & SonarCloud
 
 - This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
-- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked by a stale or mismatched check, use `gh pr merge --admin` to override.
-- **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason.
+- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked, first identify the exact required check name(s), status, and mismatch source; then fix branch-protection or check configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
+- **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason before any override is considered.
 
 ---
 
@@ -354,7 +354,7 @@ Add worktree directories to the project's `.gitignore`:
 
 When working across multiple repositories, use separate agents to work on each repo in parallel. Each agent MUST:
 
-1. **Clone or use a separate worktree** — never share a working directory between repos
+1. **Use a separate clone or working directory per repo** — never share a working directory between repos; within each repo, use separate worktrees or isolated environments per agent/task
 2. **Work only on its assigned repo** — do not modify files in other repos
 3. **Report back status when done** — include PR URL, CI status, and any blockers
 
