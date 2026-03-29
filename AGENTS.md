@@ -1082,7 +1082,6 @@ Before starting a stacked Epic/Feature workflow, verify:
 - **Graphite, git-town, and spr** are dedicated stacked PR tools that automate rebasing and retargeting. Consider adopting one if stacks become a frequent workflow.
 - **CI runs on each PR independently.** Ensure CI is configured to run against the PR's base branch, not just `main`. Most CI systems (GitHub Actions, etc.) handle this correctly by default.
 - **PR review is incremental.** Reviewers see only the diff between the Epic/Feature branch and its parent — not the entire stack. This keeps reviews focused and manageable.
-
 ---
 
 ## Multi-Agent Isolation — Git Worktrees
@@ -1187,6 +1186,16 @@ Add worktree directories to the project's `.gitignore`:
 .claude/worktrees/
 .worktrees/
 ```
+
+### Multi-Repo Orchestration
+
+When working across multiple repositories, use separate agents to work on each repo in parallel. Each agent MUST:
+
+1. **Use a separate clone or working directory per repo** — never share a working directory between repos; within each repo, use separate worktrees or isolated environments per agent/task
+2. **Work only on its assigned repo** — do not modify files in other repos
+3. **Report back status when done** — include PR URL, CI status, and any blockers
+
+Do NOT share branches or state between agents operating on different repos.
 
 ### Coordination Checklist (for humans orchestrating multiple agents)
 
