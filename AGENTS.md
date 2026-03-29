@@ -1124,6 +1124,16 @@ Add worktree directories to the project's `.gitignore`:
 .worktrees/
 ```
 
+### Multi-Repo Orchestration
+
+When working across multiple repositories, use separate agents to work on each repo in parallel. Each agent MUST:
+
+1. **Use a separate clone or working directory per repo** — never share a working directory between repos; within each repo, use separate worktrees or isolated environments per agent/task
+2. **Work only on its assigned repo** — do not modify files in other repos
+3. **Report back status when done** — include PR URL, CI status, and any blockers
+
+Do NOT share branches or state between agents operating on different repos.
+
 ### Coordination Checklist (for humans orchestrating multiple agents)
 
 Before launching parallel agents, verify:
