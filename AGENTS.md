@@ -265,6 +265,12 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 - Never bypass CI gates or weaken thresholds to make a PR pass.
 - Address CodeRabbit and Copilot review comments the same way you address human reviewer comments — fix or explicitly justify skipping with a reply.
 
+### Branch Protection & SonarCloud
+
+- This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
+- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked, first identify the exact required check name(s), status, and mismatch source; then fix branch-protection or check configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
+- **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason before any override is considered.
+
 ---
 
 ## Multi-Agent Isolation — Git Worktrees
