@@ -6,6 +6,44 @@ This file defines cross-cutting development standards for all repositories in th
 
 ---
 
+## Project Context
+
+- **Primary languages:** TypeScript, HTML, Markdown. Individual repos may also use Go, Terraform, or other languages as specified in their own AGENTS.md.
+- **Assume brownfield.** When exploring a repo, check for existing source code before assuming it is greenfield. Look at all directories, worktrees, and non-main branches before concluding that code does not exist.
+
+---
+
+## Git Workflow
+
+### Branch Creation
+
+- **Always base new branches off `main`** (not off other feature or PR branches) unless explicitly told otherwise.
+- Before creating a branch, run:
+
+  ```bash
+  git checkout main && git pull origin main
+  ```
+
+### Branch Switching
+
+- **Before switching branches, always commit or stash current work.** Uncommitted changes can be lost during branch switches.
+- After switching, verify you are on the correct branch with `git branch --show-current` before making any changes.
+
+---
+
+## Development Environment
+
+When the user asks to run or launch an app, first check the environment for required dependencies and report blockers immediately rather than attempting extensive debugging. At minimum, verify:
+
+1. **Required runtimes** — Node.js, Go, Python, etc. as specified by `package.json`, `go.mod`, or equivalent
+2. **System dependencies** — display server (for Electron/GUI apps), Homebrew, sudo availability
+3. **Available ports** — check for conflicts on common dev ports (3000, 5173, 8080)
+4. **Package installation** — run `npm install`, `go mod download`, etc. before attempting to build or run
+
+If a dependency cannot be resolved, report the specific blocker and a workaround immediately — do not spend time debugging environment issues repeatedly.
+
+---
+
 ## Test-Driven Development (TDD)
 
 - **TDD is mandatory.** Write tests before implementing features or bug fixes. Include tests in the same PR as the implementation.
@@ -202,6 +240,12 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 - Never bypass CI gates or weaken thresholds to make a PR pass.
 - Address CodeRabbit and Copilot review comments the same way you address human reviewer comments — fix or explicitly justify skipping with a reply.
 
+### Branch Protection & SonarCloud
+
+- This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
+- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked by a stale or mismatched check, use `gh pr merge --admin` to override.
+- **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason.
+
 ---
 
 ## Multi-Agent Isolation — Git Worktrees
@@ -306,6 +350,16 @@ Add worktree directories to the project's `.gitignore`:
 .claude/worktrees/
 .worktrees/
 ```
+
+### Multi-Repo Orchestration
+
+When working across multiple repositories, use separate agents to work on each repo in parallel. Each agent MUST:
+
+1. **Clone or use a separate worktree** — never share a working directory between repos
+2. **Work only on its assigned repo** — do not modify files in other repos
+3. **Report back status when done** — include PR URL, CI status, and any blockers
+
+Do NOT share branches or state between agents operating on different repos.
 
 ### Coordination Checklist (for humans orchestrating multiple agents)
 
