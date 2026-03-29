@@ -242,8 +242,6 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 ### Branch Protection & SonarCloud
 
 - This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
-- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked, first identify the exact required check name(s), status, and mismatch source; then fix branch-protection or check configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
-- **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason before any override is considered.
 
 ---
 
@@ -258,8 +256,8 @@ Never have two agents working in the same working directory simultaneously.
 1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
 3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
-4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic Development](#stacked-prs-for-epic-development)). Outside a stacked-Epic workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when (a) Epics are part of a declared stack and the child Epic branches from its parent Epic's branch, or (b) story worktrees/branches are created from the Epic integration branch as defined in the stacked-PR workflow.
-5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes. (In a stacked-Epic workflow, story worktrees may optionally produce short-lived PRs targeting the Epic branch for review — these are internal integration PRs, not standalone feature PRs.)
+4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic Development](#stacked-prs-for-epic-development)). Outside a stacked-Epic/Feature workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when (a) Epics/Features are part of a declared stack and the child Epic/Feature branches from its parent Epic/Feature's branch, or (b) story worktrees/branches are created from the Epic/Feature integration branch as defined in the stacked-PR workflow.
+5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes. (In a stacked-Epic/Feature workflow, story worktrees may optionally produce short-lived PRs targeting the Epic branch for review — these are internal integration PRs, not standalone feature PRs.)
 6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
 
 ### Detecting File Overlap
