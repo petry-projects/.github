@@ -268,6 +268,7 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 ### Branch Protection & SonarCloud
 
 - This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
+- With `enforce_admins` enabled, even repository administrators cannot bypass required status checks, including SonarCloud quality gates. All PRs must pass CI before merging.
 - SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked, first identify the exact required check name(s), status, and mismatch source; then fix branch-protection or check configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
 - **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason before any override is considered.
 
@@ -680,6 +681,19 @@ Before starting a stacked Epic/Feature workflow, verify:
 - Keep dependencies and lockfiles in sync.
 - Prefer small, focused commands — run specific tests rather than the full suite when iterating (the full suite is still required before committing; see Pre-Commit Quality Checks).
 - Document project-specific dev/test/run commands and required environment variables in the repo's own AGENTS.md or README.
+- Every repository-level AGENTS.md or README MUST include sections following this template:
+
+  ```markdown
+  ## Local Development Commands
+  - Install: `<install command>`
+  - Dev run: `<dev command>`
+  - Test: `<test command>`
+  - Lint: `<lint command>`
+  - Typecheck (if applicable): `<typecheck command>`
+
+  ## Required Environment Variables
+  - `VAR_NAME`: purpose, allowed values, example
+  ```
 
 ---
 
