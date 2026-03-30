@@ -644,6 +644,196 @@ Before starting a stacked Epic/Feature workflow, verify:
 
 ---
 
+## Structured Logging
+
+All services MUST use structured logging. Structured logs are machine-parseable, correlatable across services, and essential for observability. These rules apply to every language and framework in the stack.
+
+### Format & Fields
+
+- **Emit all logs as JSON objects in production.** Never use `fmt.Println`, `console.log`, or unstructured string interpolation for application logs.
+- **Every log line MUST include these baseline fields:**
+
+  | Field | Format | Example |
+  |-------|--------|---------|
+  | `timestamp` | ISO 8601 / RFC 3339, always UTC | `2026-03-29T14:22:01.123Z` |
+  | `level` | `debug`, `info`, `warn`, `error`, `fatal` | `info` |
+  | `msg` | Static, human-readable string (no interpolated variables) | `order placed` |
+  | `service` | Name of the emitting service | `markets-api` |
+  | `version` | Deployed version or git SHA | `a1b2c3d` |
+
+- **Put variable data in fields, not in the message string.**
+  - WRONG: `logger.Info("User 1234 placed order 5678")`
+  - RIGHT: `logger.Info("order placed", "user_id", "1234", "order_id", "5678")`
+- **Use `snake_case` for all field names.** Check existing logs in the codebase for canonical field names before inventing new ones.
+- **Canonical field names:** `user_id`, `request_id`, `trace_id`, `span_id`, `duration_ms`, `http_method`, `http_path`, `http_status`, `error_message`, `error_stack`.
+
+### Correlation & Tracing
+
+- **Every inbound request MUST be assigned a `request_id`.** If the caller provides one via `X-Request-ID` header, propagate it. Otherwise, generate a UUIDv4.
+- **Attach `request_id` to the logger context at the middleware layer.** All subsequent logs within that request lifecycle inherit it automatically.
+- **When making outbound calls (HTTP, gRPC, queues), propagate `request_id` in headers.**
+- **If OpenTelemetry is in use, include `trace_id` and `span_id` in every log line.** These fields bridge logs to distributed traces.
+
+### Log Levels
+
+| Level | Use when | Examples |
+|-------|----------|----------|
+| **DEBUG** | Detailed diagnostics, useful only during development. **Disabled in production by default.** | Variable values, SQL queries, cache hit/miss |
+| **INFO** | Normal operational events confirming the system works as expected | Request completed, job finished, service started |
+| **WARN** | Something unexpected but the system recovered or can continue | Retry attempted, deprecated API called, slow query detected |
+| **ERROR** | An operation failed and could not be completed. Every ERROR must be actionable | External service call failed after retries, database write failed |
+| **FATAL** | The process cannot continue and will exit. Use extremely sparingly | Failed to bind port, required config missing at startup |
+
+**Rules:**
+- A 404 for a missing resource is INFO, not ERROR.
+- Validation failures caused by user input are WARN at most, usually INFO.
+- Every ERROR and FATAL log MUST include `error_message` and, where available, `error_stack`.
+- If an error is caught and handled with a fallback, log at WARN, not ERROR.
+
+### What to Log
+
+- **Request/response boundaries:** method, path, status, `duration_ms`, request size.
+- **State transitions:** job started/completed/failed, circuit breaker changes, cache invalidation.
+- **Errors with full context:** the attempted operation, input parameters (sanitized), error message and type, retry count, stack trace for unexpected errors.
+- **Security events:** authentication success/failure (without credentials), authorization denial, rate limiting triggered, admin operations.
+- **Performance data:** external call durations, database query durations above threshold.
+
+### What NOT to Log
+
+- **NEVER log passwords, API keys, secrets, tokens (JWT, session, bearer), or private keys.**
+- **NEVER log full request/response bodies that may contain `Authorization`, `Cookie`, `Set-Cookie`, or `X-API-Key` headers.**
+- **NEVER log PII in plain text:** email addresses, phone numbers, physical addresses, SSNs, credit card numbers.
+- **NEVER log at DEBUG level in production by default.** DEBUG must be gated behind a runtime flag.
+- **NEVER log inside tight loops** (per-item in a batch). Log once before and once after with a count.
+- **NEVER use `log.Fatal` or `log.Panic` in library code.** Return errors; let the caller decide.
+
+### Agentic Directives
+
+These rules are deterministic — apply them whenever writing or modifying code:
+
+1. When creating any new HTTP/GraphQL handler, add structured logging middleware that logs: method, path/operation, status, `duration_ms`, `request_id`.
+2. When adding a logger call, ALWAYS use structured key-value pairs. NEVER concatenate or interpolate variables into the message string.
+3. When handling an error, log with at minimum: `level=error`, `msg=<static description>`, `error_message`, and all context IDs (`request_id`, `user_id`) available in scope.
+4. When calling an external service, log before (at DEBUG) and after (ERROR on failure with `duration_ms`, INFO/DEBUG on success with `duration_ms`).
+5. When a function receives a `context.Context` (Go) or request object (Node), extract the logger from it. NEVER create a new bare logger inside a handler.
+6. NEVER log any variable named or containing: `password`, `secret`, `token`, `key`, `authorization`, `cookie`, `ssn`, `credit_card`. When in doubt, omit it.
+7. When adding retry logic, log each retry at WARN with `attempt_number` and `max_retries`.
+8. When choosing a log level, ask: "Will someone be paged?" → ERROR. "Degradation?" → WARN. "Normal operation?" → INFO. "Only useful debugging?" → DEBUG.
+
+### Go Patterns
+
+- **Use `log/slog` (Go 1.21+) as the default.** Use `slog.NewJSONHandler` for production, `slog.NewTextHandler` for local development.
+- **Propagate loggers via `context.Context`.** Use `slog.InfoContext(ctx, ...)` so OpenTelemetry bridges can extract trace/span IDs.
+- **Never use the global `log` package** from the standard library. Always use `slog` or a structured alternative.
+- **In tests, use `slog.New(slog.NewTextHandler(io.Discard, nil))` to suppress log output.**
+- **Log at the point of handling, not at every intermediate layer.** Wrap errors with `fmt.Errorf("operation: %w", err)` and log once at the top-level handler.
+
+### TypeScript / Node Patterns
+
+- **Use `pino` as the default structured logger.**
+- **Use `logger.child({...})` to create request-scoped loggers.** Never add fields to the root logger at runtime.
+- **In Express/Fastify, attach the child logger to the request object in middleware.** All downstream code uses `req.log`.
+- **Never use `console.log`, `console.error`, or `console.warn` in application code.** `console.*` is acceptable only in CLI tools and build scripts.
+- **When logging errors, pass the Error object in a field:** `logger.error({ msg: "payment failed", err })`.
+
+---
+
+## CQRS — Command Query Responsibility Segregation
+
+CQRS separates read and write models to allow independent optimization of each. These rules define when and how to apply CQRS across the organization. CQRS is a **per-use-case decision**, not an architectural mandate — some operations within a service may use CQRS while others use standard CRUD.
+
+### When to Apply
+
+- **Use CQRS** when read and write workloads have significantly different scaling, performance, or modeling requirements.
+- **Use CQRS** when the domain has complex business rules on the write side but simple, denormalized read requirements.
+- **Use CQRS** when multiple read representations (projections) of the same data are needed.
+- **Do NOT use CQRS** for simple CRUD domains where read and write models are nearly identical.
+- **Do NOT apply CQRS to every bounded context.** Apply it selectively to contexts that benefit from it.
+
+### Separation Rules
+
+- The **write model** (command side) is optimized for enforcing invariants and business rules. It is the source of truth.
+- The **read model** (query side) is optimized for query performance. It MAY be denormalized, pre-aggregated, or stored in a different database.
+- **Commands MUST NOT return domain data.** They return either nothing (success), an ID of a created resource, or an error.
+- **Queries MUST NOT mutate state.** A query handler is side-effect-free with respect to domain state. (Logging, metrics, and cache population are acceptable side effects.)
+
+### Naming Conventions
+
+| Concept | Convention | Examples |
+|---------|-----------|----------|
+| **Command** | Imperative verb + noun | `PlaceOrder`, `CancelSubscription`, `AssignRole` |
+| **Event** | Past-tense verb + noun | `OrderPlaced`, `SubscriptionCancelled`, `RoleAssigned` |
+| **Query** | `Get`/`List`/`Search`/`Count` + noun | `GetOrderById`, `ListActiveUsers`, `SearchProducts` |
+| **Command handler** | `Handle(cmd)` or `<CommandName>Handler` | `PlaceOrderHandler` |
+| **Event handler** | `On<EventName>` or `<EventName>Handler` | `OnOrderPlaced` |
+| **Projection** | Noun describing the view | `OrderSummaryProjection`, `UserDashboardView` |
+
+Mixing these conventions (e.g., a command named `OrderPlaced` or an event named `PlaceOrder`) is a design error.
+
+### Command Patterns
+
+- A command MUST be a plain data structure (DTO) with no behavior. It carries the intent and the data needed to fulfill it.
+- Every command that creates or mutates state MUST be idempotent, or the system MUST detect and reject duplicates. Strategies: idempotency key from client, natural idempotency ("set X" not "append X"), or conditional/versioned updates (`expectedVersion`/`ETag`).
+- Each command MUST have exactly one handler.
+- A command handler's responsibilities are: (1) validate, (2) load aggregate/entity, (3) invoke domain logic, (4) persist changes, (5) publish domain events.
+- **One command = one transaction = one aggregate mutation.** Do NOT mutate multiple aggregates in one command handler. Use domain events and sagas for cross-aggregate coordination.
+- **Domain logic belongs in the aggregate/entity, not the handler.** If the handler has `if/else` business logic, move it into the domain model.
+
+### Command Validation
+
+- **Structural/syntactic validation** on the command object before it reaches the handler (required fields, format, lengths). This can be middleware.
+- **Domain/business validation** inside the aggregate/entity (e.g., "user has sufficient balance"). MUST NOT be in the handler or middleware.
+- Return validation errors as typed, structured responses — not exceptions for flow control.
+
+### Query Patterns
+
+- A query MUST be a plain data structure containing only retrieval parameters: filters, pagination, sorting, field selection.
+- Query handlers MUST NOT invoke command handlers or emit domain events.
+- Query handlers MAY read from a dedicated read database, cache, search index, or materialized view.
+- Build projections (materialized views) shaped exactly for the UI/API consumer. One projection per distinct read use case is acceptable.
+
+### Domain Events
+
+- Events MUST be immutable. Once published, an event's schema and data MUST NOT change. To evolve, publish new event types and deprecate old ones.
+- Events SHOULD carry enough data for consumers to process them without querying back to the source ("fat" events over "thin" events).
+- Every event MUST include: `event_id` (unique), `event_type`, `aggregate_id`, `aggregate_type`, `timestamp`, `version`/`sequence_number`, `payload`, `metadata` (`correlation_id`, `causation_id`, `user_id`).
+- Event handlers (projectors, reactors, sagas) MUST be idempotent. Use `sequence_number` or `event_id` to detect and skip already-processed events.
+- **Outbox pattern:** When a command handler writes to the database AND publishes events, use the transactional outbox pattern — write events to an outbox table in the same transaction as the aggregate, then publish from the outbox asynchronously. This prevents dual-write problems.
+
+### Eventual Consistency
+
+- Accept that the read model will lag behind the write model. Design UIs to handle this: optimistic updates, "your change is being processed" messaging, polling/subscriptions for completion.
+- Define and monitor consistency SLAs — the acceptable lag time between a command and the read model update.
+- Do NOT read from the write model after a command as a consistency workaround. This defeats CQRS and creates coupling.
+
+### GraphQL + CQRS Integration
+
+- **Mutations map to commands.** Each mutation field corresponds to a single command. The mutation name matches the command name.
+- **Queries map to read models.** Each query field reads from the query side. Never route a GraphQL query through a command handler.
+- **Subscriptions map to domain events** or projection change streams. Use event-driven push, not database polling.
+- Use GraphQL union types or typed error fields for command validation and domain errors. Do NOT rely solely on the `errors` array for business-logic errors.
+
+### Agentic Directives
+
+1. When implementing a new mutation, structure it as: parse input → construct command → dispatch to handler → return ID or error. Do NOT put business logic in the resolver.
+2. When implementing a new query, read from the query/projection store. NEVER load aggregates or call domain services from a query resolver.
+3. When naming a new command, use imperative form (`CreateMarket`). When naming an event, use past tense (`MarketCreated`). When naming a query, use `Get`/`List`/`Search` prefix (`GetMarketById`).
+4. When a command handler needs to affect another aggregate, publish a domain event and handle it in a separate event handler. Do NOT modify two aggregates in the same transaction.
+5. When creating an event handler, make it idempotent — check if the event has already been processed before applying side effects.
+6. When adding a new read use case with different shape requirements, create a new projection rather than overloading an existing query with conditional logic.
+7. When the domain is simple CRUD with no complex invariants or divergent read/write needs, use a standard repository pattern. Do NOT introduce CQRS for basic entity operations.
+8. When a command creates a new entity, return only the new entity's ID. Do NOT return the full read model — let the caller issue a separate query.
+
+### Testing CQRS
+
+- **Commands:** Test handlers in isolation with in-memory repositories. Verify correct events are produced, state changes are persisted, and invariants are enforced. Include idempotency tests.
+- **Queries:** Test against a pre-populated read store. Seed known data, assert query results.
+- **Event handlers:** Feed events and assert side effects. Test idempotency (same event twice = same result). Test ordering if handler depends on sequence.
+- **Projections:** Test that a projection can be rebuilt from scratch by replaying all events.
+- **Integration:** Send a command, wait for projection update (with polling/timeout, NOT arbitrary sleep), then query and assert.
+
+---
+
 ## References
 
 - AGENTS.md convention: https://agents.md/
