@@ -252,6 +252,55 @@ All repositories MUST follow these software engineering principles. They apply t
 - **Direction of dependencies.** Dependencies always point inward — infrastructure depends on application, application depends on domain. Never the reverse.
 - **No framework bleed.** Framework-specific types and annotations stay at the infrastructure/adapter layer. Domain and application layers must be framework-agnostic.
 
+### Breaking Changes — Human Approval Required
+
+Agents MUST NOT introduce breaking changes without explicit human approval. A breaking change is any modification that causes existing consumers, callers, or dependents to fail, produce incorrect results, or require changes on their end. **When in doubt, treat it as breaking.**
+
+**What constitutes a breaking change:**
+
+| Layer | Breaking changes include |
+|-------|------------------------|
+| **API** | Removing/renaming endpoints or response fields, changing field types or response shapes, adding required parameters, tightening validation, changing error formats, changing auth requirements |
+| **Database** | Dropping/renaming columns or tables, changing column types, adding NOT NULL without a default, removing defaults, dropping indexes that queries depend on, changing constraints |
+| **Frontend** | Removing/renaming exported components/hooks/utilities, changing prop types or function signatures, removing design tokens or CSS variables, changing route paths |
+| **Backend** | Removing/renaming exported functions/interfaces/types, changing function signatures or return types, changing event schemas, removing configuration options |
+| **Shared contracts** | Removing/renaming fields in API schemas, changing message payload structures, modifying shared type definitions consumed by multiple services |
+
+**Detection — tests are the primary safety net:**
+
+- Existing tests encode existing contracts. If your change causes an existing test to fail, you have likely introduced a breaking change.
+- **NEVER modify an existing test to make a breaking change pass.** Changing a test to accommodate new behavior is hiding the break, not fixing it. New behavior gets new tests; existing tests protect existing contracts.
+- If a test seems "wrong" or "outdated," flag it for human review. It may be the only documentation of a contract someone depends on.
+- Before removing or changing anything, search the entire codebase for all references (including string-based references like route strings, config keys, and dynamic imports). Report the consumer count.
+
+**When a breaking change is detected — stop and follow this protocol:**
+
+1. **Stop immediately.** Do not commit the breaking change.
+2. **Describe it clearly.** State exactly what is changing and why it qualifies as breaking.
+3. **List what will break and for whom.** Specific file names, function names, test names, consumer services — not "some things might break."
+4. **Propose a non-breaking alternative.** In most cases, one exists (see below).
+5. **Wait for explicit human approval.** Do not interpret silence or general task intent as approval.
+
+**Non-breaking alternatives (prefer in this order):**
+
+1. **Additive changes** — Add new fields/endpoints/functions/columns alongside old ones. Do not replace.
+2. **Deprecation + migration period** — Mark the old item as deprecated, add the replacement, document the migration path. Removal happens in a separate future change with human approval.
+3. **Feature flags / versioning** — Gate new behavior behind a flag so old behavior remains the default.
+4. **Adapter / compatibility layers** — Write a thin adapter mapping the old interface to the new implementation.
+5. **Staged database changes** — Add new column → migrate data → update application code → deploy and verify → drop old column in a separate, human-approved change. Never combine add and drop in a single migration.
+
+**Agentic directives:**
+
+1. NEVER remove or rename a public function, type, component, endpoint, field, column, route, event, or config option without human approval.
+2. NEVER change the signature of a public function or the shape of an API response, event payload, or shared data structure without human approval.
+3. NEVER tighten validation, add required fields, or add NOT NULL constraints without human approval.
+4. ALWAYS search for all consumers of any symbol, endpoint, or schema element before modifying or removing it.
+5. ALWAYS propose a non-breaking alternative first. Only present the breaking option alongside it.
+6. ALWAYS run the existing test suite after changes. Treat test failures as breaking change signals, not as "tests that need updating."
+7. ALWAYS use additive changes by default. Deprecate, then remove later in a separate change.
+8. NEVER combine a destructive database migration (drop column, drop table, change type) with other changes in the same commit or PR.
+9. When uncertain whether something is breaking, treat it as breaking. False positives are cheap. False negatives break production.
+
 ### Code Organization
 
 - **Co-locate related code.** Tests live next to the code they test. Types live near the code that uses them. Avoid scattering related files across distant directories.
