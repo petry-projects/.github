@@ -55,16 +55,16 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 
 ---
 
-## End-to-End Testing — Validate Real Functionality
+## End-to-End Testing — Validate Real Functional Requirements
 
-E2E tests validate real user workflows through the full stack. They exist to catch bugs that would affect real users. **A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
+E2E tests validate real functional requirements through the full stack. They exist to catch bugs that would affect real users. **A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
 
-> Every E2E test must answer one question: **"What would break for a real user if this test didn't exist?"** If the test could pass while the feature is fundamentally broken, it is worthless and must be rewritten.
+> Every E2E test must answer one question: **"What functional requirement would be broken for a real user if this test didn't exist?"** If the test could pass while the requirement is fundamentally unmet, it is worthless and must be rewritten.
 
 ### What E2E Tests MUST Do
 
-1. **Full round-trip verification.** Action → API call → database mutation → response → UI reflects new state. Not a subset — the whole chain.
-2. **Multi-layer assertions.** The UI shows correct data AND the database contains the correct record AND side effects occurred (events published, emails queued, cache invalidated).
+1. **Full round-trip verification.** Action → API call → database mutation → response → frontend reflects new state. Not a subset — the whole chain.
+2. **Multi-layer assertions.** The frontend shows correct data AND the database contains the correct record AND side effects occurred (events published, notifications queued, cache invalidated).
 3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields. After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
 4. **Test error paths.** For every happy-path test, write corresponding tests for: invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
 5. **Test authorization boundaries.** Verify user A cannot access user B's resources. Verify regular users cannot hit admin endpoints. Verify expired/revoked tokens are rejected.
@@ -77,94 +77,95 @@ These are non-negotiable. Tests exhibiting these patterns MUST be rejected:
 
 | Anti-Pattern | Why It Fails | Fix |
 |---|---|---|
-| **Smoke test disguised as E2E** | Verifies the page loads, not that anything works | Add assertions on business outcomes after user actions |
-| **UI-only assertions** | Cached/stale UI can show "Success" while the write failed | Query the database or API to verify the actual state change |
-| **Mocking the entire backend** | Eliminates the integration being tested | Hit the real backend. Use testcontainers or test databases |
+| **Smoke test disguised as E2E** | Verifies the page loads, not that a functional requirement works | Add assertions on business outcomes after user actions |
+| **Frontend-only assertions** | Cached/stale frontend can show "Success" while the write failed | Query the database or API to verify the actual state change |
+| **Mocking the entire backend** | Eliminates the integration being tested | Hit the real backend with real databases (containers or dedicated test instances) |
 | **Asserting only on HTTP status codes** | A 200 with empty body or wrong data is still a bug | Always verify response body fields and database state |
 | **Arbitrary sleeps** | Flaky, slow, hides timing bugs | Poll for a condition with a timeout |
 | **Happy path only** | Production bugs live in error paths and edge cases | Test invalid input, unauthorized access, and conflicts |
 | **No cleanup / test pollution** | Tests depend on execution order, fail in isolation | Each test creates and cleans up its own data |
-| **UI for preconditions** | 10x slower, couples test to unrelated UI flows | Use API calls or direct DB inserts for setup |
-| **Brittle selectors** | Breaks on any UI change | Use `data-testid` (web) or `testID` (React Native) exclusively |
+| **Frontend for preconditions** | 10x slower, couples test to unrelated frontend flows | Use API calls or direct database inserts for setup |
+| **Brittle selectors** | Breaks on any frontend change | Use stable test-ID attributes exclusively — never CSS classes, DOM hierarchy, or text content |
 | **Placeholder assertions** | `expect(true).toBe(true)` proves nothing | Assert on specific field values and business outcomes |
 
 ### Test Structure — Arrange, Act, Assert, Verify, Cleanup
 
 Every E2E test follows this structure:
 
-1. **Arrange** — Create preconditions via API or direct DB insert (never via UI)
+1. **Arrange** — Create preconditions via API or direct database insert (never via the frontend)
 2. **Act** — Perform the user action under test
-3. **Assert** — Check the immediate response (HTTP status + body, or UI feedback)
+3. **Assert** — Check the immediate response (HTTP status + body, or frontend feedback)
 4. **Verify** — Check the database/state store to confirm the real outcome
 5. **Cleanup** — Remove test data (or use transactional rollback)
 
 ### Test Design Patterns
 
-**Page Object Model (for UI E2E):**
-- Encapsulate page interactions in page objects. Tests read as user stories, not DOM manipulation.
+**Page/Screen Object Model (for frontend E2E):**
+- Encapsulate page interactions in page/screen objects. Tests read as functional requirements, not DOM/view manipulation.
 - Page objects expose user-intent methods (`loginAs(user)`, `submitOrder(items)`) — not element-level methods.
-- Selectors live in exactly one place (the page object). Use `data-testid` / `testID` exclusively.
+- Selectors live in exactly one place (the page object). Use stable test-ID attributes exclusively.
 
 **Test Data Factories:**
 - Every test creates its own data. Never rely on pre-existing seed data.
 - Factories produce realistic, randomized data: `createUser({role: "admin"})`, `createOrder({status: "pending", items: 3})`.
-- Factories use the API or database — NOT the UI.
+- Factories use the API or database — NOT the frontend.
 
 **Multi-Layer Assertion Example:**
+
+```pseudocode
+// WRONG — only checks frontend
+click("#submit-order")
+assert getText(".toast") == "Order placed!"
+
+// RIGHT — checks frontend + API response + database
+response = submitOrderAndCapture(orderData)
+assert response.status == 201
+assert response.body.orderId is not empty
+
+dbOrder = db.orders.findById(response.body.orderId)
+assert dbOrder.status == "confirmed"
+assert dbOrder.items.length == 3
+assert dbOrder.total == expectedTotal
+
+assert getText("[test-id='order-id']") contains dbOrder.orderId
 ```
-// WRONG — only checks UI
-await page.click("#submit-order");
-expect(await page.getText(".toast")).toBe("Order placed!");
 
-// RIGHT — checks UI + API response + database
-const response = await submitOrderAndCapture(orderData);
-expect(response.status).toBe(201);
-expect(response.body.orderId).toBeDefined();
+### API E2E
 
-const dbOrder = await db.orders.findById(response.body.orderId);
-expect(dbOrder.status).toBe("confirmed");
-expect(dbOrder.items).toHaveLength(3);
-expect(dbOrder.total).toBe(expectedTotal);
+- **Write → Read round trips.** Execute a mutation/write, then immediately query for the resource. Verify every field matches. This catches stale cache, serialization mismatches, and silent write failures.
+- **Authorization on every endpoint.** For every read and write operation, test with: valid token (succeeds), no token (rejected), wrong user's token (rejected), insufficient scope (rejected).
+- **Real-time/subscription delivery.** If the API supports subscriptions or push, open a listener, perform the triggering write, verify the listener receives the correct payload within a timeout.
+- **Pagination edge cases.** Test: empty results, exactly one page, last page terminates correctly, cursor/offset stability across inserts, invalid cursors return helpful errors.
 
-expect(await page.getText("[data-testid='order-id']")).toContain(dbOrder.orderId);
-```
+### Backend E2E
 
-### GraphQL E2E
-
-- **Mutation → Query round trips.** Execute a mutation, then immediately query for the resource. Verify every field matches. This catches stale cache, serialization mismatches, and silent write failures.
-- **Authorization on every resolver.** For every query and mutation, test with: valid token (succeeds), no token (rejected), wrong user's token (rejected), insufficient scope (rejected).
-- **Subscription delivery.** Open a subscription, perform the triggering mutation, verify the subscription receives the correct payload within a timeout.
-- **Pagination edge cases.** Test: empty results, exactly one page, last page terminates correctly, cursor stability across inserts, invalid cursors return helpful errors.
-
-### Go Backend E2E
-
-- **Use `testcontainers-go` for real databases.** Spin up real PostgreSQL (and Redis, Kafka, etc.) per test suite. No mocking the database in E2E — ever.
-- **Use `httptest.Server` with the real application.** Tests hit real HTTP endpoints, which hit the real database.
-- **Test migrations.** Run migrations from scratch on test suite startup. If migrations fail, the test fails.
-- **Test concurrency.** Double-submit for idempotency verification. Two users editing the same resource for optimistic locking. Use `errgroup` to fire concurrent requests.
+- **Use containerized or dedicated test databases.** Spin up real database instances per test suite. No mocking the database in E2E — ever.
+- **Run the real application server with test configuration.** Tests hit real API endpoints, which hit the real database.
+- **Test migrations.** Run database migrations from scratch on test suite startup. If migrations fail, the test fails.
+- **Test concurrency.** Double-submit for idempotency verification. Two users editing the same resource for optimistic locking. Fire concurrent requests from the test.
 - **Assert beyond status codes.** Verify response body fields, database state, audit log entries, published events.
 
-### Mobile / React Native E2E
+### Frontend E2E (Web and Mobile)
 
-- **Use Detox or Maestro** for React Native. Run against real simulators/emulators.
-- **Test full navigation flows** — deep links, back button, tab switching with state preservation, modal dismissal.
-- **Test offline/online transitions** — disable network, verify cached data displays and writes queue, re-enable, verify sync.
-- **Use `testID` prop exclusively for selectors.** Never match on displayed text (changes with localization).
-- **Test on at least two form factors.** Never hardcode device dimensions.
+- **Run against the real backend** — not a mocked API layer. The frontend E2E test environment connects to a real API backed by a real (test) database.
+- **Test full navigation flows** — deep links, back navigation, tab switching with state preservation, modal dismissal.
+- **Test offline/online transitions** (mobile) — disable network, verify cached data displays and writes queue, re-enable, verify sync.
+- **Use stable test-ID attributes exclusively for selectors.** Never match on displayed text (changes with localization), CSS classes, or DOM/view hierarchy.
+- **Test on at least two form factors** (mobile). Never hardcode device dimensions.
 
 ### Agentic Directives
 
-1. Before writing any E2E test, state the user workflow in a comment: `// Workflow: User creates a project, verifies it appears in the list, and can be accessed by direct URL.`
-2. Every test MUST include a database/state assertion. If the test only asserts on HTTP status or UI text, it is incomplete.
-3. Every test MUST create its own preconditions via API/DB. Never assume data exists from a previous test.
+1. Before writing any E2E test, state the functional requirement in a comment: `// Functional requirement: User creates a project, verifies it appears in the list, and can access it by direct URL.`
+2. Every test MUST include a database/state assertion. If the test only asserts on HTTP status or frontend text, it is incomplete.
+3. Every test MUST create its own preconditions via API/database. Never assume data exists from a previous test.
 4. Every test MUST clean up after itself. Prefer transactional cleanup.
-5. For every mutation test, write a corresponding verification query. Create → verify exists. Update → verify changed. Delete → verify gone.
-6. Test at least one error case per endpoint/workflow: invalid input, missing auth, forbidden access, not-found, duplicate/conflict.
+5. For every write operation test, write a corresponding verification read. Create → verify exists. Update → verify changed. Delete → verify gone.
+6. Test at least one error case per endpoint/functional requirement: invalid input, missing auth, forbidden access, not-found, duplicate/conflict.
 7. Use deterministic waits, not sleeps. Poll for a condition with a timeout.
-8. Use `data-testid` / `testID` for all element selection. If one doesn't exist, add it to the component.
-9. Name tests as behavioral specifications: not `test("submit form")` but `test("submitting a valid order creates a confirmed order record with correct line items and total")`.
+8. Use stable test-ID attributes for all element selection. If one doesn't exist, add it to the component.
+9. Name tests as functional requirement specifications: not `test("submit form")` but `test("submitting a valid order creates a confirmed order record with correct line items and total")`.
 10. When testing auth flows, always test both positive AND negative: valid credentials succeed AND invalid credentials fail with the correct error.
-11. Never generate placeholder assertions. Every `expect`/`assert` must check a meaningful, specific value.
+11. Never generate placeholder assertions. Every assertion must check a meaningful, specific value.
 12. When unsure whether a test is thorough enough, it is not. Add more assertions. Verify at more layers. Test one more error case.
 
 ---
@@ -813,8 +814,8 @@ All services MUST use structured logging. Structured logs are machine-parseable,
 
 ### Format & Fields
 
-- **Emit all logs as JSON objects in production.** Never use `fmt.Println`, `console.log`, or unstructured string interpolation for application logs.
-- **Every log line MUST include these baseline fields:**
+- **Emit all logs as JSON objects in production.** Never use unstructured print statements or string interpolation for application logs.
+- **Every log line MUST include these baseline fields.** Configure your logging library at initialization to automatically include `timestamp`, `service`, and `version` in every log entry — do not rely on developers adding these per-call.
 
   | Field | Format | Example |
   |-------|--------|---------|
@@ -828,7 +829,8 @@ All services MUST use structured logging. Structured logs are machine-parseable,
   - WRONG: `logger.Info("User 1234 placed order 5678")`
   - RIGHT: `logger.Info("order placed", "user_id", "1234", "order_id", "5678")`
 - **Use `snake_case` for all field names.** Check existing logs in the codebase for canonical field names before inventing new ones.
-- **Canonical field names:** `user_id`, `request_id`, `trace_id`, `span_id`, `duration_ms`, `http_method`, `http_path`, `http_status`, `error_message`, `error_stack`.
+- **Canonical field names:** `user_id`, `request_id`, `correlation_id`, `causation_id`, `trace_id`, `span_id`, `duration_ms`, `http_method`, `http_path`, `http_status`, `error_message`, `error_stack`.
+- **Relationship between correlation IDs:** `request_id` is assigned per inbound request. `correlation_id` tracks a logical operation across multiple services/events (often equal to the originating `request_id`). `causation_id` identifies the direct parent event or command that triggered the current action. `trace_id` and `span_id` are OpenTelemetry-specific and bridge logs to distributed traces. When CQRS domain events include `correlation_id`/`causation_id` in metadata, these MUST use the same field names and values as the logging context.
 
 ### Correlation & Tracing
 
@@ -850,7 +852,7 @@ All services MUST use structured logging. Structured logs are machine-parseable,
 **Rules:**
 - A 404 for a missing resource is INFO, not ERROR.
 - Validation failures caused by user input are WARN at most, usually INFO.
-- Every ERROR and FATAL log MUST include `error_message` and, where available, `error_stack`.
+- Every ERROR and FATAL log MUST include `error_message` (string) and, where available, `error_stack` (string). If the logging library supports automatic error serialization (e.g., passing an error object that the library expands into `error_message` and `error_stack` fields), use that mechanism — but verify the emitted JSON contains the canonical field names.
 - If an error is caught and handled with a fallback, log at WARN, not ERROR.
 
 ### What to Log
@@ -879,7 +881,7 @@ These rules are deterministic — apply them whenever writing or modifying code:
 3. When handling an error, log with at minimum: `level=error`, `msg=<static description>`, `error_message`, and all context IDs (`request_id`, `user_id`) available in scope.
 4. When calling an external service, log before (at DEBUG) and after (ERROR on failure with `duration_ms`, INFO/DEBUG on success with `duration_ms`).
 5. When a function receives a `context.Context` (Go) or request object (Node), extract the logger from it. NEVER create a new bare logger inside a handler.
-6. NEVER log any variable named or containing: `password`, `secret`, `token`, `key`, `authorization`, `cookie`, `ssn`, `credit_card`. When in doubt, omit it.
+6. NEVER log any variable whose name exactly matches or ends with: `password`, `secret`, `token`, `api_key`, `private_key`, `secret_key`, `access_key`, `authorization`, `cookie`, `ssn`, `credit_card`, `card_number`. When in doubt, omit the field rather than risk leaking sensitive data.
 7. When adding retry logic, log each retry at WARN with `attempt_number` and `max_retries`.
 8. When choosing a log level, ask: "Will someone be paged?" → ERROR. "Degradation?" → WARN. "Normal operation?" → INFO. "Only useful debugging?" → DEBUG.
 
@@ -904,6 +906,8 @@ These rules are deterministic — apply them whenever writing or modifying code:
 ## CQRS — Command Query Responsibility Segregation
 
 CQRS separates read and write models to allow independent optimization of each. These rules define when and how to apply CQRS across the organization. CQRS is a **per-use-case decision**, not an architectural mandate — some operations within a service may use CQRS while others use standard CRUD.
+
+**CQRS is not Event Sourcing.** CQRS only requires separate read and write models. Event Sourcing (persisting state as a sequence of events rather than current state) is an orthogonal pattern that pairs well with CQRS but is NOT required. Do not conflate them. Apply Event Sourcing only when there is an explicit requirement for full audit trails, temporal queries, or event replay — not as a default.
 
 ### When to Apply
 
@@ -959,7 +963,7 @@ Mixing these conventions (e.g., a command named `OrderPlaced` or an event named 
 
 - Events MUST be immutable. Once published, an event's schema and data MUST NOT change. To evolve, publish new event types and deprecate old ones.
 - Events SHOULD carry enough data for consumers to process them without querying back to the source ("fat" events over "thin" events).
-- Every event MUST include: `event_id` (unique), `event_type`, `aggregate_id`, `aggregate_type`, `timestamp`, `version`/`sequence_number`, `payload`, `metadata` (`correlation_id`, `causation_id`, `user_id`).
+- Every event MUST include: `event_id` (unique), `event_type`, `aggregate_id`, `aggregate_type`, `timestamp`, `version`/`sequence_number`, `payload`, `metadata` (`correlation_id`, `causation_id`, `user_id`). The `correlation_id` and `causation_id` in event metadata use the same field names and semantics defined in the Structured Logging section — propagate them from the request/command context that triggered the event.
 - Event handlers (projectors, reactors, sagas) MUST be idempotent. Use `sequence_number` or `event_id` to detect and skip already-processed events.
 - **Outbox pattern:** When a command handler writes to the database AND publishes events, use the transactional outbox pattern — write events to an outbox table in the same transaction as the aggregate, then publish from the outbox asynchronously. This prevents dual-write problems.
 
