@@ -55,6 +55,121 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 
 ---
 
+## End-to-End Testing — Validate Real Functional Requirements
+
+E2E tests validate real functional requirements through the full stack. They exist to catch bugs that would affect real users. **A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
+
+> Every E2E test must answer one question: **"What functional requirement would be broken for a real user if this test didn't exist?"** If the test could pass while the requirement is fundamentally unmet, it is worthless and must be rewritten.
+
+### What E2E Tests MUST Do
+
+1. **Full round-trip verification.** Action → API call → database mutation → response → frontend reflects new state. Not a subset — the whole chain.
+2. **Multi-layer assertions.** The frontend shows correct data AND the database contains the correct record AND side effects occurred (events published, notifications queued, cache invalidated).
+3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields. After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
+4. **Test error paths.** For every happy-path test, write corresponding tests for: invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
+5. **Test authorization boundaries.** Verify user A cannot access user B's resources. Verify regular users cannot hit admin endpoints. Verify expired/revoked tokens are rejected.
+6. **Use realistic data.** Factories that produce production-realistic data (unicode names, long strings, special characters, realistic cardinalities) — not `"test"` and `"foo"`.
+7. **Deterministic waits.** Wait for specific conditions (element visible, API response received, database row present) using polling with timeouts — never arbitrary sleeps.
+
+### Forbidden Patterns
+
+These are non-negotiable. Tests exhibiting these patterns MUST be rejected:
+
+| Anti-Pattern | Why It Fails | Fix |
+|---|---|---|
+| **Smoke test disguised as E2E** | Verifies the page loads, not that a functional requirement works | Add assertions on business outcomes after user actions |
+| **Frontend-only assertions** | Cached/stale frontend can show "Success" while the write failed | Query the database or API to verify the actual state change |
+| **Mocking the entire backend** | Eliminates the integration being tested | Hit the real backend with real databases (containers or dedicated test instances) |
+| **Asserting only on HTTP status codes** | A 200 with empty body or wrong data is still a bug | Always verify response body fields and database state |
+| **Arbitrary sleeps** | Flaky, slow, hides timing bugs | Poll for a condition with a timeout |
+| **Happy path only** | Production bugs live in error paths and edge cases | Test invalid input, unauthorized access, and conflicts |
+| **No cleanup / test pollution** | Tests depend on execution order, fail in isolation | Each test creates and cleans up its own data |
+| **Frontend for preconditions** | 10x slower, couples test to unrelated frontend flows | Use API calls or direct database inserts for setup |
+| **Brittle selectors** | Breaks on any frontend change | Use stable test-ID attributes exclusively — never CSS classes, DOM hierarchy, or text content |
+| **Placeholder assertions** | `expect(true).toBe(true)` proves nothing | Assert on specific field values and business outcomes |
+
+### Test Structure — Arrange, Act, Assert, Verify, Cleanup
+
+Every E2E test follows this structure:
+
+1. **Arrange** — Create preconditions via API or direct database insert (never via the frontend)
+2. **Act** — Perform the user action under test
+3. **Assert** — Check the immediate response (HTTP status + body, or frontend feedback)
+4. **Verify** — Check the database/state store to confirm the real outcome
+5. **Cleanup** — Remove test data (or use transactional rollback)
+
+### Test Design Patterns
+
+**Page/Screen Object Model (for frontend E2E):**
+- Encapsulate page interactions in page/screen objects. Tests read as functional requirements, not DOM/view manipulation.
+- Page objects expose user-intent methods (`loginAs(user)`, `submitOrder(items)`) — not element-level methods.
+- Selectors live in exactly one place (the page object). Use stable test-ID attributes exclusively.
+
+**Test Data Factories:**
+- Every test creates its own data. Never rely on pre-existing seed data.
+- Factories produce realistic, randomized data: `createUser({role: "admin"})`, `createOrder({status: "pending", items: 3})`.
+- Factories use the API or database — NOT the frontend.
+
+**Multi-Layer Assertion Example:**
+
+```pseudocode
+// WRONG — only checks frontend
+click("#submit-order")
+assert getText(".toast") == "Order placed!"
+
+// RIGHT — checks frontend + API response + database
+response = submitOrderAndCapture(orderData)
+assert response.status == 201
+assert response.body.orderId is not empty
+
+dbOrder = db.orders.findById(response.body.orderId)
+assert dbOrder.status == "confirmed"
+assert dbOrder.items.length == 3
+assert dbOrder.total == expectedTotal
+
+assert getText("[test-id='order-id']") contains dbOrder.orderId
+```
+
+### API E2E
+
+- **Write → Read round trips.** Execute a mutation/write, then immediately query for the resource. Verify every field matches. This catches stale cache, serialization mismatches, and silent write failures.
+- **Authorization on every endpoint.** For every read and write operation, test with: valid token (succeeds), no token (rejected), wrong user's token (rejected), insufficient scope (rejected).
+- **Real-time/subscription delivery.** If the API supports subscriptions or push, open a listener, perform the triggering write, verify the listener receives the correct payload within a timeout.
+- **Pagination edge cases.** Test: empty results, exactly one page, last page terminates correctly, cursor/offset stability across inserts, invalid cursors return helpful errors.
+
+### Backend E2E
+
+- **Use containerized or dedicated test databases.** Spin up real database instances per test suite. No mocking the database in E2E — ever.
+- **Run the real application server with test configuration.** Tests hit real API endpoints, which hit the real database.
+- **Test migrations.** Run database migrations from scratch on test suite startup. If migrations fail, the test fails.
+- **Test concurrency.** Double-submit for idempotency verification. Two users editing the same resource for optimistic locking. Fire concurrent requests from the test.
+- **Assert beyond status codes.** Verify response body fields, database state, audit log entries, published events.
+
+### Frontend E2E (Web and Mobile)
+
+- **Run against the real backend** — not a mocked API layer. The frontend E2E test environment connects to a real API backed by a real (test) database.
+- **Test full navigation flows** — deep links, back navigation, tab switching with state preservation, modal dismissal.
+- **Test offline/online transitions** (mobile) — disable network, verify cached data displays and writes queue, re-enable, verify sync.
+- **Use stable test-ID attributes exclusively for selectors.** Never match on displayed text (changes with localization), CSS classes, or DOM/view hierarchy.
+- **Test on at least two form factors** (mobile). Never hardcode device dimensions.
+
+### Agentic Directives
+
+1. Before writing any E2E test, state the functional requirement in a comment: `// Functional requirement: User creates a project, verifies it appears in the list, and can access it by direct URL.`
+2. Every test MUST include a database/state assertion. If the test only asserts on HTTP status or frontend text, it is incomplete.
+3. Every test MUST create its own preconditions via API/database. Never assume data exists from a previous test.
+4. Every test MUST clean up after itself. Prefer transactional cleanup.
+5. For every write operation test, write a corresponding verification read. Create → verify exists. Update → verify changed. Delete → verify gone.
+6. Test at least one error case per endpoint/functional requirement: invalid input, missing auth, forbidden access, not-found, duplicate/conflict.
+7. Use deterministic waits, not sleeps. Poll for a condition with a timeout.
+8. Use stable test-ID attributes for all element selection. If one doesn't exist, add it to the component.
+9. Name tests as functional requirement specifications: not `test("submit form")` but `test("submitting a valid order creates a confirmed order record with correct line items and total")`.
+10. When testing auth flows, always test both positive AND negative: valid credentials succeed AND invalid credentials fail with the correct error.
+11. Never generate placeholder assertions. Every assertion must check a meaningful, specific value.
+12. When unsure whether a test is thorough enough, it is not. Add more assertions. Verify at more layers. Test one more error case.
+
+---
+
 ## Pre-Commit Quality Checks
 
 Before every commit, agents MUST run and pass the project's full check suite. At minimum:
@@ -137,6 +252,55 @@ All repositories MUST follow these software engineering principles. They apply t
 - **Layered architecture.** Maintain clear boundaries between domain logic, application/use-case orchestration, and infrastructure (I/O, persistence, external services).
 - **Direction of dependencies.** Dependencies always point inward — infrastructure depends on application, application depends on domain. Never the reverse.
 - **No framework bleed.** Framework-specific types and annotations stay at the infrastructure/adapter layer. Domain and application layers must be framework-agnostic.
+
+### Breaking Changes — Human Approval Required
+
+Agents MUST NOT introduce breaking changes without explicit human approval. A breaking change is any modification that causes existing consumers, callers, or dependents to fail, produce incorrect results, or require changes on their end. **When in doubt, treat it as breaking.**
+
+**What constitutes a breaking change:**
+
+| Layer | Breaking changes include |
+|-------|------------------------|
+| **API** | Removing/renaming endpoints or response fields, changing field types or response shapes, adding required parameters, tightening validation, changing error formats, changing auth requirements |
+| **Database** | Dropping/renaming columns or tables, changing column types, adding NOT NULL without a default, removing defaults, dropping indexes that queries depend on, changing constraints |
+| **Frontend** | Removing/renaming exported components/hooks/utilities, changing prop types or function signatures, removing design tokens or CSS variables, changing route paths |
+| **Backend** | Removing/renaming exported functions/interfaces/types, changing function signatures or return types, changing event schemas, removing configuration options |
+| **Shared contracts** | Removing/renaming fields in API schemas, changing message payload structures, modifying shared type definitions consumed by multiple services |
+
+**Detection — tests are the primary safety net:**
+
+- Existing tests encode existing contracts. If your change causes an existing test to fail, you have likely introduced a breaking change.
+- **NEVER modify an existing test to make a breaking change pass.** Changing a test to accommodate new behavior is hiding the break, not fixing it. New behavior gets new tests; existing tests protect existing contracts.
+- If a test seems "wrong" or "outdated," flag it for human review. It may be the only documentation of a contract someone depends on.
+- Before removing or changing anything, search the entire codebase for all references (including string-based references like route strings, config keys, and dynamic imports). Report the consumer count.
+
+**When a breaking change is detected — stop and follow this protocol:**
+
+1. **Stop immediately.** Do not commit the breaking change.
+2. **Describe it clearly.** State exactly what is changing and why it qualifies as breaking.
+3. **List what will break and for whom.** Specific file names, function names, test names, consumer services — not "some things might break."
+4. **Propose a non-breaking alternative.** In most cases, one exists (see below).
+5. **Wait for explicit human approval.** Do not interpret silence or general task intent as approval.
+
+**Non-breaking alternatives (prefer in this order):**
+
+1. **Additive changes** — Add new fields/endpoints/functions/columns alongside old ones. Do not replace.
+2. **Deprecation + migration period** — Mark the old item as deprecated, add the replacement, document the migration path. Removal happens in a separate future change with human approval.
+3. **Feature flags / versioning** — Gate new behavior behind a flag so old behavior remains the default.
+4. **Adapter / compatibility layers** — Write a thin adapter mapping the old interface to the new implementation.
+5. **Staged database changes** — Add new column → migrate data → update application code → deploy and verify → drop old column in a separate, human-approved change. Never combine add and drop in a single migration.
+
+**Agentic directives:**
+
+1. NEVER remove or rename a public function, type, component, endpoint, field, column, route, event, or config option without human approval.
+2. NEVER change the signature of a public function or the shape of an API response, event payload, or shared data structure without human approval.
+3. NEVER tighten validation, add required fields, or add NOT NULL constraints without human approval.
+4. ALWAYS search for all consumers of any symbol, endpoint, or schema element before modifying or removing it.
+5. ALWAYS propose a non-breaking alternative first. Only present the breaking option alongside it.
+6. ALWAYS run the existing test suite after changes. Treat test failures as breaking change signals, not as "tests that need updating."
+7. ALWAYS use additive changes by default. Deprecate, then remove later in a separate change.
+8. NEVER combine a destructive database migration (drop column, drop table, change type) with other changes in the same commit or PR.
+9. When uncertain whether something is breaking, treat it as breaking. False positives are cheap. False negatives break production.
 
 ### Code Organization
 
@@ -641,6 +805,199 @@ Before starting a stacked Epic/Feature workflow, verify:
   ## Required Environment Variables
   - `VAR_NAME`: purpose, allowed values, example
   ```
+
+---
+
+## Structured Logging
+
+All services MUST use structured logging. Structured logs are machine-parseable, correlatable across services, and essential for observability. These rules apply to every language and framework in the stack.
+
+### Format & Fields
+
+- **Emit all logs as JSON objects in production.** Never use unstructured print statements or string interpolation for application logs.
+- **Every log line MUST include these baseline fields.** Configure your logging library at initialization to automatically include `timestamp`, `service`, and `version` in every log entry — do not rely on developers adding these per-call.
+
+  | Field | Format | Example |
+  |-------|--------|---------|
+  | `timestamp` | ISO 8601 / RFC 3339, always UTC | `2026-03-29T14:22:01.123Z` |
+  | `level` | `debug`, `info`, `warn`, `error`, `fatal` | `info` |
+  | `msg` | Static, human-readable string (no interpolated variables) | `order placed` |
+  | `service` | Name of the emitting service | `markets-api` |
+  | `version` | Deployed version or git SHA | `a1b2c3d` |
+
+- **Put variable data in fields, not in the message string.**
+  - WRONG: `logger.Info("User 1234 placed order 5678")`
+  - RIGHT: `logger.Info("order placed", "user_id", "1234", "order_id", "5678")`
+- **Use `snake_case` for all field names.** Check existing logs in the codebase for canonical field names before inventing new ones.
+- **Canonical field names:** `user_id`, `request_id`, `correlation_id`, `causation_id`, `trace_id`, `span_id`, `duration_ms`, `http_method`, `http_path`, `http_status`, `error_message`, `error_stack`.
+- **Relationship between correlation IDs:** `request_id` is assigned per inbound request. `correlation_id` tracks a logical operation across multiple services/events (often equal to the originating `request_id`). `causation_id` identifies the direct parent event or command that triggered the current action. `trace_id` and `span_id` are OpenTelemetry-specific and bridge logs to distributed traces. When CQRS domain events include `correlation_id`/`causation_id` in metadata, these MUST use the same field names and values as the logging context.
+
+### Correlation & Tracing
+
+- **Every inbound request MUST be assigned a `request_id`.** If the caller provides one via `X-Request-ID` header, propagate it. Otherwise, generate a UUIDv4.
+- **Attach `request_id` to the logger context at the middleware layer.** All subsequent logs within that request lifecycle inherit it automatically.
+- **When making outbound calls (HTTP, gRPC, queues), propagate `request_id` in headers.**
+- **If OpenTelemetry is in use, include `trace_id` and `span_id` in every log line.** These fields bridge logs to distributed traces.
+
+### Log Levels
+
+| Level | Use when | Examples |
+|-------|----------|----------|
+| **DEBUG** | Detailed diagnostics, useful only during development. **Disabled in production by default.** | Variable values, SQL queries, cache hit/miss |
+| **INFO** | Normal operational events confirming the system works as expected | Request completed, job finished, service started |
+| **WARN** | Something unexpected but the system recovered or can continue | Retry attempted, deprecated API called, slow query detected |
+| **ERROR** | An operation failed and could not be completed. Every ERROR must be actionable | External service call failed after retries, database write failed |
+| **FATAL** | The process cannot continue and will exit. Use extremely sparingly | Failed to bind port, required config missing at startup |
+
+**Rules:**
+- A 404 for a missing resource is INFO, not ERROR.
+- Validation failures caused by user input are WARN at most, usually INFO.
+- Every ERROR and FATAL log MUST include `error_message` (string) and, where available, `error_stack` (string). If the logging library supports automatic error serialization (e.g., passing an error object that the library expands into `error_message` and `error_stack` fields), use that mechanism — but verify the emitted JSON contains the canonical field names.
+- If an error is caught and handled with a fallback, log at WARN, not ERROR.
+
+### What to Log
+
+- **Request/response boundaries:** method, path, status, `duration_ms`, request size.
+- **State transitions:** job started/completed/failed, circuit breaker changes, cache invalidation.
+- **Errors with full context:** the attempted operation, input parameters (sanitized), error message and type, retry count, stack trace for unexpected errors.
+- **Security events:** authentication success/failure (without credentials), authorization denial, rate limiting triggered, admin operations.
+- **Performance data:** external call durations, database query durations above threshold.
+
+### What NOT to Log
+
+- **NEVER log passwords, API keys, secrets, tokens (JWT, session, bearer), or private keys.**
+- **NEVER log full request/response bodies that may contain `Authorization`, `Cookie`, `Set-Cookie`, or `X-API-Key` headers.**
+- **NEVER log PII in plain text:** email addresses, phone numbers, physical addresses, SSNs, credit card numbers.
+- **NEVER log at DEBUG level in production by default.** DEBUG must be gated behind a runtime flag.
+- **NEVER log inside tight loops** (per-item in a batch). Log once before and once after with a count.
+- **NEVER use `log.Fatal` or `log.Panic` in library code.** Return errors; let the caller decide.
+
+### Agentic Directives
+
+These rules are deterministic — apply them whenever writing or modifying code:
+
+1. When creating any new HTTP/GraphQL handler, add structured logging middleware that logs: method, path/operation, status, `duration_ms`, `request_id`.
+2. When adding a logger call, ALWAYS use structured key-value pairs. NEVER concatenate or interpolate variables into the message string.
+3. When handling an error, log with at minimum: `level=error`, `msg=<static description>`, `error_message`, and all context IDs (`request_id`, `user_id`) available in scope.
+4. When calling an external service, log before (at DEBUG) and after (ERROR on failure with `duration_ms`, INFO/DEBUG on success with `duration_ms`).
+5. When a function receives a `context.Context` (Go) or request object (Node), extract the logger from it. NEVER create a new bare logger inside a handler.
+6. NEVER log any variable whose name exactly matches or ends with: `password`, `secret`, `token`, `api_key`, `private_key`, `secret_key`, `access_key`, `authorization`, `cookie`, `ssn`, `credit_card`, `card_number`. When in doubt, omit the field rather than risk leaking sensitive data.
+7. When adding retry logic, log each retry at WARN with `attempt_number` and `max_retries`.
+8. When choosing a log level, ask: "Will someone be paged?" → ERROR. "Degradation?" → WARN. "Normal operation?" → INFO. "Only useful debugging?" → DEBUG.
+
+### Go Patterns
+
+- **Use `log/slog` (Go 1.21+) as the default.** Use `slog.NewJSONHandler` for production, `slog.NewTextHandler` for local development.
+- **Propagate loggers via `context.Context`.** Use `slog.InfoContext(ctx, ...)` so OpenTelemetry bridges can extract trace/span IDs.
+- **Never use the global `log` package** from the standard library. Always use `slog` or a structured alternative.
+- **In tests, use `slog.New(slog.NewTextHandler(io.Discard, nil))` to suppress log output.**
+- **Log at the point of handling, not at every intermediate layer.** Wrap errors with `fmt.Errorf("operation: %w", err)` and log once at the top-level handler.
+
+### TypeScript / Node Patterns
+
+- **Use `pino` as the default structured logger.**
+- **Use `logger.child({...})` to create request-scoped loggers.** Never add fields to the root logger at runtime.
+- **In Express/Fastify, attach the child logger to the request object in middleware.** All downstream code uses `req.log`.
+- **Never use `console.log`, `console.error`, or `console.warn` in application code.** `console.*` is acceptable only in CLI tools and build scripts.
+- **When logging errors, pass the Error object in a field:** `logger.error({ msg: "payment failed", err })`.
+
+---
+
+## CQRS — Command Query Responsibility Segregation
+
+CQRS separates read and write models to allow independent optimization of each. These rules define when and how to apply CQRS across the organization. CQRS is a **per-use-case decision**, not an architectural mandate — some operations within a service may use CQRS while others use standard CRUD.
+
+**CQRS is not Event Sourcing.** CQRS only requires separate read and write models. Event Sourcing (persisting state as a sequence of events rather than current state) is an orthogonal pattern that pairs well with CQRS but is NOT required. Do not conflate them. Apply Event Sourcing only when there is an explicit requirement for full audit trails, temporal queries, or event replay — not as a default.
+
+### When to Apply
+
+- **Use CQRS** when read and write workloads have significantly different scaling, performance, or modeling requirements.
+- **Use CQRS** when the domain has complex business rules on the write side but simple, denormalized read requirements.
+- **Use CQRS** when multiple read representations (projections) of the same data are needed.
+- **Do NOT use CQRS** for simple CRUD domains where read and write models are nearly identical.
+- **Do NOT apply CQRS to every bounded context.** Apply it selectively to contexts that benefit from it.
+
+### Separation Rules
+
+- The **write model** (command side) is optimized for enforcing invariants and business rules. It is the source of truth.
+- The **read model** (query side) is optimized for query performance. It MAY be denormalized, pre-aggregated, or stored in a different database.
+- **Commands MUST NOT return domain data.** They return either nothing (success), an ID of a created resource, or an error.
+- **Queries MUST NOT mutate state.** A query handler is side-effect-free with respect to domain state. (Logging, metrics, and cache population are acceptable side effects.)
+
+### Naming Conventions
+
+| Concept | Convention | Examples |
+|---------|-----------|----------|
+| **Command** | Imperative verb + noun | `PlaceOrder`, `CancelSubscription`, `AssignRole` |
+| **Event** | Past-tense verb + noun | `OrderPlaced`, `SubscriptionCancelled`, `RoleAssigned` |
+| **Query** | `Get`/`List`/`Search`/`Count` + noun | `GetOrderById`, `ListActiveUsers`, `SearchProducts` |
+| **Command handler** | `Handle(cmd)` or `<CommandName>Handler` | `PlaceOrderHandler` |
+| **Event handler** | `On<EventName>` or `<EventName>Handler` | `OnOrderPlaced` |
+| **Projection** | Noun describing the view | `OrderSummaryProjection`, `UserDashboardView` |
+
+Mixing these conventions (e.g., a command named `OrderPlaced` or an event named `PlaceOrder`) is a design error.
+
+### Command Patterns
+
+- A command MUST be a plain data structure (DTO) with no behavior. It carries the intent and the data needed to fulfill it.
+- Every command that creates or mutates state MUST be idempotent, or the system MUST detect and reject duplicates. Strategies: idempotency key from client, natural idempotency ("set X" not "append X"), or conditional/versioned updates (`expectedVersion`/`ETag`).
+- Each command MUST have exactly one handler.
+- A command handler's responsibilities are: (1) validate, (2) load aggregate/entity, (3) invoke domain logic, (4) persist changes, (5) publish domain events.
+- **One command = one transaction = one aggregate mutation.** Do NOT mutate multiple aggregates in one command handler. Use domain events and sagas for cross-aggregate coordination.
+- **Domain logic belongs in the aggregate/entity, not the handler.** If the handler has `if/else` business logic, move it into the domain model.
+
+### Command Validation
+
+- **Structural/syntactic validation** on the command object before it reaches the handler (required fields, format, lengths). This can be middleware.
+- **Domain/business validation** inside the aggregate/entity (e.g., "user has sufficient balance"). MUST NOT be in the handler or middleware.
+- Return validation errors as typed, structured responses — not exceptions for flow control.
+
+### Query Patterns
+
+- A query MUST be a plain data structure containing only retrieval parameters: filters, pagination, sorting, field selection.
+- Query handlers MUST NOT invoke command handlers or emit domain events.
+- Query handlers MAY read from a dedicated read database, cache, search index, or materialized view.
+- Build projections (materialized views) shaped exactly for the UI/API consumer. One projection per distinct read use case is acceptable.
+
+### Domain Events
+
+- Events MUST be immutable. Once published, an event's schema and data MUST NOT change. To evolve, publish new event types and deprecate old ones.
+- Events SHOULD carry enough data for consumers to process them without querying back to the source ("fat" events over "thin" events).
+- Every event MUST include: `event_id` (unique), `event_type`, `aggregate_id`, `aggregate_type`, `timestamp`, `version`/`sequence_number`, `payload`, `metadata` (`correlation_id`, `causation_id`, `user_id`). The `correlation_id` and `causation_id` in event metadata use the same field names and semantics defined in the Structured Logging section — propagate them from the request/command context that triggered the event.
+- Event handlers (projectors, reactors, sagas) MUST be idempotent. Use `sequence_number` or `event_id` to detect and skip already-processed events.
+- **Outbox pattern:** When a command handler writes to the database AND publishes events, use the transactional outbox pattern — write events to an outbox table in the same transaction as the aggregate, then publish from the outbox asynchronously. This prevents dual-write problems.
+
+### Eventual Consistency
+
+- Accept that the read model will lag behind the write model. Design UIs to handle this: optimistic updates, "your change is being processed" messaging, polling/subscriptions for completion.
+- Define and monitor consistency SLAs — the acceptable lag time between a command and the read model update.
+- Do NOT read from the write model after a command as a consistency workaround. This defeats CQRS and creates coupling.
+
+### GraphQL + CQRS Integration
+
+- **Mutations map to commands.** Each mutation field corresponds to a single command. The mutation name matches the command name.
+- **Queries map to read models.** Each query field reads from the query side. Never route a GraphQL query through a command handler.
+- **Subscriptions map to domain events** or projection change streams. Use event-driven push, not database polling.
+- Use GraphQL union types or typed error fields for command validation and domain errors. Do NOT rely solely on the `errors` array for business-logic errors.
+
+### Agentic Directives
+
+1. When implementing a new mutation, structure it as: parse input → construct command → dispatch to handler → return ID or error. Do NOT put business logic in the resolver.
+2. When implementing a new query, read from the query/projection store. NEVER load aggregates or call domain services from a query resolver.
+3. When naming a new command, use imperative form (`CreateMarket`). When naming an event, use past tense (`MarketCreated`). When naming a query, use `Get`/`List`/`Search` prefix (`GetMarketById`).
+4. When a command handler needs to affect another aggregate, publish a domain event and handle it in a separate event handler. Do NOT modify two aggregates in the same transaction.
+5. When creating an event handler, make it idempotent — check if the event has already been processed before applying side effects.
+6. When adding a new read use case with different shape requirements, create a new projection rather than overloading an existing query with conditional logic.
+7. When the domain is simple CRUD with no complex invariants or divergent read/write needs, use a standard repository pattern. Do NOT introduce CQRS for basic entity operations.
+8. When a command creates a new entity, return only the new entity's ID. Do NOT return the full read model — let the caller issue a separate query.
+
+### Testing CQRS
+
+- **Commands:** Test handlers in isolation with in-memory repositories. Verify correct events are produced, state changes are persisted, and invariants are enforced. Include idempotency tests.
+- **Queries:** Test against a pre-populated read store. Seed known data, assert query results.
+- **Event handlers:** Feed events and assert side effects. Test idempotency (same event twice = same result). Test ordering if handler depends on sequence.
+- **Projections:** Test that a projection can be rebuilt from scratch by replaying all events.
+- **Integration:** Send a command, wait for projection update (with polling/timeout, NOT arbitrary sleep), then query and assert.
 
 ---
 
