@@ -253,6 +253,121 @@ assert getText("[test-id='order-id']") contains dbOrder.orderId
 
 ---
 
+## End-to-End Testing — Validate Real Functional Requirements
+
+E2E tests validate real functional requirements through the full stack. They exist to catch bugs that would affect real users. **A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
+
+> Every E2E test must answer one question: **"What functional requirement would be broken for a real user if this test didn't exist?"** If the test could pass while the requirement is fundamentally unmet, it is worthless and must be rewritten.
+
+### What E2E Tests MUST Do
+
+1. **Full round-trip verification.** Action → API call → database mutation → response → frontend reflects new state. Not a subset — the whole chain.
+2. **Multi-layer assertions.** The frontend shows correct data AND the database contains the correct record AND side effects occurred (events published, notifications queued, cache invalidated).
+3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields. After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
+4. **Test error paths.** For every happy-path test, write corresponding tests for: invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
+5. **Test authorization boundaries.** Verify user A cannot access user B's resources. Verify regular users cannot hit admin endpoints. Verify expired/revoked tokens are rejected.
+6. **Use realistic data.** Factories that produce production-realistic data (unicode names, long strings, special characters, realistic cardinalities) — not `"test"` and `"foo"`.
+7. **Deterministic waits.** Wait for specific conditions (element visible, API response received, database row present) using polling with timeouts — never arbitrary sleeps.
+
+### Forbidden Patterns
+
+These are non-negotiable. Tests exhibiting these patterns MUST be rejected:
+
+| Anti-Pattern | Why It Fails | Fix |
+|---|---|---|
+| **Smoke test disguised as E2E** | Verifies the page loads, not that a functional requirement works | Add assertions on business outcomes after user actions |
+| **Frontend-only assertions** | Cached/stale frontend can show "Success" while the write failed | Query the database or API to verify the actual state change |
+| **Mocking the entire backend** | Eliminates the integration being tested | Hit the real backend with real databases (containers or dedicated test instances) |
+| **Asserting only on HTTP status codes** | A 200 with empty body or wrong data is still a bug | Always verify response body fields and database state |
+| **Arbitrary sleeps** | Flaky, slow, hides timing bugs | Poll for a condition with a timeout |
+| **Happy path only** | Production bugs live in error paths and edge cases | Test invalid input, unauthorized access, and conflicts |
+| **No cleanup / test pollution** | Tests depend on execution order, fail in isolation | Each test creates and cleans up its own data |
+| **Frontend for preconditions** | 10x slower, couples test to unrelated frontend flows | Use API calls or direct database inserts for setup |
+| **Brittle selectors** | Breaks on any frontend change | Use stable test-ID attributes exclusively — never CSS classes, DOM hierarchy, or text content |
+| **Placeholder assertions** | `expect(true).toBe(true)` proves nothing | Assert on specific field values and business outcomes |
+
+### Test Structure — Arrange, Act, Assert, Verify, Cleanup
+
+Every E2E test follows this structure:
+
+1. **Arrange** — Create preconditions via API or direct database insert (never via the frontend)
+2. **Act** — Perform the user action under test
+3. **Assert** — Check the immediate response (HTTP status + body, or frontend feedback)
+4. **Verify** — Check the database/state store to confirm the real outcome
+5. **Cleanup** — Remove test data (or use transactional rollback)
+
+### Test Design Patterns
+
+**Page/Screen Object Model (for frontend E2E):**
+- Encapsulate page interactions in page/screen objects. Tests read as functional requirements, not DOM/view manipulation.
+- Page objects expose user-intent methods (`loginAs(user)`, `submitOrder(items)`) — not element-level methods.
+- Selectors live in exactly one place (the page object). Use stable test-ID attributes exclusively.
+
+**Test Data Factories:**
+- Every test creates its own data. Never rely on pre-existing seed data.
+- Factories produce realistic, randomized data: `createUser({role: "admin"})`, `createOrder({status: "pending", items: 3})`.
+- Factories use the API or database — NOT the frontend.
+
+**Multi-Layer Assertion Example:**
+
+```pseudocode
+// WRONG — only checks frontend
+click("#submit-order")
+assert getText(".toast") == "Order placed!"
+
+// RIGHT — checks frontend + API response + database
+response = submitOrderAndCapture(orderData)
+assert response.status == 201
+assert response.body.orderId is not empty
+
+dbOrder = db.orders.findById(response.body.orderId)
+assert dbOrder.status == "confirmed"
+assert dbOrder.items.length == 3
+assert dbOrder.total == expectedTotal
+
+assert getText("[test-id='order-id']") contains dbOrder.orderId
+```
+
+### API E2E
+
+- **Write → Read round trips.** Execute a mutation/write, then immediately query for the resource. Verify every field matches. This catches stale cache, serialization mismatches, and silent write failures.
+- **Authorization on every endpoint.** For every read and write operation, test with: valid token (succeeds), no token (rejected), wrong user's token (rejected), insufficient scope (rejected).
+- **Real-time/subscription delivery.** If the API supports subscriptions or push, open a listener, perform the triggering write, verify the listener receives the correct payload within a timeout.
+- **Pagination edge cases.** Test: empty results, exactly one page, last page terminates correctly, cursor/offset stability across inserts, invalid cursors return helpful errors.
+
+### Backend E2E
+
+- **Use containerized or dedicated test databases.** Spin up real database instances per test suite. No mocking the database in E2E — ever.
+- **Run the real application server with test configuration.** Tests hit real API endpoints, which hit the real database.
+- **Test migrations.** Run database migrations from scratch on test suite startup. If migrations fail, the test fails.
+- **Test concurrency.** Double-submit for idempotency verification. Two users editing the same resource for optimistic locking. Fire concurrent requests from the test.
+- **Assert beyond status codes.** Verify response body fields, database state, audit log entries, published events.
+
+### Frontend E2E (Web and Mobile)
+
+- **Run against the real backend** — not a mocked API layer. The frontend E2E test environment connects to a real API backed by a real (test) database.
+- **Test full navigation flows** — deep links, back navigation, tab switching with state preservation, modal dismissal.
+- **Test offline/online transitions** (mobile) — disable network, verify cached data displays and writes queue, re-enable, verify sync.
+- **Use stable test-ID attributes exclusively for selectors.** Never match on displayed text (changes with localization), CSS classes, or DOM/view hierarchy.
+- **Test on at least two form factors** (mobile). Never hardcode device dimensions.
+
+### Agentic Directives
+
+1. Before writing any E2E test, state the functional requirement in a comment: `// Functional requirement: User creates a project, verifies it appears in the list, and can access it by direct URL.`
+2. Every test MUST include a database/state assertion. If the test only asserts on HTTP status or frontend text, it is incomplete.
+3. Every test MUST create its own preconditions via API/database. Never assume data exists from a previous test.
+4. Every test MUST clean up after itself. Prefer transactional cleanup.
+5. For every write operation test, write a corresponding verification read. Create → verify exists. Update → verify changed. Delete → verify gone.
+6. Test at least one error case per endpoint/functional requirement: invalid input, missing auth, forbidden access, not-found, duplicate/conflict.
+7. Use deterministic waits, not sleeps. Poll for a condition with a timeout.
+8. Use stable test-ID attributes for all element selection. If one doesn't exist, add it to the component.
+9. Name tests as functional requirement specifications: not `test("submit form")` but `test("submitting a valid order creates a confirmed order record with correct line items and total")`.
+10. When testing auth flows, always test both positive AND negative: valid credentials succeed AND invalid credentials fail with the correct error.
+11. Never generate placeholder assertions. Every assertion must check a meaningful, specific value.
+12. When unsure whether a test is thorough enough, it is not. Add more assertions. Verify at more layers. Test one more error case.
+
+---
+
 ## Pre-Commit Quality Checks
 
 Before every commit, agents MUST run and pass the project's full check suite. At minimum:
