@@ -403,12 +403,74 @@ All repositories MUST configure and enforce the following CI checks. PRs cannot 
 - Never bypass CI gates or weaken thresholds to make a PR pass.
 - Address CodeRabbit and Copilot review comments the same way you address human reviewer comments — fix or explicitly justify skipping with a reply.
 
-### Branch Protection & SonarCloud
+### Branch Protection & Repository Rulesets
 
-- This org uses **branch protection with SonarCloud checks** and `enforce_admins` enabled.
-- With `enforce_admins` enabled, even repository administrators cannot bypass required status checks, including SonarCloud quality gates. All PRs must pass CI before merging.
-- SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked, first identify the exact required check name(s), status, and mismatch source; then fix branch-protection or check configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
+This org enforces branch protection via **classic branch protection rules** and **repository rulesets** on all repos. Both layers are active and additive — the strictest requirement wins.
+
+#### Classic Branch Protection (all repos)
+
+| Setting | Value |
+|---------|-------|
+| **Required status checks** | Repo-specific (see table below) |
+| **Require branches to be up to date** | `strict: true` |
+| **Require approving reviews** | 1 |
+| **Dismiss stale reviews** | No |
+| **Require code owner reviews** | No |
+| **Enforce for admins** | Yes |
+| **Allow force pushes** | No |
+| **Allow deletions** | No |
+
+#### Required Status Checks by Repo
+
+| Repo | Required Checks |
+|------|----------------|
+| **broodly** | `Analyze` (CodeQL) |
+| **markets** | `SonarCloud`, `claude` |
+| **google-app-scripts** | `build-and-test` |
+| **TalkTerm** | `Analyze (Python)` (CodeQL) |
+| **ContentTwin** | `SonarCloud` |
+
+#### Repository Rulesets — `pr-quality` (all repos)
+
+| Setting | Value |
+|---------|-------|
+| **Required approving reviews** | 1 |
+| **Required review thread resolution** | **Yes** — all review comment threads must be marked Resolved before merge |
+| **Dismiss stale reviews on push** | No |
+| **Require code owner review** | No |
+| **Require last push approval** | No |
+| **Allowed merge methods** | Squash only |
+
+> **google-app-scripts** has an additional ruleset (`protect-branches`) with CodeQL code scanning enforcement and stricter review settings.
+
+#### SonarCloud Check Names
+
+SonarCloud check names may not match exactly across repos — expect check name mismatches. If a merge is blocked by a "check expected" error, first identify the exact required check name(s), the actual check name reported, and the `app_id`. Then fix the branch protection configuration. Use `gh pr merge --admin` only with explicit user approval and only after confirming all intended quality gates have passed.
+
+#### Thread Resolution Policy
+
+- **All review threads must be resolved before merge.** This is enforced by the `pr-quality` ruleset.
+- Agents MUST address and resolve Copilot, CodeRabbit, and human review comments before merging.
+- For Dependabot auto-merge: the auto-merge workflow automatically resolves AI reviewer threads on patch/minor dependency bumps.
 - **Do not retry a failing merge more than twice** without telling the user what is blocking it. Surface the specific check name, status, and reason before any override is considered.
+
+#### Dependabot Auto-Merge
+
+The `dependabot-automerge.yml` workflow handles automatic merging of Dependabot PRs:
+
+| Behavior | Detail |
+|----------|--------|
+| **Eligible updates** | Patch, minor, and indirect dependency bumps |
+| **Major version bumps** | Require manual review and approval |
+| **Merge strategy** | `gh pr merge --squash --auto` (queues merge until all checks pass) |
+| **AI reviewers** | Claude Code is skipped on Dependabot PRs (step-level `if`); Copilot/CodeRabbit threads are auto-resolved by the workflow |
+| **Approval** | GitHub App token provides the required approving review |
+
+#### Claude Code Workflow on Dependabot PRs
+
+The `claude.yml` workflow skips the Claude Code action step for Dependabot PRs (`github.event.pull_request.user.login != 'dependabot[bot]'`). The job still runs and reports SUCCESS to satisfy required status checks, but the Claude action step is skipped since:
+- `CLAUDE_CODE_OAUTH_TOKEN` is an Actions secret, not a Dependabot secret
+- AI code review on automated version bumps adds cost without value
 
 ---
 
