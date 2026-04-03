@@ -7,7 +7,7 @@
 # Add "dependency-audit" as a required status check in branch protection.
 #
 # Pinned tool versions (update deliberately):
-#   govulncheck v1.1.4 | cargo-audit 0.21.1 | pip-audit 2.9.0
+#   govulncheck v1.1.4 | cargo-audit 0.22.1 | pip-audit 2.9.0
 name: Dependency audit
 
 on:
