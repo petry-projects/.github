@@ -155,7 +155,8 @@ appropriate audit tool:
 
 | Ecosystem | Tool | Command |
 |-----------|------|---------|
-| npm | `npm audit` | `npm audit --audit-level=low` per lockfile (fails on any advisory) |
+| npm | `npm audit` | `npm audit --audit-level=low` per `package-lock.json` (fails on any advisory) |
+| pnpm | `pnpm audit` | `pnpm audit --audit-level low` per `pnpm-lock.yaml` |
 | Go | `govulncheck` | `govulncheck ./...` per `go.mod` directory |
 | Rust | `cargo-audit` | `cargo audit` per `Cargo.toml` workspace |
 | Python | `pip-audit` | `pip-audit .` per `pyproject.toml` / `-r requirements.txt` |
