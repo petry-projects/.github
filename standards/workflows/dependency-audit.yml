@@ -5,6 +5,9 @@
 # audit tool. Fails the build if any dependency has a known security advisory.
 #
 # Add "dependency-audit" as a required status check in branch protection.
+#
+# Pinned tool versions (update deliberately):
+#   govulncheck v1.1.4 | cargo-audit 0.21.1 | pip-audit 2.9.0
 name: Dependency audit
 
 on:
@@ -45,15 +48,16 @@ jobs:
             echo "gomod=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Cargo — detect via Cargo.toml (lockfile may not exist for libraries)
+          # Cargo — detect via Cargo.toml anywhere (lockfile may not exist for libraries)
           if find . -name 'Cargo.toml' -not -path '*/target/*' | grep -q .; then
             echo "cargo=true" >> "$GITHUB_OUTPUT"
           else
             echo "cargo=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Python
-          if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+          # Python — detect pyproject.toml or requirements.txt anywhere
+          if find . -name 'pyproject.toml' -not -path '*/.venv/*' -not -path '*/venv/*' | grep -q . || \
+             find . -name 'requirements.txt' -not -path '*/.venv/*' -not -path '*/venv/*' | grep -q .; then
             echo "pip=true" >> "$GITHUB_OUTPUT"
           else
             echo "pip=false" >> "$GITHUB_OUTPUT"
@@ -74,15 +78,15 @@ jobs:
       - name: Audit npm dependencies
         run: |
           # Audit each package-lock.json found in the repo
-          failed=0
-          find . -name 'package-lock.json' -not -path '*/node_modules/*' -exec dirname {} \; | while read -r dir; do
+          status=0
+          while IFS= read -r dir; do
             echo "::group::npm audit $dir"
             if ! (cd "$dir" && npm audit --audit-level=low); then
-              failed=1
+              status=1
             fi
             echo "::endgroup::"
-          done
-          exit $failed
+          done < <(find . -name 'package-lock.json' -not -path '*/node_modules/*' -exec dirname {} \;)
+          exit $status
 
   audit-go:
     name: govulncheck
@@ -101,16 +105,15 @@ jobs:
 
       - name: Audit Go dependencies
         run: |
-          # Run govulncheck in each module directory
-          failed=0
-          find . -name 'go.mod' -not -path '*/vendor/*' -exec dirname {} \; | while read -r dir; do
+          status=0
+          while IFS= read -r dir; do
             echo "::group::govulncheck $dir"
             if ! (cd "$dir" && govulncheck ./...); then
-              failed=1
+              status=1
             fi
             echo "::endgroup::"
-          done
-          exit $failed
+          done < <(find . -name 'go.mod' -not -path '*/vendor/*' -exec dirname {} \;)
+          exit $status
 
   audit-cargo:
     name: cargo audit
@@ -126,7 +129,18 @@ jobs:
         run: cargo install cargo-audit@0.21.1 --locked
 
       - name: Audit Cargo dependencies
-        run: cargo audit
+        run: |
+          # cargo audit operates on Cargo.lock at workspace root
+          # For workspaces, a single audit at root covers all crates
+          status=0
+          while IFS= read -r dir; do
+            echo "::group::cargo audit $dir"
+            if ! (cd "$dir" && cargo generate-lockfile 2>/dev/null; cargo audit); then
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name 'Cargo.toml' -not -path '*/target/*' -exec dirname {} \; | sort -u)
+          exit $status
 
   audit-pip:
     name: pip-audit
@@ -140,14 +154,29 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Install dependencies and pip-audit
-        run: |
-          pip install pip-audit==2.9.0
-          if [ -f "pyproject.toml" ]; then
-            pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
-          elif [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt
-          fi
+      - name: Install pip-audit
+        run: pip install pip-audit==2.9.0
 
       - name: Audit Python dependencies
-        run: pip-audit
+        run: |
+          status=0
+          # Audit each Python project found in the repo
+          while IFS= read -r dir; do
+            echo "::group::pip-audit $dir"
+            if [ -f "$dir/pyproject.toml" ]; then
+              if ! pip-audit "$dir"; then
+                status=1
+              fi
+            elif [ -f "$dir/requirements.txt" ]; then
+              if ! pip-audit -r "$dir/requirements.txt"; then
+                status=1
+              fi
+            fi
+            echo "::endgroup::"
+          done < <(
+            {
+              find . -name 'pyproject.toml' -not -path '*/.venv/*' -not -path '*/venv/*' -exec dirname {} \;
+              find . -name 'requirements.txt' -not -path '*/.venv/*' -not -path '*/venv/*' -exec dirname {} \;
+            } | sort -u
+          )
+          exit $status

@@ -155,10 +155,10 @@ appropriate audit tool:
 
 | Ecosystem | Tool | Command |
 |-----------|------|---------|
-| npm | `npm audit` | `npm audit --audit-level=low` (fails on any advisory) |
-| Go | `govulncheck` | `govulncheck ./...` (per module) |
-| Rust | `cargo-audit` | `cargo audit` |
-| Python | `pip-audit` | `pip-audit` |
+| npm | `npm audit` | `npm audit --audit-level=low` per lockfile (fails on any advisory) |
+| Go | `govulncheck` | `govulncheck ./...` per `go.mod` directory |
+| Rust | `cargo-audit` | `cargo audit` per `Cargo.toml` workspace |
+| Python | `pip-audit` | `pip-audit .` per `pyproject.toml` / `-r requirements.txt` |
 
 The workflow fails if any known vulnerability is found, blocking the PR from merging.
 
@@ -166,8 +166,8 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 
 1. Copy the appropriate `dependabot.yml` template to `.github/dependabot.yml`,
    adjusting `directory` paths as needed.
-2. Copy `workflows/dependabot-automerge.yml` to `.github/workflows/`.
-3. Copy `workflows/dependency-audit.yml` to `.github/workflows/`.
+2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
+3. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
 4. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
    configured for auto-merge.
 5. Create the `security` and `dependencies` labels in the repository if they
