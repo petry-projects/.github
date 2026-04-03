@@ -5,11 +5,12 @@
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
 #
-# Auto-approves and squash-merges Dependabot PRs for:
+# Auto-approves and enables auto-merge for Dependabot PRs:
 #   - Patch version updates
 #   - Minor version updates
 #   - Indirect (transitive) dependency updates
 # Major version updates are left for human review.
+# Uses --auto so the merge waits for all required CI checks to pass.
 name: Dependabot auto-merge
 
 on:
@@ -44,14 +45,14 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Approve and auto-merge
+      - name: Approve and enable auto-merge
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
           steps.metadata.outputs.dependency-type == 'indirect'
         run: |
           gh pr review --approve "$PR_URL"
-          gh pr merge --squash --admin "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

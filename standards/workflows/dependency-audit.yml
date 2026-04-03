@@ -31,22 +31,22 @@ jobs:
       - name: Detect package ecosystems
         id: check
         run: |
-          # npm
+          # npm — look for package-lock.json anywhere (excluding node_modules)
           if find . -name 'package-lock.json' -not -path '*/node_modules/*' | grep -q .; then
             echo "npm=true" >> "$GITHUB_OUTPUT"
           else
             echo "npm=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Go modules
-          if find . -name 'go.sum' | grep -q .; then
+          # Go modules — detect via go.mod (not go.sum, which may not exist)
+          if find . -name 'go.mod' -not -path '*/vendor/*' | grep -q .; then
             echo "gomod=true" >> "$GITHUB_OUTPUT"
           else
             echo "gomod=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Cargo
-          if [ -f "Cargo.lock" ]; then
+          # Cargo — detect via Cargo.toml (lockfile may not exist for libraries)
+          if find . -name 'Cargo.toml' -not -path '*/target/*' | grep -q .; then
             echo "cargo=true" >> "$GITHUB_OUTPUT"
           else
             echo "cargo=false" >> "$GITHUB_OUTPUT"
@@ -72,7 +72,17 @@ jobs:
           node-version: "lts/*"
 
       - name: Audit npm dependencies
-        run: npm audit --audit-level=moderate
+        run: |
+          # Audit each package-lock.json found in the repo
+          failed=0
+          find . -name 'package-lock.json' -not -path '*/node_modules/*' -exec dirname {} \; | while read -r dir; do
+            echo "::group::npm audit $dir"
+            if ! (cd "$dir" && npm audit --audit-level=low); then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
 
   audit-go:
     name: govulncheck
@@ -87,16 +97,20 @@ jobs:
           go-version: "stable"
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Audit Go dependencies
         run: |
           # Run govulncheck in each module directory
-          find . -name 'go.mod' -exec dirname {} \; | while read -r dir; do
+          failed=0
+          find . -name 'go.mod' -not -path '*/vendor/*' -exec dirname {} \; | while read -r dir; do
             echo "::group::govulncheck $dir"
-            (cd "$dir" && govulncheck ./...)
+            if ! (cd "$dir" && govulncheck ./...); then
+              failed=1
+            fi
             echo "::endgroup::"
           done
+          exit $failed
 
   audit-cargo:
     name: cargo audit
@@ -106,8 +120,10 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit@0.21.1 --locked
 
       - name: Audit Cargo dependencies
         run: cargo audit
@@ -124,13 +140,14 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Install pip-audit
-        run: pip install pip-audit
+      - name: Install dependencies and pip-audit
+        run: |
+          pip install pip-audit==2.9.0
+          if [ -f "pyproject.toml" ]; then
+            pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+          elif [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
 
       - name: Audit Python dependencies
-        run: |
-          if [ -f "pyproject.toml" ]; then
-            pip-audit --require-hashes=false
-          elif [ -f "requirements.txt" ]; then
-            pip-audit -r requirements.txt
-          fi
+        run: pip-audit

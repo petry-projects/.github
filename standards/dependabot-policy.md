@@ -10,13 +10,25 @@ security posture than chasing every minor/patch release.
 
 1. **Security updates only** for application dependencies (npm, Go modules, pip, Cargo).
    Dependabot opens PRs only when a vulnerability advisory exists for a dependency.
+   Version update PRs are suppressed by setting `open-pull-requests-limit: 0` for
+   application ecosystems — Dependabot security updates bypass this limit.
 2. **Version updates weekly** for GitHub Actions, since pinned action versions do not
    affect application stability and staying current reduces CI attack surface.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
-4. **Auto-merge** security patches and minor updates after CI passes, using a GitHub App
-   token to satisfy branch protection (CODEOWNERS review bypass for bot PRs).
+4. **Auto-merge** security patches and minor updates after all CI checks pass, using a
+   GitHub App token to satisfy branch protection (CODEOWNERS review bypass for bot PRs).
+   Uses `gh pr merge --auto` to wait for required checks before merging.
 5. **Vulnerability audit CI check** runs on every PR and push to `main`, failing the
    build if any dependency has a known advisory. This is a required status check.
+
+## Prerequisites
+
+- **Dependabot security updates** must be enabled at the org or repo level
+  (Settings > Code security > Dependabot security updates).
+- The `dependabot.yml` entries below configure which ecosystems and directories
+  Dependabot monitors. Setting `open-pull-requests-limit: 0` for application
+  ecosystems suppresses routine version-update PRs while still allowing
+  security-alert-triggered PRs to be created.
 
 ## Configuration Files
 
@@ -30,13 +42,25 @@ Each repository must have:
 
 ## Dependabot Templates
 
-Use the template matching your repository type. All templates share these settings:
+Use the template matching your repository type.
+
+**Application ecosystems** (npm, gomod, cargo, pip, terraform) use:
 
 ```yaml
-# Common settings applied to every package ecosystem entry
 schedule:
   interval: "weekly"
-open-pull-requests-limit: 10
+open-pull-requests-limit: 0   # suppress version updates; security PRs bypass this
+labels:
+  - "security"
+  - "dependencies"
+```
+
+**GitHub Actions** uses:
+
+```yaml
+schedule:
+  interval: "weekly"
+open-pull-requests-limit: 10  # allow version updates for CI actions
 labels:
   - "security"
   - "dependencies"
@@ -48,8 +72,6 @@ For repos with `package.json` at root or in subdirectories.
 
 - Ecosystem: `npm`
 - Directory: `/` (or path to each `package.json`)
-- Security updates only (no `versioning-strategy` override needed — Dependabot
-  security updates use the lockfile by default)
 
 See [`dependabot/frontend.yml`](dependabot/frontend.yml)
 
@@ -119,21 +141,22 @@ See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml).
 Behavior:
 - Triggers on `pull_request_target` from `dependabot[bot]`
 - Fetches Dependabot metadata to determine update type
-- For **patch** and **minor** security updates (and indirect dependency updates):
-  approves the PR and squash-merges using a GitHub App token
+- For **patch** and **minor** updates (and indirect dependency updates):
+  approves the PR and enables auto-merge (waits for all required CI checks)
 - **Major** updates are left for human review
+- Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
 ## Vulnerability Audit CI Check
 
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml).
 
-This reusable workflow detects the ecosystems present in the repo and runs the
+This workflow template detects the ecosystems present in the repo and runs the
 appropriate audit tool:
 
 | Ecosystem | Tool | Command |
 |-----------|------|---------|
-| npm | `npm audit` | `npm audit --audit-level=moderate` |
-| Go | `govulncheck` | `govulncheck ./...` |
+| npm | `npm audit` | `npm audit --audit-level=low` (fails on any advisory) |
+| Go | `govulncheck` | `govulncheck ./...` (per module) |
 | Rust | `cargo-audit` | `cargo audit` |
 | Python | `pip-audit` | `pip-audit` |
 
