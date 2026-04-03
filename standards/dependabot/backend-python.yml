@@ -1,0 +1,23 @@
+# Dependabot configuration for Python backend repositories
+# Copy to .github/dependabot.yml and adjust directory paths as needed
+version: 2
+updates:
+  # pip — security updates only
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "security"
+      - "dependencies"
+
+  # GitHub Actions — version updates (keep actions current)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "security"
+      - "dependencies"
