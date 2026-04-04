@@ -109,7 +109,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "lts/*"
-          cache: "pnpm"
 
       - name: Audit pnpm dependencies
         run: |
@@ -162,7 +161,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit@0.21.1 --locked
+        run: cargo install cargo-audit@0.22.1 --locked
 
       - name: Audit Cargo dependencies
         run: |
