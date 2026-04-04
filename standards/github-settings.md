@@ -9,9 +9,11 @@ These settings are enforced via the GitHub UI, API, and repository rulesets.
 
 | Setting | Value | Notes |
 |---------|-------|-------|
-| **Default repository permission** | `read` | Members get read access; write access is per-repo |
-| **Organization profile** | `petry-projects` | Public org |
-| **Dependabot security updates** | Enabled | Org-wide default; repos inherit unless overridden |
+| **Default repository permission** | `write` | Members get write access by default |
+| **Organization profile** | `petry-projects` | Public org (free plan) |
+| **Default branch name** | `main` | Org-wide default for new repos |
+| **Members can create repos** | Yes (public + private) | |
+| **Two-factor requirement** | Disabled | Consider enabling for security |
 
 ---
 
@@ -27,8 +29,8 @@ SHOULD be audited and brought into compliance.
 | **Default branch** | `main` | All repos use `main` |
 | **Visibility** | `public` | Default for org repos; private repos require justification |
 | **Has Issues** | `true` | Issue tracking enabled on all repos |
-| **Has Projects** | `false` | GitHub Projects disabled by default (use org-level projects if needed) |
-| **Has Wiki** | `false` | Wiki disabled; documentation lives in the repo |
+| **Has Projects** | `true` | Currently enabled on all repos |
+| **Has Wiki** | `true` | Currently enabled on most repos (consider disabling — docs live in repo) |
 | **Has Discussions** | `false` | Disabled by default |
 
 ### Merge Settings
@@ -40,8 +42,8 @@ SHOULD be audited and brought into compliance.
 | **Allow rebase merging** | `true` | Enabled to avoid conflicts with admin overrides; `pr-quality` ruleset enforces squash-only |
 | **Allow auto-merge** | `true` | Required for Dependabot auto-merge workflow |
 | **Automatically delete head branches** | `true` | Clean up merged branches automatically |
-| **Default squash merge commit title** | PR title | Keeps commit history clean |
-| **Default squash merge commit message** | PR body | Preserves PR description in commit |
+| **Default squash merge commit title** | PR title (`COMMIT_OR_PR_TITLE`) | Keeps commit history clean |
+| **Default squash merge commit message** | Commit messages (`COMMIT_MESSAGES`) | Preserves individual commit messages |
 
 > **Note:** While merge commits and rebase merging are enabled at the repository
 > level, the `pr-quality` ruleset enforces **squash-only** merges. The repo-level
@@ -74,7 +76,7 @@ CI configuration. The table below lists the current required checks:
 
 | Repository | Required Checks | Stack |
 |------------|----------------|-------|
-| **broodly** | `Analyze` (CodeQL) | Rust |
+| **broodly** | `Analyze` (CodeQL) | TypeScript + Go fullstack |
 | **markets** | `SonarCloud`, `claude` | TypeScript/Go fullstack |
 | **google-app-scripts** | `build-and-test` | TypeScript (Apps Script) |
 | **TalkTerm** | `Analyze (Python)` (CodeQL) | Python |
@@ -122,25 +124,31 @@ top of `pr-quality` with code scanning gates and tighter review policies:
 
 ## GitHub Apps & Integrations
 
-### Required Integrations
+### Installed GitHub Apps (org-wide, all repos)
 
-| App / Integration | Purpose | Scope |
-|-------------------|---------|-------|
-| **CodeRabbit** | AI-powered code review on PRs | All repos |
-| **GitHub Copilot** | AI code review (native) | All repos |
-| **SonarCloud** | Code quality, security hotspots, coverage | Repos with SonarCloud checks |
-| **CodeQL** | Static analysis (SAST) | Repos with CodeQL workflows |
+| App | Purpose | Installed |
+|-----|---------|-----------|
+| **Claude** | AI code review and PR assistance via Claude Code Action | 2026-03-20 |
+| **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge (bypasses branch protection) | 2026-03-23 |
+| **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
+| **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
+
+### Other Integrations
+
+| Integration | Purpose | Scope |
+|-------------|---------|-------|
+| **GitHub Copilot** | AI code review (native GitHub feature) | All repos |
+| **CodeQL** | Static analysis (SAST) via GitHub Actions | Repos with CodeQL workflows |
 | **Dependabot** | Security updates for dependencies | All repos (see [Dependabot Policy](dependabot-policy.md)) |
 
-### GitHub App for Auto-Merge
+### GitHub App Secrets for Auto-Merge
 
-A GitHub App is used to provide the approving review required by branch
-protection for automated Dependabot merges. Each repository that uses the
-Dependabot auto-merge workflow must have these secrets configured:
+The `dependabot-automerge-petry` app provides the approving review required by
+branch protection for automated Dependabot merges. Each repository must have:
 
 | Secret | Purpose |
 |--------|---------|
-| `APP_ID` | GitHub App ID |
+| `APP_ID` | GitHub App ID (app_id: 3167543) |
 | `APP_PRIVATE_KEY` | GitHub App private key |
 
 ---
@@ -174,6 +182,21 @@ When creating a new repository in `petry-projects`:
 7. **Create standard labels** — `security`, `dependencies`, plus any project-specific labels
 8. **Enable auto-delete head branches** in repo settings
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
+
+---
+
+## Current Compliance Status
+
+Settings deviations from the standard documented above:
+
+| Repository | Deviations |
+|------------|-----------|
+| **bmad-bgreat-suite** | No branch protection, no rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false` |
+| **ContentTwin** | `has_wiki: false`, `allow_auto_merge: false` |
+| **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard) |
+| **broodly** | Compliant |
+| **markets** | Compliant |
+| **TalkTerm** | Compliant |
 
 ---
 
