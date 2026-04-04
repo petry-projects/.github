@@ -8,8 +8,10 @@ repository must implement.
 
 ## Required Workflows
 
-Every repository MUST have these workflows. Templates are provided in the
-[`standards/workflows/`](workflows/) directory.
+Every repository MUST have these workflows. Reusable templates for Dependabot
+workflows are in [`standards/workflows/`](workflows/). The CI, CodeQL,
+SonarCloud, and Claude Code workflows are documented as patterns below — copy
+and adapt the examples to each repo's tech stack.
 
 ### 1. CI Pipeline (`ci.yml`)
 
@@ -39,8 +41,7 @@ on:
 **Standard configuration patterns:**
 
 ```yaml
-permissions:
-  contents: read
+permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -88,6 +89,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   sonarcloud:
