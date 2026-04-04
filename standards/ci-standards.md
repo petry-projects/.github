@@ -307,7 +307,7 @@ entry in `dependabot.yml`.
 All workflows MUST follow the principle of least privilege:
 
 ```yaml
-# Top-level: reset to no permissions
+# Multi-job workflows: reset at top, set per-job
 permissions: {}
 
 jobs:
@@ -315,6 +315,9 @@ jobs:
     permissions:
       contents: read          # Only what this job needs
 ```
+
+For single-job workflows, top-level least-privilege permissions are acceptable
+(e.g., `permissions: contents: read`) since there is only one job to scope.
 
 **Common permission sets:**
 
