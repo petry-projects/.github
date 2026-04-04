@@ -15,14 +15,8 @@ security posture than chasing every minor/patch release.
 2. **Version updates weekly** for GitHub Actions, since pinned action versions do not
    affect application stability and staying current reduces CI attack surface.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
-4. **Auto-merge** after all CI checks pass, approving and merging eligible PRs.
-   Approvals come from members of the `@petry-projects/org-leads` team listed
-   in every repo's `CODEOWNERS` file (see
-   [codeowners-standard.md](codeowners-standard.md)), so they satisfy
-   `require_code_owner_review` without any bypass. Eligible updates:
-   - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
-   - **App ecosystems**: patch and minor security updates only (major requires human review)
-   - **Indirect (transitive) dependencies**: all updates regardless of version bump
+4. **Auto-merge** security patches and minor updates after all CI checks pass, using a
+   GitHub App token to satisfy branch protection (CODEOWNERS review bypass for bot PRs).
    Uses `gh pr merge --auto` to wait for required checks before merging.
 5. **Vulnerability audit CI check** runs on every PR and push to `main`, failing the
    build if any dependency has a known advisory. This is a required status check.
@@ -38,20 +32,13 @@ security posture than chasing every minor/patch release.
 
 ## Configuration Files
 
-Each repository must have the following baseline files:
+Each repository must have:
 
 | File | Purpose |
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
-| `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
-
-The `dependabot-rebase.yml` is required for all repos using the `code-quality`
-ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
-each merge to `main` leaves remaining Dependabot PRs behind and they stall
-indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
-not when a branch merely falls behind.
 
 The `dependabot-rebase.yml` is required for all repos using the `code-quality`
 ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
@@ -158,13 +145,11 @@ relevant ecosystem entries into a single `dependabot.yml`. See
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml).
 
 Behavior:
-
 - Triggers on `pull_request_target` from `dependabot[bot]`
-- Fetches Dependabot metadata to determine update type and ecosystem
-- For **GitHub Actions**: approves and auto-merges all version bumps including
-  major, since actions are SHA-pinned and CI catches breaking interface changes
-- For **app ecosystems**: approves **patch** and **minor** updates (and indirect
-  dependency updates); **major** updates are left for human review
+- Fetches Dependabot metadata to determine update type
+- For **patch** and **minor** updates (and indirect dependency updates):
+  approves the PR and enables auto-merge (waits for all required CI checks)
+- **Major** updates are left for human review
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
 ## Update and Merge Behind PRs Workflow
@@ -369,52 +354,9 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 1. Copy the appropriate `dependabot.yml` template to `.github/dependabot.yml`,
    adjusting `directory` paths as needed.
 2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
-3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` (required for
-   all repos using the `code-quality` ruleset with `require_branches_to_be_up_to_date: true`).
-   Copy verbatim from [`standards/workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml)
-   — do **not** modify the secrets block or permissions.
-
-   > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
-   > The correct solution for CODEOWNERS enforcement is to list the
-   > `@petry-projects/org-leads` team in every CODEOWNERS pattern — see the
-   > [CODEOWNERS Standard](codeowners-standard.md). The earlier approach of
-   > using `gh api .../merge` as a bypass was fragile and has been superseded.
-4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-5. **GitHub App permissions** — the `dependabot-automerge-petry` GitHub App requires
-   the `workflows` permission in addition to `contents: write` and `pull_requests: write`.
-   Without it, the rebase workflow cannot call `update-branch` when `main` contains
-   workflow file changes. Grant: GitHub App settings → Permissions → Repository →
-   Workflows → Read & Write, then accept the updated permission in each repo's
-   installed-app settings.
-
-6. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
-   **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
-   not per-repo. The caller stubs pass these explicitly via:
-
-   ```yaml
-   secrets:
-     APP_ID: ${{ secrets.APP_ID }}
-     APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-   ```
-
-   Per-repo `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
-   secrets are confirmed in place, delete any per-repo copies so there's a
-   single source of truth and rotations propagate everywhere.
-
-   **Verify before deleting per-repo copies.** Run
-
-   ```bash
-   gh secret list --org petry-projects | grep -E '^(APP_ID|APP_PRIVATE_KEY)\s'
-   ```
-
-   to confirm both org-level secrets exist with `visibility: all`. Only after
-   both secrets are confirmed should you run `gh secret delete APP_ID --repo <repo>`
-   to clean up per-repo copies — otherwise `gh pr review` calls fail with
-   `Secret APP_ID is required`.
-7. Create the `security` and `dependencies` labels in the repository if they
+3. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
+4. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
+   configured for auto-merge.
+5. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
-8. Add `dependency-audit / Detect ecosystems` as a required status check in
-   branch protection rules. Do **not** require the per-ecosystem audit jobs
-   (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
-   they're conditional on lockfile presence and report `SKIPPED` when absent,
-   and a required-but-skipped check fails the merge gate.
+6. Add `dependency-audit` as a required status check in branch protection rules.
