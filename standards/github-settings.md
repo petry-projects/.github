@@ -36,8 +36,8 @@ SHOULD be audited and brought into compliance.
 | Setting | Standard Value | Rationale |
 |---------|---------------|-----------|
 | **Allow squash merging** | `true` | **Primary merge method** — enforced by `pr-quality` ruleset |
-| **Allow merge commits** | `true` | Enabled but not used in practice; ruleset restricts to squash |
-| **Allow rebase merging** | `true` | Enabled but not used in practice; ruleset restricts to squash |
+| **Allow merge commits** | `true` | Enabled to avoid conflicts with admin overrides; `pr-quality` ruleset enforces squash-only |
+| **Allow rebase merging** | `true` | Enabled to avoid conflicts with admin overrides; `pr-quality` ruleset enforces squash-only |
 | **Allow auto-merge** | `true` | Required for Dependabot auto-merge workflow |
 | **Automatically delete head branches** | `true` | Clean up merged branches automatically |
 | **Default squash merge commit title** | PR title | Keeps commit history clean |
@@ -105,13 +105,18 @@ discipline beyond what classic branch protection provides.
 
 ### `protect-branches` (google-app-scripts)
 
-The `google-app-scripts` repository has an additional ruleset with stricter
-enforcement:
+The `google-app-scripts` repository has an additional ruleset that layers on
+top of `pr-quality` with code scanning gates and tighter review policies:
 
 | Setting | Value |
 |---------|-------|
-| **Code scanning enforcement** | CodeQL required |
-| **Stricter review settings** | Additional review requirements |
+| **Required approving reviews** | 0 (relies on `pr-quality` for approval requirement) |
+| **Dismiss stale reviews on push** | Yes |
+| **Required review thread resolution** | Yes |
+| **Allowed merge methods** | Squash only |
+| **Code scanning — CodeQL** | Errors threshold: `errors`; Security alerts: `high_or_higher` |
+| **Required status checks** | `Analyze (CodeQL) (javascript)`, `CodeQL`, `coverage` |
+| **Branch restrictions** | No direct push, no deletion, no non-fast-forward, no branch creation |
 
 ---
 
