@@ -101,12 +101,12 @@ jobs:
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: SonarCloud Scan
         if: ${{ env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@v7
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
 ```
 
 **Required secrets:** `SONAR_TOKEN`
@@ -155,7 +155,7 @@ jobs:
     steps:
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@bee87b3258c251f9279e5371b0cc3660f37f3f77 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -224,7 +224,7 @@ steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-go@v5
     with:
-      go-version: '1.24'
+      go-version: 'stable'   # Or pin to specific version (e.g., '1.24') matching go.mod
       cache-dependency-path: apps/api/go.sum
   - run: go vet ./...
   - uses: golangci/golangci-lint-action@v6
@@ -293,9 +293,12 @@ version for human readability.
 Dependabot keeps pinned SHAs up to date via the `github-actions` ecosystem
 entry in `dependabot.yml`.
 
-> **Note:** The templates in this document use tag references (e.g., `@v4`)
-> for readability. When copying to a repository, always replace tags with
-> the current SHA and add a version comment.
+> **Note on examples in this document:** The "Workflow Patterns by Tech Stack"
+> section uses tag references (e.g., `@v4`) for readability since those are
+> illustrative patterns, not copy-paste templates. The "Required Workflows"
+> section above uses SHA-pinned references where possible. When copying any
+> example to a repository, always look up the current SHA for each action and
+> pin to it with a version comment.
 
 ---
 
@@ -384,7 +387,7 @@ autofix:
   permissions:
     contents: write
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         ref: ${{ github.event.pull_request.head.ref }}
     - run: npm run format && npm run lint -- --fix
