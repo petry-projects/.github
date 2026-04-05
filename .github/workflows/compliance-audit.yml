@@ -1,3 +1,6 @@
+# Weekly org-wide compliance audit against standards.
+# Checks all repos for required workflows, settings, labels, rulesets, and agent config.
+# Standard: https://github.com/petry-projects/.github/tree/main/standards
 name: Weekly Compliance Audit
 
 on:
