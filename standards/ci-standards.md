@@ -61,18 +61,14 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '25 14 * * 3'   # Weekly scan (Wednesday)
+    - cron: '0 17 * * 5'    # Weekly scan (Friday 12:00 PM EST / 17:00 UTC)
 ```
 
-**Language matrix by repo:**
-
-| Repository | CodeQL Language(s) |
-|------------|-------------------|
-| **broodly** | `actions` |
-| **google-app-scripts** | `javascript-typescript` |
-| **TalkTerm** | `python` (pending: `javascript-typescript`) |
-| **markets** | `javascript-typescript` |
-| **ContentTwin** | `javascript-typescript` (pending) |
+**Language configuration rule:** All ecosystems present in the repository MUST
+be configured as CodeQL languages. If a repo contains `package.json`, add
+`javascript-typescript`. If it contains `go.mod`, add `go`. If it contains
+`.github/workflows/*.yml`, add `actions`. Multi-language repos configure
+multiple languages via a matrix strategy.
 
 ### 3. SonarCloud Analysis (`sonarcloud.yml`)
 
@@ -331,17 +327,21 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 
 ---
 
-## Secrets Required by Repository
+## Organization-Level Secrets for Standard CI
 
-| Secret | Purpose | Repos |
-|--------|---------|-------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication | All repos with `claude.yml` |
-| `SONAR_TOKEN` | SonarCloud analysis | broodly, markets, ContentTwin, google-app-scripts |
-| `APP_ID` | GitHub App for Dependabot auto-merge | All repos with `dependabot-automerge.yml` |
-| `APP_PRIVATE_KEY` | GitHub App private key | All repos with `dependabot-automerge.yml` |
-| `GCP_PROJECT_ID` | GCP project for container registry | broodly |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | GCP Workload Identity Federation | broodly |
-| `GCP_SERVICE_ACCOUNT` | GCP service account email | broodly |
+All secrets required by the standard CI workflows are configured at the
+**organization level** and inherited by all repos automatically:
+
+| Secret | Purpose |
+|--------|---------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
+| `SONAR_TOKEN` | SonarCloud analysis authentication |
+| `APP_ID` | GitHub App ID for Dependabot auto-merge |
+| `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
+
+New repositories inherit these secrets with no additional configuration.
+Repos with infrastructure beyond standard CI (e.g., GCP deployment) may
+require additional repo-specific secrets.
 
 ---
 
