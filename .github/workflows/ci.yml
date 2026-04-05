@@ -1,0 +1,93 @@
+# CI pipeline for the .github standards repository.
+# Lints markdown, YAML, GitHub Actions, shell scripts, and runs AgentShield.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@5b7c9f74fec47e6b15667b2cc23c63dff11e449e # v9.0.0
+        with:
+          globs: '**/*.md'
+
+      - name: Lint YAML
+        run: |
+          pip install --quiet yamllint
+          yamllint -c <(cat <<'YAMLLINTRC'
+          extends: default
+          rules:
+            line-length:
+              max: 200
+            truthy:
+              check-keys: false
+            document-start: disable
+            comments:
+              min-spaces-from-content: 1
+          YAMLLINTRC
+          ) .github/workflows/ standards/workflows/ standards/dependabot/
+
+      - name: Lint GitHub Actions
+        run: |
+          # Install actionlint via verified download (pinned version + checksum)
+          ACTIONLINT_VERSION="1.7.7"
+          ACTIONLINT_SHA="023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+          curl -sLo actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA}  actionlint.tar.gz" | sha256sum -c -
+          tar xzf actionlint.tar.gz actionlint
+          chmod +x actionlint
+          rm actionlint.tar.gz
+          # Lint our own workflow files (fail on errors, ignore shellcheck style hints)
+          ./actionlint -ignore 'SC2129' .github/workflows/*.yml
+          # Template workflows use placeholder expressions — informational only
+          ./actionlint -ignore 'context' standards/workflows/*.yml || true
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run ShellCheck
+        run: |
+          if compgen -G "scripts/*.sh" > /dev/null; then
+            shellcheck --severity=warning scripts/*.sh
+          else
+            echo "No shell scripts found — skipping"
+          fi
+
+  agent-security:
+    name: Agent Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '20'
+
+      - name: Run AgentShield
+        run: |
+          npx ecc-agentshield scan --path . --format json --min-severity high
