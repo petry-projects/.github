@@ -12,7 +12,11 @@ on:
 permissions: {}
 
 concurrency:
+<<<<<<< HEAD
   group: ci-${{ github.ref }}-${{ github.sha }}
+=======
+  group: ci-${{ github.ref }}
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
   cancel-in-progress: true
 
 jobs:
@@ -22,6 +26,7 @@ jobs:
     permissions:
       contents: read
     steps:
+<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Lint Markdown
@@ -35,6 +40,16 @@ jobs:
       # the `Lint` status check (referenced by branch protection) is unchanged.
       - name: Lint YAML
         if: always()
+=======
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@5b7c9f74fec47e6b15667b2cc23c63dff11e449e # v9.0.0
+        with:
+          globs: '**/*.md'
+
+      - name: Lint YAML
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
         run: |
           pip install --quiet yamllint
           yamllint -c <(cat <<'YAMLLINTRC'
@@ -51,7 +66,10 @@ jobs:
           ) .github/workflows/ standards/workflows/ standards/dependabot/
 
       - name: Lint GitHub Actions
+<<<<<<< HEAD
         if: always()
+=======
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
         run: |
           # Install actionlint via verified download (pinned version + checksum)
           ACTIONLINT_VERSION="1.7.7"
@@ -72,6 +90,7 @@ jobs:
     permissions:
       contents: read
     steps:
+<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run ShellCheck
@@ -82,6 +101,14 @@ jobs:
           shell_files=(scripts/**/*.sh)
           if [ ${#shell_files[@]} -gt 0 ]; then
             shellcheck --severity=warning -x "${shell_files[@]}"
+=======
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run ShellCheck
+        run: |
+          if compgen -G "scripts/*.sh" > /dev/null; then
+            shellcheck --severity=warning scripts/*.sh
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
           else
             echo "No shell scripts found — skipping"
           fi
@@ -92,15 +119,22 @@ jobs:
     permissions:
       contents: read
     steps:
+<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+=======
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
         with:
           node-version: '20'
 
       - name: Run AgentShield
         run: |
           npx ecc-agentshield scan --path . --format json --min-severity high
+<<<<<<< HEAD
 
   secret-scan:
     name: Secret scan (gitleaks)
@@ -124,3 +158,5 @@ jobs:
 
       - name: Run gitleaks
         run: gitleaks detect --source . --redact --verbose --exit-code 1
+=======
+>>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
