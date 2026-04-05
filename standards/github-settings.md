@@ -152,8 +152,7 @@ all repos automatically — no per-repo setup needed:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 
-Repos with additional infrastructure (e.g., GCP deployment) may require
-repo-specific secrets beyond this standard set.
+Repos's may require repo-specific secrets beyond this standard set.
 
 ---
 
