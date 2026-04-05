@@ -13,6 +13,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: compliance-audit
+  cancel-in-progress: false   # Let running audits finish to avoid partial issue state
+
 jobs:
   # -----------------------------------------------------------------------
   # Job 1: Deterministic compliance checks
@@ -23,6 +27,7 @@ jobs:
   audit:
     name: Compliance Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write

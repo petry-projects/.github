@@ -79,6 +79,8 @@ gh_api() {
     fi
     if [ "$i" -lt "$retries" ]; then
       sleep $((i * 2))
+    else
+      info "gh api $1 failed after $retries retries" >&2
     fi
   done
   return 1
@@ -99,8 +101,12 @@ detect_ecosystems() {
     ECOSYSTEMS+=("npm")
   fi
   if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
-    # Override npm with pnpm if lock file present
-    ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
+    # Override npm with pnpm if lock file present, or add pnpm directly
+    if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
+      ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
+    else
+      ECOSYSTEMS+=("pnpm")
+    fi
   fi
   if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
     ECOSYSTEMS+=("go")
@@ -430,33 +436,29 @@ This finding is still open.
     return
   fi
 
-  # Create new issue
-  local body
-  body=$(cat <<HEREDOC
-## Compliance Finding
+  # Build issue body — variable values are safe (from our own check logic + GitHub API)
+  local body="## Compliance Finding
 
-**Category:** \`$category\`
-**Severity:** \`$severity\`
-**Check:** \`$check\`
+**Category:** \`${category}\`
+**Severity:** \`${severity}\`
+**Check:** \`${check}\`
 
 ## Detail
 
-$detail
+${detail}
 
 ## Standard Reference
 
-[$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)
+[${standard_ref}](https://github.com/${ORG}/.github/blob/main/${standard_ref})
 
 ## Remediation
 
 Please review the linked standard and bring this repository into compliance.
 
-See the [full standards documentation](https://github.com/$ORG/.github/tree/main/standards) for implementation guidance.
+See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance.
 
 ---
-*This issue was automatically created by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml).*
-HEREDOC
-  )
+*This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
   issue_url=$(gh issue create --repo "$ORG/$repo" \
@@ -491,9 +493,12 @@ close_resolved_issues() {
 
   [ -z "$open_issues" ] && return
 
-  # Get current findings for this repo
+  # Get current findings for this repo (bail if jq fails to avoid false closures)
   local current_checks
-  current_checks=$(jq -r --arg repo "$repo" '.[] | select(.repo == $repo) | .check' "$FINDINGS_FILE")
+  if ! current_checks=$(jq -r --arg repo "$repo" '.[] | select(.repo == $repo) | .check' "$FINDINGS_FILE" 2>/dev/null); then
+    warn "Failed to read findings for $repo — skipping issue closure to avoid false positives"
+    return
+  fi
 
   while IFS=$'\t' read -r issue_num issue_title; do
     # Extract the check name from the title "Compliance: <check>"
@@ -600,7 +605,13 @@ main() {
 
   # Get all non-archived repos in the org
   local repos
-  repos=$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 100)
+  repos=$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)
+
+  if [ -z "$repos" ]; then
+    warn "No repositories found in $ORG — check GH_TOKEN permissions"
+    echo "[]" > "$FINDINGS_FILE"
+    return 1
+  fi
 
   local repo_count=0
 
@@ -614,7 +625,11 @@ main() {
     log "Auditing $ORG/$repo"
 
     detect_ecosystems "$repo"
-    info "Detected ecosystems: ${ECOSYSTEMS[*]:-none}"
+    if [ ${#ECOSYSTEMS[@]} -eq 0 ]; then
+      info "Detected ecosystems: none"
+    else
+      info "Detected ecosystems: ${ECOSYSTEMS[*]}"
+    fi
 
     check_required_workflows "$repo"
     check_action_pinning "$repo"
@@ -643,8 +658,9 @@ main() {
 
       ensure_audit_label "$repo"
 
-      # Create issues for new findings
-      jq -c --arg repo "$repo" '.[] | select(.repo == $repo)' "$FINDINGS_FILE" | while read -r finding; do
+      # Create issues for new findings (process substitution avoids subshell)
+      while IFS= read -r finding; do
+        [ -z "$finding" ] && continue
         local f_check f_severity f_detail f_standard_ref f_category
         f_category=$(echo "$finding" | jq -r '.category')
         f_check=$(echo "$finding" | jq -r '.check')
@@ -653,7 +669,7 @@ main() {
         f_standard_ref=$(echo "$finding" | jq -r '.standard_ref')
 
         create_issue_for_finding "$repo" "$f_category" "$f_check" "$f_severity" "$f_detail" "$f_standard_ref"
-      done
+      done < <(jq -c --arg repo "$repo" '.[] | select(.repo == $repo)' "$FINDINGS_FILE")
 
       # Close issues for resolved findings
       close_resolved_issues "$repo"
