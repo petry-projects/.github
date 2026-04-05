@@ -413,7 +413,7 @@ check_claude_md() {
   if [ -z "$content" ]; then
     add_finding "$repo" "standards" "missing-claude-md" "error" \
       "Missing \`CLAUDE.md\` — every repo must have a CLAUDE.md that references AGENTS.md" \
-      "standards/github-settings.md"
+      "AGENTS.md"
     return
   fi
 
@@ -421,9 +421,9 @@ check_claude_md() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
   if ! echo "$decoded" | grep -qi 'AGENTS\.md'; then
-    add_finding "$repo" "standards" "claude-md-missing-agents-ref" "warning" \
+    add_finding "$repo" "standards" "claude-md-missing-agents-ref" "error" \
       "\`CLAUDE.md\` does not reference \`AGENTS.md\`" \
-      "standards/github-settings.md"
+      "AGENTS.md"
   fi
 }
 
@@ -439,7 +439,7 @@ check_agents_md() {
   if [ -z "$content" ]; then
     add_finding "$repo" "standards" "missing-agents-md" "error" \
       "Missing \`AGENTS.md\` — every repo must have an AGENTS.md that references the org-level standards" \
-      "standards/github-settings.md"
+      "AGENTS.md"
     return
   fi
 
@@ -448,10 +448,10 @@ check_agents_md() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
-    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github)'; then
-      add_finding "$repo" "standards" "agents-md-missing-org-ref" "warning" \
+    if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
+      add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
-        "standards/github-settings.md"
+        "AGENTS.md"
     fi
   fi
 }
