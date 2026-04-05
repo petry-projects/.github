@@ -139,6 +139,7 @@ relevant ecosystem entries into a single `dependabot.yml`. See
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml).
 
 Behavior:
+
 - Triggers on `pull_request_target` from `dependabot[bot]`
 - Fetches Dependabot metadata to determine update type
 - For **patch** and **minor** updates (and indirect dependency updates):
