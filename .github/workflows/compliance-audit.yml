@@ -157,6 +157,6 @@ jobs:
             Include: executive summary, top priority items, workflow run link,
             any new standards improvement issues you created. Label: `compliance-audit`.
 
-            Close any previous "Weekly Compliance Audit Summary" issues first.
+            Do NOT close any previous summary issues — leave that to humans.
           allowed_tools: "Bash,Read,Glob,Grep"
           timeout_minutes: 20
