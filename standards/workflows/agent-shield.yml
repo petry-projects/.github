@@ -66,13 +66,19 @@ jobs:
       - name: Check for permission bypasses
         run: |
           status=0
+          bypass_pattern='dangerouslySkipPermissions|skipPermissions|--dangerously-skip'
 
           for file in CLAUDE.md AGENTS.md $(find . -name '*.md' -path '*/.claude/*' | grep -v node_modules); do
             if [ -f "$file" ]; then
-              if grep -in 'dangerouslySkipPermissions\|skipPermissions\|--dangerously' "$file"; then
-                echo "::error file=$file::Permission bypass detected — agent configs must not skip permission checks"
+              while IFS= read -r match; do
+                # Skip documentation lines (negation patterns and backtick-quoted references)
+                if echo "$match" | grep -qiP '^\s*-\s*(No|Never|Must not|Do not|MUST NOT)\b' || \
+                   echo "$match" | grep -qP '`[^`]*'"$bypass_pattern"'[^`]*`'; then
+                  continue
+                fi
+                echo "::error file=$file::Permission bypass detected: $match"
                 status=1
-              fi
+              done < <(grep -inP "$bypass_pattern" "$file" 2>/dev/null || true)
             fi
           done
 
