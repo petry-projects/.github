@@ -29,27 +29,46 @@ Every repository MUST have:
 
 ## Agent Configuration Security
 
-Repositories with agent configurations MUST pass the AgentShield CI check,
-which validates:
+The workflow uses a **two-layer** approach:
 
-### Security Rules
+### Layer 1: AgentShield Action (deep security scan)
 
-| Rule | Severity | Status | Description |
-|------|----------|--------|-------------|
-| `no-secrets` | error | Enforced | No API keys, tokens, passwords, or connection strings in agent config files |
-| `no-skip-permissions` | error | Enforced | No `dangerouslySkipPermissions` or equivalent permission bypasses |
-| `org-reference` | error | Enforced | AGENTS.md must reference org-level `.github/AGENTS.md` |
-| `claude-reference` | error | Enforced | CLAUDE.md must reference AGENTS.md |
-| `no-unrestricted-tools` | warning | Planned | Tool authorizations should be scoped, not wildcard |
-| `no-prompt-injection-vectors` | warning | Planned | Config files should not include user-controllable template variables in security-sensitive positions |
+The [`affaan-m/agentshield`](https://github.com/affaan-m/agentshield) GitHub
+Action performs a comprehensive security scan with **102 rules** across 5
+categories:
 
-### Structural Rules
+| Category | Rules | Coverage |
+|----------|------:|----------|
+| Secrets Detection | 10 rules, 14 patterns | API keys, tokens, credentials, env leaks |
+| Permission Audit | 10 rules | Wildcard access, missing deny lists, dangerous flags |
+| Hook Analysis | 34 rules | Command injection, data exfiltration, silent errors |
+| MCP Server Security | 23 rules | High-risk servers, supply chain, hardcoded secrets |
+| Agent Config Review | 25 rules | Prompt injection, auto-run, hidden instructions |
 
-| Rule | Severity | Status | Description |
-|------|----------|--------|-------------|
-| `valid-yaml-frontmatter` | error | Enforced | All SKILL.md files must have valid YAML frontmatter with `name` and `description` |
-| `no-orphan-skills` | warning | Enforced | Every skill directory must be registered in module-help.csv (if applicable) |
-| `manifest-consistency` | warning | Planned | Skill manifests must match directory structure |
+The action produces a graded security report (A–F, 0–100 score) and fails
+the build if findings at or above `high` severity are detected.
+
+**Action reference:**
+
+```yaml
+- uses: affaan-m/agentshield@9bbc007cf5afb562c324bbad4ce6c544420f49f6 # v1.4.0
+  with:
+    path: "."
+    min-severity: "high"
+    fail-on-findings: "true"
+```
+
+### Layer 2: Org-specific structural checks
+
+Custom checks that enforce petry-projects conventions not covered by the
+generic AgentShield scanner:
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `required-files` | error | CLAUDE.md and AGENTS.md must exist |
+| `claude-reference` | error | CLAUDE.md must reference AGENTS.md |
+| `org-reference` | error | AGENTS.md must reference `petry-projects/.github/AGENTS.md` |
+| `valid-frontmatter` | error | All SKILL.md files must have YAML frontmatter with `name` and `description` |
 
 ## AgentShield CI Workflow
 
@@ -59,8 +78,8 @@ standard template.
 
 **Standard triggers:** push to main, pull requests to main.
 
-The workflow validates all agent configuration files and fails the build
-if any error-severity rule is violated.
+The workflow runs both the AgentShield action and the org structural checks.
+Either layer failing causes the build to fail.
 
 ## Agent Ecosystem in Dependabot
 
@@ -71,4 +90,4 @@ on agent configuration files.
 
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
-The AgentShield check adds the agent-specific security layer on top.
+The AgentShield action adds the agent-specific security layer on top.
