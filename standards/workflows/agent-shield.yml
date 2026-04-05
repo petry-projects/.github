@@ -1,0 +1,115 @@
+name: AgentShield
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  agent-shield:
+    name: AgentShield
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check required agent files exist
+        run: |
+          status=0
+
+          if [ ! -f "CLAUDE.md" ]; then
+            echo "::error::Missing CLAUDE.md — required for all repositories"
+            status=1
+          fi
+
+          if [ ! -f "AGENTS.md" ]; then
+            echo "::error::Missing AGENTS.md — required for all repositories"
+            status=1
+          fi
+
+          exit $status
+
+      - name: Validate CLAUDE.md references AGENTS.md
+        if: hashFiles('CLAUDE.md') != ''
+        run: |
+          if ! grep -qi 'AGENTS.md' CLAUDE.md; then
+            echo "::error file=CLAUDE.md::CLAUDE.md must reference AGENTS.md"
+            exit 1
+          fi
+
+      - name: Validate AGENTS.md references org standards
+        if: hashFiles('AGENTS.md') != ''
+        run: |
+          if ! grep -qi 'petry-projects/\.github' AGENTS.md && ! grep -qi 'org.level\|org-level\|organization' AGENTS.md; then
+            echo "::warning file=AGENTS.md::AGENTS.md should reference org-level standards (petry-projects/.github/AGENTS.md)"
+          fi
+
+      - name: Scan for secrets in agent config files
+        run: |
+          status=0
+          patterns='(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|password\s*[:=]\s*["\x27][^"\x27]+["\x27]|api[_-]?key\s*[:=]\s*["\x27][^"\x27]+["\x27])'
+
+          for file in CLAUDE.md AGENTS.md $(find . -name 'SKILL.md' -o -name '.claude*' -o -name 'config.yaml' | grep -v node_modules | grep -v .git); do
+            if [ -f "$file" ]; then
+              if grep -Pn "$patterns" "$file" 2>/dev/null; then
+                echo "::error file=$file::Potential secret or credential detected in agent config"
+                status=1
+              fi
+            fi
+          done
+
+          exit $status
+
+      - name: Check for permission bypasses
+        run: |
+          status=0
+
+          for file in CLAUDE.md AGENTS.md $(find . -name '*.md' -path '*/.claude/*' | grep -v node_modules); do
+            if [ -f "$file" ]; then
+              if grep -in 'dangerouslySkipPermissions\|skipPermissions\|--dangerously' "$file"; then
+                echo "::error file=$file::Permission bypass detected — agent configs must not skip permission checks"
+                status=1
+              fi
+            fi
+          done
+
+          exit $status
+
+      - name: Validate SKILL.md frontmatter
+        run: |
+          status=0
+
+          while IFS= read -r file; do
+            # Check file starts with ---
+            if ! head -1 "$file" | grep -q '^---$'; then
+              echo "::error file=$file::SKILL.md must start with YAML frontmatter (---)"
+              status=1
+              continue
+            fi
+
+            # Extract frontmatter and validate
+            frontmatter=$(sed -n '1,/^---$/p' "$file" | tail -n +2 | head -n -1)
+            if [ -z "$frontmatter" ]; then
+              echo "::error file=$file::SKILL.md has empty frontmatter"
+              status=1
+              continue
+            fi
+
+            # Check required fields
+            if ! echo "$frontmatter" | grep -q '^name:'; then
+              echo "::error file=$file::SKILL.md frontmatter missing required 'name' field"
+              status=1
+            fi
+            if ! echo "$frontmatter" | grep -q '^description:'; then
+              echo "::error file=$file::SKILL.md frontmatter missing required 'description' field"
+              status=1
+            fi
+          done < <(find . -name 'SKILL.md' -not -path '*/node_modules/*' -not -path '*/.git/*')
+
+          if [ "$status" -eq 0 ]; then
+            echo "All SKILL.md frontmatter validated."
+          fi
+          exit $status

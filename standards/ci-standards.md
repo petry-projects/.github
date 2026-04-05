@@ -8,10 +8,10 @@ repository must implement.
 
 ## Required Workflows
 
-Every repository MUST have these workflows. Reusable templates for Dependabot
-workflows are in [`standards/workflows/`](workflows/). The CI, CodeQL,
-SonarCloud, and Claude Code workflows are documented as patterns below — copy
-and adapt the examples to each repo's tech stack.
+Every repository MUST have these 7 workflows. Reusable templates for Dependabot
+and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
+CodeQL, SonarCloud, and Claude Code workflows are documented as patterns
+below — copy and adapt the examples to each repo's tech stack.
 
 ### 1. CI Pipeline (`ci.yml`)
 
@@ -204,6 +204,14 @@ and the [Dependabot Policy](dependabot-policy.md) for full details.
 Vulnerability scanning for all package ecosystems.
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
 and the [Dependabot Policy](dependabot-policy.md).
+
+### 7. AgentShield (`agent-shield.yml`)
+
+Agent configuration security validation. Checks that CLAUDE.md and
+AGENTS.md exist and follow standards, scans for secrets in agent config
+files, validates SKILL.md frontmatter, and detects permission bypasses.
+See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
+[Agent Configuration Standards](agent-standards.md) for full details.
 
 ---
 
@@ -454,9 +462,10 @@ autofix:
 6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
-9. **Configure secrets** in the repository settings
-10. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
-11. **Pin all action references** to commit SHAs
+9. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
+10. **Configure secrets** in the repository settings
+11. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
+12. **Pin all action references** to commit SHAs
 
 ---
 
