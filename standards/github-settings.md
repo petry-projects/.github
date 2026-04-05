@@ -76,29 +76,48 @@ rules are deprecated — migrate existing classic rules to rulesets.
 > Without one, the "Require code owner review" setting has no effect. Add
 > CODEOWNERS incrementally as team structure and domain ownership solidifies.
 
-### `code-quality` — Conditional Checks Ruleset
+### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Required status checks are configured per-repo based on which tools are
-present. Add checks to this ruleset when the corresponding configuration exists
-in the repository:
+Every repository MUST have all five quality checks configured and required.
+The specific check names and ecosystem configurations vary by repo, but the
+categories are universal.
 
-| Condition | Required Check(s) |
-|-----------|--------------------|
-| Repo has a `sonarcloud.yml` workflow or `sonar-project.properties` | `SonarCloud` |
-| Repo has a `codeql.yml` workflow | `Analyze` (or `Analyze (<language>)` for multi-language) |
-| Repo has a `claude.yml` workflow | `claude` |
-| Repo has a `ci.yml` workflow | CI job name (e.g., `build-and-test`, `TypeScript`, `Go`) |
-| Repo has a `coverage.yml` or coverage step | `coverage` |
+#### Required Check Categories
 
-Additional settings:
+| Check | Required | Check Name(s) | Notes |
+|-------|----------|---------------|-------|
+| **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
+| **CodeQL** | All repos | `Analyze` or `Analyze (<language>)` | SAST — language(s) match the repo's ecosystems |
+| **Claude Code** | All repos | `claude` | AI code review on every PR |
+| **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
+| **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
+
+#### Ecosystem-Specific Configuration
+
+The ecosystems scanned by each check depend on which languages/tools the repo
+contains. If a repo contains an ecosystem, that ecosystem MUST be configured
+in the relevant checks:
+
+| Ecosystem Detected | CodeQL Language | SonarCloud | CI Pipeline | Dependency Audit |
+|--------------------|----------------|------------|-------------|------------------|
+| `package.json` / `package-lock.json` | `javascript-typescript` | JS/TS analysis | npm/pnpm lint, typecheck, test | `npm audit` or `pnpm audit` |
+| `go.mod` | `go` | Go analysis | `go vet`, `golangci-lint`, `go test` | `govulncheck` |
+| `Cargo.toml` | `rust` (if supported) | Rust analysis | `cargo fmt`, `cargo check`, `cargo test` | `cargo audit` |
+| `pyproject.toml` / `requirements.txt` | `python` | Python analysis | pytest, coverage | `pip-audit` |
+| `.github/workflows/*.yml` | `actions` | — | — | — |
+| `*.tf` (Terraform) | — | — | `terraform validate` | Dependabot security updates |
+
+Multi-language repos (e.g., TypeScript + Go) MUST configure all applicable
+ecosystems in each check.
+
+#### Additional Settings
 
 | Setting | Value |
 |---------|-------|
 | **Require branches to be up to date** | Yes (`strict: true`) |
 | **Enforce for admins** | Yes |
 
-When adding a new repository, determine which CI tools apply to its stack
-(see [CI Standards](ci-standards.md)) and add the corresponding checks.
+See [CI Standards](ci-standards.md) for workflow templates and patterns.
 
 ---
 
