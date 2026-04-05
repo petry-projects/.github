@@ -1,0 +1,162 @@
+name: Weekly Compliance Audit
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'   # Every Monday at 8:00 UTC (before org-scorecard at 9:00)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — audit only, skip issue creation'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: compliance-audit
+  cancel-in-progress: false   # Let running audits finish to avoid partial issue state
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Job 1: Deterministic compliance checks
+  # Runs the shell script that audits all repos against org standards.
+  # Produces a JSON findings file and markdown summary.
+  # Creates/updates/closes GitHub Issues for each finding.
+  # -----------------------------------------------------------------------
+  audit:
+    name: Compliance Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.ORG_SCORECARD_TOKEN }}
+    outputs:
+      findings_count: ${{ steps.audit.outputs.findings_count }}
+      error_count: ${{ steps.audit.outputs.error_count }}
+      warning_count: ${{ steps.audit.outputs.warning_count }}
+      repos_with_findings: ${{ steps.audit.outputs.repos_with_findings }}
+    steps:
+      - name: Checkout .github repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run compliance audit
+        id: audit
+        env:
+          REPORT_DIR: ${{ runner.temp }}/compliance-report
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          CREATE_ISSUES: 'true'
+        run: |
+          mkdir -p "$REPORT_DIR"
+          bash scripts/compliance-audit.sh
+
+          # Parse outputs for downstream jobs
+          FINDINGS_COUNT=$(jq length "$REPORT_DIR/findings.json")
+          ERROR_COUNT=$(jq '[.[] | select(.severity == "error")] | length' "$REPORT_DIR/findings.json")
+          WARNING_COUNT=$(jq '[.[] | select(.severity == "warning")] | length' "$REPORT_DIR/findings.json")
+          REPOS_WITH_FINDINGS=$(jq '[.[].repo] | unique | length' "$REPORT_DIR/findings.json")
+
+          echo "findings_count=$FINDINGS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "error_count=$ERROR_COUNT" >> "$GITHUB_OUTPUT"
+          echo "warning_count=$WARNING_COUNT" >> "$GITHUB_OUTPUT"
+          echo "repos_with_findings=$REPOS_WITH_FINDINGS" >> "$GITHUB_OUTPUT"
+
+      - name: Write step summary
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/compliance-report/summary.md" ]; then
+            cat "${{ runner.temp }}/compliance-report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Audit script did not produce a summary." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compliance-report
+          path: ${{ runner.temp }}/compliance-report/
+          retention-days: 90
+
+  # -----------------------------------------------------------------------
+  # Job 2: AI-powered standards analysis
+  # Uses Claude Code Action to review the audit findings, research potential
+  # improvements to the org standards themselves, and post a summary
+  # notification for org owners.
+  # -----------------------------------------------------------------------
+  standards-review:
+    name: Standards Review (Claude)
+    needs: audit
+    if: always() && needs.audit.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout .github repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download audit report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: compliance-report
+          path: ${{ runner.temp }}/compliance-report
+
+      - name: Run Claude Code for standards review
+        env:
+          GH_TOKEN: ${{ secrets.ORG_SCORECARD_TOKEN }}
+        uses: anthropics/claude-code-action@bee87b3258c251f9279e5371b0cc3660f37f3f77 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: |
+            You are performing a weekly standards review for the petry-projects GitHub organization.
+            The compliance audit has already run and produced findings.
+
+            ## Audit Data
+
+            - Total findings: ${{ needs.audit.outputs.findings_count }}
+            - Errors: ${{ needs.audit.outputs.error_count }}
+            - Warnings: ${{ needs.audit.outputs.warning_count }}
+            - Repos with findings: ${{ needs.audit.outputs.repos_with_findings }}
+            - Findings JSON: ${{ runner.temp }}/compliance-report/findings.json
+            - Summary report: ${{ runner.temp }}/compliance-report/summary.md
+            - Workflow run: https://github.com/petry-projects/.github/actions/runs/${{ github.run_id }}
+
+            ## Task 1: Research Standards Improvements
+
+            Read the current org standards in the `standards/` directory:
+            - `standards/ci-standards.md`
+            - `standards/dependabot-policy.md`
+            - `standards/github-settings.md`
+            - `AGENTS.md`
+
+            Also read the findings JSON and summary report at the paths above.
+
+            Research and identify gaps or improvements to the standards. Consider:
+            - Missing standards modern GitHub orgs should have (secret scanning, push protection, Dependabot auto-triage)
+            - Newer versions of tools/actions referenced in standards
+            - Inconsistencies between standards documents
+            - Industry best practices not yet covered
+
+            For each improvement, create a GitHub Issue in `petry-projects/.github` with:
+            - Title: "Standards: <concise description>"
+            - Label: `enhancement`
+            - Body: current state, proposed improvement, rationale, implementation steps
+
+            Before creating, search for existing open issues to avoid duplicates.
+            Only create genuinely valuable improvements. Max 3 new issues per run.
+
+            ## Task 2: Post Summary Notification
+
+            Create a notification issue in `petry-projects/.github` titled:
+            "Weekly Compliance Audit Summary — YYYY-MM-DD" (use today's date).
+
+            Include: executive summary, top priority items, workflow run link,
+            any new standards improvement issues you created. Label: `compliance-audit`.
+
+            Do NOT close any previous summary issues — leave that to humans.
+          allowed_tools: "Bash,Read,Glob,Grep"
+          timeout_minutes: 20
