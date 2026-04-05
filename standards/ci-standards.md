@@ -6,6 +6,7 @@ repository must implement.
 
 ---
 
+<<<<<<< HEAD
 ## Using Templates from `standards/workflows/`
 
 > **Rule:** When fixing a compliance finding by adding a workflow file, **copy
@@ -178,6 +179,14 @@ In addition, BMAD Method-enabled repositories MUST also include the conditional
 [Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
+=======
+## Required Workflows
+
+Every repository MUST have these workflows. Reusable templates for Dependabot
+workflows are in [`standards/workflows/`](workflows/). The CI, CodeQL,
+SonarCloud, and Claude Code workflows are documented as patterns below — copy
+and adapt the examples to each repo's tech stack.
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ### 1. CI Pipeline (`ci.yml`)
 
@@ -210,6 +219,7 @@ on:
 permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
+<<<<<<< HEAD
   group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 ```
@@ -303,6 +313,33 @@ non-default toolchain, or a language CodeQL supports only via manual
 build. **Document the reason in the workflow file's header and open a
 standards PR against this document** so the exception is recorded
 alongside the rule.
+=======
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+### 2. CodeQL Analysis (`codeql.yml`)
+
+Static Application Security Testing (SAST) via GitHub's CodeQL.
+
+**Standard configuration:**
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 17 * * 5'    # Weekly scan (Friday 12:00 PM EST / 17:00 UTC)
+```
+
+**Language configuration rule:** All ecosystems present in the repository MUST
+be configured as CodeQL languages. If a repo contains `package.json`, add
+`javascript-typescript`. If it contains `go.mod`, add `go`. If it contains
+`.github/workflows/*.yml`, add `actions`. Multi-language repos configure
+multiple languages via a matrix strategy.
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ### 3. SonarCloud Analysis (`sonarcloud.yml`)
 
@@ -343,6 +380,7 @@ jobs:
 
 Each repo needs a `sonar-project.properties` file at root with project key and org.
 
+<<<<<<< HEAD
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
 Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
@@ -454,6 +492,14 @@ UI feature which consumes Copilot premium requests.
 **Archived configuration — do not adopt.** The YAML below is a read-only historical reference;
 `claude.yml` is no longer deployed in org repos. For the current AI-automation implementation,
 see [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent).
+=======
+### 4. Claude Code (`claude.yml`)
+
+AI-assisted code review via Claude Code Action on PRs. Also responds to
+`@claude` mentions in PR comments.
+
+**Standard configuration:**
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ```yaml
 name: Claude Code
@@ -466,15 +512,21 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+<<<<<<< HEAD
   issues:
     types: [labeled]
   check_run:          # enables claude-ci-fix — do not remove
     types: [completed]
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 permissions: {}
 
 jobs:
+<<<<<<< HEAD
   # Interactive mode: PR reviews and @claude mentions
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
   claude:
     if: >-
       (github.event_name == 'pull_request' &&
@@ -488,6 +540,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
+<<<<<<< HEAD
       contents: write
       id-token: write
       pull-requests: write
@@ -585,17 +638,43 @@ the workflow — other labels were ignored.
 runtime to determine who to tag.
 
 ### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
+=======
+      contents: read
+      id-token: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Run Claude Code
+        if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
+        uses: anthropics/claude-code-action@bee87b3258c251f9279e5371b0cc3660f37f3f77 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+**Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
+
+**Dependabot behavior:** The Claude Code step is skipped for Dependabot PRs (the
+`if` condition on the step). The job still runs and reports SUCCESS to satisfy
+required status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
+
+### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 Automatically approves and squash-merges eligible Dependabot PRs.
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml)
 and the [Dependabot Policy](dependabot-policy.md) for full details.
 
+<<<<<<< HEAD
 ### 7. Dependency Audit (`dependency-audit.yml`)
+=======
+### 6. Dependency Audit (`dependency-audit.yml`)
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 Vulnerability scanning for all package ecosystems.
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
 and the [Dependabot Policy](dependabot-policy.md).
 
+<<<<<<< HEAD
 ### 8. AgentShield (`agent-shield.yml`)
 
 Agent configuration security validation. Checks that CLAUDE.md and
@@ -883,6 +962,8 @@ is the pilot adopter. The TalkTerm workflow is the standard caller stub
 with `project_context` set to a TalkTerm-specific paragraph — no other
 customisation.
 
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 ---
 
 ## Workflow Patterns by Tech Stack
@@ -894,7 +975,11 @@ steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-node@v4
     with:
+<<<<<<< HEAD
       node-version: '24'       # or 'lts/*'
+=======
+      node-version: '20'       # or 'lts/*'
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
       cache: npm
   - run: npm ci
   - run: npm run check         # lint + format
@@ -912,7 +997,11 @@ steps:
   - uses: pnpm/action-setup@v4
   - uses: actions/setup-node@v4
     with:
+<<<<<<< HEAD
       node-version: 24
+=======
+      node-version: 20
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
       cache: pnpm
   - run: pnpm install --frozen-lockfile
   - run: pnpm run lint
@@ -959,7 +1048,10 @@ steps:
 ```
 
 **Additional jobs for Electron:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 - Mutation testing (`npm run test:mutate`) — `continue-on-error: true`
 - E2E tests via Playwright (`npx playwright test`) on macOS — `continue-on-error: true`
 
@@ -976,7 +1068,11 @@ steps:
   # Project-specific: pip install, pytest, etc.
 ```
 
+<<<<<<< HEAD
 **Repos using this pattern:** _(none currently)_
+=======
+**Repos using this pattern:** TalkTerm (CodeQL only currently)
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ---
 
@@ -999,6 +1095,7 @@ version for human readability.
 Dependabot keeps pinned SHAs up to date via the `github-actions` ecosystem
 entry in `dependabot.yml`.
 
+<<<<<<< HEAD
 ### Looking Up the Correct SHA
 
 > **Never guess or fabricate a SHA.** A SHA that doesn't exist in the upstream
@@ -1024,6 +1121,8 @@ action with its tag reference and document the blocker in the PR body so a
 human can complete the fix. A correct unpinned reference is better than an
 incorrect pinned one.
 
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 > **Note on examples in this document:** The "Workflow Patterns by Tech Stack"
 > section uses tag references (e.g., `@v4`) for readability since those are
 > illustrative patterns, not copy-paste templates. The "Required Workflows"
@@ -1031,6 +1130,7 @@ incorrect pinned one.
 > example to a repository, always look up the current SHA for each action and
 > pin to it with a version comment.
 
+<<<<<<< HEAD
 ### Exception: Internal Reusable Workflow References
 
 Calls to first-party `petry-projects/*` reusable workflows are **exempt from
@@ -1061,6 +1161,8 @@ deliberately (bumped only on backward-compatible releases) and are not subject
 to tag-force-push risk because the org controls the tag. **Do not open
 compliance PRs to pin these references.**
 
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 ---
 
 ## Permissions Policy
@@ -1086,6 +1188,7 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 |----------|------------|
 | CI (build/test) | `contents: read` |
 | SonarCloud | `contents: read`, `pull-requests: read` |
+<<<<<<< HEAD
 | Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
@@ -1107,6 +1210,12 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 > succeed. Granting a non-existent workflow permission has no effect and
 > will fail `actionlint`.
 
+=======
+| Claude Code | `contents: read`, `id-token: write`, `pull-requests: write`, `issues: write` |
+| CodeQL | `actions: read`, `security-events: write`, `contents: read` |
+| Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
+
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 ---
 
 ## Organization-Level Secrets for Standard CI
@@ -1118,7 +1227,10 @@ All secrets required by the standard CI workflows are configured at the
 |--------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
+<<<<<<< HEAD
 | `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 | `APP_ID` | GitHub App ID for Dependabot auto-merge |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 
@@ -1137,13 +1249,18 @@ references. Use consistent, descriptive names:
 |---------|---------|-------|
 | Language / tool name | `TypeScript`, `Go`, `SonarCloud` | For multi-language repos |
 | `build-and-test` | `build-and-test` | For single-language repos |
+<<<<<<< HEAD
 | `CodeQL` | `CodeQL` | Default-setup CodeQL — single context regardless of language count |
 | `Analyze (actions)` | `Analyze (actions)` | Manual `codeql.yml` with `jobs.analyze.name: Analyze` — the language is appended in parentheses by `codeql-action`. Use `Analyze ({language})` (e.g. `Analyze (javascript-typescript)`) in required-check configs for repos with a per-repo `codeql.yml`. |
+=======
+| `Analyze` or `Analyze (<lang>)` | `Analyze`, `Analyze (Python)` | CodeQL jobs |
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 | `claude` | `claude` | Claude Code Action |
 
 These names are referenced in branch protection required status checks.
 Changing a job name requires updating the branch protection configuration.
 
+<<<<<<< HEAD
 > **Default vs manual CodeQL check names:** repos using GitHub-managed default
 > setup (the org standard — see [§2](#2-codeql-analysis-github-managed-default-setup))
 > produce a single `CodeQL` check. Repos with a hand-authored `codeql.yml` produce
@@ -1151,6 +1268,8 @@ Changing a job name requires updating the branch protection configuration.
 > `Analyze` (no language suffix), it will never be satisfied — use the language-qualified
 > name that actually appears in the PR check list.
 
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 ---
 
 ## Org-Level Workflows
@@ -1162,11 +1281,14 @@ org-level workflows that run across all repositories:
 
 - **Schedule:** Weekly (Monday 9:00 UTC)
 - **Purpose:** Security posture scoring for all public repos
+<<<<<<< HEAD
 - **Token Requirements (`ORG_SCORECARD_TOKEN`):** Must be a Fine-Grained Personal Access
   Token with **Repository access** set to "All repositories" (or specific audit targets).
   It requires **Administration: Read-only**, **Metadata: Read-only**, **Contents: Read-only**,
   and **Issues: Read and write**. Additionally, it requires **Organization: Metadata (Read-only)**
   to list repositories in the organization.
+=======
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 - **Behavior:** Creates/updates GitHub Issues with findings, auto-closes resolved findings
 - **Skip list:** CII-Best-Practices, Contributors, Fuzzing, Maintained, Packaging, Signed-Releases
 
@@ -1212,6 +1334,7 @@ autofix:
 
 1. **Determine tech stack** and select the matching workflow patterns above
 2. **Create `ci.yml`** with lint, format, typecheck, and test stages
+<<<<<<< HEAD
 3. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
 4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
 5. **Add `dev-lead.yml`** from [`standards/workflows/`](workflows/) for AI-driven PR automation
@@ -1225,6 +1348,17 @@ autofix:
 11. **Configure secrets** in the repository settings
 12. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
 13. **Pin all action references** to commit SHAs
+=======
+3. **Add `codeql.yml`** with the appropriate language(s)
+4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
+5. **Add `claude.yml`** for AI code review
+6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
+7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
+8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
+9. **Configure secrets** in the repository settings
+10. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
+11. **Pin all action references** to commit SHAs
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ---
 
@@ -1234,6 +1368,7 @@ All five check categories are **required on every repository** (see
 [GitHub Settings — code-quality ruleset](github-settings.md#code-quality--required-checks-ruleset-all-repositories)).
 The specific ecosystems configured in each check depend on the repo's stack.
 
+<<<<<<< HEAD
 The **CodeQL** column reflects GitHub default setup state (`configured` vs
 `not-configured`), not the presence of a workflow file. Repos still
 carrying a per-repo `codeql.yml` after this standard lands are flagged as
@@ -1254,11 +1389,22 @@ weekly compliance audit (after `apply-repo-settings.sh` runs against the
 fleet) will flip the cells to `Yes` or surface specific failures via the
 `codeql-default-setup-not-configured` finding category. There is no
 `codeql.yml` workflow column anymore — that file is drift, not signal.
+=======
+| Repository | CI | CodeQL | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config |
+|------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|
+| **broodly** | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| **markets** | — | Yes | Yes | Yes | — | Yes | Yes | Partial |
+| **google-app-scripts** | Yes | Yes | Yes | Yes | Yes | Yes (older) | — | Non-standard |
+| **TalkTerm** | Yes | — | — | — | Yes | — | — | — |
+| **ContentTwin** | — | — | Yes | — | — | — | — | — |
+| **bmad-bgreat-suite** | — | — | — | — | — | — | — | — |
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ### Gaps to Address
 
 Every `—` in the table above is a gap that must be remediated. Priority order:
 
+<<<<<<< HEAD
 1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding (CodeQL default setup will be enabled as part of onboarding)
 2. **ContentTwin:** Missing CI, Claude, Coverage, Dependabot — 4 of 8 categories missing
 3. **TalkTerm:** Missing SonarCloud, Claude, Dependabot — 3 of 8 categories missing
@@ -1266,6 +1412,13 @@ Every `—` in the table above is a gap that must be remediated. Priority order:
 5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
 6. **All repos:** Enable CodeQL default setup via `apply-repo-settings.sh` and remove any pre-existing `codeql.yml` workflow file
 7. **All repos:** Add `copilot-setup-steps.yml` — copy from [`standards/workflows/`](workflows/copilot-setup-steps.yml), uncomment the matching stack block, and merge to `main`
+=======
+1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding
+2. **ContentTwin:** Missing CI, CodeQL, Claude, Coverage, Dependabot — 5 of 8 categories missing
+3. **TalkTerm:** Missing CodeQL, SonarCloud, Claude, Dependabot — 4 of 8 categories missing
+4. **markets:** Missing CI pipeline and Coverage; Dependabot config only covers `github-actions` (missing `npm` ecosystem)
+5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 
 ### Version Inconsistencies
 
@@ -1274,6 +1427,7 @@ All repos MUST align to the latest version of each action:
 | Action | Target Version | Repos Needing Update |
 |--------|---------------|---------------------|
 | **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
+<<<<<<< HEAD
 | **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
 
 > **`github/codeql-action` is no longer pinned per repo** because the
@@ -1393,3 +1547,7 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 | Anti-loop guard | No | Yes |
 | Idempotency markers | No | Yes (SHA-based) |
 | CI relay deduplication | No | Yes |
+=======
+| **CodeQL action** | v4 | markets (currently v3) |
+| **Claude Code Action** | Latest SHA | All repos should use the same pinned SHA |
+>>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
