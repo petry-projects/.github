@@ -48,14 +48,16 @@ categories:
 The action produces a graded security report (A–F, 0–100 score) and fails
 the build if findings at or above `high` severity are detected.
 
-**Action reference:**
+**CLI reference (used via `npx` in CI — no install required):**
 
 ```yaml
-- uses: affaan-m/agentshield@9bbc007cf5afb562c324bbad4ce6c544420f49f6 # v1.4.0
-  with:
-    path: "."
-    min-severity: "high"
-    fail-on-findings: "true"
+- name: AgentShield Security Scan
+  run: |
+    npx ecc-agentshield@1.4.0 scan \
+      --path . \
+      --min-severity high \
+      --fail-on-findings \
+      --format terminal
 ```
 
 ### Layer 2: Org-specific structural checks

@@ -25,14 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # --- Deep security scan via AgentShield action ---
+      # --- Deep security scan via AgentShield CLI ---
+      # Uses ecc-agentshield (https://github.com/affaan-m/agentshield)
+      # 102 rules: secrets, permissions, hooks, MCP servers, agent config
       - name: AgentShield Security Scan
-        uses: affaan-m/agentshield@9bbc007cf5afb562c324bbad4ce6c544420f49f6 # v1.4.0
-        with:
-          path: "."
-          min-severity: "high"
-          fail-on-findings: "true"
-          format: "terminal"
+        run: |
+          npx ecc-agentshield@1.4.0 scan \
+            --path . \
+            --min-severity high \
+            --fail-on-findings \
+            --format terminal
 
       # --- Org-specific structural checks ---
       - name: Check required agent files exist
