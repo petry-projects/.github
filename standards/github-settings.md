@@ -140,18 +140,25 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 | **CodeQL** | Static analysis (SAST) via GitHub Actions | Repos with CodeQL workflows |
 | **Dependabot** | Security updates for dependencies | All repos (see [Dependabot Policy](dependabot-policy.md)) |
 
-### GitHub App Secrets for Auto-Merge
+### Organization-Level Secrets
 
-The `dependabot-automerge-petry` app provides the approving review required by
-rulesets for automated Dependabot merges. These secrets are configured at the
-**organization level** and inherited by all repos:
+These secrets are configured at the **organization level** and inherited by
+all repos automatically — no per-repo setup needed:
 
 | Secret | Level | Purpose |
 |--------|-------|---------|
-| `APP_ID` | Organization | GitHub App ID (app_id: 3167543) |
-| `APP_PRIVATE_KEY` | Organization | GitHub App private key |
+| `APP_ID` | Organization | GitHub App ID for Dependabot auto-merge (app_id: 3167543) |
+| `APP_PRIVATE_KEY` | Organization | GitHub App private key for Dependabot auto-merge |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Organization | Authentication for Claude Code Action |
 
-New repositories automatically inherit these secrets — no per-repo configuration needed.
+### Repo-Level Secrets
+
+These must be configured per-repo when the corresponding integration is added:
+
+| Secret | Purpose |
+|--------|---------|
+| `SONAR_TOKEN` | SonarCloud analysis authentication |
+| GCP secrets (`GCP_PROJECT_ID`, etc.) | Cloud deployment (repos with GCP infrastructure) |
 
 ---
 
@@ -186,8 +193,9 @@ When creating a new repository in `petry-projects`:
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
 
 > **Note:** Org-level secrets (`APP_ID`, `APP_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`)
-> are inherited automatically. Repo-specific secrets (e.g., `SONAR_TOKEN`, GCP
-> credentials) must be configured per-repo.
+> are inherited automatically. Add repo-level secrets (`SONAR_TOKEN`, GCP credentials)
+> as needed — see [Organization-Level Secrets](#organization-level-secrets) and
+> [Repo-Level Secrets](#repo-level-secrets) above.
 
 ---
 
