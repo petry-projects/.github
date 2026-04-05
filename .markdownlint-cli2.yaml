@@ -1,7 +1,16 @@
+ignores:
+  - ".claude/**"
+  - "node_modules/**"
+
 config:
-  MD013: false   # Line length — many existing docs exceed 200 chars; fix incrementally
-  MD024: false   # Duplicate headings — AGENTS.md has intentional repeated section headers
-  MD032: false   # Blanks around lists — many existing docs use compact list formatting
-  MD033: false   # Inline HTML — used in standards docs for tables/details
-  MD034: false   # Bare URLs — AGENTS.md uses bare URLs for references
-  MD041: true    # First line must be a top-level heading
+  MD013:
+    line_length: 200
+    tables: false        # Tables often have long rows — exclude
+    code_blocks: false   # Code blocks need exact formatting — exclude
+  MD024:
+    siblings_only: true  # Allow duplicate headings in different sections
+  MD032: true            # Blanks around lists
+  MD033: false           # Inline HTML — used in standards docs
+  MD034: true            # No bare URLs
+  MD041: true            # First line must be a top-level heading
+  MD060: false           # Table column style — too strict for compact tables
