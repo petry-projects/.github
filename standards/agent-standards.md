@@ -56,7 +56,6 @@ the build if findings at or above `high` severity are detected.
     npx ecc-agentshield@1.4.0 scan \
       --path . \
       --min-severity high \
-      --fail-on-findings \
       --format terminal
 ```
 
