@@ -2,7 +2,7 @@ name: Weekly Compliance Audit
 
 on:
   schedule:
-    - cron: '0 8 * * 1'   # Every Monday at 8:00 UTC (before org-scorecard at 9:00)
+    - cron: '0 12 * * 5'   # Every Friday at 12:00 UTC
   workflow_dispatch:
     inputs:
       dry_run:
