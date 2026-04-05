@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@db6cbeee42f48b7ef3aee758e737c473e8e60900 # v20.0.0
+        with:
+          globs: '**/*.md'
+
+      - name: Lint YAML
+        run: |
+          pip install --quiet yamllint
+          yamllint -c <(cat <<'YAMLLINTRC'
+          extends: default
+          rules:
+            line-length:
+              max: 200
+            truthy:
+              check-keys: false
+            document-start: disable
+            comments:
+              min-spaces-from-content: 1
+          YAMLLINTRC
+          ) .github/workflows/ standards/workflows/ standards/dependabot/
+
+      - name: Lint GitHub Actions
+        run: |
+          # Install actionlint
+          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-bash.sh)
+          # Lint all workflow files (our own and templates)
+          ./actionlint .github/workflows/*.yml || true
+          # Template workflows may use placeholder expressions — lint with relaxed mode
+          ./actionlint -ignore 'context' standards/workflows/*.yml || true
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck --severity=warning scripts/*.sh
+
+  agent-security:
+    name: Agent Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run AgentShield
+        uses: affaan-m/agentshield@main
+        with:
+          path: .
+          min-severity: high
+          fail-on-findings: true
+          format: json

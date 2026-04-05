@@ -1,0 +1,5 @@
+config:
+  MD013:
+    line_length: 200
+  MD033: false   # Allow inline HTML (used in standards docs for tables/details)
+  MD041: false   # First line doesn't need to be a top-level heading
