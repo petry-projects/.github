@@ -254,16 +254,20 @@ assert getText("[test-id='order-id']") contains dbOrder.orderId
 
 ## End-to-End Testing — Validate Real Functional Requirements
 
-E2E tests validate real functional requirements through the full stack. They exist to catch bugs that would affect real users. **A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
+E2E tests validate real functional requirements through the full stack. They exist to catch bugs that would affect real users.
+**A test that does not verify a real business outcome is a test that provides false confidence and must not exist.**
 
-> Every E2E test must answer one question: **"What functional requirement would be broken for a real user if this test didn't exist?"** If the test could pass while the requirement is fundamentally unmet, it is worthless and must be rewritten.
+> Every E2E test must answer one question: **"What functional requirement would be broken for a real user if this test didn't exist?"**
+> If the test could pass while the requirement is fundamentally unmet, it is worthless and must be rewritten.
 
 ### What E2E Tests MUST Do
 
 1. **Full round-trip verification.** Action → API call → database mutation → response → frontend reflects new state. Not a subset — the whole chain.
 2. **Multi-layer assertions.** The frontend shows correct data AND the database contains the correct record AND side effects occurred (events published, notifications queued, cache invalidated).
-3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields. After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
-4. **Test error paths.** For every happy-path test, write corresponding tests for: invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
+3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields.
+   After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
+4. **Test error paths.** For every happy-path test, write corresponding tests for:
+   invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
 5. **Test authorization boundaries.** Verify user A cannot access user B's resources. Verify regular users cannot hit admin endpoints. Verify expired/revoked tokens are rejected.
 6. **Use realistic data.** Factories that produce production-realistic data (unicode names, long strings, special characters, realistic cardinalities) — not `"test"` and `"foo"`.
 7. **Deterministic waits.** Wait for specific conditions (element visible, API response received, database row present) using polling with timeouts — never arbitrary sleeps.
@@ -298,11 +302,13 @@ Every E2E test follows this structure:
 ### Test Design Patterns
 
 **Page/Screen Object Model (for frontend E2E):**
+
 - Encapsulate page interactions in page/screen objects. Tests read as functional requirements, not DOM/view manipulation.
 - Page objects expose user-intent methods (`loginAs(user)`, `submitOrder(items)`) — not element-level methods.
 - Selectors live in exactly one place (the page object). Use stable test-ID attributes exclusively.
 
 **Test Data Factories:**
+
 - Every test creates its own data. Never rely on pre-existing seed data.
 - Factories produce realistic, randomized data: `createUser({role: "admin"})`, `createOrder({status: "pending", items: 3})`.
 - Factories use the API or database — NOT the frontend.
@@ -712,7 +718,9 @@ The `dependabot-automerge.yml` workflow handles automatic merging of Dependabot 
 
 #### Claude Code Workflow on Dependabot PRs
 
-The `claude.yml` workflow skips the Claude Code action step for Dependabot PRs (`github.event.pull_request.user.login != 'dependabot[bot]'`). The job still runs and reports SUCCESS to satisfy required status checks, but the Claude action step is skipped since:
+The `claude.yml` workflow skips the Claude Code action step for Dependabot PRs (`github.event.pull_request.user.login != 'dependabot[bot]'`).
+The job still runs and reports SUCCESS to satisfy required status checks, but the Claude action step is skipped since:
+
 - `CLAUDE_CODE_OAUTH_TOKEN` is an Actions secret, not a Dependabot secret
 - AI code review on automated version bumps adds cost without value
 
@@ -1210,17 +1218,31 @@ Before starting a stacked Epic/Feature workflow, verify:
 
 ## Multi-Agent Isolation — Git Worktrees
 
-When multiple agents work on the same repository concurrently, they MUST use **isolated workspaces** to prevent conflicts. Git worktrees are the industry-standard isolation primitive — used by Claude Code, Cursor, Windsurf, Augment Intent, and dmux. Cloud agents (OpenAI Codex, GitHub Copilot, Devin) use containers or ephemeral environments that provide equivalent isolation.
+When multiple agents work on the same repository concurrently, they MUST use **isolated workspaces** to prevent conflicts.
+Git worktrees are the industry-standard isolation primitive — used by Claude Code, Cursor, Windsurf, Augment Intent, and dmux.
+Cloud agents (OpenAI Codex, GitHub Copilot, Devin) use containers or ephemeral environments that provide equivalent isolation.
 
 Never have two agents working in the same working directory simultaneously.
 
 ### Rules
 
-1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`), Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
+1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace
+   (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`),
+   Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
-3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel. This is the single most important rule for multi-agent work.
-4. **Branch from the default branch** — unless using a stacked PR workflow (see [Stacked PRs for Epic/Feature Development](#stacked-prs-for-epicfeature-development)). Outside a stacked-Epic/Feature workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`). You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present. Never branch from another agent's branch **except** when (a) Epics/Features are part of a declared stack and the child Epic/Feature branches from its parent Epic/Feature's branch, or (b) story worktrees/branches are created from the Epic/Feature integration branch as defined in the stacked-PR workflow.
-5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes. (In a stacked-Epic/Feature workflow, story worktrees may optionally produce short-lived PRs targeting the Epic/Feature branch for review — these are internal integration PRs, not standalone feature PRs.)
+3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files
+   (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel.
+   This is the single most important rule for multi-agent work.
+4. **Branch from the default branch** — unless using a stacked PR workflow
+(see [Stacked PRs for Epic/Feature Development](#stacked-prs-for-epicfeature-development)).
+Outside a stacked-Epic/Feature workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`).
+You MAY use `origin/HEAD` as a shortcut when it is correctly configured, but MUST NOT rely on it being present.
+Never branch from another agent's branch **except** when (a) Epics/Features are part of a declared stack and the child Epic/Feature branches
+from its parent Epic/Feature's branch, or (b) story worktrees/branches are created from the Epic/Feature integration branch
+as defined in the stacked-PR workflow.
+5. **One PR per workspace.** Each workspace produces exactly one pull request. Do not combine unrelated changes.
+(In a stacked-Epic/Feature workflow, story worktrees may optionally produce short-lived PRs targeting the Epic/Feature branch
+for review — these are internal integration PRs, not standalone feature PRs.)
 6. **3–5 parallel agents max.** Coordination overhead increases non-linearly. Limit concurrent agents to 3–5 per repository.
 
 ### Detecting File Overlap
@@ -1324,6 +1346,7 @@ Do NOT share branches or state between agents operating on different repos.
 ### Coordination Checklist (for humans orchestrating multiple agents)
 
 Before launching parallel agents, verify:
+
 - [ ] Each agent has a distinct story/task assignment
 - [ ] No two agents will modify the same files
 - [ ] Shared dependencies (lockfiles, generated types) are up to date on the default branch before agents start
@@ -1334,7 +1357,10 @@ Before launching parallel agents, verify:
 
 ## Stacked PRs for Epic/Feature Development
 
-When a project has multiple Epics/Features with **sequential dependencies** — where Epic 2 builds on the foundation laid by Epic 1, Epic 3 extends Epic 2, and so on — the standard "branch from main" model forces each Epic/Feature to wait for the previous one's PR to fully merge before work can begin. Stacked PRs eliminate this bottleneck by letting each Epic/Feature's branch build on the previous one's branch, forming a chain that merges bottom-up.
+When a project has multiple Epics/Features with **sequential dependencies** — where Epic 2 builds on the foundation laid by Epic 1,
+Epic 3 extends Epic 2, and so on — the standard "branch from main" model forces each Epic/Feature to wait for the previous one's PR
+to fully merge before work can begin. Stacked PRs eliminate this bottleneck by letting each Epic/Feature's branch build on the previous
+one's branch, forming a chain that merges bottom-up.
 
 Each Epic/Feature produces a **single PR** containing all of its stories. The stack is a chain of Epic/Feature-level PRs:
 
@@ -1344,7 +1370,9 @@ main ← Epic-1-PR ← Epic-2-PR ← Epic-3-PR ← Epic-4-PR
 
 ### How It Works
 
-Each Epic/Feature gets one long-lived **Epic/Feature branch** (also called its integration branch). Multiple agents work stories concurrently in separate worktrees that branch from the Epic/Feature branch, then merge their completed stories back into it. The Epic/Feature branch accumulates all story work and becomes one PR in the stack.
+Each Epic/Feature gets one long-lived **Epic/Feature branch** (also called its integration branch).
+Multiple agents work stories concurrently in separate worktrees that branch from the Epic/Feature branch,
+then merge their completed stories back into it. The Epic/Feature branch accumulates all story work and becomes one PR in the stack.
 
 | PR | Source branch | Target branch |
 |----|---------------|---------------|
@@ -1360,10 +1388,15 @@ When Epic 1's PR merges into `main`, Epic 2's PR is retargeted to `main`, and so
 1. **One PR per Epic/Feature.** Each Epic/Feature produces exactly one PR. All stories within it are merged into its branch.
 2. **Stacks are strictly linear.** No branching within a stack (no diamond or tree shapes). One parent, one child.
 3. **Maximum stack depth: 4.** Deeper stacks become fragile and painful to rebase. If a project has more than 4 sequential Epics/Features, look for opportunities to merge intermediate ones before continuing.
-4. **Parallel agents within an Epic/Feature.** Multiple agents CAN work on stories within the same Epic/Feature concurrently — each in its own worktree branching from the Epic/Feature branch. The standard multi-agent isolation rules apply: no two agents modify the same file. Story worktrees merge back into the Epic/Feature branch when complete.
-5. **Sprints within an Epic/Feature may overlap.** If Sprint 2's stories are independent of Sprint 1's stories, agents may work on both sprints concurrently. Only serialize sprints when later stories depend on earlier ones.
-6. **Independent stacks CAN run in parallel.** If your project has two separate dependency chains (e.g., A1→A2 and B1→B2), run those stacks concurrently with separate agents. The standard multi-agent isolation rules apply — no overlapping file ownership across stacks.
-7. **File ownership within a stack is cumulative.** Files touched by Epic 1 may also be touched by Epic 2 (that's the nature of sequential dependency). Ensure agents in the child Epic/Feature coordinate with the parent's completed state.
+4. **Parallel agents within an Epic/Feature.** Multiple agents CAN work on stories within the same Epic/Feature concurrently —
+each in its own worktree branching from the Epic/Feature branch. The standard multi-agent isolation rules apply:
+no two agents modify the same file. Story worktrees merge back into the Epic/Feature branch when complete.
+5. **Sprints within an Epic/Feature may overlap.** If Sprint 2's stories are independent of Sprint 1's stories,
+agents may work on both sprints concurrently. Only serialize sprints when later stories depend on earlier ones.
+6. **Independent stacks CAN run in parallel.** If your project has two separate dependency chains (e.g., A1→A2 and B1→B2),
+run those stacks concurrently with separate agents. The standard multi-agent isolation rules apply — no overlapping file ownership across stacks.
+7. **File ownership within a stack is cumulative.** Files touched by Epic 1 may also be touched by Epic 2
+(that's the nature of sequential dependency). Ensure agents in the child Epic/Feature coordinate with the parent's completed state.
 8. **Bottom-up merge order is mandatory.** Always merge the bottom PR first, then retarget the next PR to `main`, and so on. Never merge out of order.
 
 ### Workflow — Planning the Stack
@@ -1409,7 +1442,8 @@ git worktree add .worktrees/S-1.3-db-schema -b epic-1/S-1.3-db-schema origin/epi
 
 Each agent implements its story, runs quality checks, and pushes.
 
-**Step 3: Merge stories back into the Epic/Feature branch.** As stories complete, merge them into the Epic/Feature branch. See [Story and Sprint Organization Within an Epic/Feature](#story-and-sprint-organization-within-an-epicfeature) for merge strategies and commands.
+**Step 3: Merge stories back into the Epic/Feature branch.** As stories complete, merge them into the Epic/Feature branch.
+See [Story and Sprint Organization Within an Epic/Feature](#story-and-sprint-organization-within-an-epicfeature) for merge strategies and commands.
 
 **Step 4: Create the next Epic/Feature branch.** Once all stories that the next Epic/Feature depends on have been merged into the previous branch, create the next one:
 
@@ -1466,7 +1500,9 @@ If conflicts are extensive, consider collapsing the stack — merge what you can
 
 ### Keeping Epic/Feature Branches in Sync with Main
 
-If `main` advances while a stack is in progress (e.g., hotfixes or other PRs merge), periodically rebase the bottom Epic/Feature branch onto `main` and propagate upward through the stack. Do this between Sprints or at natural breakpoints — not while story agents are actively working. A long-diverged Epic/Feature branch will produce painful conflicts at merge time.
+If `main` advances while a stack is in progress (e.g., hotfixes or other PRs merge), periodically rebase the bottom Epic/Feature branch
+onto `main` and propagate upward through the stack. Do this between Sprints or at natural breakpoints — not while story agents are
+actively working. A long-diverged Epic/Feature branch will produce painful conflicts at merge time.
 
 ### Story and Sprint Organization Within an Epic/Feature
 
@@ -1562,6 +1598,7 @@ Once Agents 1–3 merge their stories into `epic-1/foundation`, Agent 6 can begi
 ### Stack Coordination Checklist
 
 Before starting a stacked Epic/Feature workflow, verify:
+
 - [ ] Epics/Features have genuine sequential dependencies (not just conceptual ordering)
 - [ ] Stack depth is 4 or fewer
 - [ ] Stack plan is documented with Epic/Feature order, parent relationships, and Sprint breakdown
