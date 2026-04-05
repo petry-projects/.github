@@ -165,6 +165,7 @@ See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml).
 
 Behavior:
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 - Triggers on `pull_request_target` from `dependabot[bot]`
 - Fetches Dependabot metadata to determine update type and ecosystem
@@ -301,6 +302,9 @@ command above — each new Dependabot push causes the automerge workflow to fire
 and submit a fresh approval.
 
 =======
+=======
+
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
 - Triggers on `pull_request_target` from `dependabot[bot]`
 - Fetches Dependabot metadata to determine update type
 - For **patch** and **minor** updates (and indirect dependency updates):

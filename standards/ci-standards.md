@@ -495,8 +495,15 @@ see [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent).
 =======
 ### 4. Claude Code (`claude.yml`)
 
-AI-assisted code review via Claude Code Action on PRs. Also responds to
-`@claude` mentions in PR comments.
+AI-assisted code review on PRs and issue automation via Claude Code Action.
+Claude responds to PR events, `@claude` mentions in comments, and issues
+labeled `claude`. The label trigger enables Claude to work issues like a
+human contributor — reading the issue, creating a branch, implementing the
+fix, and opening a PR.
+
+**Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
+not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
+UI feature which consumes Copilot premium requests.
 
 **Standard configuration:**
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
@@ -513,12 +520,17 @@ on:
   pull_request_review_comment:
     types: [created]
 <<<<<<< HEAD
+<<<<<<< HEAD
   issues:
     types: [labeled]
   check_run:          # enables claude-ci-fix — do not remove
     types: [completed]
 =======
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+  issues:
+    types: [labeled]
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
 
 permissions: {}
 
@@ -536,10 +548,13 @@ jobs:
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
         contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' &&
+        github.event.label.name == 'claude')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
+<<<<<<< HEAD
 <<<<<<< HEAD
       contents: write
       id-token: write
@@ -640,22 +655,45 @@ runtime to determine who to tag.
 ### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 =======
       contents: read
+=======
+      contents: write
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
       id-token: write
       pull-requests: write
       issues: write
     steps:
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@bee87b3258c251f9279e5371b0cc3660f37f3f77 # v1
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          label_trigger: "claude"
 ```
 
 **Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
 
+**Required labels:** The `claude` label (color: `7c3aed`) must exist on every
+repository. The weekly compliance audit ensures this label is present. It can
+also be applied manually to any issue to trigger Claude.
+
+**How Claude follows org standards:** `claude-code-action` automatically reads
+`CLAUDE.md` from the repository root. The org-level `.github/CLAUDE.md` is
+inherited by repos without their own. Each repo's `CLAUDE.md` references
+`AGENTS.md` for cross-cutting development standards (TDD, SOLID, pre-commit
+checks, etc.). No additional `prompt` or `settings` input is needed.
+
+**Permissions note:** `contents: write` is required for issue-triggered work
+where Claude creates branches and pushes commits. PR review mode only needs
+`contents: read`, but a single permission set covers both modes.
+
 **Dependabot behavior:** The Claude Code step is skipped for Dependabot PRs (the
 `if` condition on the step). The job still runs and reports SUCCESS to satisfy
 required status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
+
+**Issue trigger security:** The `issues: [labeled]` event fires when any user
+with triage or write access applies a label. The label name check in the `if:`
+condition ensures only the `claude` label triggers the workflow — other labels
+are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 
 ### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
@@ -1049,9 +1087,13 @@ steps:
 
 **Additional jobs for Electron:**
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
 - Mutation testing (`npm run test:mutate`) — `continue-on-error: true`
 - E2E tests via Playwright (`npx playwright test`) on macOS — `continue-on-error: true`
 
@@ -1189,6 +1231,7 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 | CI (build/test) | `contents: read` |
 | SonarCloud | `contents: read`, `pull-requests: read` |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
@@ -1212,6 +1255,9 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 
 =======
 | Claude Code | `contents: read`, `id-token: write`, `pull-requests: write`, `issues: write` |
+=======
+| Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write` |
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
 | CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
@@ -1549,5 +1595,9 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 | CI relay deduplication | No | Yes |
 =======
 | **CodeQL action** | v4 | markets (currently v3) |
+<<<<<<< HEAD
 | **Claude Code Action** | Latest SHA | All repos should use the same pinned SHA |
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+| **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
+>>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
