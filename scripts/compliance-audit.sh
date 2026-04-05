@@ -780,6 +780,7 @@ check_workflow_permissions() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Check: claude.yml jobs both have a checkout step
 # ---------------------------------------------------------------------------
 check_claude_workflow_checkout() {
@@ -1126,6 +1127,8 @@ check_centralized_check_names() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -1172,11 +1175,15 @@ check_agents_md() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
+<<<<<<< HEAD
     # Accept two forms of reference:
     #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
     #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
     # Both are treated as references to the org-level standards file.
     if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
+=======
+    if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
@@ -1185,6 +1192,7 @@ check_agents_md() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: copilot-setup-steps.yml exists
 # ---------------------------------------------------------------------------
 # Every repo should have a copilot-setup-steps.yml to pre-install tools and
@@ -1357,6 +1365,8 @@ check_check_suite_prefs() {
 # ---------------------------------------------------------------------------
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
@@ -1881,10 +1891,14 @@ HEREDOC
 HEREDOC
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
 =======
   for category in ci-workflows action-pinning dependabot settings labels rulesets; do
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -2051,6 +2065,7 @@ main() {
 
   for repo in $repos; do
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     # Skip the .github config repo itself (different compliance criteria)
     if [ "$repo" = ".github" ]; then
@@ -2058,6 +2073,8 @@ main() {
     fi
 
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
     repo_count=$((repo_count + 1))
     log "Auditing $ORG/$repo"
 
@@ -2098,6 +2115,7 @@ main() {
 <<<<<<< HEAD
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
+<<<<<<< HEAD
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
@@ -2112,6 +2130,10 @@ main() {
 =======
     check_workflow_permissions "$repo"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+    check_claude_md "$repo"
+    check_agents_md "$repo"
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
 
     log_end
   done
@@ -2127,11 +2149,14 @@ main() {
 
     for repo in $repos; do
 <<<<<<< HEAD
+<<<<<<< HEAD
       ensure_audit_label "$repo"
       ensure_required_labels "$repo"
 =======
       [ "$repo" = ".github" ] && continue
 
+=======
+>>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
       ensure_audit_label "$repo"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
