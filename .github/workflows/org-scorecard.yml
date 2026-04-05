@@ -1,3 +1,6 @@
+# OpenSSF Scorecard security posture review for all public repos.
+# Creates/updates/closes GitHub Issues for findings across the org.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#openssf-scorecard-org-scorecardyml
 name: Org Scorecard Review
 
 on:

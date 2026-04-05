@@ -1,5 +1,6 @@
-# Dependabot auto-merge workflow
-# Copy to .github/workflows/dependabot-automerge.yml
+# Dependabot auto-merge workflow.
+# Auto-approves and merges eligible patch/minor Dependabot PRs after CI passes.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md#auto-merge-workflow
 #
 # Requires repository secrets:
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write

@@ -1,3 +1,5 @@
+# AI-assisted code review via Claude Code Action on PRs.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#4-claude-code-claudeyml
 name: Claude Code
 
 on:

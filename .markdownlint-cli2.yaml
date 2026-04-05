@@ -4,4 +4,4 @@ config:
   MD032: false   # Blanks around lists — many existing docs use compact list formatting
   MD033: false   # Inline HTML — used in standards docs for tables/details
   MD034: false   # Bare URLs — AGENTS.md uses bare URLs for references
-  MD041: false   # First line heading — not all docs start with a heading
+  MD041: true    # First line must be a top-level heading
