@@ -13,7 +13,7 @@ These settings are enforced via the GitHub UI, API, and repository rulesets.
 | **Organization profile** | `petry-projects` | Public org (free plan) |
 | **Default branch name** | `main` | Org-wide default for new repos |
 | **Members can create repos** | Yes (public + private) | |
-| **Two-factor requirement** | Disabled | Consider enabling for security |
+| **Two-factor requirement** | **Required** | All org members must have 2FA enabled |
 
 ---
 
@@ -162,7 +162,7 @@ When creating a new repository in `petry-projects`:
 5. **Add Dependabot configuration** — copy the appropriate template from
    [`standards/dependabot/`](dependabot/) and add to `.github/dependabot.yml`
 6. **Add CI workflows** — see [CI Standards](ci-standards.md) for required workflows
-7. **Create standard labels** — `security`, `dependencies`, plus any project-specific labels
+7. **Create standard labels** — all labels from the [Standard Set](#labels--standard-set) above, plus any project-specific labels
 8. **Enable auto-delete head branches** and **auto-merge** in repo settings
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
 
