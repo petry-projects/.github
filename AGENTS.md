@@ -52,7 +52,7 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 - **Achieve and maintain excellent test coverage.** Verify locally before pushing. PRs that reduce coverage below repo-defined thresholds will be rejected.
 - **NEVER use `.skip()` to avoid failing tests.** If tests fail, fix them. If functionality cannot be directly tested, extract testable logic and test the extraction.
 - **NEVER add coverage-ignore comments** (e.g., `/* istanbul ignore next */`, `/* c8 ignore next */`, `// v8 ignore next`) to artificially boost coverage.
-If code is difficult to test, improve mocking strategies or adjust thresholds instead.
+  If code is difficult to test, improve mocking strategies or adjust thresholds instead.
 - Unit tests MUST be fast, deterministic, and not access external networks.
 - Integration tests are allowed but MUST be clearly marked. They may be skipped locally during rapid iteration, but CI MUST always run them (for example, in a separate job or scheduled workflow).
 - Mock external services using project-provided helpers where available.
@@ -72,9 +72,9 @@ E2E tests validate real functional requirements through the full stack. They exi
 1. **Full round-trip verification.** Action → API call → database mutation → response → frontend reflects new state. Not a subset — the whole chain.
 2. **Multi-layer assertions.** The frontend shows correct data AND the database contains the correct record AND side effects occurred (events published, notifications queued, cache invalidated).
 3. **Verify at the data layer.** After a form submission, query the database directly to verify the record exists with correct fields.
-After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
+   After a delete, verify it's gone. After auth, verify the token's claims and scopes. Do NOT stop at "success toast appeared."
 4. **Test error paths.** For every happy-path test, write corresponding tests for:
-invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
+   invalid input, unauthorized access, conflict/duplicate states, and not-found resources.
 5. **Test authorization boundaries.** Verify user A cannot access user B's resources. Verify regular users cannot hit admin endpoints. Verify expired/revoked tokens are rejected.
 6. **Use realistic data.** Factories that produce production-realistic data (unicode names, long strings, special characters, realistic cardinalities) — not `"test"` and `"foo"`.
 7. **Deterministic waits.** Wait for specific conditions (element visible, API response received, database row present) using polling with timeouts — never arbitrary sleeps.
@@ -229,21 +229,21 @@ Repository-level AGENTS.md or CLAUDE.md files may specify how each principle map
 ### DRY — Don't Repeat Yourself
 
 - **Eliminate knowledge duplication.** Every piece of business knowledge or logic must have a single, authoritative source.
-If the same rule exists in two places, extract it.
+  If the same rule exists in two places, extract it.
 - **DRY applies to knowledge, not code.** Two blocks of code that look identical but represent different domain concepts are NOT duplication — do not merge them.
-Two blocks that look different but encode the same business rule ARE duplication — unify them.
+  Two blocks that look different but encode the same business rule ARE duplication — unify them.
 - **Premature abstraction is worse than duplication.** Wait until you have at least three concrete instances before extracting a shared abstraction. Two similar cases do not justify a generic helper.
 
 ### DDD — Domain-Driven Design
 
 - **Ubiquitous language.** Use the same terminology in code, tests, specs, and conversation. If the domain calls it a "market" or "session", the code uses `Market` or `Session` — not `item` or `context`.
 - **Bounded contexts.** Each major subdomain has clear boundaries. Code in one context must not directly depend on the internals of another.
-Communicate across contexts through well-defined interfaces or events.
+  Communicate across contexts through well-defined interfaces or events.
 - **Aggregate roots.** Enforce invariants through aggregate roots. External code accesses an aggregate's children only through the root.
 - **Value objects.** Use typed value objects (branded types, newtypes, or equivalent) for identifiers, quantities, and domain-specific data.
-Avoid passing raw primitives (`string`, `int`) when a domain type adds safety and meaning.
+  Avoid passing raw primitives (`string`, `int`) when a domain type adds safety and meaning.
 - **Repository pattern.** Persistence is abstracted behind repository interfaces that the domain defines. Infrastructure implements those interfaces.
-Domain code never imports ORM, SQL, or storage libraries directly.
+  Domain code never imports ORM, SQL, or storage libraries directly.
 
 ### KISS — Keep It Simple
 
@@ -512,12 +512,12 @@ Never have two agents working in the same working directory simultaneously.
 ### Rules
 
 1. **One workspace per agent.** Every agent performing code changes MUST operate in its own isolated workspace
-(git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`),
-Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
+   (git worktree, container, or ephemeral environment). This applies to Claude Code (`isolation: "worktree"` or `--worktree`),
+   Cursor parallel agents, GitHub Copilot coding agent, OpenAI Codex, and any other AI agent tool.
 2. **One agent per story/task.** Each workspace maps to exactly one BMAD story, feature, or bug fix. Do not assign the same story to multiple agents.
 3. **No overlapping file ownership.** Two agents MUST NOT modify the same file concurrently. If stories touch shared files
-(e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel.
-This is the single most important rule for multi-agent work.
+   (e.g., a shared type definition, config, or lockfile), serialize those stories — do not run them in parallel.
+   This is the single most important rule for multi-agent work.
 4. **Branch from the default branch** — unless using a stacked PR workflow
 (see [Stacked PRs for Epic/Feature Development](#stacked-prs-for-epicfeature-development)).
 Outside a stacked-Epic/Feature workflow, workspaces MUST branch from the repository's configured default branch (for example, `origin/main`).
@@ -935,7 +935,7 @@ These rules apply to every language and framework in the stack.
 
 - **Emit all logs as JSON objects in production.** Never use unstructured print statements or string interpolation for application logs.
 - **Every log line MUST include these baseline fields.** Configure your logging library at initialization to automatically include
-`timestamp`, `service`, and `version` in every log entry — do not rely on developers adding these per-call.
+  `timestamp`, `service`, and `version` in every log entry — do not rely on developers adding these per-call.
 
   | Field | Format | Example |
   |-------|--------|---------|
@@ -952,10 +952,10 @@ These rules apply to every language and framework in the stack.
 - **Canonical field names:** `user_id`, `request_id`, `correlation_id`, `causation_id`, `trace_id`, `span_id`, `duration_ms`,
 `http_method`, `http_path`, `http_status`, `error_message`, `error_stack`.
 - **Relationship between correlation IDs:** `request_id` is assigned per inbound request. `correlation_id` tracks a logical operation
-across multiple services/events (often equal to the originating `request_id`). `causation_id` identifies the direct parent event
-or command that triggered the current action. `trace_id` and `span_id` are OpenTelemetry-specific and bridge logs to distributed traces.
-When CQRS domain events include `correlation_id`/`causation_id` in metadata, these MUST use the same field names and values
-as the logging context.
+  across multiple services/events (often equal to the originating `request_id`). `causation_id` identifies the direct parent event
+  or command that triggered the current action. `trace_id` and `span_id` are OpenTelemetry-specific and bridge logs to distributed traces.
+  When CQRS domain events include `correlation_id`/`causation_id` in metadata, these MUST use the same field names and values
+  as the logging context.
 
 ### Correlation & Tracing
 

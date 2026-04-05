@@ -189,9 +189,9 @@ where Claude creates branches and pushes commits. PR review mode only needs
 required status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
 
 **Issue trigger security:** The `issues: [labeled]` event fires when any user
-with write access applies the `claude` label. The label name check in the `if:`
-condition ensures only the `claude` label triggers the workflow. The compliance
-audit script applies this label automatically to new compliance findings.
+with triage or write access applies a label. The label name check in the `if:`
+condition ensures only the `claude` label triggers the workflow — other labels
+are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 
 ### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
