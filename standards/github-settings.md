@@ -31,23 +31,7 @@ SHOULD be audited and brought into compliance.
 | **Has Issues** | `true` | Issue tracking enabled on all repos |
 | **Has Projects** | `true` | Currently enabled on all repos |
 | **Has Wiki** | `false` | Disabled — documentation lives in the repo |
-| **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
-
-### Security & Analysis
-
-All repositories MUST have the following security features enabled. These are
-the enforcement primitives behind the [Push Protection Standard](push-protection.md).
-
-| Setting | Standard Value | Rationale |
-|---------|---------------|-----------|
-| **Secret scanning** | `enabled` | Detect leaked credentials in history and new commits |
-| **Secret scanning push protection** | `enabled` | Block pushes containing known secret patterns at the server side |
-| **Secret scanning AI detection** | `enabled` | Catch generic secrets missed by regex patterns |
-| **Secret scanning non-provider patterns** | `enabled` | Private keys, HTTP basic auth, high-entropy strings |
-| **Dependabot security updates** | `enabled` | Automated patches for known-vulnerable dependencies |
-
-> See the full requirements, custom patterns, CI job, incident response flow,
-> and compliance audit checks in [`push-protection.md`](push-protection.md).
+| **Has Discussions** | `true` | Enabled for community engagement |
 
 ### Merge Settings
 
@@ -64,54 +48,6 @@ the enforcement primitives behind the [Push Protection Standard](push-protection
 > **Note:** While merge commits and rebase merging are enabled at the repository
 > level, the `pr-quality` ruleset enforces **squash-only** merges. The repo-level
 > settings are permissive to avoid conflicts with admin overrides when needed.
-
----
-
-## Discussions Configuration
-
-GitHub Discussions MUST be enabled on all repositories. Discussions serve as the
-durable, threaded home for feature ideation, design proposals, and community
-feedback — distinct from Issues (which track actionable work).
-
-### Required Discussion Categories
-
-All repositories MUST have the following categories configured:
-
-| Category | Format | Emoji | Description |
-|----------|--------|-------|-------------|
-| **Ideas** | Open-ended | `💡` | Feature proposals, ideation threads, and innovation exploration |
-| **General** | Open-ended | `💬` | General project discussions and questions |
-
-Additional categories MAY be added per project needs (e.g., "Q&A", "Show and Tell",
-"Polls"). The two above are the required minimum.
-
-### Automated Ideation Workflow
-
-Repositories with the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)
-installed (`_bmad/` directory) MUST have the `feature-ideation.yml` workflow,
-which uses the **Ideas** category to post and maintain feature proposal
-Discussions. Each proposal is a separate Discussion thread, updated by subsequent
-workflow runs as market signals and project context evolve. See
-[CI Standards § Feature Ideation](ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos)
-for requirements.
-
-### Setup
-
-To enable and configure Discussions on an existing repository:
-
-```bash
-# Enable Discussions
-gh api -X PATCH repos/<owner>/<repo> -f has_discussions=true
-
-# Discussion categories are managed via the GitHub UI:
-# Settings → General → Features → Discussions → Set up discussions
-# Or via GraphQL after initial setup.
-```
-
-> **Note:** Discussion categories cannot currently be created via the REST API.
-> Use the GitHub UI or GraphQL `createDiscussionCategory` mutation. The compliance
-> audit checks that Discussions are enabled; category configuration is verified
-> manually during onboarding.
 
 ---
 
@@ -193,70 +129,30 @@ always` to both required actors, and flags the `Repository admin` role
 | **Dismiss stale reviews on push** | **Yes** — prevents merging unreviewed code after approval |
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
-| **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
-| **Allow auto-merge** | **Yes** — enables automatic merge when all status checks pass and requirements are satisfied |
+| **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
 
-> **CODEOWNERS:** All repos MUST have a `CODEOWNERS` file. Without one, the
-> "Require code owner review" setting has no effect. See the
-> [CODEOWNERS Standard](#codeowners-standard) below for the required format.
-
-#### Auto-Merge Configuration
-
-The **Allow auto-merge** setting enables PRs to merge automatically once all status checks pass and review requirements are satisfied. This is required for:
-
-- **Dependabot auto-merge workflows** — enables `gh pr merge --auto` API calls
-- **Agentic PR automation** — CI/CD agents can queue PRs for automatic merge after approval and check passage
-- **Efficient CI workflows** — avoids manual merge steps when all quality gates have passed
-
-Auto-merge is a **safe setting** because the ruleset still enforces all approval and review requirements before
-the merge occurs — the automation only handles the final merge step after human review and all CI checks pass.
-See [GitHub's auto-merge documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
-for more details.
-
-#### Bypass Actors
-
-See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
-The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
-
-#### CODEOWNERS Approval Timing
-
-GitHub evaluates code owner status **at the time an approval is submitted**, not
-retroactively. If `CODEOWNERS` is updated (e.g., adding bot accounts), approvals
-already on open PRs from those accounts are not retroactively credited as code
-owner approvals.
-
-**Recovery:** comment `@dependabot rebase` on blocked PRs. This triggers
-Dependabot to push a new commit, which fires the automerge workflow and submits
-a fresh approval under the current CODEOWNERS.
+> **CODEOWNERS:** Repos SHOULD add a `CODEOWNERS` file defining ownership.
+> Without one, the "Require code owner review" setting has no effect. Add
+> CODEOWNERS incrementally as team structure and domain ownership solidifies.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have the following quality checks configured and
-required. The specific check names and ecosystem configurations vary by repo,
-but the categories are universal.
+Every repository MUST have all five quality checks configured and required.
+The specific check names and ecosystem configurations vary by repo, but the
+categories are universal.
 
 #### Required Check Categories
 
 | Check | Required | Check Name(s) | Notes |
 |-------|----------|---------------|-------|
 | **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
-| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
+| **CodeQL** | All repos | `Analyze` or `Analyze (<language>)` | SAST — all ecosystems present in the repo must be configured |
 | **Claude Code** | All repos | `claude` | AI code review on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
-| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
-
-> **Check names must match exactly.** GitHub-managed CodeQL produces a check named
-> `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
-> `CodeQL / Analyze (go)`. Requiring a check name that no job produces permanently
-> blocks every PR. Verify check names against actual workflow runs:
->
-> ```bash
-> gh pr checks <PR-number> --repo petry-projects/<repo>
-> ```
 
 #### Ecosystem-Specific Configuration
 
@@ -272,7 +168,6 @@ in the relevant checks:
 | `pyproject.toml` / `requirements.txt` | `python` | Python analysis | pytest, coverage | `pip-audit` |
 | `.github/workflows/*.yml` | `actions` | — | — | — |
 | `*.tf` (Terraform) | — | — | `terraform validate` | Dependabot security updates |
-| `_bmad/` (BMAD Method) | — | — | `feature-ideation.yml` (weekly) | — |
 
 Multi-language repos (e.g., TypeScript + Go) MUST configure all applicable
 ecosystems in each check.
@@ -295,40 +190,9 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 | App | Purpose | Installed |
 |-----|---------|-----------|
 | **Claude** | AI code review and PR assistance via Claude Code Action | 2026-03-20 |
-| **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge | 2026-03-23 |
-| **petry-projects-pr-review-agent** | (deprecated) GitHub App formerly used for PR review — replaced by `donpetry-bot` machine user in `@petry-projects/org-leads` because Apps cannot be CODEOWNERS | 2026-04-01 |
-| **donpetry-bot** | Machine-user account in `@petry-projects/org-leads`; satisfies CODEOWNERS for automated PR review | 2026-05-04 |
+| **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge (bypasses branch protection) | 2026-03-23 |
 | **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
-
-### Check-Suite Auto-Trigger Preferences
-
-GitHub automatically creates a check suite for any app that has previously created check runs in a repo, on every push.
-Some apps (Claude, CodeRabbit) create these suites proactively but only complete them when they have real work to do.
-When they have nothing to do, the suite stays in `queued` state indefinitely —
-**GitHub auto-merge waits for all check suites to reach a terminal state before merging**,
-so these orphaned suites permanently block auto-merge.
-
-**Required configuration** (enforced by `scripts/apply-repo-settings.sh` and detected by `scripts/compliance-audit.sh`):
-
-| App | app_id | Setting |
-|-----|--------|---------|
-| Claude (`anthropics/claude-code-action`) | `1236702` | `auto_trigger_checks: false` |
-| CodeRabbit | `347564` | `auto_trigger_checks: false` |
-
-Disabling auto-trigger stops GitHub from creating suites on every push. The apps still create suites explicitly when they have work to report.
-
-If an app has never created a check run in a repository, GitHub omits that app from `auto_trigger_checks` entirely.
-Both `scripts/apply-repo-settings.sh` and `scripts/compliance-audit.sh` treat this `missing` state as compliant —
-no PATCH is needed and no finding is raised until the app is first seen in the repo.
-
-**Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
-
-```bash
-GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh <repo-name>
-# or for all org repos:
-GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
-```
 
 ### Other Integrations
 
@@ -350,7 +214,7 @@ all repos automatically — no per-repo setup needed:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 
-Repos may require repo-specific secrets beyond this standard set.
+Repos's may require repo-specific secrets beyond this standard set.
 
 ---
 
@@ -366,36 +230,6 @@ All repositories MUST have these labels configured:
 | `bug` | `#d73a4a` (red) | Bug reports |
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
-| `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
-
----
-
-## CODEOWNERS Standard
-
-All repositories MUST have a `CODEOWNERS` file at `.github/CODEOWNERS`
-(or `CODEOWNERS` at the repo root for repos with no `.github/` directory).
-
-The full policy lives in [`codeowners-standard.md`](codeowners-standard.md).
-Summary:
-
-- The default owner line MUST be `* @petry-projects/org-leads`
-- Direct listings of users or bot accounts (e.g.,
-  `@petry-projects-pr-review-agent`, `@dependabot-automerge-petry`) are
-  **forbidden** — manage membership through the team instead
-- GitHub Apps cannot be code owners (platform limitation); use machine-user
-  accounts added to the team
-
-### Standard Template
-
-```gitignore
-# CODEOWNERS
-# Standard: https://github.com/petry-projects/.github/blob/main/standards/codeowners-standard.md
-
-* @petry-projects/org-leads
-```
-
-Repos with finer-grained path ownership MUST include `@petry-projects/org-leads`
-on every owner line so the team can always satisfy `require_code_owner_review`.
 
 ---
 
@@ -404,17 +238,14 @@ on every owner line so the team can always satisfy `require_code_owner_review`.
 When creating a new repository in `petry-projects`:
 
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
-2. **Create the `pr-quality` ruleset** matching the standard configuration above, including:
-   - Bypass actors with `bypass_mode: always` for `dependabot-automerge-petry` and `OrganizationAdmin`
-   - **Allow auto-merge enabled** — in the ruleset's "Merge settings", check the "Allow auto-merge" option.
-     Required for seamless PR automation and CI-dependent merges
-3. **Create the `code-quality` ruleset** with required checks for the repo's stack — verify check names against actual workflow runs before requiring them
-4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
+2. **Create the `pr-quality` ruleset** matching the standard configuration above
+3. **Create the `code-quality` ruleset** with required checks for the repo's stack
+4. **Add a `CODEOWNERS` file** defining ownership for the repo's key paths
 5. **Add Dependabot configuration** — copy the appropriate template from
    [`standards/dependabot/`](dependabot/) and add to `.github/dependabot.yml`
 6. **Add CI workflows** — see [CI Standards](ci-standards.md) for required workflows
 7. **Create standard labels** — all labels from the [Standard Set](#labels--standard-set) above, plus any project-specific labels
-8. **Enable auto-delete head branches** in repo settings
+8. **Enable auto-delete head branches** and **auto-merge** in repo settings
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
 
 > **Note:** All standard CI secrets are configured at the org level and inherited
@@ -425,9 +256,7 @@ When creating a new repository in `petry-projects`:
 
 ## Current Compliance Status
 
-**Repository settings:** All 7 repos are fully compliant as of 2026-05-13
-(check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
-last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
+Settings deviations from the standard documented above:
 
 **Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
 sweep (now enforced by `check_ruleset_bypass_actors()` and
