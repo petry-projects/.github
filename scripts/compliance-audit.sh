@@ -40,6 +40,7 @@ REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:Allow auto-merge must be enabled for Dependabot workflow"
   "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
   "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
+  "has_issues:true:Issue tracking must be enabled"
 )
 
 # ---------------------------------------------------------------------------
@@ -342,7 +343,7 @@ check_codeowners() {
 
   if [ "$found" = false ]; then
     add_finding "$repo" "settings" "missing-codeowners" "warning" \
-      "No \`CODEOWNERS\` file found — required for code owner review enforcement" \
+      "No \`CODEOWNERS\` file found — recommended for code owner review enforcement" \
       "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
   fi
 }
@@ -384,11 +385,18 @@ check_workflow_permissions() {
     [ -z "$decoded" ] && continue
 
     # Check if the workflow has a top-level permissions key
-    # A well-configured multi-job workflow resets permissions to {} at top level
+    # Single-job workflows may define permissions at job level instead
     if ! echo "$decoded" | grep -qE '^permissions:'; then
-      add_finding "$repo" "ci-workflows" "missing-permissions-$wf" "warning" \
-        "Workflow \`$wf\` missing top-level \`permissions:\` declaration (least-privilege policy)" \
-        "standards/ci-standards.md#permissions-policy"
+      # Count jobs and check if the single job has job-level permissions
+      local job_count
+      job_count=$(echo "$decoded" | grep -cE '^  [a-zA-Z_-]+:$' || echo "0")
+      local has_job_perms
+      has_job_perms=$(echo "$decoded" | grep -cE '^    permissions:' || echo "0")
+      if [ "$job_count" -gt 1 ] || [ "$has_job_perms" -eq 0 ]; then
+        add_finding "$repo" "ci-workflows" "missing-permissions-$wf" "warning" \
+          "Workflow \`$wf\` missing top-level \`permissions:\` declaration (least-privilege policy)" \
+          "standards/ci-standards.md#permissions-policy"
+      fi
     fi
   done
 }
