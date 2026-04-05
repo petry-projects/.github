@@ -44,8 +44,10 @@ jobs:
 
       - name: Lint GitHub Actions
         run: |
-          # Install actionlint
-          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-bash.sh)
+          # Install actionlint via direct download (pinned version)
+          ACTIONLINT_VERSION="1.7.7"
+          curl -sL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" | tar xz actionlint
+          chmod +x actionlint
           # Lint all workflow files (our own and templates)
           ./actionlint .github/workflows/*.yml || true
           # Template workflows may use placeholder expressions — lint with relaxed mode

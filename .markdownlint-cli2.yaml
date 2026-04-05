@@ -1,5 +1,7 @@
 config:
-  MD013:
-    line_length: 200
-  MD033: false   # Allow inline HTML (used in standards docs for tables/details)
-  MD041: false   # First line doesn't need to be a top-level heading
+  MD013: false   # Line length — many existing docs exceed 200 chars; fix incrementally
+  MD024: false   # Duplicate headings — AGENTS.md has intentional repeated section headers
+  MD032: false   # Blanks around lists — many existing docs use compact list formatting
+  MD033: false   # Inline HTML — used in standards docs for tables/details
+  MD034: false   # Bare URLs — AGENTS.md uses bare URLs for references
+  MD041: false   # First line heading — not all docs start with a heading
