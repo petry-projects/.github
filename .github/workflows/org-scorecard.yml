@@ -81,7 +81,12 @@ jobs:
               ISSUE_TITLE="Scorecard: $CHECK_NAME"
 
               # Search for existing open issue
-              EXISTING_ISSUE=$(gh issue list --repo "$ORG/$REPO" --label scorecard --state open --search "\"$ISSUE_TITLE\" in:title" --json number,title -q ".[] | select(.title | startswith(\"$ISSUE_TITLE\")) | .number" | head -1)
+              EXISTING_ISSUE=$(gh issue list --repo "$ORG/$REPO" \
+                --label scorecard --state open \
+                --search "\"$ISSUE_TITLE\" in:title" \
+                --json number,title \
+                -q ".[] | select(.title | startswith(\"$ISSUE_TITLE\")) | .number" \
+                | head -1)
 
               if [ "$SCORE" -eq 10 ]; then
                 # Check passed - close existing issue if any
