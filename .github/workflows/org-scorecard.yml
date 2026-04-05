@@ -15,7 +15,11 @@ jobs:
       - name: Install Scorecard CLI
         run: |
           SCORECARD_VERSION="v5.1.1"
-          curl -sL "https://github.com/ossf/scorecard/releases/download/${SCORECARD_VERSION}/scorecard_5.1.1_linux_amd64.tar.gz" | tar xz
+          SCORECARD_SHA="a894eb7390308069a49a3ace0f68dddf995cdfa1b6e7f8b2e1ea77de131e4962"
+          curl -sLo scorecard.tar.gz "https://github.com/ossf/scorecard/releases/download/${SCORECARD_VERSION}/scorecard_5.1.1_linux_amd64.tar.gz"
+          echo "${SCORECARD_SHA}  scorecard.tar.gz" | sha256sum -c -
+          tar xzf scorecard.tar.gz
+          rm scorecard.tar.gz
           sudo mv scorecard-linux-amd64 /usr/local/bin/scorecard
           chmod +x /usr/local/bin/scorecard
 
