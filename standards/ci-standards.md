@@ -430,25 +430,35 @@ autofix:
 
 ## Current Repository CI Status
 
-| Repository | CI | CodeQL | SonarCloud | Claude | Dep Auto-merge | Dep Audit | Dependabot Config |
-|------------|:--:|:------:|:----------:|:------:|:--------------:|:---------:|:-----------------:|
-| **broodly** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| **markets** | — | Yes | Yes | Yes | Yes | Yes | Partial (missing npm ecosystem) |
-| **google-app-scripts** | Yes | Yes | Yes | Yes | Yes (older pattern) | — | Non-standard (npm limit:10) |
-| **TalkTerm** | Yes | — | — | — | — | — | — |
-| **ContentTwin** | — | — | Yes | — | — | — | — |
-| **bmad-bgreat-suite** | — | — | — | — | — | — | — |
+All five check categories are **required on every repository** (see
+[GitHub Settings — code-quality ruleset](github-settings.md#code-quality--required-checks-ruleset-all-repositories)).
+The specific ecosystems configured in each check depend on the repo's stack.
+
+| Repository | CI | CodeQL | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config |
+|------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|
+| **broodly** | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| **markets** | — | Yes | Yes | Yes | — | Yes | Yes | Partial |
+| **google-app-scripts** | Yes | Yes | Yes | Yes | Yes | Yes (older) | — | Non-standard |
+| **TalkTerm** | Yes | — | — | — | Yes | — | — | — |
+| **ContentTwin** | — | — | Yes | — | — | — | — | — |
+| **bmad-bgreat-suite** | — | — | — | — | — | — | — | — |
 
 ### Gaps to Address
 
-- **TalkTerm:** Missing SonarCloud, Claude Code, Dependabot config, auto-merge, dependency audit, CodeQL
-- **ContentTwin:** Missing CI pipeline, CodeQL, Claude Code, Dependabot config, auto-merge, dependency audit
-- **bmad-bgreat-suite:** Missing all CI workflows (new repo — no branch protection or rulesets either)
-- **google-app-scripts:** Missing dependency audit workflow; Dependabot config uses `limit:10` for npm (should be `0` per policy); auto-merge workflow uses older pattern (`--admin` bypass instead of `--auto`)
-- **markets:** Missing dedicated CI pipeline; Dependabot config only covers `github-actions` — missing `npm` ecosystem entry
+Every `—` in the table above is a gap that must be remediated. Priority order:
+
+1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding
+2. **ContentTwin:** Missing CI, CodeQL, Claude, Coverage, Dependabot — 5 of 8 categories missing
+3. **TalkTerm:** Missing CodeQL, SonarCloud, Claude, Dependabot — 4 of 8 categories missing
+4. **markets:** Missing CI pipeline and Coverage; Dependabot config only covers `github-actions` (missing `npm` ecosystem)
+5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
 
 ### Version Inconsistencies
 
-- **SonarCloud action:** broodly/markets use v7.0.0; ContentTwin/google-app-scripts use v6
-- **CodeQL action:** broodly uses v4; markets uses v3
-- **Claude Code Action:** Different SHA pins across repos (should be aligned)
+All repos MUST align to the latest version of each action:
+
+| Action | Target Version | Repos Needing Update |
+|--------|---------------|---------------------|
+| **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
+| **CodeQL action** | v4 | markets (currently v3) |
+| **Claude Code Action** | Latest SHA | All repos should use the same pinned SHA |
