@@ -34,22 +34,22 @@ which validates:
 
 ### Security Rules
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `no-secrets` | error | No API keys, tokens, passwords, or connection strings in agent config files |
-| `no-skip-permissions` | error | No `dangerouslySkipPermissions` or equivalent permission bypasses |
-| `no-unrestricted-tools` | warning | Tool authorizations should be scoped, not wildcard |
-| `org-reference` | error | AGENTS.md must reference org-level `.github/AGENTS.md` |
-| `claude-reference` | error | CLAUDE.md must reference AGENTS.md |
-| `no-prompt-injection-vectors` | warning | Config files should not include user-controllable template variables in security-sensitive positions |
+| Rule | Severity | Status | Description |
+|------|----------|--------|-------------|
+| `no-secrets` | error | Enforced | No API keys, tokens, passwords, or connection strings in agent config files |
+| `no-skip-permissions` | error | Enforced | No `dangerouslySkipPermissions` or equivalent permission bypasses |
+| `org-reference` | error | Enforced | AGENTS.md must reference org-level `.github/AGENTS.md` |
+| `claude-reference` | error | Enforced | CLAUDE.md must reference AGENTS.md |
+| `no-unrestricted-tools` | warning | Planned | Tool authorizations should be scoped, not wildcard |
+| `no-prompt-injection-vectors` | warning | Planned | Config files should not include user-controllable template variables in security-sensitive positions |
 
 ### Structural Rules
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `valid-yaml-frontmatter` | error | All SKILL.md files must have valid YAML frontmatter |
-| `manifest-consistency` | warning | Skill manifests must match directory structure |
-| `no-orphan-skills` | warning | Every skill directory must be registered in module-help.csv (if applicable) |
+| Rule | Severity | Status | Description |
+|------|----------|--------|-------------|
+| `valid-yaml-frontmatter` | error | Enforced | All SKILL.md files must have valid YAML frontmatter with `name` and `description` |
+| `no-orphan-skills` | warning | Enforced | Every skill directory must be registered in module-help.csv (if applicable) |
+| `manifest-consistency` | warning | Planned | Skill manifests must match directory structure |
 
 ## AgentShield CI Workflow
 

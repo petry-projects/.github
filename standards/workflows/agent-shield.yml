@@ -1,3 +1,6 @@
+# AgentShield — Agent configuration security validation
+# See: standards/agent-standards.md
+
 name: AgentShield
 
 on:
@@ -43,8 +46,9 @@ jobs:
       - name: Validate AGENTS.md references org standards
         if: hashFiles('AGENTS.md') != ''
         run: |
-          if ! grep -qi 'petry-projects/\.github' AGENTS.md && ! grep -qi 'org.level\|org-level\|organization' AGENTS.md; then
-            echo "::warning file=AGENTS.md::AGENTS.md should reference org-level standards (petry-projects/.github/AGENTS.md)"
+          if ! grep -qi 'petry-projects/\.github' AGENTS.md; then
+            echo "::error file=AGENTS.md::AGENTS.md must reference org-level standards (petry-projects/.github/AGENTS.md)"
+            exit 1
           fi
 
       - name: Scan for secrets in agent config files
@@ -52,15 +56,33 @@ jobs:
           status=0
           patterns='(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|password\s*[:=]\s*["\x27][^"\x27]+["\x27]|api[_-]?key\s*[:=]\s*["\x27][^"\x27]+["\x27])'
 
-          for file in CLAUDE.md AGENTS.md $(find . -name 'SKILL.md' -o -name '.claude*' -o -name 'config.yaml' | grep -v node_modules | grep -v .git); do
-            if [ -f "$file" ]; then
-              if grep -Pn "$patterns" "$file" 2>/dev/null; then
-                echo "::error file=$file::Potential secret or credential detected in agent config"
-                status=1
-              fi
+          scan_file() {
+            local file="$1"
+            if grep -Pq "$patterns" "$file" 2>/dev/null; then
+              # Report the match without printing the secret value
+              local count
+              count=$(grep -Pc "$patterns" "$file" 2>/dev/null)
+              echo "::error file=$file::Potential secret or credential detected ($count match(es)) — review file manually"
+              return 1
             fi
+            return 0
+          }
+
+          for file in CLAUDE.md AGENTS.md; do
+            [ -f "$file" ] && scan_file "$file" || status=1
           done
 
+          while IFS= read -r file; do
+            scan_file "$file" || status=1
+          done < <(find . -type f \( -name 'SKILL.md' -o -name 'workflow.md' -o -name 'config.yaml' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' \) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.github/workflows/*')
+
+          while IFS= read -r file; do
+            scan_file "$file" || status=1
+          done < <(find . -type f -path '*/.claude/*' -not -path '*/node_modules/*' -not -path '*/.git/*')
+
+          if [ "$status" -eq 0 ]; then
+            echo "No secrets detected in agent configuration files."
+          fi
           exit $status
 
       - name: Check for permission bypasses
@@ -68,20 +90,30 @@ jobs:
           status=0
           bypass_pattern='dangerouslySkipPermissions|skipPermissions|--dangerously-skip'
 
-          for file in CLAUDE.md AGENTS.md $(find . -name '*.md' -path '*/.claude/*' | grep -v node_modules); do
-            if [ -f "$file" ]; then
-              while IFS= read -r match; do
-                # Skip documentation lines (negation patterns and backtick-quoted references)
-                if echo "$match" | grep -qiP '^\s*-\s*(No|Never|Must not|Do not|MUST NOT)\b' || \
-                   echo "$match" | grep -qP '`[^`]*'"$bypass_pattern"'[^`]*`'; then
-                  continue
-                fi
-                echo "::error file=$file::Permission bypass detected: $match"
-                status=1
-              done < <(grep -inP "$bypass_pattern" "$file" 2>/dev/null || true)
-            fi
+          scan_file() {
+            local file="$1"
+            while IFS= read -r match; do
+              # Skip documentation lines (negation patterns and backtick-quoted references)
+              if echo "$match" | grep -qiP '^\s*[-*]\s*(No|Never|Must not|Do not|MUST NOT)\b' || \
+                 echo "$match" | grep -qP '`[^`]*'"$bypass_pattern"'[^`]*`'; then
+                continue
+              fi
+              echo "::error file=$file::Permission bypass detected"
+              status=1
+            done < <(grep -inP "$bypass_pattern" "$file" 2>/dev/null || true)
+          }
+
+          for file in CLAUDE.md AGENTS.md; do
+            [ -f "$file" ] && scan_file "$file"
           done
 
+          while IFS= read -r file; do
+            scan_file "$file"
+          done < <(find . -type f \( -name 'SKILL.md' -o -name 'workflow.md' -o -name '*.md' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) \( -path '*/src/*' -o -path '*/.claude/*' \) -not -path '*/node_modules/*' -not -path '*/.git/*')
+
+          if [ "$status" -eq 0 ]; then
+            echo "No permission bypasses detected."
+          fi
           exit $status
 
       - name: Validate SKILL.md frontmatter
@@ -96,8 +128,16 @@ jobs:
               continue
             fi
 
-            # Extract frontmatter and validate
-            frontmatter=$(sed -n '1,/^---$/p' "$file" | tail -n +2 | head -n -1)
+            # Check for closing --- delimiter
+            closing_line=$(tail -n +2 "$file" | grep -n '^---$' | head -1 | cut -d: -f1)
+            if [ -z "$closing_line" ]; then
+              echo "::error file=$file::SKILL.md frontmatter missing closing --- delimiter"
+              status=1
+              continue
+            fi
+
+            # Extract frontmatter between delimiters
+            frontmatter=$(sed -n "2,$((closing_line))p" "$file" | head -n -1)
             if [ -z "$frontmatter" ]; then
               echo "::error file=$file::SKILL.md has empty frontmatter"
               status=1
