@@ -402,6 +402,61 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: CLAUDE.md exists and references AGENTS.md
+# ---------------------------------------------------------------------------
+check_claude_md() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/CLAUDE.md" --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-claude-md" "error" \
+      "Missing \`CLAUDE.md\` — every repo must have a CLAUDE.md that references AGENTS.md" \
+      "standards/github-settings.md"
+    return
+  fi
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+
+  if ! echo "$decoded" | grep -qi 'AGENTS\.md'; then
+    add_finding "$repo" "standards" "claude-md-missing-agents-ref" "warning" \
+      "\`CLAUDE.md\` does not reference \`AGENTS.md\`" \
+      "standards/github-settings.md"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: AGENTS.md exists and references org .github/AGENTS.md
+# ---------------------------------------------------------------------------
+check_agents_md() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/AGENTS.md" --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-agents-md" "error" \
+      "Missing \`AGENTS.md\` — every repo must have an AGENTS.md that references the org-level standards" \
+      "standards/github-settings.md"
+    return
+  fi
+
+  # For repos other than .github, AGENTS.md should reference the org-level .github/AGENTS.md
+  if [ "$repo" != ".github" ]; then
+    local decoded
+    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+
+    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github)'; then
+      add_finding "$repo" "standards" "agents-md-missing-org-ref" "warning" \
+        "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
+        "standards/github-settings.md"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
@@ -585,7 +640,7 @@ HEREDOC
 
 HEREDOC
 
-  for category in ci-workflows action-pinning dependabot settings labels rulesets; do
+  for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -624,11 +679,6 @@ main() {
   local repo_count=0
 
   for repo in $repos; do
-    # Skip the .github config repo itself (different compliance criteria)
-    if [ "$repo" = ".github" ]; then
-      continue
-    fi
-
     repo_count=$((repo_count + 1))
     log "Auditing $ORG/$repo"
 
@@ -648,6 +698,8 @@ main() {
     check_codeowners "$repo"
     check_sonarcloud "$repo"
     check_workflow_permissions "$repo"
+    check_claude_md "$repo"
+    check_agents_md "$repo"
 
     log_end
   done
@@ -662,8 +714,6 @@ main() {
     info "Managing issues..."
 
     for repo in $repos; do
-      [ "$repo" = ".github" ] && continue
-
       ensure_audit_label "$repo"
 
       # Create issues for new findings (process substitution avoids subshell)
