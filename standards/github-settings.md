@@ -9,7 +9,7 @@ These settings are enforced via the GitHub UI, API, and repository rulesets.
 
 | Setting | Value | Notes |
 |---------|-------|-------|
-| **Default repository permission** | `write` | Members get write access by default |
+| **Default repository permission** | `read` | Least privilege; grant write/admin via teams |
 | **Organization profile** | `petry-projects` | Public org (free plan) |
 | **Default branch name** | `main` | Org-wide default for new repos |
 | **Members can create repos** | Yes (public + private) | |
@@ -138,7 +138,7 @@ New repositories automatically inherit these secrets — no per-repo configurati
 
 ## Labels — Standard Set
 
-All repositories SHOULD have these labels available:
+All repositories MUST have these labels configured:
 
 | Label | Color | Purpose |
 |-------|-------|---------|
