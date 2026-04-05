@@ -5,12 +5,19 @@
 #   standards/ci-standards.md
 #   standards/dependabot-policy.md
 #   standards/github-settings.md
+<<<<<<< HEAD
 #   standards/push-protection.md
 #
 # Outputs:
 #   $REPORT_DIR/findings.json      — machine-readable findings
 #   $REPORT_DIR/summary.md         — human-readable report
 #   $REPORT_DIR/issue-counts.json  — issue management counts (added/existing/removed)
+=======
+#
+# Outputs:
+#   $REPORT_DIR/findings.json   — machine-readable findings
+#   $REPORT_DIR/summary.md      — human-readable report
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 #
 # Environment variables:
 #   GH_TOKEN        — GitHub token with repo/org scope (required)
@@ -33,6 +40,7 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
+<<<<<<< HEAD
 ISSUES_FILE="$REPORT_DIR/issues.json"
 ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
 
@@ -71,6 +79,18 @@ REQUIRED_SETTINGS_BOOL=(
   "has_wiki:false:warning:Wiki should be disabled — documentation lives in the repo"
   "has_issues:true:error:Issue tracking must be enabled"
   "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
+=======
+
+REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml)
+
+REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
+
+REQUIRED_SETTINGS_BOOL=(
+  "allow_auto_merge:true:Allow auto-merge must be enabled for Dependabot workflow"
+  "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
+  "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
+  "has_issues:true:Issue tracking must be enabled"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 )
 
 # ---------------------------------------------------------------------------
@@ -101,6 +121,7 @@ log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
 
+<<<<<<< HEAD
 # escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
 # This ensures that version tags (e.g. v2.1) and reusable basenames are treated
 # as literal strings even if they contain regex metacharacters.
@@ -108,6 +129,8 @@ escape_ere() {
   printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/{}]/\\&/g'
 }
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
@@ -124,6 +147,7 @@ gh_api() {
   return 1
 }
 
+<<<<<<< HEAD
 # Source the shared push-protection library — provides pp_run_all_checks()
 # and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
 # add_finding() are defined, since the lib's check functions call them.
@@ -136,6 +160,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/dev-lead-retrigger.sh
 . "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -147,10 +173,17 @@ detect_ecosystems() {
   local tree
   tree=$(gh_api "repos/$ORG/$repo/git/trees/HEAD?recursive=1" --jq '.tree[].path' 2>/dev/null || echo "")
 
+<<<<<<< HEAD
   if grep -qE '(^|/)package\.json$' <<< "$tree"; then
     ECOSYSTEMS+=("npm")
   fi
   if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
+=======
+  if echo "$tree" | grep -qE '(^|/)package\.json$'; then
+    ECOSYSTEMS+=("npm")
+  fi
+  if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     # Override npm with pnpm if lock file present, or add pnpm directly
     if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
       ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
@@ -158,6 +191,7 @@ detect_ecosystems() {
       ECOSYSTEMS+=("pnpm")
     fi
   fi
+<<<<<<< HEAD
   if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
     ECOSYSTEMS+=("go")
   fi
@@ -179,6 +213,23 @@ detect_ecosystems() {
   if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
     ECOSYSTEMS+=("bmad-method")
   fi
+=======
+  if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
+    ECOSYSTEMS+=("go")
+  fi
+  if echo "$tree" | grep -qE '(^|/)Cargo\.toml$'; then
+    ECOSYSTEMS+=("rust")
+  fi
+  if echo "$tree" | grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$'; then
+    ECOSYSTEMS+=("python")
+  fi
+  if echo "$tree" | grep -qE '\.tf$'; then
+    ECOSYSTEMS+=("terraform")
+  fi
+  if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
+    ECOSYSTEMS+=("github-actions")
+  fi
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 }
 
 # ---------------------------------------------------------------------------
@@ -194,6 +245,7 @@ check_required_workflows() {
         "standards/ci-standards.md#required-workflows"
     fi
   done
+<<<<<<< HEAD
 
   # Conditional: bmad-method repos must have feature-ideation workflow
   if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
@@ -203,6 +255,8 @@ check_required_workflows() {
         "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
     fi
   fi
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 }
 
 # ---------------------------------------------------------------------------
@@ -229,10 +283,15 @@ check_action_pinning() {
     # Find uses: directives that are NOT SHA-pinned
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
+<<<<<<< HEAD
     # Exclude $ORG/.github reusable workflow refs — these use tag refs
     # (@v1, @v2, @main) by design per ci-standards.md#action-pinning-policy
     local unpinned
     unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE "uses:[[:space:]]+$ORG/\\.github(-private)?/\\.github/workflows/" || true)
+=======
+    local unpinned
+    unpinned=$(echo "$decoded" | grep -E '^\s*-?\s*uses:\s+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
     if [ -n "$unpinned" ]; then
       local count
@@ -247,6 +306,7 @@ check_action_pinning() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: Reusable workflow path syntax
 # ---------------------------------------------------------------------------
 # NOTE: The correct pattern IS petry-projects/.github/.github/workflows/...
@@ -263,6 +323,8 @@ check_reusable_workflow_paths() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -282,14 +344,19 @@ check_dependabot_config() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
   # Check github-actions ecosystem entry exists
+<<<<<<< HEAD
   # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
   if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
+=======
+  if ! echo "$decoded" | grep -q 'package-ecosystem:.*"github-actions"'; then
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     add_finding "$repo" "dependabot" "missing-github-actions-ecosystem" "error" \
       "Dependabot config missing \`github-actions\` ecosystem entry" \
       "standards/dependabot-policy.md#github-actions-all-repos"
   fi
 
   # Check that app ecosystem entries use open-pull-requests-limit: 0
+<<<<<<< HEAD
   # Extract ecosystem blocks and check limits.
   # Accept both double-quoted and single-quoted YAML string values.
   for eco in npm pip gomod cargo terraform; do
@@ -298,6 +365,15 @@ check_dependabot_config() {
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
       block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
+=======
+  # Extract ecosystem blocks and check limits
+  for eco in npm pip gomod cargo terraform; do
+    if echo "$decoded" | grep -q "package-ecosystem:.*\"$eco\""; then
+      # Check if this ecosystem has limit: 0
+      # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
+      local block
+      block=$(echo "$decoded" | awk "/package-ecosystem:.*\"$eco\"/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/\"$eco\"/) exit}" | head -15)
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
@@ -308,14 +384,23 @@ check_dependabot_config() {
     fi
   done
 
+<<<<<<< HEAD
   # Check for required labels in dependabot config.
   # Accept both double-quoted and single-quoted YAML string values.
   if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
+=======
+  # Check for required labels in dependabot config
+  if ! echo "$decoded" | grep -q '"security"'; then
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     add_finding "$repo" "dependabot" "missing-security-label" "warning" \
       "Dependabot config missing \`security\` label on updates" \
       "standards/dependabot-policy.md#policy"
   fi
+<<<<<<< HEAD
   if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
+=======
+  if ! echo "$decoded" | grep -q '"dependencies"'; then
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     add_finding "$repo" "dependabot" "missing-dependencies-label" "warning" \
       "Dependabot config missing \`dependencies\` label on updates" \
       "standards/dependabot-policy.md#policy"
@@ -327,10 +412,16 @@ check_dependabot_config() {
 # ---------------------------------------------------------------------------
 check_repo_settings() {
   local repo="$1"
+<<<<<<< HEAD
   local repo_json="$2"
 
   local settings
   settings=$(echo "$repo_json" | jq '{
+=======
+
+  local settings
+  settings=$(gh_api "repos/$ORG/$repo" --jq '{
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     has_wiki: .has_wiki,
@@ -343,11 +434,19 @@ check_repo_settings() {
 
   # Boolean settings checks
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
+<<<<<<< HEAD
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
     actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
+=======
+    IFS=':' read -r key expected detail <<< "$entry"
+    local actual
+    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
+    if [ "$actual" != "$expected" ]; then
+      add_finding "$repo" "settings" "$key" "warning" \
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
         "standards/github-settings.md#repository-settings--standard-defaults"
     fi
@@ -355,13 +454,28 @@ check_repo_settings() {
 
   # Default branch
   local default_branch
+<<<<<<< HEAD
   default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
+=======
+  default_branch=$(echo "$settings" | jq -r '.default_branch')
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   if [ "$default_branch" != "main" ]; then
     add_finding "$repo" "settings" "default-branch" "error" \
       "Default branch is \`$default_branch\`, should be \`main\`" \
       "standards/github-settings.md#general"
   fi
 
+<<<<<<< HEAD
+=======
+  # Discussions
+  local has_discussions
+  has_discussions=$(echo "$settings" | jq -r '.has_discussions')
+  if [ "$has_discussions" != "true" ]; then
+    add_finding "$repo" "settings" "has-discussions" "warning" \
+      "Discussions should be enabled for community engagement" \
+      "standards/github-settings.md#general"
+  fi
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 }
 
 # ---------------------------------------------------------------------------
@@ -373,6 +487,7 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
+<<<<<<< HEAD
   for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
     IFS=':' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
@@ -395,6 +510,13 @@ check_labels() {
             "standards/github-settings.md#labels--standard-set"
         fi
       fi
+=======
+  for label in "${REQUIRED_LABELS[@]}"; do
+    if ! echo "$existing_labels" | grep -qx "$label"; then
+      add_finding "$repo" "labels" "missing-label-$label" "warning" \
+        "Required label \`$label\` is missing" \
+        "standards/github-settings.md#labels--standard-set"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     fi
   done
 }
@@ -429,6 +551,7 @@ check_codeowners() {
 
   # CODEOWNERS can be in root, .github/, or docs/
   local found=false
+<<<<<<< HEAD
   local codeowners_content=""
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
     # Use || echo "" so a 404 is non-fatal under set -euo pipefail
@@ -437,11 +560,17 @@ check_codeowners() {
     if [ -n "$content" ]; then
       found=true
       codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
+=======
+  for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
+    if gh_api "repos/$ORG/$repo/contents/$path" --jq '.name' > /dev/null 2>&1; then
+      found=true
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
       break
     fi
   done
 
   if [ "$found" = false ]; then
+<<<<<<< HEAD
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
       "standards/codeowners-standard.md"
@@ -505,6 +634,11 @@ check_codeowners() {
     add_finding "$repo" "settings" "codeowners-no-catchall" "warning" \
       "CODEOWNERS has no default \`*\` catch-all pattern — files not matched by a path rule will have no owner and \`require_code_owner_review\` will not apply to them" \
       "standards/codeowners-standard.md"
+=======
+    add_finding "$repo" "settings" "missing-codeowners" "warning" \
+      "No \`CODEOWNERS\` file found — recommended for code owner review enforcement" \
+      "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   fi
 }
 
@@ -525,6 +659,7 @@ check_sonarcloud() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: CodeQL default setup is configured (and no stray codeql.yml exists)
 #
 # After petry-projects/.github#103, CodeQL is configured via GitHub's
@@ -593,6 +728,8 @@ check_codeql_default_setup() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 # Check: Workflow permissions follow least-privilege
 # ---------------------------------------------------------------------------
 check_workflow_permissions() {
@@ -612,6 +749,7 @@ check_workflow_permissions() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
+<<<<<<< HEAD
     # Skip reusable workflows (workflow_call-only triggers).
     # Their permissions are controlled entirely by the caller workflow, so
     # requiring a top-level permissions: block here would be redundant and
@@ -621,6 +759,8 @@ check_workflow_permissions() {
       continue
     fi
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     # Check if the workflow has a top-level permissions key
     # Single-job workflows may define permissions at job level instead
     if ! echo "$decoded" | grep -qE '^permissions:'; then
@@ -639,6 +779,7 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: claude.yml jobs both have a checkout step
 # ---------------------------------------------------------------------------
 check_claude_workflow_checkout() {
@@ -1214,6 +1355,8 @@ check_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
@@ -1223,6 +1366,7 @@ ensure_audit_label() {
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
+<<<<<<< HEAD
   gh label create "dev-lead" \
     --repo "$ORG/$repo" \
     --description "For dev-lead agent pickup" \
@@ -1252,6 +1396,8 @@ ensure_required_labels() {
       --color "$color" \
       --force 2>/dev/null || true
   done
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 }
 
 create_issue_for_finding() {
@@ -1272,8 +1418,12 @@ create_issue_for_finding() {
     2>/dev/null | head -1 || echo "")
 
   if [ -n "$existing" ]; then
+<<<<<<< HEAD
     # Update existing issue with a comment; only count as existing if the update succeeds
     local update_ok=true
+=======
+    # Update existing issue with a comment
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     gh issue comment "$existing" --repo "$ORG/$repo" \
       --body "**Weekly Compliance Audit** ($(date -u +%Y-%m-%d))
 
@@ -1281,6 +1431,7 @@ This finding is still open.
 
 **Detail:** $detail
 
+<<<<<<< HEAD
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || update_ok=false
     if [ "$update_ok" = "true" ]; then
       info "Updated existing issue #$existing in $repo for: $check"
@@ -1358,6 +1509,13 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
       ;;
   esac
 
+=======
+**Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
+    info "Updated existing issue #$existing in $repo for: $check"
+    return
+  fi
+
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   # Build issue body — variable values are safe (from our own check logic + GitHub API)
   local body="## Compliance Finding
 
@@ -1375,23 +1533,36 @@ ${detail}
 
 ## Remediation
 
+<<<<<<< HEAD
 ${remediation_steps}
+=======
+Please review the linked standard and bring this repository into compliance.
+
+See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance.
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
 ---
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
+<<<<<<< HEAD
   # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
     --label "dev-lead" \
+=======
+  issue_url=$(gh issue create --repo "$ORG/$repo" \
+    --title "$search_title" \
+    --label "$AUDIT_LABEL" \
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
     local new_issue
     new_issue=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
     info "Created issue #$new_issue in $repo for: $check ($issue_url)"
+<<<<<<< HEAD
     ISSUES_ADDED=$((ISSUES_ADDED + 1))
 
     # Record created issue for umbrella
@@ -1405,12 +1576,19 @@ ${remediation_steps}
         --arg url "$issue_url" \
         '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
         >> "$ISSUES_FILE"
+=======
+
+    # Attempt to assign to claude — the bot user for Claude Code Action
+    if [ -n "$new_issue" ]; then
+      gh issue edit "$new_issue" --repo "$ORG/$repo" --add-assignee "app/claude" 2>/dev/null || true
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     fi
   else
     warn "Failed to create issue in $repo for: $check"
   fi
 }
 
+<<<<<<< HEAD
 create_umbrella_issue() {
   local audit_date
   audit_date=$(date -u +%Y-%m-%d)
@@ -1535,6 +1713,8 @@ Findings are grouped by remediation category. Address each category together to 
   fi
 }
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 close_resolved_issues() {
   local repo="$1"
 
@@ -1561,6 +1741,7 @@ close_resolved_issues() {
 
     # If this check is no longer in findings, close the issue
     if ! echo "$current_checks" | grep -qx "$check_name"; then
+<<<<<<< HEAD
       if gh issue close "$issue_num" --repo "$ORG/$repo" \
           --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
           2>/dev/null; then
@@ -1569,6 +1750,12 @@ close_resolved_issues() {
       else
         warn "Failed to close resolved issue #$issue_num in $repo: $issue_title"
       fi
+=======
+      gh issue close "$issue_num" --repo "$ORG/$repo" \
+        --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
+        2>/dev/null || true
+      info "Closed resolved issue #$issue_num in $repo: $issue_title"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     fi
   done <<< "$open_issues"
 }
@@ -1598,13 +1785,26 @@ generate_summary() {
 | Errors (must fix) | $error_count |
 | Warnings (should fix) | $warning_count |
 
+<<<<<<< HEAD
 HEREDOC
 
   if [ "$total_findings" -eq 0 ]; then
+=======
+## Findings by Repository
+
+HEREDOC
+
+  # Group findings by repo
+  local repos_with_findings
+  repos_with_findings=$(jq -r '[.[].repo] | unique[]' "$FINDINGS_FILE")
+
+  if [ -z "$repos_with_findings" ]; then
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     echo "All repositories are fully compliant! No findings." >> "$SUMMARY_FILE"
     return
   fi
 
+<<<<<<< HEAD
   # ── Findings by Check Type ──────────────────────────────────────────────────
   # Group by check name (not repo) to surface cross-repo patterns at a glance.
   # Errors first, then warnings; within each severity sorted by category then check.
@@ -1653,17 +1853,45 @@ HEREDOC
   # ── Category breakdown ───────────────────────────────────────────────────────
   cat >> "$SUMMARY_FILE" <<'HEREDOC'
 
+=======
+  for repo in $repos_with_findings; do
+    local repo_findings
+    repo_findings=$(jq -r --arg repo "$repo" \
+      '.[] | select(.repo == $repo) | "| `\(.severity)` | \(.category) | \(.check) | \(.detail) |"' \
+      "$FINDINGS_FILE")
+
+    local repo_count
+    repo_count=$(jq --arg repo "$repo" '[.[] | select(.repo == $repo)] | length' "$FINDINGS_FILE")
+
+    cat >> "$SUMMARY_FILE" <<HEREDOC
+### [$repo](https://github.com/$ORG/$repo) — $repo_count finding(s)
+
+| Severity | Category | Check | Detail |
+|----------|----------|-------|--------|
+$repo_findings
+
+HEREDOC
+  done
+
+  # Category breakdown
+  cat >> "$SUMMARY_FILE" <<HEREDOC
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 ## Findings by Category
 
 HEREDOC
 
+<<<<<<< HEAD
   for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
+=======
+  for category in ci-workflows action-pinning dependabot settings labels rulesets; do
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
       echo "- **$category:** $cat_count finding(s)" >> "$SUMMARY_FILE"
     fi
   done
+<<<<<<< HEAD
   # Footer appended by main() after issue links are added
 }
 
@@ -1767,12 +1995,21 @@ HEREDOC
   done <<< "$checks_ordered"
 
   rm -f "$pr_data_file"
+=======
+
+  cat >> "$SUMMARY_FILE" <<HEREDOC
+
+---
+*Generated by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
+HEREDOC
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
+<<<<<<< HEAD
   # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
   if [ -z "${GH_TOKEN:-}" ]; then
     echo "::error::GH_TOKEN is not set. Ensure ORG_SCORECARD_TOKEN secret is configured and passed as an env var to this step." \
@@ -1785,13 +2022,20 @@ main() {
     exit 1
   fi
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   info "Starting compliance audit for $ORG"
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
 
+<<<<<<< HEAD
   # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
   : > "$ISSUES_FILE"
+=======
+  # Initialize findings file
+  echo "[]" > "$FINDINGS_FILE"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
   # Get all non-archived repos in the org
   local repos
@@ -1806,6 +2050,14 @@ main() {
   local repo_count=0
 
   for repo in $repos; do
+<<<<<<< HEAD
+=======
+    # Skip the .github config repo itself (different compliance criteria)
+    if [ "$repo" = ".github" ]; then
+      continue
+    fi
+
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     repo_count=$((repo_count + 1))
     log "Auditing $ORG/$repo"
 
@@ -1816,6 +2068,7 @@ main() {
       info "Detected ecosystems: ${ECOSYSTEMS[*]}"
     fi
 
+<<<<<<< HEAD
     # Fetch full repo JSON once and share with settings/push-protection checks
     local repo_json
     repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
@@ -1832,10 +2085,17 @@ main() {
     check_reusable_workflow_paths "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
+=======
+    check_required_workflows "$repo"
+    check_action_pinning "$repo"
+    check_dependabot_config "$repo"
+    check_repo_settings "$repo"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
+<<<<<<< HEAD
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
@@ -1849,6 +2109,9 @@ main() {
     check_copilot_instructions "$repo"
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
+=======
+    check_workflow_permissions "$repo"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
     log_end
   done
@@ -1863,8 +2126,14 @@ main() {
     info "Managing issues..."
 
     for repo in $repos; do
+<<<<<<< HEAD
       ensure_audit_label "$repo"
       ensure_required_labels "$repo"
+=======
+      [ "$repo" = ".github" ] && continue
+
+      ensure_audit_label "$repo"
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 
       # Create issues for new findings (process substitution avoids subshell)
       while IFS= read -r finding; do
@@ -1882,6 +2151,7 @@ main() {
       # Close issues for resolved findings
       close_resolved_issues "$repo"
     done
+<<<<<<< HEAD
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
     # Both individual issues and the umbrella get the `dev-lead` label for agent pickup.
@@ -1890,10 +2160,13 @@ main() {
     # Append per-check issue links and related open PRs to the step summary
     info "Fetching linked PRs for issue summary..."
     append_issue_pr_links
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi
 
+<<<<<<< HEAD
   # Write issue-management counts and append to summary (conditional on issue management running)
   if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
     printf '{"added":%d,"existing":%d,"removed":%d,"retriggered":%d}\n' \
@@ -1926,6 +2199,8 @@ HEREDOC
 *Generated by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
 HEREDOC
 
+=======
+>>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
   # Output report paths
   echo "findings=$FINDINGS_FILE"
   echo "summary=$SUMMARY_FILE"
