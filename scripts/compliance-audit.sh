@@ -812,6 +812,9 @@ check_workflow_permissions() {
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
 # Check: claude.yml jobs both have a checkout step
 # ---------------------------------------------------------------------------
 check_claude_workflow_checkout() {
@@ -841,6 +844,7 @@ check_claude_workflow_checkout() {
         "standards/workflows/claude.yml"
     fi
   done
+<<<<<<< HEAD
 
   # Verify the check_run trigger is present — without it the claude-ci-fix job
   # in the reusable can never fire to diagnose and fix CI failures on PRs.
@@ -1160,6 +1164,11 @@ check_centralized_check_names() {
 # ---------------------------------------------------------------------------
 =======
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
+=======
+}
+
+# ---------------------------------------------------------------------------
+>>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -2161,11 +2170,15 @@ main() {
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
 <<<<<<< HEAD
+<<<<<<< HEAD
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_dev_lead_stub "$repo"
     check_centralized_check_names "$repo"
+=======
+    check_claude_workflow_checkout "$repo"
+>>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
     check_claude_md "$repo"
     check_agents_md "$repo"
     check_copilot_setup_steps "$repo"
