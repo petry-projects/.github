@@ -32,6 +32,7 @@ SHOULD be audited and brought into compliance.
 | **Has Projects** | `true` | Currently enabled on all repos |
 | **Has Wiki** | `false` | Disabled — documentation lives in the repo |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
 
 ### Security & Analysis
@@ -52,6 +53,9 @@ the enforcement primitives behind the [Push Protection Standard](push-protection
 =======
 | **Has Discussions** | `true` | Enabled for community engagement |
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+| **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 
 ### Merge Settings
 
@@ -72,6 +76,9 @@ the enforcement primitives behind the [Push Protection Standard](push-protection
 ---
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 ## Discussions Configuration
 
 GitHub Discussions MUST be enabled on all repositories. Discussions serve as the
@@ -120,8 +127,11 @@ gh api -X PATCH repos/<owner>/<repo> -f has_discussions=true
 
 ---
 
+<<<<<<< HEAD
 =======
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 ## Repository Rulesets
 
 Rulesets are the primary enforcement mechanism for branch policies. All
@@ -288,9 +298,13 @@ in the relevant checks:
 | `.github/workflows/*.yml` | `actions` | — | — | — |
 | `*.tf` (Terraform) | — | — | `terraform validate` | Dependabot security updates |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `_bmad/` (BMAD Method) | — | — | `feature-ideation.yml` (weekly) | — |
 =======
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+| `_bmad/` (BMAD Method) | — | — | `feature-ideation.yml` (weekly) | — |
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 
 Multi-language repos (e.g., TypeScript + Go) MUST configure all applicable
 ecosystems in each check.

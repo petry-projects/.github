@@ -86,11 +86,19 @@ REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-autom
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
 
 REQUIRED_SETTINGS_BOOL=(
+<<<<<<< HEAD
   "allow_auto_merge:true:Allow auto-merge must be enabled for Dependabot workflow"
   "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
   "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
   "has_issues:true:Issue tracking must be enabled"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
+  "delete_branch_on_merge:true:warning:Automatically delete head branches must be enabled"
+  "has_wiki:false:warning:Wiki should be disabled — documentation lives in the repo"
+  "has_issues:true:error:Issue tracking must be enabled"
+  "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 )
 
 # ---------------------------------------------------------------------------
@@ -229,7 +237,13 @@ detect_ecosystems() {
   if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
     ECOSYSTEMS+=("github-actions")
   fi
+<<<<<<< HEAD
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  if echo "$tree" | grep -qE '(^|/)_bmad/'; then
+    ECOSYSTEMS+=("bmad-method")
+  fi
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
@@ -246,6 +260,9 @@ check_required_workflows() {
     fi
   done
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 
   # Conditional: bmad-method repos must have feature-ideation workflow
   if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
@@ -255,8 +272,11 @@ check_required_workflows() {
         "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
     fi
   fi
+<<<<<<< HEAD
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
@@ -435,6 +455,7 @@ check_repo_settings() {
   # Boolean settings checks
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
 <<<<<<< HEAD
+<<<<<<< HEAD
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
     actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
@@ -447,6 +468,13 @@ check_repo_settings() {
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "warning" \
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+    IFS=':' read -r key expected severity detail <<< "$entry"
+    local actual
+    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
+    if [ "$actual" != "$expected" ]; then
+      add_finding "$repo" "settings" "$key" "$severity" \
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
         "standards/github-settings.md#repository-settings--standard-defaults"
     fi
@@ -466,6 +494,7 @@ check_repo_settings() {
   fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   # Discussions
   local has_discussions
@@ -476,6 +505,8 @@ check_repo_settings() {
       "standards/github-settings.md#general"
   fi
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
