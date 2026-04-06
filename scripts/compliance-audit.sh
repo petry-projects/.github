@@ -665,6 +665,18 @@ HEREDOC
 # Main
 # ---------------------------------------------------------------------------
 main() {
+  # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
+  if [ -z "${GH_TOKEN:-}" ]; then
+    echo "::error::GH_TOKEN is not set. Ensure ORG_SCORECARD_TOKEN secret is configured and passed as an env var to this step." \
+      "Job-level env vars should be inherited, but add GH_TOKEN explicitly to the step env block as a workaround." >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "::error::gh auth failed — GH_TOKEN is set but authentication did not succeed." \
+      "Check that ORG_SCORECARD_TOKEN is valid and has repo + read:org scopes." >&2
+    exit 1
+  fi
+
   info "Starting compliance audit for $ORG"
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
