@@ -2059,6 +2059,9 @@ HEREDOC
 # ---------------------------------------------------------------------------
 main() {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eba7ea0 (fix: add GH_TOKEN preflight check to compliance-audit.sh (#60))
   # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
   if [ -z "${GH_TOKEN:-}" ]; then
     echo "::error::GH_TOKEN is not set. Ensure ORG_SCORECARD_TOKEN secret is configured and passed as an env var to this step." \
@@ -2067,12 +2070,19 @@ main() {
   fi
   if ! gh auth status >/dev/null 2>&1; then
     echo "::error::gh auth failed — GH_TOKEN is set but authentication did not succeed." \
+<<<<<<< HEAD
       "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has repository permissions: 'Administration: Read-only', 'Metadata: Read-only', 'Contents: Read-only', 'Issues: Read and write'; and organization permission: 'Metadata: Read-only' (required to list repositories)." >&2
     exit 1
   fi
 
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+      "Check that ORG_SCORECARD_TOKEN is valid and has repo + read:org scopes." >&2
+    exit 1
+  fi
+
+>>>>>>> eba7ea0 (fix: add GH_TOKEN preflight check to compliance-audit.sh (#60))
   info "Starting compliance audit for $ORG"
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
