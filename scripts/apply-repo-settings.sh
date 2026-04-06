@@ -21,6 +21,12 @@
 
 set -euo pipefail
 
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  echo "[ERROR] Bash 4+ required (associative arrays). Found: $BASH_VERSION" >&2
+  echo "        On macOS: brew install bash, then run with /opt/homebrew/bin/bash" >&2
+  exit 1
+fi
+
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 
