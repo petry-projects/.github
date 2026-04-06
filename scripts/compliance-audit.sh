@@ -1493,6 +1493,7 @@ ensure_required_labels() {
     "bug|d73a4a|Bug reports"
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
+    "in-progress|fbca04|An agent is actively working this issue"
   )
 
   for config in "${label_configs[@]}"; do
