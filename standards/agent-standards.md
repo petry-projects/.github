@@ -14,6 +14,7 @@ Every repository MUST have:
 | `CLAUDE.md` | Project-level instructions for Claude Code | error if missing |
 | `AGENTS.md` | Development standards for AI agents | error if missing |
 
+<<<<<<< HEAD
 ## Compliance Exemptions — Files Agents Must Not Modify
 
 The following files are structurally immutable. Agents must not open PRs that
@@ -31,6 +32,8 @@ These files must be adopted verbatim from `standards/workflows/` and updated
 only by merging a standards PR from `petry-projects/.github`, which propagates
 to all repos via the `@v1` tag bump.
 
+=======
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
 ### CLAUDE.md Requirements
 
 - MUST reference `AGENTS.md` for development standards
@@ -109,6 +112,7 @@ on agent configuration files.
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
+<<<<<<< HEAD
 
 ## BMAD Method Workflows
 
@@ -122,3 +126,5 @@ for the full standard, including the multi-skill ideation pipeline and the
 critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
 log-secret hygiene). The template is at
 [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
+=======
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))

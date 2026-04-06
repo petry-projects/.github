@@ -182,11 +182,18 @@ for the template.
 =======
 ## Required Workflows
 
+<<<<<<< HEAD
 Every repository MUST have these workflows. Reusable templates for Dependabot
 workflows are in [`standards/workflows/`](workflows/). The CI, CodeQL,
 SonarCloud, and Claude Code workflows are documented as patterns below — copy
 and adapt the examples to each repo's tech stack.
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+Every repository MUST have these 7 workflows. Reusable templates for Dependabot
+and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
+CodeQL, SonarCloud, and Claude Code workflows are documented as patterns
+below — copy and adapt the examples to each repo's tech stack.
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
 
 ### 1. CI Pipeline (`ci.yml`)
 
@@ -717,7 +724,11 @@ See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
 and the [Dependabot Policy](dependabot-policy.md).
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 8. AgentShield (`agent-shield.yml`)
+=======
+### 7. AgentShield (`agent-shield.yml`)
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
 
 Agent configuration security validation. Checks that CLAUDE.md and
 AGENTS.md exist and follow standards, scans for secrets in agent config
@@ -725,6 +736,7 @@ files, validates SKILL.md frontmatter, and detects permission bypasses.
 See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 [Agent Configuration Standards](agent-standards.md) for full details.
 
+<<<<<<< HEAD
 ### 8. Auto-Rebase (`auto-rebase.yml`)
 
 Keeps open non-Dependabot PRs up-to-date with the base branch.
@@ -1006,6 +1018,8 @@ customisation.
 
 =======
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
 ---
 
 ## Workflow Patterns by Tech Stack
@@ -1405,10 +1419,17 @@ autofix:
 6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
+<<<<<<< HEAD
 9. **Configure secrets** in the repository settings
 10. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
 11. **Pin all action references** to commit SHAs
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+9. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
+10. **Configure secrets** in the repository settings
+11. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
+12. **Pin all action references** to commit SHAs
+>>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
 
 ---
 
