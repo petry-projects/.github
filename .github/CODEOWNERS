@@ -1,6 +1,7 @@
 # CODEOWNERS
 # Each line is a pattern followed by one or more owners.
 # Owners are matched in order, last matching pattern wins.
+<<<<<<< HEAD
 #
 # Standard: use the @petry-projects/org-leads team for all code owner
 # assignments instead of listing individuals or bot accounts directly.
@@ -9,3 +10,8 @@
 
 # Default catch-all — org-leads own everything
 * @petry-projects/org-leads
+=======
+
+# Default owner for all files
+* @don-petry
+>>>>>>> 265f6dc (feat: add CODEOWNERS file for code owner review enforcement)
