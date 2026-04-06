@@ -31,10 +31,11 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
+ISSUES_FILE="$REPORT_DIR/issues.json"
 
 REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
-REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
+REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation in-progress)
 
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
@@ -516,6 +517,7 @@ ensure_required_labels() {
     "bug|d73a4a|Bug reports"
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
+    "in-progress|fbca04|An agent is actively working this issue"
   )
 
   for config in "${label_configs[@]}"; do
@@ -556,6 +558,15 @@ This finding is still open.
 
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
+    # Record existing issue for umbrella
+    jq --null-input \
+      --arg repo "$repo" \
+      --arg category "$category" \
+      --arg check "$check" \
+      --arg number "$existing" \
+      --arg url "https://github.com/$ORG/$repo/issues/$existing" \
+      '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+      >> "$ISSUES_FILE"
     return
   fi
 
@@ -584,10 +595,11 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
+  # Individual finding issues get compliance-audit label only — NOT the claude label.
+  # The umbrella issue (created separately) gets the claude label to trigger one coordinated agent run.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
-    --label "claude" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -595,12 +607,142 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
     new_issue=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
     info "Created issue #$new_issue in $repo for: $check ($issue_url)"
 
-    # Attempt to assign to claude — the bot user for Claude Code Action
+    # Record created issue for umbrella
     if [ -n "$new_issue" ]; then
-      gh issue edit "$new_issue" --repo "$ORG/$repo" --add-assignee "app/claude" 2>/dev/null || true
+      jq --null-input \
+        --arg repo "$repo" \
+        --arg category "$category" \
+        --arg check "$check" \
+        --arg number "$new_issue" \
+        --arg url "$issue_url" \
+        '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+        >> "$ISSUES_FILE"
     fi
   else
     warn "Failed to create issue in $repo for: $check"
+  fi
+}
+
+create_umbrella_issue() {
+  local audit_date
+  audit_date=$(date -u +%Y-%m-%d)
+  local title="Compliance audit — $audit_date"
+
+  # Skip if no findings
+  local total_findings
+  total_findings=$(jq length "$FINDINGS_FILE")
+  if [ "$total_findings" -eq 0 ]; then
+    info "No findings — skipping umbrella issue"
+    return
+  fi
+
+  # Check for existing open umbrella issue for today
+  local existing_umbrella
+  existing_umbrella=$(gh issue list --repo "$ORG/.github" \
+    --label "$AUDIT_LABEL" \
+    --state open \
+    --search "\"$title\" in:title" \
+    --json number,title \
+    -q ".[] | select(.title == \"$title\") | .number" \
+    2>/dev/null | head -1 || echo "")
+
+  if [ -n "$existing_umbrella" ]; then
+    info "Umbrella issue #$existing_umbrella already exists for $audit_date — skipping"
+    return
+  fi
+
+  # Map finding categories to remediation groups
+  # Each group: category_keys|display_name|remediation_script
+  local groups=(
+    "settings|Repository Settings|apply-repo-settings.sh"
+    "labels|Labels|apply_labels() in apply-repo-settings.sh"
+    "rulesets|Repository Rulesets|apply-rulesets.sh"
+    "ci-workflows|Workflows|per-repo workflow additions"
+    "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
+    "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
+    "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
+  )
+
+  local body
+  body="## Compliance Audit — $audit_date
+
+This umbrella issue tracks all findings from the automated compliance audit run on **$audit_date**.
+Findings are grouped by remediation category. Address each category together to avoid duplicate agent PRs.
+
+**Total findings:** $total_findings across $(jq -r '[.[].repo] | unique | length' "$FINDINGS_FILE") repositories
+
+---
+
+## Remediation Work Breakdown
+"
+
+  for group_entry in "${groups[@]}"; do
+    IFS='|' read -r cat_key display_name remediation_script <<< "$group_entry"
+
+    local cat_findings
+    cat_findings=$(jq -c --arg cat "$cat_key" '[.[] | select(.category == $cat)]' "$FINDINGS_FILE")
+    local cat_count
+    cat_count=$(echo "$cat_findings" | jq 'length')
+
+    [ "$cat_count" -eq 0 ] && continue
+
+    local affected_repos
+    affected_repos=$(echo "$cat_findings" | jq -r '[.[].repo] | unique | join(", ")')
+
+    body+="
+### $display_name ($cat_count finding(s))
+
+**Remediation:** \`$remediation_script\`
+**Affected repos:** $affected_repos
+
+| Repo | Check | Severity |
+|------|-------|----------|
+"
+    # Add per-finding rows with issue links where available
+    while IFS= read -r finding; do
+      local f_repo f_check f_severity f_number f_url
+      f_repo=$(echo "$finding" | jq -r '.repo')
+      f_check=$(echo "$finding" | jq -r '.check')
+      f_severity=$(echo "$finding" | jq -r '.severity')
+
+      # Look up issue link if we tracked it
+      local issue_link=""
+      if [ -s "$ISSUES_FILE" ]; then
+        local issue_entry
+        issue_entry=$(grep -F "\"repo\":\"$f_repo\"" "$ISSUES_FILE" 2>/dev/null | \
+          jq -c --arg repo "$f_repo" --arg check "$f_check" \
+          'select(.repo == $repo and .check == $check)' 2>/dev/null | head -1 || echo "")
+        if [ -n "$issue_entry" ]; then
+          f_number=$(echo "$issue_entry" | jq -r '.number')
+          f_url=$(echo "$issue_entry" | jq -r '.url')
+          issue_link=" ([#$f_number]($f_url))"
+        fi
+      fi
+
+      body+="| \`$f_repo\` | \`$f_check\`$issue_link | \`$f_severity\` |
+"
+    done < <(echo "$cat_findings" | jq -c '.[]')
+
+  done
+
+  body+="
+---
+*Generated by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
+*Address each remediation category as a single coordinated PR to avoid duplicate agent work.*"
+
+  ensure_audit_label ".github"
+
+  local umbrella_url
+  umbrella_url=$(gh issue create --repo "$ORG/.github" \
+    --title "$title" \
+    --label "$AUDIT_LABEL" \
+    --label "claude" \
+    --body "$body" 2>/dev/null || echo "")
+
+  if [ -n "$umbrella_url" ]; then
+    info "Created umbrella issue: $umbrella_url"
+  else
+    warn "Failed to create umbrella issue in $ORG/.github"
   fi
 }
 
@@ -736,8 +878,9 @@ main() {
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
 
-  # Initialize findings file
+  # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
+  : > "$ISSUES_FILE"
 
   # Get all non-archived repos in the org
   local repos
@@ -807,6 +950,11 @@ main() {
       # Close issues for resolved findings
       close_resolved_issues "$repo"
     done
+
+    # Create one umbrella issue per audit run grouping all findings by remediation category.
+    # Only the umbrella gets the `claude` label — individual issues do not — so one coordinated
+    # agent handles related findings together instead of multiple agents producing duplicate PRs.
+    create_umbrella_issue
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi

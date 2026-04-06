@@ -640,6 +640,66 @@ Before launching parallel agents, verify:
 
 ---
 
+## Multi-Agent Issue Coordination
+
+When multiple autonomous agents work from the same issue queue (e.g., during a compliance remediation run), they MUST
+coordinate via GitHub labels and PR checks to prevent duplicate work. This protocol is mandatory for any agent picking
+up issues from a shared backlog.
+
+### Claim-Before-Work Protocol
+
+Before starting work on **any** GitHub issue, an agent MUST:
+
+1. **Check the `in-progress` label.** If the issue already has `in-progress`, skip it — another agent owns it.
+
+   ```bash
+   gh issue view <issue-number> --repo <owner>/<repo> --json labels \
+     --jq '.labels[].name' | grep -q '^in-progress$' && echo "SKIP"
+   ```
+
+2. **Check for an open PR referencing the issue.** If one exists, skip the issue or comment on the PR instead.
+
+   ```bash
+   gh pr list --repo <owner>/<repo> --state open --search "closes #<issue-number>" --json number | \
+     jq 'length > 0'
+   ```
+
+3. **Claim the issue immediately** by adding the `in-progress` label — before writing any code.
+
+   ```bash
+   gh issue edit <issue-number> --repo <owner>/<repo> --add-label "in-progress"
+   ```
+
+4. **Release the claim** if you abandon the issue without opening a PR:
+
+   ```bash
+   gh issue edit <issue-number> --repo <owner>/<repo> --remove-label "in-progress"
+   ```
+
+The `in-progress` label is created by `apply-repo-settings.sh` and is part of the standard label set for all repos.
+
+### File-Conflict Check
+
+Before creating a new file, check whether any open PR in the repository already creates that file.
+If found, comment on the existing PR rather than creating a competing one.
+
+```bash
+# Check if any open PR already creates the target file
+gh pr list --repo <owner>/<repo> --state open --json files \
+  --jq '.[].files[].path' | grep -qx "<path/to/file>" && echo "FILE ALREADY IN OPEN PR"
+```
+
+### Compliance Umbrella Issues
+
+The compliance audit creates one **umbrella issue** per run (in `petry-projects/.github`, labeled `claude`) that groups
+all findings by remediation category. When picking up compliance work:
+
+- Work from the umbrella issue — not from individual finding issues.
+- Address an entire remediation category in a single PR (e.g., all label fixes, all ruleset fixes) to avoid N competing PRs for the same script.
+- Individual finding issues have the `compliance-audit` label only; they are NOT labeled `claude` and do not need to be claimed individually.
+
+---
+
 ## Stacked PRs for Epic/Feature Development
 
 When a project has multiple Epics/Features with **sequential dependencies** — where Epic 2 builds on the foundation laid by Epic 1,
