@@ -312,6 +312,12 @@ check_labels() {
     IFS=':' read -r label color description <<< "$spec"
 
     if ! echo "$existing_labels" | grep -qx "$label"; then
+      if [ "$DRY_RUN" = "true" ]; then
+        add_finding "$repo" "labels" "missing-label-$label" "warning" \
+          "Required label \`$label\` is missing (dry run — skipping auto-create)" \
+          "standards/github-settings.md#labels--standard-set"
+        continue
+      fi
       info "Label \`$label\` missing from $repo — attempting to create it"
       if gh label create "$label" \
           --repo "$ORG/$repo" \
