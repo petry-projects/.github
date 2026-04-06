@@ -34,6 +34,16 @@ SUMMARY_FILE="$REPORT_DIR/summary.md"
 
 REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
+# Format: "name:color:description" (color without leading #)
+REQUIRED_LABEL_CONFIGS=(
+  "security:d93f0b:Security-related PRs and issues"
+  "dependencies:0075ca:Dependency update PRs"
+  "scorecard:d93f0b:OpenSSF Scorecard findings"
+  "bug:d73a4a:Bug reports"
+  "enhancement:a2eeef:Feature requests"
+  "documentation:0075ca:Documentation changes"
+)
+
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
 
 REQUIRED_SETTINGS_BOOL=(
@@ -468,6 +478,22 @@ ensure_audit_label() {
     --force 2>/dev/null || true
 }
 
+ensure_required_labels() {
+  local repo="$1"
+  for config in "${REQUIRED_LABEL_CONFIGS[@]}"; do
+    local name color description
+    name="${config%%:*}"
+    color="${config#*:}"
+    description="${color#*:}"
+    color="${color%%:*}"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
+}
+
 create_issue_for_finding() {
   local repo="$1" category="$2" check="$3" severity="$4" detail="$5" standard_ref="$6"
 
@@ -716,6 +742,7 @@ main() {
 
     for repo in $repos; do
       ensure_audit_label "$repo"
+      ensure_required_labels "$repo"
 
       # Create issues for new findings (process substitution avoids subshell)
       while IFS= read -r finding; do
