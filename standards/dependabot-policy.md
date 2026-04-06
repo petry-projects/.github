@@ -38,6 +38,7 @@ Each repository must have:
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
+| `.github/workflows/dependabot-rebase.yml` | Rebase behind Dependabot PRs after merges |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
 
 The `dependabot-rebase.yml` is required for all repos using the `code-quality`
@@ -355,9 +356,10 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 1. Copy the appropriate `dependabot.yml` template to `.github/dependabot.yml`,
    adjusting `directory` paths as needed.
 2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
-3. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-4. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
-   configured for auto-merge.
-5. Create the `security` and `dependencies` labels in the repository if they
+3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/`.
+4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
+5. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
+   configured for auto-merge and rebase.
+6. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
-6. Add `dependency-audit` as a required status check in branch protection rules.
+7. Add `dependency-audit` as a required status check in branch protection rules.
