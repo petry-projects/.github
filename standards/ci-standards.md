@@ -322,7 +322,7 @@ steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-node@v4
     with:
-      node-version: '20'       # or 'lts/*'
+      node-version: '24'       # or 'lts/*'
       cache: npm
   - run: npm ci
   - run: npm run check         # lint + format
@@ -340,7 +340,7 @@ steps:
   - uses: pnpm/action-setup@v4
   - uses: actions/setup-node@v4
     with:
-      node-version: 20
+      node-version: 24
       cache: pnpm
   - run: pnpm install --frozen-lockfile
   - run: pnpm run lint
