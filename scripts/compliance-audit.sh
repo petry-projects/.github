@@ -41,6 +41,7 @@ REQUIRED_SETTINGS_BOOL=(
   "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
   "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
   "has_issues:true:Issue tracking must be enabled"
+  "has_discussions:true:Discussions must be enabled for ideation and community engagement"
 )
 
 # ---------------------------------------------------------------------------
@@ -276,14 +277,6 @@ check_repo_settings() {
       "standards/github-settings.md#general"
   fi
 
-  # Discussions
-  local has_discussions
-  has_discussions=$(echo "$settings" | jq -r '.has_discussions')
-  if [ "$has_discussions" != "true" ]; then
-    add_finding "$repo" "settings" "has-discussions" "warning" \
-      "Discussions should be enabled for community engagement" \
-      "standards/github-settings.md#general"
-  fi
 }
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ SHOULD be audited and brought into compliance.
 | **Has Issues** | `true` | Issue tracking enabled on all repos |
 | **Has Projects** | `true` | Currently enabled on all repos |
 | **Has Wiki** | `false` | Disabled — documentation lives in the repo |
-| **Has Discussions** | `true` | Enabled for community engagement |
+| **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
 
 ### Merge Settings
 
@@ -48,6 +48,51 @@ SHOULD be audited and brought into compliance.
 > **Note:** While merge commits and rebase merging are enabled at the repository
 > level, the `pr-quality` ruleset enforces **squash-only** merges. The repo-level
 > settings are permissive to avoid conflicts with admin overrides when needed.
+
+---
+
+## Discussions Configuration
+
+GitHub Discussions MUST be enabled on all repositories. Discussions serve as the
+durable, threaded home for feature ideation, design proposals, and community
+feedback — distinct from Issues (which track actionable work).
+
+### Required Discussion Categories
+
+All repositories MUST have the following categories configured:
+
+| Category | Format | Emoji | Description |
+|----------|--------|-------|-------------|
+| **Ideas** | Open-ended | `💡` | Feature proposals, ideation threads, and innovation exploration |
+| **General** | Open-ended | `💬` | General project discussions and questions |
+
+Additional categories MAY be added per project needs (e.g., "Q&A", "Show and Tell",
+"Polls"). The two above are the required minimum.
+
+### Automated Ideation Workflow
+
+Repositories with the `feature-ideation.yml` workflow use the **Ideas** category
+to post and maintain feature proposal Discussions. Each proposal is a separate
+Discussion thread, updated by subsequent workflow runs as market signals and
+project context evolve.
+
+### Setup
+
+To enable and configure Discussions on an existing repository:
+
+```bash
+# Enable Discussions
+gh api -X PATCH repos/<owner>/<repo> -f has_discussions=true
+
+# Discussion categories are managed via the GitHub UI:
+# Settings → General → Features → Discussions → Set up discussions
+# Or via GraphQL after initial setup.
+```
+
+> **Note:** Discussion categories cannot currently be created via the REST API.
+> Use the GitHub UI or GraphQL `createDiscussionCategory` mutation. The compliance
+> audit checks that Discussions are enabled; category configuration is verified
+> manually during onboarding.
 
 ---
 
