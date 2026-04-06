@@ -206,6 +206,8 @@ jobs:
           additional_permissions: |
             actions: read
             checks: read
+          claude_args: |
+            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run watch:*),Bash(cat:*),Edit,Write"
           prompt: |
             Implement a fix for issue #${{ github.event.issue.number }}.
 
