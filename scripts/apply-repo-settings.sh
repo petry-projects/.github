@@ -3,7 +3,10 @@
 #
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
+<<<<<<< HEAD
 #   standards/push-protection.md#required-repo-level-settings
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -16,23 +19,30 @@
 #   DRY_RUN=true GH_TOKEN=<admin-token> ./scripts/apply-repo-settings.sh <repo-name>
 #
 # Requirements:
+<<<<<<< HEAD
 #   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 #   - GH_TOKEN must have admin:repo scope (or be an admin of the org)
 #   - gh CLI must be installed
 
 set -euo pipefail
 
+<<<<<<< HEAD
 if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
   echo "[ERROR] Bash 4+ required (associative arrays). Found: $BASH_VERSION" >&2
   echo "        On macOS: brew install bash, then run with /opt/homebrew/bin/bash" >&2
   exit 1
 fi
 
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
+<<<<<<< HEAD
 warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
@@ -50,6 +60,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
+=======
+err()   { echo "[ERROR] $*" >&2; }
+skip()  { echo "[SKIP]  $*"; }
+
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 usage() {
   echo "Usage: $0 <repo-name>"
   echo "       $0 --all"
@@ -60,6 +75,7 @@ usage() {
   exit 1
 }
 
+<<<<<<< HEAD
 apply_labels() {
   local repo="$1"
   info "Applying standard labels to $ORG/$repo ..."
@@ -97,31 +113,55 @@ apply_settings() {
   # Extract current settings from the pre-fetched repo JSON
   local current
   current=$(echo "$repo_json" | jq '{
+=======
+apply_settings() {
+  local repo="$1"
+  info "Applying standard settings to $ORG/$repo ..."
+
+  # Fetch current settings
+  local current
+  current=$(gh api "repos/$ORG/$repo" --jq '{
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
     allow_merge_commit: .allow_merge_commit,
     allow_rebase_merge: .allow_rebase_merge,
+<<<<<<< HEAD
     has_discussions: .has_discussions,
     has_issues: .has_issues,
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
     squash_merge_commit_title: .squash_merge_commit_title,
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
 
+<<<<<<< HEAD
   if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
     err "Could not parse settings for $ORG/$repo"
     return 1
   fi
 
   # Standard settings from standards/github-settings.md#repository-settings--standard-defaults
+=======
+  if [ "$current" = "{}" ]; then
+    err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+    return 1
+  fi
+
+  # Standard settings from standards/github-settings.md#merge-settings
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
   declare -A EXPECTED=(
     [allow_auto_merge]="true"
     [delete_branch_on_merge]="true"
     [allow_squash_merge]="true"
     [allow_merge_commit]="true"
     [allow_rebase_merge]="true"
+<<<<<<< HEAD
     [has_discussions]="true"
     [has_issues]="true"
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
   )
 
   local needs_patch=false
@@ -129,7 +169,11 @@ apply_settings() {
 
   for key in "${!EXPECTED[@]}"; do
     local actual
+<<<<<<< HEAD
     actual=$(printf '%s' "$current" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
+=======
+    actual=$(echo "$current" | jq -r ".$key // \"null\"")
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
     local expected="${EXPECTED[$key]}"
 
     if [ "$actual" != "$expected" ]; then
@@ -143,7 +187,11 @@ apply_settings() {
 
   # Check string settings separately (jq -f flag for strings)
   local squash_title
+<<<<<<< HEAD
   squash_title=$(printf '%s' "$current" | jq -r '.squash_merge_commit_title // "null"')
+=======
+  squash_title=$(echo "$current" | jq -r '.squash_merge_commit_title // "null"')
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
   if [ "$squash_title" != "PR_TITLE" ]; then
     info "  squash_merge_commit_title: $squash_title → PR_TITLE"
     needs_patch=true
@@ -153,7 +201,11 @@ apply_settings() {
   fi
 
   local squash_msg
+<<<<<<< HEAD
   squash_msg=$(printf '%s' "$current" | jq -r '.squash_merge_commit_message // "null"')
+=======
+  squash_msg=$(echo "$current" | jq -r '.squash_merge_commit_message // "null"')
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
   if [ "$squash_msg" != "COMMIT_MESSAGES" ]; then
     info "  squash_merge_commit_message: $squash_msg → COMMIT_MESSAGES"
     needs_patch=true
@@ -177,6 +229,7 @@ apply_settings() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
 #
 # Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
@@ -286,6 +339,8 @@ apply_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -310,6 +365,7 @@ if [ "$1" = "--all" ]; then
 
   failed=0
   for repo in $repos; do
+<<<<<<< HEAD
     # Fetch full repo JSON once and share across functions
     repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
     if [ "$repo_json" = "{}" ]; then
@@ -323,6 +379,9 @@ if [ "$1" = "--all" ]; then
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
+=======
+    apply_settings "$repo" || failed=$((failed + 1))
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -332,6 +391,7 @@ if [ "$1" = "--all" ]; then
 
   ok "All repos processed successfully"
 else
+<<<<<<< HEAD
   repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
   if [ "$repo_json" = "{}" ]; then
     err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"
@@ -343,4 +403,7 @@ else
   pp_apply_security_and_analysis "$1"
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
+=======
+  apply_settings "$1"
+>>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 fi
