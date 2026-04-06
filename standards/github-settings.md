@@ -198,6 +198,7 @@ Settings deviations from the standard documented above:
 
 | Repository | Deviations |
 |------------|-----------|
+| **.github** | `has_wiki: true` |
 | **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
 | **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
 | **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
@@ -208,6 +209,23 @@ Settings deviations from the standard documented above:
 > **Migration note:** All repos currently use classic branch protection. These
 > should be migrated to rulesets per the standard above. Classic rules should
 > be removed after rulesets are verified.
+
+---
+
+## Remediation
+
+To apply standard settings to a repository, use the remediation script:
+
+```bash
+# Fix a single repo
+GH_TOKEN=<token-with-repo-scope> bash scripts/apply-repo-settings.sh .github
+
+# Fix all repos (dry run first)
+DRY_RUN=true GH_TOKEN=<token> bash scripts/apply-repo-settings.sh
+GH_TOKEN=<token> bash scripts/apply-repo-settings.sh
+```
+
+The script reads current settings, reports what will change, and applies the patch.
 
 ---
 
