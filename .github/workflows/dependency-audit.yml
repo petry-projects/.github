@@ -97,8 +97,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
 >>>>>>> b7c5bc6 (chore(deps): Bump actions/checkout from 4.2.2 to 6.0.2 (#21))
 
+<<<<<<< HEAD
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+>>>>>>> 5ae771f (chore(deps): Bump actions/setup-node from 4.4.0 to 6.3.0 (#23))
         with:
           node-version: "lts/*"
 
@@ -136,8 +140,12 @@ jobs:
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
 
+<<<<<<< HEAD
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+>>>>>>> 5ae771f (chore(deps): Bump actions/setup-node from 4.4.0 to 6.3.0 (#23))
         with:
           node-version: "lts/*"
 
