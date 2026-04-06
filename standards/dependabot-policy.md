@@ -44,6 +44,7 @@ Each repository must have the following baseline files:
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
+| `.github/workflows/dependabot-rebase.yml` | Rebase behind Dependabot PRs after merges |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
 | `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
 
