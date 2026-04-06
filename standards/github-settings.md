@@ -259,9 +259,8 @@ When creating a new repository in `petry-projects`:
 | **markets** | ✅ | — | |
 | **google-app-scripts** | — | — | Has non-standard `protect-branches` ruleset — migrate to `pr-quality` |
 
-> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create `code-quality`
-> rulesets across all repos. The `pr-quality` ruleset support needs to be added
-> to `apply-rulesets.sh` (currently only handles `code-quality`).
+> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create both `pr-quality`
+> and `code-quality` rulesets across all repos.
 > Migrate `google-app-scripts` from its legacy `protect-branches` ruleset.
 
 ---

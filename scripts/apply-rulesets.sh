@@ -5,6 +5,7 @@
 #   standards/github-settings.md#repository-rulesets
 #
 # Rulesets managed:
+#   pr-quality    — pull request review requirements and merge policy
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
 #
 # Usage:
@@ -135,7 +136,51 @@ detect_required_checks() {
 }
 
 # ---------------------------------------------------------------------------
-# Build the ruleset JSON payload
+# Build the pr-quality ruleset JSON payload
+# ---------------------------------------------------------------------------
+build_pr_quality_ruleset_json() {
+  jq -n '{
+    name: "pr-quality",
+    target: "branch",
+    enforcement: "active",
+    conditions: {
+      ref_name: {
+        include: ["~DEFAULT_BRANCH"],
+        exclude: []
+      }
+    },
+    rules: [
+      {
+        type: "pull_request",
+        parameters: {
+          required_approving_review_count: 1,
+          dismiss_stale_reviews_on_push: true,
+          require_code_owner_review: true,
+          require_last_push_approval: true,
+          required_review_thread_resolution: true
+        }
+      },
+      { type: "required_linear_history" },
+      { type: "non_fast_forward" },
+      { type: "deletion" }
+    ],
+    bypass_actors: [
+      {
+        actor_id: 0,
+        actor_type: "OrganizationAdmin",
+        bypass_mode: "always"
+      },
+      {
+        actor_id: 3167543,
+        actor_type: "Integration",
+        bypass_mode: "pull_request"
+      }
+    ]
+  }'
+}
+
+# ---------------------------------------------------------------------------
+# Build the code-quality ruleset JSON payload
 # ---------------------------------------------------------------------------
 build_ruleset_json() {
   local name="$1"
@@ -183,6 +228,32 @@ apply_rulesets() {
   # Fetch existing rulesets
   local existing_rulesets
   existing_rulesets=$(gh api "repos/$ORG/$repo/rulesets" 2>/dev/null || echo "[]")
+
+  # --- pr-quality ruleset ---
+  local pr_quality_id
+  pr_quality_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "pr-quality") | .id' 2>/dev/null || echo "")
+
+  local pr_quality_payload
+  pr_quality_payload=$(build_pr_quality_ruleset_json)
+
+  if [ "$DRY_RUN" = true ]; then
+    if [ -n "$pr_quality_id" ]; then
+      skip "  DRY_RUN — would UPDATE pr-quality ruleset (id=$pr_quality_id) for $ORG/$repo"
+    else
+      skip "  DRY_RUN — would CREATE pr-quality ruleset for $ORG/$repo"
+    fi
+    echo "$pr_quality_payload" | jq '.'
+  elif [ -n "$pr_quality_id" ]; then
+    info "  Updating existing pr-quality ruleset (id=$pr_quality_id) ..."
+    gh api -X PUT "repos/$ORG/$repo/rulesets/$pr_quality_id" \
+      --input <(echo "$pr_quality_payload") > /dev/null
+    ok "  pr-quality ruleset updated for $ORG/$repo"
+  else
+    info "  Creating pr-quality ruleset ..."
+    gh api -X POST "repos/$ORG/$repo/rulesets" \
+      --input <(echo "$pr_quality_payload") > /dev/null
+    ok "  pr-quality ruleset created for $ORG/$repo"
+  fi
 
   # --- code-quality ruleset ---
   local existing_id
