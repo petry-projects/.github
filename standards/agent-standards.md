@@ -14,23 +14,6 @@ Every repository MUST have:
 | `CLAUDE.md` | Project-level instructions for Claude Code | error if missing |
 | `AGENTS.md` | Development standards for AI agents | error if missing |
 
-## Compliance Exemptions — Files Agents Must Not Modify
-
-The following files are structurally immutable. Agents must not open PRs that
-modify them. No compliance finding will ever require a change to these files;
-if an existing agent-created PR touches them, close it without merging.
-
-**Canonical source:** [`standards/workflow-exemptions.json`](workflow-exemptions.json)
-
-| File | Reason |
-|------|--------|
-| `.github/workflows/claude.yml` | Anthropic OIDC invariant — any diff from the default branch causes `401 Workflow validation failed`; Claude Code cannot run on that PR |
-| `.github/workflows/agent-shield.yml` | Security boundary — agents are not permitted to weaken security scanning; changes require explicit human review |
-
-These files must be adopted verbatim from `standards/workflows/` and updated
-only by merging a standards PR from `petry-projects/.github`, which propagates
-to all repos via the `@v1` tag bump.
-
 ### CLAUDE.md Requirements
 
 - MUST reference `AGENTS.md` for development standards
@@ -109,16 +92,3 @@ on agent configuration files.
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
-
-## BMAD Method Workflows
-
-Repositories with BMAD Method installed (presence of `_bmad/`, `_bmad-output/`,
-or equivalent BMAD planning artifacts) MUST include the **Feature Ideation**
-workflow, which runs the BMAD Analyst (Mary) on a weekly schedule to research
-the market and produce evidence-grounded feature proposals as GitHub Discussions.
-
-See [CI Standards §8 — Feature Ideation](ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos)
-for the full standard, including the multi-skill ideation pipeline and the
-critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
-log-secret hygiene). The template is at
-[`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
