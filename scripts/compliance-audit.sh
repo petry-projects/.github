@@ -34,7 +34,15 @@ SUMMARY_FILE="$REPORT_DIR/summary.md"
 
 REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
-REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
+# Label specs: "name:color:description" (color without leading #)
+REQUIRED_LABEL_SPECS=(
+  "security:d93f0b:Security-related PRs and issues"
+  "dependencies:0075ca:Dependency update PRs"
+  "scorecard:d93f0b:OpenSSF Scorecard findings"
+  "bug:d73a4a:Bug reports"
+  "enhancement:a2eeef:Feature requests"
+  "documentation:0075ca:Documentation changes"
+)
 
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
@@ -292,7 +300,7 @@ check_repo_settings() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: Required labels
+# Check: Required labels (auto-creates missing ones)
 # ---------------------------------------------------------------------------
 check_labels() {
   local repo="$1"
@@ -300,11 +308,23 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
-  for label in "${REQUIRED_LABELS[@]}"; do
+  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
+    IFS=':' read -r label color description <<< "$spec"
+
     if ! echo "$existing_labels" | grep -qx "$label"; then
-      add_finding "$repo" "labels" "missing-label-$label" "warning" \
-        "Required label \`$label\` is missing" \
-        "standards/github-settings.md#labels--standard-set"
+      info "Label \`$label\` missing from $repo — attempting to create it"
+      if gh label create "$label" \
+          --repo "$ORG/$repo" \
+          --color "$color" \
+          --description "$description" \
+          --force 2>/dev/null; then
+        info "Created label \`$label\` in $repo"
+      else
+        warn "Failed to create label \`$label\` in $repo — filing finding for manual remediation"
+        add_finding "$repo" "labels" "missing-label-$label" "warning" \
+          "Required label \`$label\` is missing and could not be auto-created" \
+          "standards/github-settings.md#labels--standard-set"
+      fi
     fi
   done
 }

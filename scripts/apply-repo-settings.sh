@@ -38,6 +38,40 @@ usage() {
   exit 1
 }
 
+# Label specs: "name:color:description" (color without leading #)
+REQUIRED_LABEL_SPECS=(
+  "security:d93f0b:Security-related PRs and issues"
+  "dependencies:0075ca:Dependency update PRs"
+  "scorecard:d93f0b:OpenSSF Scorecard findings"
+  "bug:d73a4a:Bug reports"
+  "enhancement:a2eeef:Feature requests"
+  "documentation:0075ca:Documentation changes"
+)
+
+apply_labels() {
+  local repo="$1"
+  info "Ensuring required labels exist on $ORG/$repo ..."
+
+  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
+    IFS=':' read -r label color description <<< "$spec"
+
+    if [ "$DRY_RUN" = "true" ]; then
+      skip "DRY_RUN=true — would ensure label \`$label\` (color: #$color) exists in $repo"
+      continue
+    fi
+
+    if gh label create "$label" \
+        --repo "$ORG/$repo" \
+        --color "$color" \
+        --description "$description" \
+        --force 2>/dev/null; then
+      ok "  label \`$label\` ensured in $repo"
+    else
+      err "  Failed to create/update label \`$label\` in $repo"
+    fi
+  done
+}
+
 apply_settings() {
   local repo="$1"
   info "Applying standard settings to $ORG/$repo ..."
@@ -146,6 +180,7 @@ if [ "$1" = "--all" ]; then
   failed=0
   for repo in $repos; do
     apply_settings "$repo" || failed=$((failed + 1))
+    apply_labels "$repo" || true
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -156,4 +191,5 @@ if [ "$1" = "--all" ]; then
   ok "All repos processed successfully"
 else
   apply_settings "$1"
+  apply_labels "$1"
 fi
