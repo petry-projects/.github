@@ -217,6 +217,7 @@ All repositories MUST have these labels configured:
 | `bug` | `#d73a4a` (red) | Bug reports |
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
+| `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
 
 ---
 
