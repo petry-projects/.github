@@ -222,8 +222,8 @@ jobs:
             4. Check CI status. If CI fails, read the logs, fix the issues,
                and push again. Repeat until CI passes.
             5. When CI is green, all actionable review comments are resolved,
-               and the PR is ready, leave a comment tagging @don-petry
-               to review and merge.
+               and the PR is ready, read the CODEOWNERS file and leave a
+               comment tagging the relevant code owners to review and merge.
 ```
 
 **Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
@@ -256,8 +256,9 @@ with triage or write access applies a label. The label name check in the `if:`
 condition ensures only the `claude` label triggers the workflow — other labels
 are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 
-**Customizing the maintainer tag:** Replace `@don-petry` in the `claude-issue`
-prompt with the appropriate maintainer or team for each repository.
+**Maintainer notification:** The `claude-issue` prompt reads `CODEOWNERS` at
+runtime to determine who to tag. No per-repo customization is needed as long
+as `CODEOWNERS` is present (checked by the compliance audit).
 
 ### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
