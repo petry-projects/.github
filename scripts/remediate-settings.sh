@@ -30,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --repo)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --repo requires a repository name argument" >&2
+        exit 1
+      fi
       TARGET_REPO="$2"
       shift 2
       ;;
@@ -61,7 +65,7 @@ patch_setting() {
     return
   fi
 
-  gh api --method PATCH "repos/$ORG/$repo" -f "$field=$value" --jq "\"$repo: set $field=\" + (.${field} | tostring)" \
+  gh api --method PATCH "repos/$ORG/$repo" -f "$field=$value" > /dev/null \
     && changed "$repo: $field=$value — $description" \
     || echo "[ERROR] $repo: failed to set $field=$value" >&2
 }
