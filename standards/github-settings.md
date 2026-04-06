@@ -527,9 +527,8 @@ Settings deviations from the standard documented above:
 | **markets** | ✅ | — | |
 | **google-app-scripts** | — | — | Has non-standard `protect-branches` ruleset — migrate to `pr-quality` |
 
-> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create `code-quality`
-> rulesets across all repos. The `pr-quality` ruleset support needs to be added
-> to `apply-rulesets.sh` (currently only handles `code-quality`).
+> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create both `pr-quality`
+> and `code-quality` rulesets across all repos.
 > Migrate `google-app-scripts` from its legacy `protect-branches` ruleset.
 >>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 

@@ -6,9 +6,13 @@
 #
 # Rulesets managed:
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   pr-quality    — pull request review requirements and merge policy
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
 =======
+=======
+#   pr-quality    — pull request review requirements and merge policy
+>>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
 #
@@ -215,6 +219,9 @@ detect_required_checks() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 # Build the pr-quality ruleset JSON payload
 # ---------------------------------------------------------------------------
 build_pr_quality_ruleset_json() {
@@ -260,9 +267,12 @@ build_pr_quality_ruleset_json() {
 
 # ---------------------------------------------------------------------------
 # Build the code-quality ruleset JSON payload
+<<<<<<< HEAD
 =======
 # Build the ruleset JSON payload
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
+=======
+>>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 # ---------------------------------------------------------------------------
 build_ruleset_json() {
   local name="$1"
@@ -312,6 +322,9 @@ apply_rulesets() {
   existing_rulesets=$(gh api "repos/$ORG/$repo/rulesets" 2>/dev/null || echo "[]")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
   # --- pr-quality ruleset ---
   local pr_quality_id
   pr_quality_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "pr-quality") | .id' 2>/dev/null || echo "")
@@ -338,8 +351,11 @@ apply_rulesets() {
     ok "  pr-quality ruleset created for $ORG/$repo"
   fi
 
+<<<<<<< HEAD
 =======
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
+=======
+>>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
   # --- code-quality ruleset ---
   local existing_id
   existing_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "code-quality") | .id' 2>/dev/null || echo "")
