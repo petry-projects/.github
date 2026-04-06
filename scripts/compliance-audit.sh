@@ -125,6 +125,9 @@ detect_ecosystems() {
   if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
     ECOSYSTEMS+=("github-actions")
   fi
+  if echo "$tree" | grep -qE '(^|/)_bmad/'; then
+    ECOSYSTEMS+=("bmad-method")
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -140,6 +143,15 @@ check_required_workflows() {
         "standards/ci-standards.md#required-workflows"
     fi
   done
+
+  # Conditional: bmad-method repos must have feature-ideation workflow
+  if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
+    if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.name' > /dev/null 2>&1; then
+      add_finding "$repo" "ci-workflows" "missing-feature-ideation.yml" "warning" \
+        "BMAD Method repo should have \`feature-ideation.yml\` workflow for automated ideation" \
+        "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------

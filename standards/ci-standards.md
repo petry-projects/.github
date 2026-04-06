@@ -219,6 +219,35 @@ See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 
 ---
 
+## Conditional Workflows
+
+These workflows are required only when a specific ecosystem is detected.
+
+### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+
+**Condition:** Repository contains a `_bmad/` directory (BMAD Method installed).
+
+Scheduled weekly workflow that uses Claude Code Action as the BMAD Analyst
+(Mary) to research market trends, analyze project signals, and create per-idea
+Discussion threads in the **Ideas** category. Each proposal is a separate
+Discussion, updated by subsequent runs as the market and project evolve.
+
+| Setting | Value |
+|---------|-------|
+| **Schedule** | Weekly (recommended: Friday early morning) |
+| **Output** | GitHub Discussions in the Ideas category |
+| **Inputs** | `focus_area` (optional), `research_depth` (quick/standard/deep) |
+| **Permissions** | `contents: read`, `discussions: write`, `id-token: write` |
+| **Required secrets** | `CLAUDE_CODE_OAUTH_TOKEN` (org-level) |
+
+**Prerequisite:** Discussions must be enabled with an "Ideas" category
+(see [Discussions Configuration](github-settings.md#discussions-configuration)).
+
+See the [TalkTerm implementation](https://github.com/petry-projects/TalkTerm/blob/main/.github/workflows/feature-ideation.yml)
+as the reference template.
+
+---
+
 ## Workflow Patterns by Tech Stack
 
 ### TypeScript / Node.js (npm)

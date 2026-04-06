@@ -71,10 +71,13 @@ Additional categories MAY be added per project needs (e.g., "Q&A", "Show and Tel
 
 ### Automated Ideation Workflow
 
-Repositories with the `feature-ideation.yml` workflow use the **Ideas** category
-to post and maintain feature proposal Discussions. Each proposal is a separate
-Discussion thread, updated by subsequent workflow runs as market signals and
-project context evolve.
+Repositories with the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)
+installed (`_bmad/` directory) SHOULD have the `feature-ideation.yml` workflow,
+which uses the **Ideas** category to post and maintain feature proposal
+Discussions. Each proposal is a separate Discussion thread, updated by subsequent
+workflow runs as market signals and project context evolve. See
+[CI Standards § Feature Ideation](ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos)
+for requirements.
 
 ### Setup
 
@@ -151,6 +154,7 @@ in the relevant checks:
 | `pyproject.toml` / `requirements.txt` | `python` | Python analysis | pytest, coverage | `pip-audit` |
 | `.github/workflows/*.yml` | `actions` | — | — | — |
 | `*.tf` (Terraform) | — | — | `terraform validate` | Dependabot security updates |
+| `_bmad/` (BMAD Method) | — | — | `feature-ideation.yml` (weekly) | — |
 
 Multi-language repos (e.g., TypeScript + Go) MUST configure all applicable
 ecosystems in each check.
