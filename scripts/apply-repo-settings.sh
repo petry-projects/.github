@@ -76,6 +76,9 @@ usage() {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 apply_labels() {
   local repo="$1"
   info "Applying standard labels to $ORG/$repo ..."
@@ -88,7 +91,10 @@ apply_labels() {
     "bug|d73a4a|Bug reports"
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
+<<<<<<< HEAD
     "in-progress|fbca04|An agent is actively working this issue"
+=======
+>>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
   )
 
   for config in "${label_configs[@]}"; do
@@ -105,6 +111,7 @@ apply_labels() {
   done
 }
 
+<<<<<<< HEAD
 apply_settings() {
   local repo="$1"
   local repo_json="$2"
@@ -114,6 +121,8 @@ apply_settings() {
   local current
   current=$(echo "$repo_json" | jq '{
 =======
+=======
+>>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 apply_settings() {
   local repo="$1"
   info "Applying standard settings to $ORG/$repo ..."
@@ -395,7 +404,11 @@ if [ "$1" = "--all" ]; then
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
 =======
     apply_settings "$repo" || failed=$((failed + 1))
+<<<<<<< HEAD
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+    apply_labels "$repo"
+>>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -419,5 +432,9 @@ else
   apply_check_suite_prefs "$1"
 =======
   apply_settings "$1"
+<<<<<<< HEAD
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+  apply_labels "$1"
+>>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 fi
