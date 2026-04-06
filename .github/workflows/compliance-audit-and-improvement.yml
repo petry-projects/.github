@@ -196,6 +196,9 @@ jobs:
 
             # ── Live security alerts ──
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1d2c490 (fix: handle gh api 403/404 responses in health survey)
             # gh api with --jq outputs error JSON on 403/404 before falling back,
             # so we must check exit code first to avoid concatenated output.
             if DEPENDABOT_RAW=$(gh api "repos/$FULL_REPO/dependabot/alerts?state=open" 2>/dev/null); then
@@ -213,11 +216,14 @@ jobs:
             else
               CODE_SCANNING=0
             fi
+<<<<<<< HEAD
 =======
             DEPENDABOT_OPEN=$(gh api "repos/$FULL_REPO/dependabot/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
             SECRET_ALERTS=$(gh api "repos/$FULL_REPO/secret-scanning/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
             CODE_SCANNING=$(gh api "repos/$FULL_REPO/code-scanning/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+>>>>>>> 1d2c490 (fix: handle gh api 403/404 responses in health survey)
 
             # ── Branch protection status ──
             if BP_RAW=$(gh api "repos/$FULL_REPO/branches/main/protection" 2>/dev/null); then
@@ -232,15 +238,21 @@ jobs:
 
             # ── Workflow inventory ──
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1d2c490 (fix: handle gh api 403/404 responses in health survey)
             if WF_RAW=$(gh api "repos/$FULL_REPO/actions/workflows" 2>/dev/null); then
               WORKFLOWS=$(echo "$WF_RAW" | jq -c '[.workflows[] | {name:.name,state:.state,path:.path}]')
             else
               WORKFLOWS='[]'
             fi
+<<<<<<< HEAD
 =======
             WORKFLOWS=$(gh api "repos/$FULL_REPO/actions/workflows" \
               --jq '[.workflows[] | {name:.name,state:.state,path:.path}]' 2>/dev/null || echo '[]')
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+>>>>>>> 1d2c490 (fix: handle gh api 403/404 responses in health survey)
 
             # ── Open issue summary ──
             TOTAL_OPEN_ISSUES=$(gh issue list --repo "$FULL_REPO" --state open --json number -q 'length' 2>/dev/null || echo '0')
