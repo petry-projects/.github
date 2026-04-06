@@ -1,0 +1,11 @@
+# CODEOWNERS
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for all files
+* @don-petry
+
+# Standards documentation
+/standards/ @don-petry
+
+# CI workflows and configuration
+/.github/workflows/ @don-petry
