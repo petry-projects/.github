@@ -34,6 +34,16 @@ SUMMARY_FILE="$REPORT_DIR/summary.md"
 
 REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
+# Required labels: name|color|description
+REQUIRED_LABEL_SPECS=(
+  "security|d93f0b|Security-related PRs and issues"
+  "dependencies|0075ca|Dependency update PRs"
+  "scorecard|d93f0b|OpenSSF Scorecard findings (auto-created)"
+  "bug|d73a4a|Bug reports"
+  "enhancement|a2eeef|Feature requests"
+  "documentation|0075ca|Documentation changes"
+)
+
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
 
 REQUIRED_SETTINGS_BOOL=(
@@ -287,7 +297,7 @@ check_repo_settings() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: Required labels
+# Check: Required labels (and auto-create if missing)
 # ---------------------------------------------------------------------------
 check_labels() {
   local repo="$1"
@@ -295,11 +305,22 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
-  for label in "${REQUIRED_LABELS[@]}"; do
+  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
+    IFS='|' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
-      add_finding "$repo" "labels" "missing-label-$label" "warning" \
-        "Required label \`$label\` is missing" \
-        "standards/github-settings.md#labels--standard-set"
+      # Auto-create the missing label as remediation
+      if gh label create "$label" \
+          --repo "$ORG/$repo" \
+          --color "$color" \
+          --description "$description" \
+          2>/dev/null; then
+        info "Auto-created missing label '$label' in $ORG/$repo"
+      else
+        # Creation failed — report as a finding for manual remediation
+        add_finding "$repo" "labels" "missing-label-$label" "warning" \
+          "Required label \`$label\` is missing" \
+          "standards/github-settings.md#labels--standard-set"
+      fi
     fi
   done
 }
