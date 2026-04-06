@@ -57,7 +57,6 @@ jobs:
       - name: Run compliance audit
         id: audit
         env:
-          GH_TOKEN: ${{ secrets.ORG_SCORECARD_TOKEN }}
           REPORT_DIR: ${{ runner.temp }}/compliance-report
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           CREATE_ISSUES: 'true'
