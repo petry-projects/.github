@@ -15,6 +15,7 @@
 #   DRY_RUN=true GH_TOKEN=<admin-token> ./scripts/apply-repo-settings.sh <repo-name>
 #
 # Requirements:
+#   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
 #   - GH_TOKEN must have admin:repo scope (or be an admin of the org)
 #   - gh CLI must be installed
 
