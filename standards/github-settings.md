@@ -410,6 +410,7 @@ All repositories MUST have these labels configured:
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
 
 ---
@@ -442,6 +443,9 @@ Repos with finer-grained path ownership MUST include `@petry-projects/org-leads`
 on every owner line so the team can always satisfy `require_code_owner_review`.
 =======
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+| `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
 ---
 

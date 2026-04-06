@@ -102,9 +102,13 @@ apply_labels() {
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
 <<<<<<< HEAD
+<<<<<<< HEAD
     "in-progress|fbca04|An agent is actively working this issue"
 =======
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
+=======
+    "in-progress|fbca04|An agent is actively working this issue"
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
   )
 
   for config in "${label_configs[@]}"; do

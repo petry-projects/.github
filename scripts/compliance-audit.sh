@@ -41,8 +41,12 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 <<<<<<< HEAD
+<<<<<<< HEAD
 ISSUES_FILE="$REPORT_DIR/issues.json"
 ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
+=======
+ISSUES_FILE="$REPORT_DIR/issues.json"
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
@@ -50,6 +54,7 @@ ISSUES_EXISTING=0
 ISSUES_REMOVED=0
 ISSUES_RETRIGGERED=0
 
+<<<<<<< HEAD
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
@@ -72,6 +77,9 @@ REQUIRED_LABEL_SPECS=(
 # 1236702 = Claude (anthropics/claude-code-action)
 # 347564  = CodeRabbit
 CHECK_SUITE_APP_IDS=(1236702 347564)
+=======
+REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation in-progress)
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
@@ -1461,6 +1469,7 @@ ensure_required_labels() {
     "bug|d73a4a|Bug reports"
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
+    "in-progress|fbca04|An agent is actively working this issue"
   )
 
   for config in "${label_configs[@]}"; do
@@ -1585,6 +1594,15 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 =======
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
+    # Record existing issue for umbrella
+    jq --null-input \
+      --arg repo "$repo" \
+      --arg category "$category" \
+      --arg check "$check" \
+      --arg number "$existing" \
+      --arg url "https://github.com/$ORG/$repo/issues/$existing" \
+      '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+      >> "$ISSUES_FILE"
     return
   fi
 
@@ -1619,6 +1637,7 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 
   local issue_url
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
@@ -1633,6 +1652,13 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 =======
     --label "claude" \
 >>>>>>> b9fe8f7 (fix: add claude label to compliance audit issues)
+=======
+  # Individual finding issues get compliance-audit label only — NOT the claude label.
+  # The umbrella issue (created separately) gets the claude label to trigger one coordinated agent run.
+  issue_url=$(gh issue create --repo "$ORG/$repo" \
+    --title "$search_title" \
+    --label "$AUDIT_LABEL" \
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -1655,10 +1681,21 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
         >> "$ISSUES_FILE"
 =======
 
-    # Attempt to assign to claude — the bot user for Claude Code Action
+    # Record created issue for umbrella
     if [ -n "$new_issue" ]; then
+<<<<<<< HEAD
       gh issue edit "$new_issue" --repo "$ORG/$repo" --add-assignee "app/claude" 2>/dev/null || true
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+      jq --null-input \
+        --arg repo "$repo" \
+        --arg category "$category" \
+        --arg check "$check" \
+        --arg number "$new_issue" \
+        --arg url "$issue_url" \
+        '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+        >> "$ISSUES_FILE"
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
     fi
   else
     warn "Failed to create issue in $repo for: $check"
@@ -1666,6 +1703,9 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 create_umbrella_issue() {
   local audit_date
   audit_date=$(date -u +%Y-%m-%d)
@@ -1698,13 +1738,20 @@ create_umbrella_issue() {
   # Each group: category_keys|display_name|remediation_script
   local groups=(
     "settings|Repository Settings|apply-repo-settings.sh"
+<<<<<<< HEAD
     "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
+=======
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
+<<<<<<< HEAD
     "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
+=======
+    "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
   )
 
   local body
@@ -1780,7 +1827,11 @@ Findings are grouped by remediation category. Address each category together to 
   umbrella_url=$(gh issue create --repo "$ORG/.github" \
     --title "$title" \
     --label "$AUDIT_LABEL" \
+<<<<<<< HEAD
     --label "dev-lead" \
+=======
+    --label "claude" \
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$umbrella_url" ]; then
@@ -1790,8 +1841,11 @@ Findings are grouped by remediation category. Address each category together to 
   fi
 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 close_resolved_issues() {
   local repo="$1"
 
@@ -2120,6 +2174,7 @@ main() {
   info "Dry run: $DRY_RUN"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
   : > "$ISSUES_FILE"
@@ -2127,6 +2182,11 @@ main() {
   # Initialize findings file
   echo "[]" > "$FINDINGS_FILE"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  # Initialize findings and issues tracking files
+  echo "[]" > "$FINDINGS_FILE"
+  : > "$ISSUES_FILE"
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
   # Get all non-archived repos in the org
   local repos
@@ -2261,6 +2321,7 @@ main() {
       close_resolved_issues "$repo"
     done
 <<<<<<< HEAD
+<<<<<<< HEAD
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
     # Both individual issues and the umbrella get the `dev-lead` label for agent pickup.
@@ -2271,6 +2332,13 @@ main() {
     append_issue_pr_links
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+
+    # Create one umbrella issue per audit run grouping all findings by remediation category.
+    # Only the umbrella gets the `claude` label — individual issues do not — so one coordinated
+    # agent handles related findings together instead of multiple agents producing duplicate PRs.
+    create_umbrella_issue
+>>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi
