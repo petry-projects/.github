@@ -1,11 +1,16 @@
 # Petry Projects
 
+<<<<<<< HEAD
 A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, beekeeping tech, and agent orchestration.
+=======
+A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, and agent orchestration.
+>>>>>>> c4f8d86 (feat: add org profile README (#61))
 
 ---
 
 ## Projects
 
+<<<<<<< HEAD
 | Repository | Description | Language |
 | --- | --- | --- |
 | [TalkTerm](https://github.com/petry-projects/TalkTerm) | Terminal-based communication tool | HTML |
@@ -16,6 +21,15 @@ A collection of open-source tools and experiments spanning terminal UX, market d
 | [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A collection of Google Apps Scripts for personal productivity automation | JavaScript |
 | [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, Claude Code skills, and agentic workflow infrastructure | JavaScript |
 | [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
+=======
+| Repository | Description | Topics |
+| --- | --- | --- |
+| [TalkTerm](https://github.com/petry-projects/TalkTerm) | Terminal-based communication tool | terminal, cli |
+| [markets](https://github.com/petry-projects/markets) | Market data and analysis tooling | finance, data |
+| [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered content generation and management | ai, content |
+| [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMAD agent workflow suite | agents, automation |
+| [.github](https://github.com/petry-projects/.github) | Org-wide standards, CI templates, and compliance tooling | standards, devops |
+>>>>>>> c4f8d86 (feat: add org profile README (#61))
 
 ---
 
