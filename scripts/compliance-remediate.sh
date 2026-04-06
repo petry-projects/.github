@@ -339,8 +339,10 @@ pin_workflow_actions() {
   local pin_log=""
 
   while IFS= read -r line; do
-    # Match lines with uses: <owner>/<repo>@<tag> (not SHA-pinned, not docker://, not ./)
-    if echo "$line" | grep -qE '^\s*-?\s*uses:\s+[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+@[^0-9a-f#][^ ]*' && \
+    # Match lines with uses: <owner>/<action>@<ref> that are NOT already SHA-pinned.
+    # The reliable test is the absence of a full 40-char hex SHA — the first grep
+    # is a cheap pre-filter to skip lines that clearly have no action reference.
+    if echo "$line" | grep -qE 'uses:\s+[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+@' && \
        ! echo "$line" | grep -qE '@[0-9a-f]{40}'; then
 
       local action_ref
@@ -690,8 +692,8 @@ main() {
     return 0
   fi
 
-  # Process each finding
-  # Sort by repo so we can batch-comment/close later per repo
+  # Process each finding — use || true so a single failure doesn't abort the loop
+  # (set -e would otherwise exit on the first remediate_finding non-zero return)
   while IFS= read -r finding; do
     [ -z "$finding" ] && continue
 
@@ -702,7 +704,7 @@ main() {
     f_severity=$(echo "$finding" | jq -r '.severity')
     f_detail=$(echo "$finding"   | jq -r '.detail')
 
-    remediate_finding "$f_repo" "$f_category" "$f_check" "$f_severity" "$f_detail"
+    remediate_finding "$f_repo" "$f_category" "$f_check" "$f_severity" "$f_detail" || true
   done < <(jq -c '.[] | {repo,category,check,severity,detail}' "$FINDINGS_FILE")
 
   log "Remediation complete"
