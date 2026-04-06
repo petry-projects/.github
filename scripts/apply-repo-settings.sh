@@ -50,6 +50,8 @@ apply_settings() {
     allow_squash_merge: .allow_squash_merge,
     allow_merge_commit: .allow_merge_commit,
     allow_rebase_merge: .allow_rebase_merge,
+    has_discussions: .has_discussions,
+    has_issues: .has_issues,
     squash_merge_commit_title: .squash_merge_commit_title,
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
@@ -59,13 +61,15 @@ apply_settings() {
     return 1
   fi
 
-  # Standard settings from standards/github-settings.md#merge-settings
+  # Standard settings from standards/github-settings.md#repository-settings--standard-defaults
   declare -A EXPECTED=(
     [allow_auto_merge]="true"
     [delete_branch_on_merge]="true"
     [allow_squash_merge]="true"
     [allow_merge_commit]="true"
     [allow_rebase_merge]="true"
+    [has_discussions]="true"
+    [has_issues]="true"
   )
 
   local needs_patch=false
