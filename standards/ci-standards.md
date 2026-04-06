@@ -1142,10 +1142,14 @@ steps:
   - uses: actions/setup-node@v4
     with:
 <<<<<<< HEAD
+<<<<<<< HEAD
       node-version: '24'       # or 'lts/*'
 =======
       node-version: '20'       # or 'lts/*'
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+      node-version: '24'       # or 'lts/*'
+>>>>>>> 7105718 (fix: update Node.js runtime examples from 20 to 24 in CI standards docs (#62))
       cache: npm
   - run: npm ci
   - run: npm run check         # lint + format
@@ -1164,10 +1168,14 @@ steps:
   - uses: actions/setup-node@v4
     with:
 <<<<<<< HEAD
+<<<<<<< HEAD
       node-version: 24
 =======
       node-version: 20
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+      node-version: 24
+>>>>>>> 7105718 (fix: update Node.js runtime examples from 20 to 24 in CI standards docs (#62))
       cache: pnpm
   - run: pnpm install --frozen-lockfile
   - run: pnpm run lint
