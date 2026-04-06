@@ -20,23 +20,33 @@
 #
 # Requirements:
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+#   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
+>>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 #   - GH_TOKEN must have admin:repo scope (or be an admin of the org)
 #   - gh CLI must be installed
 
 set -euo pipefail
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
   echo "[ERROR] Bash 4+ required (associative arrays). Found: $BASH_VERSION" >&2
   echo "        On macOS: brew install bash, then run with /opt/homebrew/bin/bash" >&2
   exit 1
 fi
 
+<<<<<<< HEAD
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+>>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 

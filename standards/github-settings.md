@@ -482,6 +482,7 @@ When creating a new repository in `petry-projects`:
 ## Current Compliance Status
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 **Repository settings:** All 7 repos are fully compliant as of 2026-05-13
 (check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
 last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
@@ -499,20 +500,34 @@ last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 | **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
 =======
 Settings deviations from the standard documented above:
+=======
+**Repository settings:** All 7 repos are fully compliant as of 2026-04-05
+(remediated via `scripts/apply-repo-settings.sh --all`).
+>>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 
-| Repository | Deviations |
-|------------|-----------|
-| **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
-| **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
-| **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
-| **broodly** | `has_wiki: true`, `has_discussions: false` |
-| **markets** | `has_wiki: true`, `has_discussions: false` |
-| **TalkTerm** | `has_wiki: true`, `has_discussions: false` |
+**Ruleset status:**
 
+<<<<<<< HEAD
 > **Migration note:** All repos currently use classic branch protection. These
 > should be migrated to rulesets per the standard above. Classic rules should
 > be removed after rulesets are verified.
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+| Repository | `pr-quality` | `code-quality` | Notes |
+|------------|:---:|:---:|-------|
+| **.github** | — | — | No rulesets yet |
+| **bmad-bgreat-suite** | — | — | No rulesets yet |
+| **ContentTwin** | ✅ | — | |
+| **broodly** | ✅ | — | |
+| **TalkTerm** | ✅ | — | |
+| **markets** | ✅ | — | |
+| **google-app-scripts** | — | — | Has non-standard `protect-branches` ruleset — migrate to `pr-quality` |
+
+> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create `code-quality`
+> rulesets across all repos. The `pr-quality` ruleset support needs to be added
+> to `apply-rulesets.sh` (currently only handles `code-quality`).
+> Migrate `google-app-scripts` from its legacy `protect-branches` ruleset.
+>>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 
 ---
 
