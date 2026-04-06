@@ -192,12 +192,33 @@ When creating a new repository in `petry-projects`:
 
 ---
 
+## Applying Standard Settings
+
+Use the [`scripts/apply-repo-settings.sh`](../scripts/apply-repo-settings.sh) script to apply
+or verify the standard boolean settings on any repository:
+
+```bash
+# Apply to a single repo (requires a token with repo admin scope)
+GH_TOKEN=<admin-token> bash scripts/apply-repo-settings.sh .github
+
+# Preview changes without applying
+DRY_RUN=true GH_TOKEN=<token> bash scripts/apply-repo-settings.sh --all
+
+# Apply to all repos
+GH_TOKEN=<admin-token> bash scripts/apply-repo-settings.sh --all
+```
+
+The script enforces: `delete_branch_on_merge`, `allow_auto_merge`, `has_wiki`, `has_issues`.
+
+---
+
 ## Current Compliance Status
 
 Settings deviations from the standard documented above:
 
 | Repository | Deviations |
 |------------|-----------|
+| **.github** | `delete_branch_on_merge: null` — run `bash scripts/apply-repo-settings.sh .github` to remediate |
 | **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
 | **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
 | **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
