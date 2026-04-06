@@ -32,7 +32,7 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 
-REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml)
+REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
 
