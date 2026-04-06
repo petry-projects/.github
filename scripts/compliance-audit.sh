@@ -505,6 +505,29 @@ ensure_audit_label() {
     --force 2>/dev/null || true
 }
 
+# Create all required labels (idempotent — uses --force to update if present)
+ensure_required_labels() {
+  local repo="$1"
+  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
+}
+
 create_issue_for_finding() {
   local repo="$1" category="$2" check="$3" severity="$4" detail="$5" standard_ref="$6"
 
@@ -766,6 +789,7 @@ main() {
 
     for repo in $repos; do
       ensure_audit_label "$repo"
+      ensure_required_labels "$repo"
 
       # Create issues for new findings (process substitution avoids subshell)
       while IFS= read -r finding; do

@@ -38,6 +38,34 @@ usage() {
   exit 1
 }
 
+apply_labels() {
+  local repo="$1"
+  info "Applying standard labels to $ORG/$repo ..."
+
+  # Format: "name|color|description" — matches standards/github-settings.md#labels--standard-set
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    if [ "$DRY_RUN" = "true" ]; then
+      skip "DRY_RUN=true — would create/update label '$name' (#$color) in $ORG/$repo"
+    else
+      gh label create "$name" \
+        --repo "$ORG/$repo" \
+        --description "$description" \
+        --color "$color" \
+        --force 2>/dev/null && ok "  label '$name' applied" || err "  failed to apply label '$name'"
+    fi
+  done
+}
+
 apply_settings() {
   local repo="$1"
   info "Applying standard settings to $ORG/$repo ..."
@@ -150,6 +178,7 @@ if [ "$1" = "--all" ]; then
   failed=0
   for repo in $repos; do
     apply_settings "$repo" || failed=$((failed + 1))
+    apply_labels "$repo"
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -160,4 +189,5 @@ if [ "$1" = "--all" ]; then
   ok "All repos processed successfully"
 else
   apply_settings "$1"
+  apply_labels "$1"
 fi
