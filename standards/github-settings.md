@@ -198,6 +198,7 @@ Settings deviations from the standard documented above:
 
 | Repository | Deviations |
 |------------|-----------|
+| **.github** | `has_discussions: false` |
 | **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
 | **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
 | **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
@@ -224,3 +225,21 @@ workflow. This workflow:
 
 Scorecard results should be reviewed weekly and remediated per the
 [OpenSSF Scorecard documentation](https://github.com/ossf/scorecard/blob/main/docs/checks.md).
+
+### Remediating Settings Findings
+
+Settings compliance issues (e.g., `has_discussions`, `has_wiki`, `allow_auto_merge`) can be
+fixed in bulk using the [`scripts/remediate-settings.sh`](../scripts/remediate-settings.sh) script:
+
+```bash
+# Preview changes without applying them
+./scripts/remediate-settings.sh --dry-run
+
+# Fix all repositories
+./scripts/remediate-settings.sh
+
+# Fix a single repository
+./scripts/remediate-settings.sh --repo .github
+```
+
+Requires a `GH_TOKEN` with `repo` admin scope (or `administration: write` for fine-grained tokens).
