@@ -61,6 +61,16 @@ jobs:
           echo "eligible=true" >> "$GITHUB_OUTPUT"
           echo "Auto-merge eligible: ecosystem=$ECOSYSTEM update=$UPDATE_TYPE"
 
+      - name: Check app secrets
+        if: steps.eligible.outputs.eligible == 'true'
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+        run: |
+          if [[ -z "$APP_ID" ]]; then
+            echo "::error::APP_ID secret is missing or empty. Set APP_ID and APP_PRIVATE_KEY at the org level (Settings → Secrets and variables → Actions). See https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md"
+            exit 1
+          fi
+
       - name: Generate app token
         if: steps.eligible.outputs.eligible == 'true'
         id: app-token
