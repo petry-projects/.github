@@ -148,24 +148,35 @@ Behavior:
 - **Major** updates are left for human review
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
-## Rebase Behind PRs Workflow
+## Update and Merge Behind PRs Workflow
 
 See [`workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml).
 
 When branch protection requires branches to be up-to-date (`strict: true`),
 merging one Dependabot PR makes the others fall behind. Dependabot only rebases
 PRs on its scheduled run (weekly) or when there are merge conflicts — not when
-a PR merely falls behind `main`. This stalls auto-merge until the next run.
+a PR merely falls behind `main`. Additionally, GitHub's auto-merge (`--auto`)
+may not trigger when rulesets cause `mergeable_state` to report "blocked" even
+when all requirements are met. Together, these issues stall Dependabot PR
+merges indefinitely.
 
-This workflow fires on every push to `main` and asks Dependabot to rebase any
-open PRs that are behind, using the `@dependabot rebase` command. Dependabot
-performs the rebase with its own commit signature, preserving the automerge
-workflow's ability to verify the PR author via `dependabot/fetch-metadata`.
+This workflow fires on every push to `main` and:
 
-**Important:** never use the GitHub API `update-branch` endpoint to rebase
-Dependabot PRs. It replaces Dependabot's commit signature, which breaks
-`dependabot/fetch-metadata` verification and causes Dependabot to refuse
-future rebases ("edited by someone other than Dependabot").
+1. **Updates behind PRs** — uses the GitHub API `update-branch` endpoint with
+   the **merge** method to bring Dependabot PR branches up to date with `main`.
+2. **Merges ready PRs** — directly merges any Dependabot PR that is up-to-date,
+   has auto-merge enabled, and has all CI checks passing.
+
+Using the app token for merges ensures each merge triggers a new push to `main`,
+creating a self-sustaining chain that serializes Dependabot PR merges.
+
+**Important:** always use the **merge** method (not rebase) with `update-branch`.
+The rebase method force-pushes, replacing Dependabot's commit signature, which
+breaks `dependabot/fetch-metadata` verification and causes Dependabot to refuse
+future operations ("edited by someone other than Dependabot"). The merge method
+preserves the original commits. The automerge workflow must use
+`skip-commit-verification: true` in `dependabot/fetch-metadata` since the merge
+commit is authored by GitHub, not Dependabot.
 
 ## Vulnerability Audit CI Check
 
