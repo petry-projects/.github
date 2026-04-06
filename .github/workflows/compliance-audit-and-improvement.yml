@@ -156,9 +156,23 @@ jobs:
             STALE_COUNT=$(echo "$STALE_PRS" | jq 'length')
 
             # ── Live security alerts ──
-            DEPENDABOT_OPEN=$(gh api "repos/$FULL_REPO/dependabot/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
-            SECRET_ALERTS=$(gh api "repos/$FULL_REPO/secret-scanning/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
-            CODE_SCANNING=$(gh api "repos/$FULL_REPO/code-scanning/alerts?state=open" --jq 'length' 2>/dev/null || echo "0")
+            # gh api with --jq outputs error JSON on 403/404 before falling back,
+            # so we must check exit code first to avoid concatenated output.
+            if DEPENDABOT_RAW=$(gh api "repos/$FULL_REPO/dependabot/alerts?state=open" 2>/dev/null); then
+              DEPENDABOT_OPEN=$(echo "$DEPENDABOT_RAW" | jq 'length')
+            else
+              DEPENDABOT_OPEN=0
+            fi
+            if SECRET_RAW=$(gh api "repos/$FULL_REPO/secret-scanning/alerts?state=open" 2>/dev/null); then
+              SECRET_ALERTS=$(echo "$SECRET_RAW" | jq 'length')
+            else
+              SECRET_ALERTS=0
+            fi
+            if CODESCAN_RAW=$(gh api "repos/$FULL_REPO/code-scanning/alerts?state=open" 2>/dev/null); then
+              CODE_SCANNING=$(echo "$CODESCAN_RAW" | jq 'length')
+            else
+              CODE_SCANNING=0
+            fi
 
             # ── Branch protection status ──
             if BP_RAW=$(gh api "repos/$FULL_REPO/branches/main/protection" 2>/dev/null); then
@@ -172,8 +186,11 @@ jobs:
             fi
 
             # ── Workflow inventory ──
-            WORKFLOWS=$(gh api "repos/$FULL_REPO/actions/workflows" \
-              --jq '[.workflows[] | {name:.name,state:.state,path:.path}]' 2>/dev/null || echo '[]')
+            if WF_RAW=$(gh api "repos/$FULL_REPO/actions/workflows" 2>/dev/null); then
+              WORKFLOWS=$(echo "$WF_RAW" | jq -c '[.workflows[] | {name:.name,state:.state,path:.path}]')
+            else
+              WORKFLOWS='[]'
+            fi
 
             # ── Open issue summary ──
             TOTAL_OPEN_ISSUES=$(gh issue list --repo "$FULL_REPO" --state open --json number -q 'length' 2>/dev/null || echo '0')
