@@ -112,10 +112,14 @@ Each repo needs a `sonar-project.properties` file at root with project key and o
 ### 4. Claude Code (`claude.yml`)
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
-Claude responds to PR events, `@claude` mentions in comments, and issues
-labeled `claude`. The label trigger enables Claude to work issues like a
-human contributor — reading the issue, creating a branch, implementing the
-fix, and opening a PR.
+The workflow has two jobs:
+
+- **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
+  mentions in comments. No `prompt` input; runs in interactive mode.
+- **`claude-issue`** (automation mode) — triggered when the `claude` label is
+  applied to an issue. Uses a `prompt` to drive the full lifecycle:
+  implement the fix, create a PR, self-review, resolve review comments,
+  monitor CI, and tag the maintainer when ready for human review.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -140,6 +144,7 @@ on:
 permissions: {}
 
 jobs:
+  # Interactive mode: PR reviews and @claude mentions
   claude:
     if: >-
       (github.event_name == 'pull_request' &&
@@ -149,9 +154,7 @@ jobs:
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
         contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'issues' && github.event.action == 'labeled' &&
-        github.event.label.name == 'claude')
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -159,6 +162,8 @@ jobs:
       id-token: write
       pull-requests: write
       issues: write
+      actions: read
+      checks: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -169,7 +174,56 @@ jobs:
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+            checks: read
+
+  # Automation mode: issue-triggered work — implement, open PR, review, and notify
+  claude-issue:
+    if: >-
+      github.event_name == 'issues' && github.event.action == 'labeled' &&
+        github.event.label.name == 'claude'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           label_trigger: "claude"
+          track_progress: "true"
+          additional_permissions: |
+            actions: read
+            checks: read
+          prompt: |
+            Implement a fix for issue #${{ github.event.issue.number }}.
+
+            After implementing:
+            1. Create a pull request with a clear title and description.
+               Include "Closes #${{ github.event.issue.number }}" in the PR body.
+            2. Self-review your own PR — look for bugs, style issues,
+               missed edge cases, and test gaps. If you find problems, push fixes.
+            3. Review all comments and review threads on the PR. For each one:
+               - If you can address the feedback, make the fix, push, and
+                 mark the conversation as resolved.
+               - If the comment requires human judgment, leave a reply
+                 explaining what you need.
+            4. Check CI status. If CI fails, read the logs, fix the issues,
+               and push again. Repeat until CI passes.
+            5. When CI is green, all actionable review comments are resolved,
+               and the PR is ready, leave a comment tagging @don-petry
+               to review and merge.
 ```
 
 **Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
@@ -182,20 +236,28 @@ also be applied manually to any issue to trigger Claude.
 `CLAUDE.md` from the repository root. The org-level `.github/CLAUDE.md` is
 inherited by repos without their own. Each repo's `CLAUDE.md` references
 `AGENTS.md` for cross-cutting development standards (TDD, SOLID, pre-commit
-checks, etc.). No additional `prompt` or `settings` input is needed.
+checks, etc.). The `claude-issue` job adds an automation `prompt` for the
+issue-to-PR lifecycle, but Claude still reads `CLAUDE.md` and `AGENTS.md`
+for project-specific context.
 
-**Permissions note:** `contents: write` is required for issue-triggered work
-where Claude creates branches and pushes commits. PR review mode only needs
-`contents: read`, but a single permission set covers both modes.
+**Permissions note:** Both jobs use the same permission set. `contents: write`
+is required for issue-triggered work where Claude creates branches and pushes
+commits. `actions: read` and `checks: read` enable Claude to monitor CI status
+via the GitHub MCP tools (`get_ci_status`, `get_workflow_run_details`,
+`download_job_log`).
 
-**Dependabot behavior:** The Claude Code step is skipped for Dependabot PRs (the
-`if` condition on the step). The job still runs and reports SUCCESS to satisfy
-required status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
+**Dependabot behavior:** The Claude Code step in the `claude` job is skipped
+for Dependabot PRs (the `if` condition on the step). The job still runs and
+reports SUCCESS to satisfy required status checks. See
+[AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
 
 **Issue trigger security:** The `issues: [labeled]` event fires when any user
 with triage or write access applies a label. The label name check in the `if:`
 condition ensures only the `claude` label triggers the workflow — other labels
 are ignored. Apply the `claude` label manually to any issue to trigger Claude.
+
+**Customizing the maintainer tag:** Replace `@don-petry` in the `claude-issue`
+prompt with the appropriate maintainer or team for each repository.
 
 ### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
@@ -365,7 +427,7 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 |----------|------------|
 | CI (build/test) | `contents: read` |
 | SonarCloud | `contents: read`, `pull-requests: read` |
-| Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write` |
+| Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
 | CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
