@@ -305,7 +305,8 @@ When creating a new repository in `petry-projects`:
 
 ## Current Compliance Status
 
-Settings deviations from the standard documented above:
+**Repository settings:** All 7 repos are fully compliant as of 2026-04-05
+(remediated via `scripts/apply-repo-settings.sh --all`).
 
 **Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
 sweep (now enforced by `check_ruleset_bypass_actors()` and
