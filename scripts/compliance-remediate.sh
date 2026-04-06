@@ -145,6 +145,18 @@ remediate_label() {
 }
 
 # ---------------------------------------------------------------------------
+# Ensure the compliance-audit label exists in a repo (needed before PR creation)
+# ---------------------------------------------------------------------------
+ensure_compliance_label() {
+  local repo="$1"
+  gh label create "compliance-audit" \
+    --repo "$ORG/$repo" \
+    --color "7057ff" \
+    --description "Automated compliance audit finding" \
+    --force 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
 # PR-based: generate CODEOWNERS
 # ---------------------------------------------------------------------------
 remediate_codeowners() {
@@ -225,6 +237,9 @@ remediate_codeowners() {
     report_fail "$repo" "missing-codeowners" "Could not create file via Contents API"
     return 0
   fi
+
+  # Ensure label exists before PR creation
+  ensure_compliance_label "$repo"
 
   # Open PR
   local pr_url
@@ -321,20 +336,24 @@ remediate_unpinned_actions() {
     # Resolve the tag to a commit SHA
     local commit_sha=""
 
-    # Try to get the tag's commit SHA (handle annotated tags via ^{})
-    commit_sha=$(gh api "repos/$action_part/git/refs/tags/$tag_part" \
-      --jq '.object | if .type == "tag" then .sha else .sha end' 2>/dev/null || echo "")
+    # Resolve tag ref — lightweight tags point directly to a commit (.type == "commit"),
+    # annotated tags point to a tag object (.type == "tag") which in turn points to
+    # the commit. We need the commit SHA in both cases.
+    local ref_json
+    ref_json=$(gh api "repos/$action_part/git/refs/tags/$tag_part" 2>/dev/null || echo "")
 
-    # For annotated tags, dereference the tag object to get the commit SHA
-    if [ -n "$commit_sha" ]; then
-      local obj_type
-      obj_type=$(gh api "repos/$action_part/git/refs/tags/$tag_part" \
-        --jq '.object.type' 2>/dev/null || echo "")
+    if [ -n "$ref_json" ]; then
+      local obj_type obj_sha
+      obj_type=$(echo "$ref_json" | jq -r '.object.type // empty')
+      obj_sha=$(echo "$ref_json" | jq -r '.object.sha // empty')
+
       if [ "$obj_type" = "tag" ]; then
-        # Annotated tag — fetch the tag object to get the commit SHA
-        local tag_obj_sha="$commit_sha"
-        commit_sha=$(gh api "repos/$action_part/git/tags/$tag_obj_sha" \
+        # Annotated tag — dereference the tag object to get the commit SHA
+        commit_sha=$(gh api "repos/$action_part/git/tags/$obj_sha" \
           --jq '.object.sha' 2>/dev/null || echo "")
+      else
+        # Lightweight tag — the object IS the commit
+        commit_sha="$obj_sha"
       fi
     fi
 
@@ -421,6 +440,9 @@ Ref: standards/ci-standards.md#action-pinning-policy"
     report_fail "$repo" "unpinned-actions-$workflow_file" "Contents API PUT failed"
     return 0
   fi
+
+  # Ensure label exists before PR creation
+  ensure_compliance_label "$repo"
 
   # Open PR
   local failed_note=""
