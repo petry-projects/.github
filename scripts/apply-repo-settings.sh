@@ -128,10 +128,15 @@ apply_settings() {
     allow_merge_commit: .allow_merge_commit,
     allow_rebase_merge: .allow_rebase_merge,
 <<<<<<< HEAD
+<<<<<<< HEAD
     has_discussions: .has_discussions,
     has_issues: .has_issues,
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+    has_discussions: .has_discussions,
+    has_issues: .has_issues,
+>>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
     squash_merge_commit_title: .squash_merge_commit_title,
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
@@ -149,8 +154,12 @@ apply_settings() {
     return 1
   fi
 
+<<<<<<< HEAD
   # Standard settings from standards/github-settings.md#merge-settings
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+  # Standard settings from standards/github-settings.md#repository-settings--standard-defaults
+>>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
   declare -A EXPECTED=(
     [allow_auto_merge]="true"
     [delete_branch_on_merge]="true"
@@ -158,10 +167,15 @@ apply_settings() {
     [allow_merge_commit]="true"
     [allow_rebase_merge]="true"
 <<<<<<< HEAD
+<<<<<<< HEAD
     [has_discussions]="true"
     [has_issues]="true"
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+    [has_discussions]="true"
+    [has_issues]="true"
+>>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
   )
 
   local needs_patch=false
