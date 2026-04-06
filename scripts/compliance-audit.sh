@@ -402,6 +402,36 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: claude.yml has checkout step in the interactive 'claude' job
+# ---------------------------------------------------------------------------
+# Without checkout, claude-code-action cannot read CLAUDE.md / AGENTS.md and
+# fails on all PR-triggered and @claude-mention runs.
+check_claude_workflow_checkout() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/claude.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # Missing claude.yml is caught by check_required_workflows
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # Locate the 'claude:' job block (interactive mode, not claude-issue).
+  # We look for the checkout action appearing before the claude-issue job
+  # definition. Strategy: extract lines up to the 'claude-issue:' job header,
+  # then check whether actions/checkout appears in that slice.
+  local before_issue_job
+  before_issue_job=$(echo "$decoded" | awk '/^  claude-issue:/{exit} {print}')
+
+  if ! echo "$before_issue_job" | grep -qE 'uses:\s+actions/checkout@'; then
+    add_finding "$repo" "ci-workflows" "claude-missing-checkout" "error" \
+      "\`.github/workflows/claude.yml\` is missing a \`Checkout repository\` step in the \`claude\` job — PR reviews and @claude mentions will fail without it" \
+      "standards/ci-standards.md#4-claude-code-claudeyml"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -699,6 +729,7 @@ main() {
     check_codeowners "$repo"
     check_sonarcloud "$repo"
     check_workflow_permissions "$repo"
+    check_claude_workflow_checkout "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
 
