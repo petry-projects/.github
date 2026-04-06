@@ -294,7 +294,6 @@ jobs:
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--allowedTools Bash,Read,Glob,Grep --timeout 2400000"
           prompt: |
             You are the **Weekly Compliance & Health Analyst** for the **${{ github.repository_owner }}** GitHub organization.
             Two data collection jobs have completed. Your job is to analyze both datasets together,
