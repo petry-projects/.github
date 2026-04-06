@@ -1560,12 +1560,16 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
+<<<<<<< HEAD
     --label "dev-lead" \
 =======
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+    --label "claude" \
+>>>>>>> b9fe8f7 (fix: add claude label to compliance audit issues)
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
