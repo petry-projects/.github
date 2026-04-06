@@ -112,6 +112,15 @@ Each repo needs a `sonar-project.properties` file at root with project key and o
 ### 4. Claude Code (`claude.yml`)
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
+A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
+
+> **Both jobs require a checkout step.** The `claude` job (PR reviews) and the
+> `claude-issue` job (issue automation) each need `actions/checkout` **before**
+> the `claude-code-action` step. Without it, `claude-code-action` cannot read
+> `CLAUDE.md` or `AGENTS.md` and will error on every trigger. The weekly
+> compliance audit (`check_claude_workflow_checkout`) detects repos missing this
+> step and creates a labeled issue to drive remediation.
+
 The workflow has two jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`

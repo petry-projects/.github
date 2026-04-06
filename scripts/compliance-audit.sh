@@ -407,6 +407,38 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: claude.yml jobs both have a checkout step
+# ---------------------------------------------------------------------------
+check_claude_workflow_checkout() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/claude.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # missing workflow is caught by check_required_workflows
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # For each job that uses claude-code-action, verify a checkout step precedes it.
+  # Strategy: scan for job blocks and check each for 'actions/checkout'.
+  for job in claude claude-issue; do
+    # Extract the block starting at the job definition
+    local job_block
+    job_block=$(echo "$decoded" | awk "/^  ${job}:/{found=1} found{print; if(/^  [a-zA-Z_-]+:/ && !/^  ${job}:/) exit}" )
+    if [ -z "$job_block" ]; then
+      continue  # job not present (e.g. repo only has one job)
+    fi
+
+    if ! echo "$job_block" | grep -q 'actions/checkout'; then
+      add_finding "$repo" "ci-workflows" "claude-job-missing-checkout-${job}" "error" \
+        "The \`${job}\` job in \`claude.yml\` is missing a checkout step — claude-code-action requires the repo to be checked out to read \`CLAUDE.md\` and \`AGENTS.md\`" \
+        "standards/workflows/claude.yml"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -704,6 +736,7 @@ main() {
     check_codeowners "$repo"
     check_sonarcloud "$repo"
     check_workflow_permissions "$repo"
+    check_claude_workflow_checkout "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
 
