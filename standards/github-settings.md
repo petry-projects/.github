@@ -198,7 +198,8 @@ Settings deviations from the standard documented above:
 
 | Repository | Deviations |
 |------------|-----------|
-| **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
+| **.github** | No rulesets — run `scripts/setup-branch-protection.sh` to remediate |
+| **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` — run `scripts/setup-branch-protection.sh` to remediate rulesets |
 | **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
 | **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
 | **broodly** | `has_wiki: true`, `has_discussions: false` |
@@ -208,6 +209,27 @@ Settings deviations from the standard documented above:
 > **Migration note:** All repos currently use classic branch protection. These
 > should be migrated to rulesets per the standard above. Classic rules should
 > be removed after rulesets are verified.
+
+### Remediating Missing Rulesets
+
+Use `scripts/setup-branch-protection.sh` to create the `pr-quality` and `code-quality`
+rulesets on `.github` and `bmad-bgreat-suite`:
+
+```bash
+# Dry run (no changes, shows what would be done)
+bash scripts/setup-branch-protection.sh --dry-run
+
+# Apply (requires gh CLI authenticated with repo admin access)
+GH_TOKEN=<admin-pat> bash scripts/setup-branch-protection.sh
+```
+
+After running, verify rulesets in the GitHub UI:
+- [`.github` rulesets](https://github.com/petry-projects/.github/settings/rules)
+- [`bmad-bgreat-suite` rulesets](https://github.com/petry-projects/bmad-bgreat-suite/settings/rules)
+
+> **Note:** The required CI check names for `bmad-bgreat-suite` in the script
+> (`SonarCloud`, `Analyze`, `claude`) should be verified against the repo's
+> actual workflow job names before applying. Adjust the script if needed.
 
 ---
 
