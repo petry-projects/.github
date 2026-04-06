@@ -38,6 +38,7 @@ Each repository must have:
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
+| `.github/workflows/dependabot-rebase.yml` | Rebase behind Dependabot PRs after merges |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
 
 ## Dependabot Templates
@@ -147,6 +148,36 @@ Behavior:
 - **Major** updates are left for human review
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
+## Update and Merge Behind PRs Workflow
+
+See [`workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml).
+
+When branch protection requires branches to be up-to-date (`strict: true`),
+merging one Dependabot PR makes the others fall behind. Dependabot only rebases
+PRs on its scheduled run (weekly) or when there are merge conflicts — not when
+a PR merely falls behind `main`. Additionally, GitHub's auto-merge (`--auto`)
+may not trigger when rulesets cause `mergeable_state` to report "blocked" even
+when all requirements are met. Together, these issues stall Dependabot PR
+merges indefinitely.
+
+This workflow fires on every push to `main` and:
+
+1. **Updates behind PRs** — uses the GitHub API `update-branch` endpoint with
+   the **merge** method to bring Dependabot PR branches up to date with `main`.
+2. **Merges ready PRs** — directly merges any Dependabot PR that is up-to-date,
+   has auto-merge enabled, and has all CI checks passing.
+
+Using the app token for merges ensures each merge triggers a new push to `main`,
+creating a self-sustaining chain that serializes Dependabot PR merges.
+
+**Important:** always use the **merge** method (not rebase) with `update-branch`.
+The rebase method force-pushes, replacing Dependabot's commit signature, which
+breaks `dependabot/fetch-metadata` verification and causes Dependabot to refuse
+future operations ("edited by someone other than Dependabot"). The merge method
+preserves the original commits. The automerge workflow must use
+`skip-commit-verification: true` in `dependabot/fetch-metadata` since the merge
+commit is authored by GitHub, not Dependabot.
+
 ## Vulnerability Audit CI Check
 
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml).
@@ -169,9 +200,10 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 1. Copy the appropriate `dependabot.yml` template to `.github/dependabot.yml`,
    adjusting `directory` paths as needed.
 2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
-3. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-4. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
-   configured for auto-merge.
-5. Create the `security` and `dependencies` labels in the repository if they
+3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/`.
+4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
+5. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
+   configured for auto-merge and rebase.
+6. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
-6. Add `dependency-audit` as a required status check in branch protection rules.
+7. Add `dependency-audit` as a required status check in branch protection rules.
