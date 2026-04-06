@@ -66,21 +66,6 @@ detect_required_checks() {
       || echo ""
   }
 
-  # Helper: fetch all job display names (name: field, or job id if no name)
-  workflow_job_names() {
-    local file="$1"
-    local content
-    content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$file" \
-      --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-    # Extract job names from YAML (lines under `jobs:` section with `  name:`)
-    echo "$content" | awk '
-      /^jobs:/ { in_jobs=1; next }
-      in_jobs && /^  [a-zA-Z0-9_-]+:/ { job_id=substr($0, 3); gsub(/:.*/, "", job_id); current_job=job_id; has_name=0; next }
-      in_jobs && /^    name:/ { name=substr($0, 11); gsub(/^[ \t]+|[ \t]+$/, "", name); gsub(/["\x27]/, "", name); print name; has_name=1; next }
-      in_jobs && /^  [a-zA-Z0-9_-]+:/ && !has_name { print current_job; next }
-    '
-  }
-
   # --- SonarCloud ---
   if echo "$workflows" | grep -qx "sonarcloud.yml"; then
     local sc_wf_name
@@ -145,8 +130,8 @@ detect_required_checks() {
     fi
   fi
 
-  # Output as newline-separated list
-  printf '%s\n' "${checks[@]}"
+  # Output as newline-separated list (guard against empty array with set -u)
+  [ "${#checks[@]}" -gt 0 ] && printf '%s\n' "${checks[@]}" || true
 }
 
 # ---------------------------------------------------------------------------
