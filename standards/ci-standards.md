@@ -956,6 +956,9 @@ jobs:
     if: >-
       github.event_name == 'issues' && github.event.action == 'labeled' &&
         github.event.label.name == 'claude'
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
