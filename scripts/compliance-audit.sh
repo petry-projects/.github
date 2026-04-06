@@ -37,10 +37,11 @@ REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-autom
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
 
 REQUIRED_SETTINGS_BOOL=(
-  "allow_auto_merge:true:Allow auto-merge must be enabled for Dependabot workflow"
-  "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
-  "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
-  "has_issues:true:Issue tracking must be enabled"
+  "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
+  "delete_branch_on_merge:true:warning:Automatically delete head branches must be enabled"
+  "has_wiki:false:warning:Wiki should be disabled — documentation lives in the repo"
+  "has_issues:true:error:Issue tracking must be enabled"
+  "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
 )
 
 # ---------------------------------------------------------------------------
@@ -124,6 +125,9 @@ detect_ecosystems() {
   if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
     ECOSYSTEMS+=("github-actions")
   fi
+  if echo "$tree" | grep -qE '(^|/)_bmad/'; then
+    ECOSYSTEMS+=("bmad-method")
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -139,6 +143,15 @@ check_required_workflows() {
         "standards/ci-standards.md#required-workflows"
     fi
   done
+
+  # Conditional: bmad-method repos must have feature-ideation workflow
+  if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
+    if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.name' > /dev/null 2>&1; then
+      add_finding "$repo" "ci-workflows" "missing-feature-ideation.yml" "error" \
+        "BMAD Method repo must have \`feature-ideation.yml\` workflow for automated ideation" \
+        "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -257,11 +270,11 @@ check_repo_settings() {
 
   # Boolean settings checks
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
-    IFS=':' read -r key expected detail <<< "$entry"
+    IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
     actual=$(echo "$settings" | jq -r ".$key // \"null\"")
     if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "settings" "$key" "warning" \
+      add_finding "$repo" "settings" "$key" "$severity" \
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
         "standards/github-settings.md#repository-settings--standard-defaults"
     fi
@@ -276,14 +289,6 @@ check_repo_settings() {
       "standards/github-settings.md#general"
   fi
 
-  # Discussions
-  local has_discussions
-  has_discussions=$(echo "$settings" | jq -r '.has_discussions')
-  if [ "$has_discussions" != "true" ]; then
-    add_finding "$repo" "settings" "has-discussions" "warning" \
-      "Discussions should be enabled for community engagement" \
-      "standards/github-settings.md#general"
-  fi
 }
 
 # ---------------------------------------------------------------------------
