@@ -696,6 +696,9 @@ runtime to determine who to tag.
     if: >-
       github.event_name == 'issues' && github.event.action == 'labeled' &&
         github.event.label.name == 'claude'
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -720,7 +723,7 @@ runtime to determine who to tag.
             actions: read
             checks: read
           claude_args: |
-            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run watch:*),Bash(cat:*),Edit,Write"
+            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
           prompt: |
             Implement a fix for issue #${{ github.event.issue.number }}.
 
