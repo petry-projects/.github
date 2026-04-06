@@ -72,7 +72,7 @@ Additional categories MAY be added per project needs (e.g., "Q&A", "Show and Tel
 ### Automated Ideation Workflow
 
 Repositories with the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD)
-installed (`_bmad/` directory) SHOULD have the `feature-ideation.yml` workflow,
+installed (`_bmad/` directory) MUST have the `feature-ideation.yml` workflow,
 which uses the **Ideas** category to post and maintain feature proposal
 Discussions. Each proposal is a separate Discussion thread, updated by subsequent
 workflow runs as market signals and project context evolve. See
