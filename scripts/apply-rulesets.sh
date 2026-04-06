@@ -30,7 +30,7 @@ info()  { echo "[INFO]  $*" >&2; }
 warn()  { echo "[WARN]  $*" >&2; }
 error() { echo "[ERROR] $*" >&2; }
 
-# Upsert a ruleset: create if missing, update (PATCH) if already present.
+# Upsert a ruleset: create if missing, replace (PUT) if already present.
 # Args: <repo> <ruleset-name> <json-payload>
 upsert_ruleset() {
   local repo="$1" name="$2" payload="$3"
@@ -38,8 +38,8 @@ upsert_ruleset() {
 
   # Look up existing rulesets for this repo
   local existing_id
-  existing_id=$(gh api "repos/$full_repo/rulesets" \
-    --jq --arg name "$name" '.[] | select(.name == $name) | .id' 2>/dev/null || echo "")
+  existing_id=$(gh api "repos/$full_repo/rulesets" 2>/dev/null \
+    | jq -r --arg name "$name" '.[] | select(.name == $name) | .id' || echo "")
 
   if [ "$DRY_RUN" = "true" ]; then
     if [ -n "$existing_id" ]; then
