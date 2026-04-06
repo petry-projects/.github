@@ -663,7 +663,8 @@ create_umbrella_issue() {
     "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
   )
 
-  local body="## Compliance Audit — $audit_date
+  local body
+  body="## Compliance Audit — $audit_date
 
 This umbrella issue tracks all findings from the automated compliance audit run on **$audit_date**.
 Findings are grouped by remediation category. Address each category together to avoid duplicate agent PRs.
