@@ -247,7 +247,8 @@ Settings deviations from the standard documented above:
 
 | Repository | Deviations |
 |------------|-----------|
-| **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` |
+| **.github** | No rulesets — remediate with `scripts/setup-branch-protection.sh` |
+| **bmad-bgreat-suite** | No rulesets, `delete_branch_on_merge: false`, `allow_auto_merge: false`, `has_wiki: true`, `has_discussions: false` — remediate rulesets with `scripts/setup-branch-protection.sh` |
 | **ContentTwin** | `allow_auto_merge: false`, `has_discussions: false` |
 | **google-app-scripts** | `allow_merge_commit: false`, `allow_rebase_merge: false` (stricter than standard), `has_discussions: false` |
 | **broodly** | `has_wiki: true`, `has_discussions: false` |
@@ -257,6 +258,27 @@ Settings deviations from the standard documented above:
 > **Migration note:** All repos currently use classic branch protection. These
 > should be migrated to rulesets per the standard above. Classic rules should
 > be removed after rulesets are verified.
+
+### Remediating Missing Rulesets
+
+To enable the `pr-quality` and `code-quality` rulesets on `.github` and
+`bmad-bgreat-suite`, run:
+
+```bash
+# Dry-run first to preview changes
+DRY_RUN=true GH_TOKEN=<admin-pat> bash scripts/setup-branch-protection.sh --default
+
+# Apply to both repos
+GH_TOKEN=<admin-pat> bash scripts/setup-branch-protection.sh --default
+
+# Or apply to a single repo
+GH_TOKEN=<admin-pat> bash scripts/setup-branch-protection.sh .github
+GH_TOKEN=<admin-pat> bash scripts/setup-branch-protection.sh bmad-bgreat-suite
+```
+
+> **Note:** `GH_TOKEN` must have `admin:repo` scope (org admin or repo admin).
+> Verify that the check names in `scripts/setup-branch-protection.sh` match
+> the actual CI job names in each repo before enabling enforcement.
 
 ---
 
