@@ -45,8 +45,11 @@ JSON
 }
 
 @test "filter-bots: env extension adds custom bot logins" {
+  # NOTE: must use `bash -c`, not `sh -c`. On Ubuntu, /bin/sh is dash, which
+  # doesn't support `set -o pipefail` and would choke when sourcing a script
+  # that uses bash-isms. macOS /bin/sh is bash so it works there but CI fails.
   input='[{"number":1,"title":"x","author":{"login":"my-custom-bot"}},{"number":2,"title":"y","author":{"login":"alice"}}]'
-  result=$(FEATURE_IDEATION_BOT_AUTHORS="my-custom-bot" sh -c "
+  result=$(FEATURE_IDEATION_BOT_AUTHORS="my-custom-bot" bash -c "
     . '${TT_SCRIPTS_DIR}/lib/filter-bots.sh'
     printf '%s' '$input' | filter_bots_apply
   ")
