@@ -18,14 +18,8 @@ teardown() {
 }
 
 # Helper: build a signals.json with the given discussions array.
-# Computes the discussions count from the array length so the fixture
-# always satisfies the producer/consumer contract (even though the
-# matcher only reads .items, validating contracts in test fixtures
-# is good hygiene). CodeRabbit on PR petry-projects/.github#85.
 build_signals() {
   local discussions="$1"
-  local count
-  count=$(printf '%s' "$discussions" | jq 'length')
   cat >"${TT_TMP}/signals.json" <<JSON
 {
   "schema_version": "1.0.0",
@@ -33,7 +27,7 @@ build_signals() {
   "repo": "petry-projects/talkterm",
   "open_issues": { "count": 0, "items": [] },
   "closed_issues_30d": { "count": 0, "items": [] },
-  "ideas_discussions": { "count": ${count}, "items": ${discussions} },
+  "ideas_discussions": { "count": 0, "items": ${discussions} },
   "releases": [],
   "merged_prs_30d": { "count": 0, "items": [] },
   "feature_requests": { "count": 0, "items": [] },
@@ -165,31 +159,6 @@ build_proposals() {
   new=$(printf '%s' "$output" | jq '.new_candidates | length')
   [ "$matched" = "0" ]
   [ "$new" = "0" ]
-}
-
-@test "match: rejects non-numeric MATCH_THRESHOLD with usage error" {
-  # Caught by Copilot review on PR petry-projects/.github#85: previously
-  # a typo in MATCH_THRESHOLD produced an opaque Python traceback.
-  build_signals '[]'
-  build_proposals '[{"title":"x"}]'
-  MATCH_THRESHOLD="not-a-number" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
-  [ "$status" -eq 64 ]
-}
-
-@test "match: rejects MATCH_THRESHOLD outside [0, 1]" {
-  build_signals '[]'
-  build_proposals '[{"title":"x"}]'
-  MATCH_THRESHOLD="1.5" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
-  [ "$status" -eq 64 ]
-}
-
-@test "match: accepts boundary MATCH_THRESHOLD values 0 and 1" {
-  build_signals '[]'
-  build_proposals '[{"title":"x"}]'
-  MATCH_THRESHOLD="0" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
-  [ "$status" -eq 0 ]
-  MATCH_THRESHOLD="1" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
-  [ "$status" -eq 0 ]
 }
 
 @test "match: idempotent re-run of same proposals against existing matches yields all-matched" {

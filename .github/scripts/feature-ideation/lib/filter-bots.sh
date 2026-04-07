@@ -7,9 +7,7 @@
 #   pollute the signals payload and crowd out real user feedback.
 #
 # Configurable via FEATURE_IDEATION_BOT_AUTHORS (comma-separated, optional).
-# Defaults to a sensible blocklist of known automation accounts. Items
-# matching this list are REMOVED from the result. Adopters can add their
-# own bot logins via the env var to extend the blocklist.
+# Defaults to a sensible allowlist of known automation accounts.
 
 set -euo pipefail
 
@@ -38,18 +36,7 @@ filter_bots_build_list() {
     local IFS=','
     # shellcheck disable=SC2206
     local extras=($FEATURE_IDEATION_BOT_AUTHORS)
-    # Trim leading/trailing whitespace from each comma-separated entry so
-    # `"bot1, bot2"` resolves to `bot1` and `bot2`, not `bot1` and ` bot2`.
-    # Caught by CodeRabbit review on PR petry-projects/.github#85.
-    local trimmed=()
-    local entry
-    for entry in "${extras[@]}"; do
-      # Strip leading whitespace, then trailing whitespace.
-      entry="${entry#"${entry%%[![:space:]]*}"}"
-      entry="${entry%"${entry##*[![:space:]]}"}"
-      [ -n "$entry" ] && trimmed+=("$entry")
-    done
-    list+=("${trimmed[@]}")
+    list+=("${extras[@]}")
   fi
   printf '%s\n' "${list[@]}" | jq -R . | jq -sc .
 }
