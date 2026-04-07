@@ -1,0 +1,52 @@
+#!/usr/bin/env bats
+# Validates fixture signals.json files against the schema.
+#
+# Kills R3: ensures the producer/consumer contract is enforced in CI
+# rather than discovered when Mary's prompt parses an unexpected shape.
+
+load 'helpers/setup'
+
+VALIDATOR="${TT_REPO_ROOT}/.github/scripts/feature-ideation/validate-signals.py"
+SCHEMA="${TT_REPO_ROOT}/.github/schemas/signals.schema.json"
+FIX="${TT_FIXTURES_DIR}/expected"
+
+@test "schema: validator script exists and is executable" {
+  [ -f "$VALIDATOR" ]
+  [ -r "$VALIDATOR" ]
+}
+
+@test "schema: schema file is valid JSON" {
+  jq -e . "$SCHEMA" >/dev/null
+}
+
+@test "schema: empty-repo fixture passes" {
+  run python3 "$VALIDATOR" "${FIX}/empty-repo.signals.json" "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "schema: populated fixture passes" {
+  run python3 "$VALIDATOR" "${FIX}/populated.signals.json" "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "schema: truncated fixture passes" {
+  run python3 "$VALIDATOR" "${FIX}/truncated.signals.json" "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
+@test "schema: missing required field FAILS validation" {
+  run python3 "$VALIDATOR" "${FIX}/INVALID-missing-field.signals.json" "$SCHEMA"
+  [ "$status" -eq 1 ]
+}
+
+@test "schema: malformed repo string FAILS validation" {
+  run python3 "$VALIDATOR" "${FIX}/INVALID-bad-repo.signals.json" "$SCHEMA"
+  [ "$status" -eq 1 ]
+}
+
+@test "schema: extra top-level field FAILS validation" {
+  bad_file="${BATS_TEST_TMPDIR}/extra-field.json"
+  jq '. + {unexpected: "value"}' "${FIX}/empty-repo.signals.json" >"$bad_file"
+  run python3 "$VALIDATOR" "$bad_file" "$SCHEMA"
+  [ "$status" -eq 1 ]
+}
