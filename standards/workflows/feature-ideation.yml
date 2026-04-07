@@ -1,0 +1,664 @@
+# BMAD Analyst (Mary) — Feature Research & Ideation
+#
+# Weekly automated research and ideation powered by the BMAD Analyst persona.
+# Gathers project signals, researches the competitive landscape via web search,
+# and produces evidence-grounded feature proposals as GitHub Discussions.
+#
+# Required for repos that have BMAD Method installed (presence of `_bmad/`,
+# `_bmad-output/`, or equivalent BMAD planning artifacts).
+#
+# How it works (two jobs):
+#   1. gather-signals: collects open issues, feature requests, bug patterns,
+#      merged PRs, releases, and existing Ideas discussions into a JSON payload.
+#   2. analyze: runs the BMAD Analyst (Mary) on Opus 4.6 through a 5-phase
+#      multi-skill pipeline (market research → brainstorming → party mode →
+#      adversarial → publish), creating one Discussion per surviving idea.
+#
+# Customisation required when adopting:
+#   - PROJECT_CONTEXT env var (in the `analyze` job) — short paragraph
+#     describing what the project is, who it's for, and the competitive
+#     landscape to research. The agent uses this to steer Phase 2 research.
+#   - Optional: tighten or relax the schedule cron, the focus_area choices,
+#     and the timeout_minutes if your project warrants it.
+#
+# Critical gotchas (do NOT remove without reading the standard):
+#   - `github_token: ${{ secrets.GITHUB_TOKEN }}` MUST be passed explicitly.
+#     The action's auto-generated GitHub App installation token (claude[bot])
+#     lacks `discussions: write` and silently fails every Discussion mutation.
+#     Passing GITHUB_TOKEN makes the job-level permissions grant apply.
+#   - `ANTHROPIC_MODEL: claude-opus-4-6` is set as a step env var. Opus is
+#     required for the depth of reasoning the multi-skill pipeline expects;
+#     Sonnet runs cheaper but produces shallower adversarial passes.
+#   - Do NOT enable `show_full_output: true`. It echoes raw tool results to
+#     public logs, which can leak secrets.
+#
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
+# Reference implementation: https://github.com/petry-projects/TalkTerm/blob/main/.github/workflows/feature-ideation.yml
+
+name: Feature Research & Ideation (BMAD Analyst)
+
+on:
+  schedule:
+    - cron: '0 7 * * 5'   # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
+  workflow_dispatch:
+    inputs:
+      focus_area:
+        description: 'Optional focus area (e.g., "accessibility", "performance", "developer experience")'
+        required: false
+        type: string
+      research_depth:
+        description: 'Research depth — controls web search volume and iteration count'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - quick
+          - standard
+          - deep
+
+permissions: {}
+
+concurrency:
+  group: feature-ideation
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Gather signals — issues, discussions, releases, community feedback
+  # ---------------------------------------------------------------------------
+  gather-signals:
+    name: Gather Project Signals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      discussions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      signals_artifact: ${{ steps.collect.outputs.signals_artifact }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Collect project signals
+        id: collect
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          SIGNALS_FILE=$(mktemp)
+
+          # --- Open issues (exclude bot-generated, omit body to stay within output limits) ---
+          OPEN_ISSUES=$(gh issue list --repo "$REPO" --state open --limit 50 \
+            --json number,title,labels,createdAt,author \
+            -q '[.[] | select(.author.login != "dependabot[bot]" and .author.login != "github-actions[bot]")]' \
+            2>/dev/null || echo '[]')
+
+          # --- Recently closed issues (last 30 days) ---
+          THIRTY_DAYS_AGO=$(date -u -d '30 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-30d +%Y-%m-%d)
+          CLOSED_ISSUES=$(gh issue list --repo "$REPO" --state closed --limit 30 \
+            --json number,title,labels,closedAt \
+            -q "[.[] | select(.closedAt >= \"${THIRTY_DAYS_AGO}\")]" \
+            2>/dev/null || echo '[]')
+
+          # --- Existing Ideas discussions (to detect what's already tracked) ---
+          # First resolve the Ideas category ID, then query filtered by category.
+          IDEAS_CAT_ID=$(gh api graphql -f query='
+            query($repo: String!, $owner: String!) {
+              repository(name: $repo, owner: $owner) {
+                discussionCategories(first: 20) {
+                  nodes { id name }
+                }
+              }
+            }' -f owner="${{ github.repository_owner }}" \
+               -f repo="${{ github.event.repository.name }}" \
+            --jq '[.data.repository.discussionCategories.nodes[] | select(.name == "Ideas")][0].id' \
+            2>/dev/null || echo "")
+
+          if [ -n "$IDEAS_CAT_ID" ] && [ "$IDEAS_CAT_ID" != "null" ]; then
+            IDEAS_DISCUSSIONS=$(gh api graphql -f query='
+              query($repo: String!, $owner: String!, $categoryId: ID!) {
+                repository(name: $repo, owner: $owner) {
+                  discussions(first: 100, orderBy: {field: UPDATED_AT, direction: DESC},
+                              categoryId: $categoryId) {
+                    nodes {
+                      id number title
+                      createdAt updatedAt
+                      labels(first: 10) { nodes { name } }
+                      comments(first: 1) { totalCount }
+                    }
+                  }
+                }
+              }' -f owner="${{ github.repository_owner }}" \
+                 -f repo="${{ github.event.repository.name }}" \
+                 -f categoryId="$IDEAS_CAT_ID" \
+              --jq '.data.repository.discussions.nodes' \
+              2>/dev/null || echo '[]')
+          else
+            IDEAS_DISCUSSIONS='[]'
+          fi
+
+          # --- Recent releases ---
+          RELEASES=$(gh release list --repo "$REPO" --limit 5 \
+            --json tagName,name,publishedAt,isPrerelease \
+            2>/dev/null || echo '[]')
+
+          # --- PR activity (merged last 30 days — what's been shipping) ---
+          MERGED_PRS=$(gh pr list --repo "$REPO" --state merged --limit 30 \
+            --json number,title,labels,mergedAt \
+            -q "[.[] | select(.mergedAt >= \"${THIRTY_DAYS_AGO}\")]" \
+            2>/dev/null || echo '[]')
+
+          # --- Feature requests (issues labeled enhancement/feature) ---
+          FEATURE_REQUESTS=$(echo "$OPEN_ISSUES" | jq -c \
+            '[.[] | select(.labels | map(.name) | any(test("enhancement|feature|idea"; "i")))]')
+
+          # --- Bug patterns (open bugs — indicate pain points) ---
+          BUG_REPORTS=$(echo "$OPEN_ISSUES" | jq -c \
+            '[.[] | select(.labels | map(.name) | any(test("bug"; "i")))]')
+
+          # --- Compose signals ---
+          jq -n \
+            --arg scan_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg repo "$REPO" \
+            --argjson open_issues "$OPEN_ISSUES" \
+            --argjson closed_issues "$CLOSED_ISSUES" \
+            --argjson ideas_discussions "$IDEAS_DISCUSSIONS" \
+            --argjson releases "$RELEASES" \
+            --argjson merged_prs "$MERGED_PRS" \
+            --argjson feature_requests "$FEATURE_REQUESTS" \
+            --argjson bug_reports "$BUG_REPORTS" \
+            '{
+              scan_date: $scan_date,
+              repo: $repo,
+              open_issues: { count: ($open_issues | length), items: $open_issues },
+              closed_issues_30d: { count: ($closed_issues | length), items: $closed_issues },
+              ideas_discussions: { count: ($ideas_discussions | length), items: $ideas_discussions },
+              releases: $releases,
+              merged_prs_30d: { count: ($merged_prs | length), items: $merged_prs },
+              feature_requests: { count: ($feature_requests | length), items: $feature_requests },
+              bug_reports: { count: ($bug_reports | length), items: $bug_reports }
+            }' > "$SIGNALS_FILE"
+
+          cp "$SIGNALS_FILE" "${{ runner.temp }}/signals.json"
+          echo "signals_artifact=signals" >> "$GITHUB_OUTPUT"
+
+          # Step summary
+          {
+            echo "## Signals Collected"
+            echo ""
+            echo "- **Open issues:** $(jq '.open_issues.count' "$SIGNALS_FILE")"
+            echo "- **Feature requests:** $(jq '.feature_requests.count' "$SIGNALS_FILE")"
+            echo "- **Bug reports:** $(jq '.bug_reports.count' "$SIGNALS_FILE")"
+            echo "- **Merged PRs (30d):** $(jq '.merged_prs_30d.count' "$SIGNALS_FILE")"
+            echo "- **Existing Ideas discussions:** $(jq '.ideas_discussions.count' "$SIGNALS_FILE")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          rm -f "$SIGNALS_FILE"
+
+      - name: Upload signals artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signals
+          path: ${{ runner.temp }}/signals.json
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Job 2: BMAD Analyst — Research, ideate, and post per-idea Discussions
+  # ---------------------------------------------------------------------------
+  analyze:
+    name: BMAD Analyst — Feature Ideation
+    needs: [gather-signals]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      discussions: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Download signals artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signals
+          path: ${{ runner.temp }}
+
+      - name: Run Claude Code — BMAD Analyst
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FOCUS_AREA: ${{ inputs.focus_area || '' }}
+          RESEARCH_DEPTH: ${{ inputs.research_depth || 'standard' }}
+          # Opus 4.6 is required — see header comment for why.
+          ANTHROPIC_MODEL: claude-opus-4-6
+          # === CUSTOMISE THIS PER REPO ===
+          # Replace this paragraph with a 3-5 sentence description of your project:
+          # what it is, who it serves, and the competitive landscape Mary should
+          # research. The more specific you are, the more useful the proposals.
+          PROJECT_CONTEXT: |
+            TODO: Replace this with a description of the project and its market.
+            Example: "ProjectX is a [type of product] for [target user]. Competitors
+            include A, B, C. Key emerging trends in this space: X, Y, Z."
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # CRITICAL: pass the workflow's GITHUB_TOKEN explicitly so the
+          # job-level `permissions: discussions: write` grant applies. Without
+          # this, the action uses its own GitHub App token (claude[bot]) which
+          # lacks discussions:write and silently fails every mutation.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: "--allowedTools Bash,Read,Glob,Grep,WebSearch,WebFetch"
+          prompt: |
+            You are **Mary**, the BMAD Strategic Business Analyst, running as an automated
+            weekly feature research and ideation agent for the **${{ github.repository }}** project.
+
+            ## Thinking & Research Directive
+
+            **Think hard.** Take your time with every phase below. Reason deeply about each
+            finding before moving on. Do not rush to conclusions — sit with the evidence,
+            look for non-obvious patterns, and challenge your own assumptions.
+
+            **Research freely — time is no constraint.** You have the full timeout budget to
+            produce the highest-quality analysis possible. Prefer doing one more web search
+            over guessing. Prefer reading one more source over assuming. Depth and rigor
+            matter far more than speed.
+
+            ## Your Persona
+
+            You are a senior analyst with deep expertise in market research, competitive analysis,
+            and requirements elicitation. You approach every analysis like a treasure hunt —
+            thrilled by every clue, energized when patterns emerge. You structure insights with
+            precision while making analysis feel like discovery. You draw upon Porter's Five Forces,
+            SWOT analysis, and competitive intelligence methodologies naturally.
+
+            ## Project Context
+
+            $PROJECT_CONTEXT
+
+            ## Environment
+
+            - Repository: ${{ github.repository }}
+            - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Date: $(date -u +%Y-%m-%d)
+            - Focus area: $FOCUS_AREA (empty = open-ended exploration)
+            - Research depth: $RESEARCH_DEPTH
+
+            ## Phase 1: Load Context
+
+            1. Read the project signals collected by the previous job:
+               ```bash
+               cat ${{ runner.temp }}/signals.json
+               ```
+
+            2. Discover and read planning artifacts. BMAD installations vary —
+               use Glob to find them, then Read the ones that exist:
+               ```
+               Glob: _bmad/**/*.md
+               Glob: _bmad-output/**/*.md
+               Glob: docs/planning/**/*.md
+               Glob: docs/architecture/**/*.md
+               ```
+               Prioritise files named like `prd*.md`, `architecture*.md`,
+               `epics*.md`, `roadmap*.md`, `ux-*.md`, `requirements*.md`.
+
+            3. Read the project README and any recent changelog or release notes.
+
+            4. Scan the codebase for extensibility points and underutilized capabilities.
+               Use Glob and Grep to find:
+               - Interface/port files (e.g. `**/ports/*.ts`, `**/interfaces/*.go`,
+                 `**/abstract*.py`) — these often hint at planned extensions.
+               - Adapter / strategy / factory patterns — extension seams.
+               - TODO / FIXME / HACK comments — known gaps the team has flagged.
+               - Files named `*config*`, `*settings*` — surfaces user-facing knobs.
+
+            5. **Read existing Ideas discussions from signals.** These are ideas already being
+               tracked. You will update them if you have new findings, or leave them alone.
+
+            ## Phase 2: Market Research Skill (Iterative Evidence Gathering)
+
+            **Adopt the "Market Research" mindset.** Your sole job in this phase is to gather
+            hard evidence — not to generate ideas yet. Be a detective, not a brainstormer.
+
+            Using the **Project Context** above as your starting point, research the
+            competitive landscape and emerging trends. Cover at minimum:
+
+            ### Competitive Landscape
+            - What are competitors in this space shipping recently?
+            - What UX patterns or capabilities are emerging as table stakes?
+            - Who is winning, who is losing, and why?
+            - What user segments are underserved?
+
+            ### Emerging Capabilities
+            - New platform / SDK / model / framework features that unlock new approaches
+            - Industry trend reports, analyst commentary, conference announcements
+            - Technology shifts that change what is feasible or affordable
+
+            ### User Need Signals
+            - Patterns in open issues and feature requests
+            - Common pain points from bug reports that suggest UX gaps
+            - What shipped recently (merged PRs) and what gaps remain
+            - Community discussion themes
+
+            Adjust depth based on RESEARCH_DEPTH:
+            - **quick**: Skim signals, 1-2 web searches, focus on low-hanging fruit
+            - **standard**: Thorough signal analysis, 5-8 web searches, balanced exploration
+            - **deep**: Exhaustive research, 10+ web searches, competitor deep dives, trend analysis
+
+            **Iterate:** After your first research pass, review what you found. Are there gaps?
+            Promising threads you didn't pull? Do another pass on the most promising areas
+            before moving on. Keep going until you feel you have a solid evidence base.
+
+            ## Phase 3: Brainstorming Skill (Divergent Ideation)
+
+            **Switch to the "Brainstorming" mindset.** Now generate as many ideas as possible —
+            quantity over quality. No idea is too wild at this stage. Build on the evidence
+            from Phase 2 but let your imagination run.
+
+            Generate **8-15 raw feature ideas** across these lenses:
+            - What gaps do competitors leave that this project could fill?
+            - What emerging tech could unlock entirely new capabilities?
+            - What pain points from issues/bugs hint at deeper unmet needs?
+            - What would make this project indispensable for a specific user persona?
+            - What would a "10x better" version of an existing feature look like?
+
+            For each raw idea, write a one-line description and note which evidence supports it.
+
+            **Iterate:** Review your list. Can you combine two weaker ideas into one stronger
+            idea? Did generating ideas reveal a research gap? If so, go back to Phase 2 for
+            a targeted search, then return here. Repeat until the ideas feel grounded and
+            diverse.
+
+            ## Phase 4: Party Mode Skill (Collaborative Refinement)
+
+            **Switch to the "Party Mode" mindset.** Imagine you are a room of enthusiastic
+            product people, engineers, and designers who are all excited about these ideas.
+            The energy is high. Each person builds on the previous person's suggestion.
+
+            Take the top 5-8 ideas from Phase 3 and refine them collaboratively:
+
+            1. **Amplify:** For each idea, ask "What if we went even further?" Push the idea
+               to its most ambitious form.
+            2. **Connect:** Look for synergies — can two ideas combine into something greater
+               than the sum of their parts?
+            3. **Ground:** For each amplified idea, ask "What is the minimum version that still
+               delivers the core value?" Find the sweet spot between ambition and feasibility.
+            4. **Score:** For each refined idea, assess:
+
+               | Dimension | Question |
+               |-----------|----------|
+               | **Feasibility** | Can we build this with the current stack? How much effort? |
+               | **Impact** | How many users does this serve? How much value does it add? |
+               | **Urgency** | Is the market moving here now? Is there competitive pressure? |
+
+            Select the **top 5 ideas** scoring high on at least 2 of 3 dimensions.
+
+            ## Phase 5: Adversarial Skill (Stress-Test & Defend)
+
+            **Switch to the "Adversarial" mindset.** You are now a skeptical VP of Product,
+            a resource-constrained engineering lead, and a demanding end-user — all at once.
+            Your job is to tear these ideas apart. Only the ones that survive are worth proposing.
+
+            For each of the top 5 ideas from Phase 4, apply these challenges:
+
+            1. **"So what?"** — Why would a user actually switch to or stay with this project
+               because of this? If you can't articulate a compelling user story, cut it.
+            2. **"Who else?"** — Is someone else already doing this better, or about to?
+               If this project can't differentiate, cut it or find the unique angle.
+            3. **"At what cost?"** — What is the true engineering cost (not the optimistic
+               estimate)? What would we have to stop doing to build this? If the opportunity
+               cost is too high, cut it.
+            4. **"What breaks?"** — What existing functionality or architectural assumptions
+               does this violate? If it creates technical debt or UX inconsistency, can that
+               be mitigated?
+            5. **"Prove it."** — What evidence from Phase 2 actually supports demand for this?
+               Gut feelings and "it would be cool" are not evidence. Cite specific signals.
+
+            **After the adversarial pass, you should have 3-5 ROBUST and DEFENSIBLE proposals.**
+            Each surviving idea must have:
+            - At least one concrete market signal (competitor move, user request, or trend)
+            - A clear user story explaining why someone would care
+            - A feasible technical path grounded in the current architecture
+            - A rebuttal to the strongest objection against it
+
+            If fewer than 3 ideas survive, that is fine — quality over quantity.
+            If a focus area was specified, weight proposals toward that area but don't
+            exclude other high-scoring discoveries.
+
+            ## Phase 6: Resolve Discussion Category & Repository IDs
+
+            **Auth note:** All `gh` and `gh api` commands in the phases below use
+            the `GH_TOKEN` environment variable (already set to the workflow's
+            `GITHUB_TOKEN`), which has `discussions: write` permission via the
+            job-level grant. You do NOT need to authenticate manually.
+
+            Before creating or updating Discussions, you need the repository ID and the
+            "Ideas" discussion category ID.
+
+            ```bash
+            gh api graphql -f query='
+              query($repo: String!, $owner: String!) {
+                repository(name: $repo, owner: $owner) {
+                  id
+                  discussionCategories(first: 20) {
+                    nodes { id name }
+                  }
+                }
+              }' -f owner="${{ github.repository_owner }}" \
+                 -f repo="${{ github.event.repository.name }}"
+            ```
+
+            Save the repository ID and the "Ideas" category ID. If "Ideas" does not exist,
+            fall back to "General". If neither exists, skip Discussion creation and write
+            an error to the step summary.
+
+            ## Phase 7: Create or Update Per-Idea Discussions
+
+            For **each** feature proposal surviving Phase 5, check whether a matching Discussion
+            already exists in the Ideas category.
+
+            ### Matching Logic
+
+            Search existing Ideas discussions (from the signals data) for a title that
+            matches the proposal's core concept. Use fuzzy matching — the exact title
+            may differ but the idea should be recognizably the same.
+
+            **Discussion title format:** `💡 <Concise Idea Title>`
+
+            ### If the Discussion DOES NOT exist → Create it
+
+            ```bash
+            gh api graphql -f query='
+              mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+                createDiscussion(input: {
+                  repositoryId: $repoId,
+                  categoryId: $categoryId,
+                  title: $title,
+                  body: $body
+                }) {
+                  discussion { id number url }
+                }
+              }' -f repoId="<REPO_ID>" \
+                 -f categoryId="<CATEGORY_ID>" \
+                 -f title="💡 <Idea Title>" \
+                 -f body="<BODY>"
+            ```
+
+            **New Discussion body format:**
+
+            ```markdown
+            ## Summary
+
+            <2-3 sentence description of the feature idea>
+
+            ## Market Signal
+
+            <What competitive or market trend supports this idea>
+
+            ## User Signal
+
+            <Related issues, feedback, discussion themes, or bug patterns>
+
+            ## Technical Opportunity
+
+            <How the current architecture enables or supports this — reference specific
+            interfaces, abstractions, or extension points from the codebase>
+
+            ## Assessment
+
+            | Dimension | Score | Rationale |
+            |-----------|-------|-----------|
+            | Feasibility | high/med/low | ... |
+            | Impact | high/med/low | ... |
+            | Urgency | high/med/low | ... |
+
+            ## Adversarial Review
+
+            **Strongest objection:** <The hardest challenge this idea faces>
+            **Rebuttal:** <Why the idea survives despite that objection>
+
+            ## Suggested Next Step
+
+            <Concrete action: "Create a product brief", "Spike on X", "Discuss with team", etc.>
+
+            ---
+            *Proposed by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
+            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
+            ```
+
+            After creating, add the `enhancement` label to the discussion if your repo
+            has one. Resolve the label ID with:
+            ```bash
+            gh api graphql -f query='
+              query($repo: String!, $owner: String!) {
+                repository(name: $repo, owner: $owner) {
+                  label(name: "enhancement") { id }
+                }
+              }' -f owner="${{ github.repository_owner }}" \
+                 -f repo="${{ github.event.repository.name }}"
+            ```
+            Then apply via `addLabelsToLabelable`. Skip silently if the label doesn't exist.
+
+            ### If the Discussion ALREADY exists → Add an update comment
+
+            When a prior run already created a Discussion for the same idea, add a comment
+            with new developments rather than creating a duplicate.
+
+            ```bash
+            gh api graphql -f query='
+              mutation($discussionId: ID!, $body: String!) {
+                addDiscussionComment(input: {
+                  discussionId: $discussionId,
+                  body: $body
+                }) {
+                  comment { id url }
+                }
+              }' -f discussionId="<DISCUSSION_ID>" \
+                 -f body="<COMMENT>"
+            ```
+
+            **Update comment format:**
+
+            ```markdown
+            ## Weekly Update — <DATE>
+
+            ### What Changed
+
+            <New market signals, competitive moves, technology developments, or
+            user feedback since the last update. Be specific about what's new —
+            don't repeat the original proposal.>
+
+            ### Updated Assessment
+
+            | Dimension | Previous | Current | Delta |
+            |-----------|----------|---------|-------|
+            | Feasibility | ... | ... | ↑/↓/→ |
+            | Impact | ... | ... | ↑/↓/→ |
+            | Urgency | ... | ... | ↑/↓/→ |
+
+            ### Recommendation
+
+            <Should this idea be advanced, kept watching, or retired? Why?>
+
+            ---
+            *Updated by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
+            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
+            ```
+
+            **Important:** Only add an update comment if there is genuinely new information.
+            If nothing has changed for an existing idea, skip it — don't post "no updates" comments.
+
+            ### If an existing idea should be retired
+
+            If research shows a previously proposed idea is no longer viable (market shifted,
+            already implemented, superseded by another approach), add a final comment
+            recommending closure:
+
+            ```markdown
+            ## Retirement Recommendation — <DATE>
+
+            **Recommendation:** Close this proposal.
+
+            **Reason:** <Why the idea is no longer viable or relevant>
+
+            <Details on what changed>
+
+            ---
+            *Reviewed by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
+            ```
+
+            Do NOT close the Discussion — only recommend closure for human decision.
+
+            ## Phase 8: Step Summary
+
+            Write to $GITHUB_STEP_SUMMARY:
+
+            ```markdown
+            ## Feature Research & Ideation — <DATE>
+
+            **Focus:** <area or "Open exploration">
+            **Research depth:** <quick|standard|deep>
+
+            ### New Ideas Proposed
+            | Discussion | Title | Feasibility | Impact | Urgency |
+            |------------|-------|-------------|--------|---------|
+            | #N | 💡 ... | ... | ... | ... |
+
+            ### Existing Ideas Updated
+            | Discussion | Title | Key Change |
+            |------------|-------|------------|
+            | #N | 💡 ... | <what's new> |
+
+            ### Ideas Reviewed — No Update Needed
+            | Discussion | Title | Reason |
+            |------------|-------|--------|
+            | #N | 💡 ... | <no new signal> |
+
+            ### Market & Trend Summary
+            <2-3 bullet points on the most notable trends this week>
+
+            ---
+            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
+            ```
+
+            ## Rules
+
+            - **Do NOT create issues or PRs.** Output goes to Discussion threads only.
+            - **Do NOT implement code.** This is research and ideation only.
+            - **Max 5 new Discussions per run.** Fewer is fine — quality over quantity.
+            - **Only propose ideas scoring high on 2+ dimensions** (feasibility/impact/urgency).
+            - **One Discussion per idea.** Never create duplicates — always check existing first.
+            - **Only comment on existing Discussions when there is new information.** No empty updates.
+            - **Ground proposals in evidence.** Every proposal must cite at least one market signal,
+              user signal, or technical opportunity — not just abstract ideas.
+            - **Be specific about next steps.** Each proposal should suggest a concrete action
+              (product brief, spike, discussion, etc.) not just "we should consider this."
+            - **Respect the project's architecture.** Proposals should be compatible with the
+              patterns documented in AGENTS.md and the planning artifacts.
+            - **Use the 💡 prefix** in all idea Discussion titles for easy identification.

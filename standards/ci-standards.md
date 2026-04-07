@@ -13,6 +13,11 @@ and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
 CodeQL, SonarCloud, and Claude Code workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack.
 
+In addition, BMAD Method-enabled repositories MUST also include the conditional
+[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
+for the template.
+
 ### 1. CI Pipeline (`ci.yml`)
 
 The primary build-and-test workflow. Structure varies by tech stack but must include:
@@ -302,26 +307,86 @@ These workflows are required only when a specific ecosystem is detected.
 
 ### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
-**Condition:** Repository contains a `_bmad/` directory (BMAD Method installed).
+**Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
+`_bmad-output/`, or equivalent BMAD planning artifacts).
 
-Scheduled weekly workflow that uses Claude Code Action as the BMAD Analyst
-(Mary) to research market trends, analyze project signals, and create per-idea
-Discussion threads in the **Ideas** category. Each proposal is a separate
-Discussion, updated by subsequent runs as the market and project evolve.
+Scheduled weekly workflow that runs the BMAD Analyst (Mary) on **Claude Opus 4.6**
+through a 5-phase multi-skill ideation pipeline, producing evidence-grounded
+feature proposals as GitHub Discussions in the **Ideas** category. Each proposal
+is a separate Discussion, updated by subsequent runs as the market and project
+evolve.
+
+**The pipeline (the reason this workflow exists):**
+
+| Phase | Skill | Purpose |
+|------:|-------|---------|
+| 1 | Load Context | Read signals JSON, planning artifacts, README, codebase extension points |
+| 2 | **Market Research** | Iterative evidence gathering — competitor moves, emerging capabilities, user-need signals. Loops until evidence base feels solid. |
+| 3 | **Brainstorming** | Divergent ideation — 8-15 raw ideas, builds on Phase 2 evidence. Loops back to research if gaps appear. |
+| 4 | **Party Mode** | Collaborative refinement — amplify, connect synergies, ground in feasibility, score on Feasibility/Impact/Urgency. Top 5 advance. |
+| 5 | **Adversarial** | 5-question stress test ("So what?", "Who else?", "At what cost?", "What breaks?", "Prove it."). Only survivors are proposed. |
+| 6-7 | Publish | Resolve Discussion category, then create new Discussions or comment on existing ones with deltas. |
+
+The adversarial pass is the load-bearing part: ideas that survive it are
+**robust and defensible**, with a documented rebuttal to the strongest objection.
 
 | Setting | Value |
 |---------|-------|
-| **Schedule** | Weekly (recommended: Friday early morning) |
-| **Output** | GitHub Discussions in the Ideas category |
+| **Model** | `claude-opus-4-6` (set via `ANTHROPIC_MODEL` env var on the step) |
+| **Schedule** | Weekly (template uses Friday 07:00 UTC) |
+| **Output** | GitHub Discussions in the Ideas category, one per proposal |
 | **Inputs** | `focus_area` (optional), `research_depth` (quick/standard/deep) |
 | **Permissions** | `contents: read`, `discussions: write`, `id-token: write` |
 | **Required secrets** | `CLAUDE_CODE_OAUTH_TOKEN` (org-level) |
+| **Typical cost** | ~$2-3 per run on Opus 4.6, standard depth, 25-40 turns |
 
 **Prerequisite:** Discussions must be enabled with an "Ideas" category
 (see [Discussions Configuration](github-settings.md#discussions-configuration)).
 
-See the [TalkTerm implementation](https://github.com/petry-projects/TalkTerm/blob/main/.github/workflows/feature-ideation.yml)
-as the reference template.
+#### Standard template
+
+Copy [`workflows/feature-ideation.yml`](workflows/feature-ideation.yml) to
+`.github/workflows/feature-ideation.yml` in the target repo. The only
+required customisation is the `PROJECT_CONTEXT` env var on the `analyze`
+job's Claude step — replace the placeholder with a 3-5 sentence description
+of what the project is and what competitive landscape Mary should research.
+
+#### Critical gotchas
+
+These were discovered during the TalkTerm pilot and are wired into the template
+— **do not remove them without understanding why they exist:**
+
+1. **Pass `github_token: ${{ secrets.GITHUB_TOKEN }}` explicitly.**
+   The `claude-code-action` auto-generates its own GitHub App installation
+   token (`claude[bot]`), which lacks the `discussions: write` scope.
+   Without an explicit `github_token` input, every `createDiscussion` and
+   `addDiscussionComment` mutation fails silently with `FORBIDDEN: Resource
+   not accessible by integration` — the run reports success and produces
+   no Discussions. Passing the workflow's `GITHUB_TOKEN` makes the job-level
+   `permissions: discussions: write` grant apply.
+
+2. **Set `ANTHROPIC_MODEL: claude-opus-4-6` as a step env var.**
+   The action does not expose model selection as an input — it reads the
+   `ANTHROPIC_MODEL` environment variable. Opus is required for the depth
+   the multi-skill pipeline expects; Sonnet runs cheaper but produces
+   noticeably shallower adversarial passes.
+
+3. **Do NOT enable `show_full_output: true`.**
+   It echoes raw tool results to public action logs, which can leak secrets.
+   The standard template intentionally omits it.
+
+4. **The ideation pipeline is structured deliberately.**
+   The Phase 2-5 sequence (Market Research → Brainstorming → Party Mode →
+   Adversarial) is what produces *defensible* ideas instead of plausible
+   ones. The phases are explicitly named "skills" so the agent switches
+   mindsets between them. Keep this structure when customising the prompt.
+
+#### Reference implementation
+
+[`petry-projects/TalkTerm`](https://github.com/petry-projects/TalkTerm/blob/main/.github/workflows/feature-ideation.yml)
+is the pilot adopter. The TalkTerm workflow is identical to the template
+except that `PROJECT_CONTEXT` is replaced with a TalkTerm-specific paragraph
+and the codebase scan instructions reference TalkTerm's specific port files.
 
 ---
 
