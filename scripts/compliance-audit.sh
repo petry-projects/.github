@@ -126,7 +126,10 @@ detect_ecosystems() {
   if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
     ECOSYSTEMS+=("github-actions")
   fi
-  if echo "$tree" | grep -qE '(^|/)_bmad/'; then
+  # BMAD Method: detected via either the active install dir (`_bmad/`) or
+  # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
+  # the other, or both depending on the BMAD workflow stage.
+  if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
     ECOSYSTEMS+=("bmad-method")
   fi
 }

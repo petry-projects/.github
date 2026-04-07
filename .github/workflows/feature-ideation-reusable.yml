@@ -221,12 +221,31 @@ jobs:
           name: signals
           path: ${{ runner.temp }}
 
+      - name: Validate project_context is customised
+        # Fail fast if an adopter copied the caller stub without replacing
+        # the placeholder. Without this, runs would burn cost producing
+        # generic Discussions about a "TODO: Replace this" project.
+        env:
+          PROJECT_CONTEXT: ${{ inputs.project_context }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$PROJECT_CONTEXT" | grep -q 'TODO: Replace this'; then
+            {
+              echo "## ❌ project_context not customised"
+              echo ""
+              echo "The reusable feature-ideation workflow was called with the"
+              echo "stock placeholder \`project_context\`. Edit your repo's"
+              echo "\`.github/workflows/feature-ideation.yml\` and replace the"
+              echo "TODO block with a 3-5 sentence description of the project,"
+              echo "its target users, and the competitive landscape Mary should"
+              echo "research."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Run Claude Code — BMAD Analyst
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FOCUS_AREA: ${{ inputs.focus_area }}
-          RESEARCH_DEPTH: ${{ inputs.research_depth }}
-          PROJECT_CONTEXT: ${{ inputs.project_context }}
           # CRITICAL: Opus 4.6 is required for the depth the multi-skill
           # pipeline expects. The action does not expose model selection as
           # an input — it reads ANTHROPIC_MODEL from the environment.
@@ -265,15 +284,15 @@ jobs:
 
             ## Project Context
 
-            $PROJECT_CONTEXT
+            ${{ inputs.project_context }}
 
             ## Environment
 
             - Repository: ${{ github.repository }}
             - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            - Date: $(date -u +%Y-%m-%d)
-            - Focus area: $FOCUS_AREA (empty = open-ended exploration)
-            - Research depth: $RESEARCH_DEPTH
+            - Date: ${{ github.run_started_at }}
+            - Focus area: ${{ inputs.focus_area || 'Open exploration' }}
+            - Research depth: ${{ inputs.research_depth }}
 
             ## Phase 1: Load Context
 
