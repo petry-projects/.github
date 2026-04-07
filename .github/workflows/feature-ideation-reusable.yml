@@ -74,9 +74,6 @@ jobs:
       - name: Collect project signals
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2016
-          # The GraphQL queries below use `$variable` syntax for GraphQL
-          # variables, not shell expansion — single quotes are required.
           REPO="${{ github.repository }}"
           SIGNALS_FILE=$(mktemp)
 
@@ -94,35 +91,46 @@ jobs:
             2>/dev/null || echo '[]')
 
           # --- Existing Ideas discussions (to detect what's already tracked) ---
-          IDEAS_CAT_ID=$(gh api graphql -f query='
-            query($repo: String!, $owner: String!) {
-              repository(name: $repo, owner: $owner) {
-                discussionCategories(first: 20) {
-                  nodes { id name }
-                }
+          # NOTE: GraphQL queries use heredocs with quoted terminators so the
+          # `$repo` / `$owner` / `$categoryId` references stay literal (they
+          # are GraphQL variables, not shell expansions).
+          IDEAS_CAT_QUERY=$(cat <<'GRAPHQL'
+          query($repo: String!, $owner: String!) {
+            repository(name: $repo, owner: $owner) {
+              discussionCategories(first: 20) {
+                nodes { id name }
               }
-            }' -f owner="${{ github.repository_owner }}" \
-               -f repo="${{ github.event.repository.name }}" \
+            }
+          }
+          GRAPHQL
+          )
+          IDEAS_CAT_ID=$(gh api graphql -f query="$IDEAS_CAT_QUERY" \
+            -f owner="${{ github.repository_owner }}" \
+            -f repo="${{ github.event.repository.name }}" \
             --jq '[.data.repository.discussionCategories.nodes[] | select(.name == "Ideas")][0].id' \
             2>/dev/null || echo "")
 
           if [ -n "$IDEAS_CAT_ID" ] && [ "$IDEAS_CAT_ID" != "null" ]; then
-            IDEAS_DISCUSSIONS=$(gh api graphql -f query='
-              query($repo: String!, $owner: String!, $categoryId: ID!) {
-                repository(name: $repo, owner: $owner) {
-                  discussions(first: 100, orderBy: {field: UPDATED_AT, direction: DESC},
-                              categoryId: $categoryId) {
-                    nodes {
-                      id number title
-                      createdAt updatedAt
-                      labels(first: 10) { nodes { name } }
-                      comments(first: 1) { totalCount }
-                    }
-                  }
+            IDEAS_DISC_QUERY=$(cat <<'GRAPHQL'
+          query($repo: String!, $owner: String!, $categoryId: ID!) {
+            repository(name: $repo, owner: $owner) {
+              discussions(first: 100, orderBy: {field: UPDATED_AT, direction: DESC},
+                          categoryId: $categoryId) {
+                nodes {
+                  id number title
+                  createdAt updatedAt
+                  labels(first: 10) { nodes { name } }
+                  comments(first: 1) { totalCount }
                 }
-              }' -f owner="${{ github.repository_owner }}" \
-                 -f repo="${{ github.event.repository.name }}" \
-                 -f categoryId="$IDEAS_CAT_ID" \
+              }
+            }
+          }
+          GRAPHQL
+          )
+            IDEAS_DISCUSSIONS=$(gh api graphql -f query="$IDEAS_DISC_QUERY" \
+              -f owner="${{ github.repository_owner }}" \
+              -f repo="${{ github.event.repository.name }}" \
+              -f categoryId="$IDEAS_CAT_ID" \
               --jq '.data.repository.discussions.nodes' \
               2>/dev/null || echo '[]')
           else
