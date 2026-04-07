@@ -113,6 +113,9 @@ For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
 
 ## BMAD Method Workflows
 
@@ -126,5 +129,8 @@ for the full standard, including the multi-skill ideation pipeline and the
 critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
 log-secret hygiene). The template is at
 [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
+<<<<<<< HEAD
 =======
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+>>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))

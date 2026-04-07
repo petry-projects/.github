@@ -246,9 +246,16 @@ detect_ecosystems() {
     ECOSYSTEMS+=("github-actions")
   fi
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 =======
   if echo "$tree" | grep -qE '(^|/)_bmad/'; then
+=======
+  # BMAD Method: detected via either the active install dir (`_bmad/`) or
+  # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
+  # the other, or both depending on the BMAD workflow stage.
+  if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
+>>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
     ECOSYSTEMS+=("bmad-method")
   fi
 >>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
