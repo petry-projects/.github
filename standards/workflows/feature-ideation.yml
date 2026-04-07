@@ -44,6 +44,19 @@ concurrency:
 
 jobs:
   ideate:
+    # Permissions cascade from the calling job to the reusable workflow.
+    # The reusable workflow's two jobs (gather-signals + analyze) need:
+    #   - contents:    read   (checkout, file reads)
+    #   - issues:      read   (signal collection)
+    #   - pull-requests: read (signal collection)
+    #   - discussions: write  (CRITICAL — create/update Discussion threads)
+    #   - id-token:    write  (claude-code-action OIDC for GitHub App token)
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      discussions: write
+      id-token: write
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@main
     with:
       # === CUSTOMISE THIS PER REPO — the only required edit ===
