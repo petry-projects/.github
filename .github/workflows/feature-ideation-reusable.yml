@@ -290,9 +290,11 @@ jobs:
 
             - Repository: ${{ github.repository }}
             - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            - Date: ${{ github.run_started_at }}
             - Focus area: ${{ inputs.focus_area || 'Open exploration' }}
             - Research depth: ${{ inputs.research_depth }}
+
+            (The current date is in `signals.json` as `scan_date` — read it
+            from there when you need it for Discussion timestamps.)
 
             ## Phase 1: Load Context
 
