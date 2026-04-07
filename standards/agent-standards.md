@@ -92,3 +92,16 @@ on agent configuration files.
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
+
+## BMAD Method Workflows
+
+Repositories with BMAD Method installed (presence of `_bmad/`, `_bmad-output/`,
+or equivalent BMAD planning artifacts) MUST include the **Feature Ideation**
+workflow, which runs the BMAD Analyst (Mary) on a weekly schedule to research
+the market and produce evidence-grounded feature proposals as GitHub Discussions.
+
+See [CI Standards §8 — Feature Ideation](ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+for the full standard, including the multi-skill ideation pipeline and the
+critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
+log-secret hygiene). The template is at
+[`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
