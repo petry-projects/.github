@@ -246,10 +246,6 @@ jobs:
       - name: Run Claude Code — BMAD Analyst
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # CRITICAL: Opus 4.6 is required for the depth the multi-skill
-          # pipeline expects. The action does not expose model selection as
-          # an input — it reads ANTHROPIC_MODEL from the environment.
-          ANTHROPIC_MODEL: ${{ inputs.model }}
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -258,7 +254,11 @@ jobs:
           # this, the action uses its own GitHub App token (claude[bot]) which
           # lacks discussions:write and silently fails every mutation.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          claude_args: "--allowedTools Bash,Read,Glob,Grep,WebSearch,WebFetch"
+          # Model selection goes through claude_args per the v1 action's
+          # documented interface. Opus 4.6 is the default — see inputs.model.
+          claude_args: |
+            --model ${{ inputs.model }}
+            --allowedTools Bash,Read,Glob,Grep,WebSearch,WebFetch
           prompt: |
             You are **Mary**, the BMAD Strategic Business Analyst, running as an automated
             weekly feature research and ideation agent for the **${{ github.repository }}** project.
@@ -467,11 +467,18 @@ jobs:
             ## Phase 7: Create or Update Per-Idea Discussions
 
             For **each** feature proposal surviving Phase 5, check whether a matching Discussion
-            already exists in the Ideas category.
+            already exists in the target category (Ideas, or General as fallback).
 
             ### Matching Logic
 
-            Search existing Ideas discussions (from the signals data) for a title that
+            **Re-query before each create.** The signals snapshot only contains the first
+            100 Ideas discussions and may miss the General fallback category. Before
+            creating a new Discussion for a proposal, run a fresh GraphQL query for
+            existing discussions in the target category, filtered to titles starting with
+            `💡`. This avoids duplicates if the snapshot was incomplete or if a previous
+            run in this same execution already created a related Discussion.
+
+            Search the fresh results (and the signals snapshot) for a title that
             matches the proposal's core concept. Use fuzzy matching — the exact title
             may differ but the idea should be recognizably the same.
 
