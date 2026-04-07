@@ -343,20 +343,46 @@ The adversarial pass is the load-bearing part: ideas that survive it are
 **Prerequisite:** Discussions must be enabled with an "Ideas" category
 (see [Discussions Configuration](github-settings.md#discussions-configuration)).
 
-#### Standard template
+#### Architecture: reusable workflow + thin caller stub
 
-Copy [`workflows/feature-ideation.yml`](workflows/feature-ideation.yml) to
-`.github/workflows/feature-ideation.yml` in the target repo. The only
-required customisation is the `PROJECT_CONTEXT` env var on the `analyze`
-job's Claude step — replace the placeholder with a 3-5 sentence description
-of what the project is and what competitive landscape Mary should research.
+To avoid duplicating ~600 lines of prompt logic across every BMAD repo —
+and to let us tune the multi-skill pipeline in one place — the workflow is
+split into two parts:
 
-#### Critical gotchas
+1. **Reusable workflow** (single source of truth, hosted in this repo):
+   [`.github/workflows/feature-ideation-reusable.yml`](../.github/workflows/feature-ideation-reusable.yml).
+   Contains both jobs (signal collection + analyst), the full prompt with
+   the 5-phase pipeline, and the four critical gotchas (model selection,
+   token override, etc.) hard-coded so they cannot regress.
 
-These were discovered during the TalkTerm pilot and are wired into the template
-— **do not remove them without understanding why they exist:**
+2. **Caller stub** (copied into each adopting repo, ~60 lines):
+   [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
+   Defines the schedule, the `workflow_dispatch` inputs, and calls the
+   reusable workflow with a single required parameter: `project_context`.
 
-1. **Pass `github_token: ${{ secrets.GITHUB_TOKEN }}` explicitly.**
+When we tune the prompt, the model, or the gotchas, we change one file in
+this repo and every adopter picks up the change on their next scheduled run.
+
+#### Adopting in a new repo
+
+1. Copy [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
+   to `.github/workflows/feature-ideation.yml` in the target repo.
+2. Replace the `project_context` value with a 3-5 sentence description of
+   what the project is, who it serves, and the competitive landscape Mary
+   should research. This is the **only** required edit.
+3. (Optional) Adjust the cron schedule, focus area choices, or pin to a
+   tag instead of `@main` if you want change isolation.
+4. Ensure GitHub Discussions is enabled with an "Ideas" category — see
+   [Discussions Configuration](github-settings.md#discussions-configuration).
+5. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
+
+#### Critical gotchas (baked into the reusable workflow)
+
+These were discovered during the TalkTerm pilot. They live in the reusable
+workflow with inline warning comments — **do not remove them without
+understanding why they exist:**
+
+1. **`github_token: ${{ secrets.GITHUB_TOKEN }}` is passed explicitly.**
    The `claude-code-action` auto-generates its own GitHub App installation
    token (`claude[bot]`), which lacks the `discussions: write` scope.
    Without an explicit `github_token` input, every `createDiscussion` and
@@ -365,28 +391,42 @@ These were discovered during the TalkTerm pilot and are wired into the template
    no Discussions. Passing the workflow's `GITHUB_TOKEN` makes the job-level
    `permissions: discussions: write` grant apply.
 
-2. **Set `ANTHROPIC_MODEL: claude-opus-4-6` as a step env var.**
+2. **`ANTHROPIC_MODEL: claude-opus-4-6` is set as a step env var.**
    The action does not expose model selection as an input — it reads the
    `ANTHROPIC_MODEL` environment variable. Opus is required for the depth
    the multi-skill pipeline expects; Sonnet runs cheaper but produces
-   noticeably shallower adversarial passes.
+   noticeably shallower adversarial passes. The reusable workflow exposes
+   this as the optional `model` input for callers that need an override.
 
-3. **Do NOT enable `show_full_output: true`.**
+3. **`show_full_output: true` is NOT enabled.**
    It echoes raw tool results to public action logs, which can leak secrets.
-   The standard template intentionally omits it.
+   The reusable workflow intentionally omits it.
 
-4. **The ideation pipeline is structured deliberately.**
-   The Phase 2-5 sequence (Market Research → Brainstorming → Party Mode →
-   Adversarial) is what produces *defensible* ideas instead of plausible
-   ones. The phases are explicitly named "skills" so the agent switches
-   mindsets between them. Keep this structure when customising the prompt.
+4. **The Phase 2-5 sequence is structural, not cosmetic.**
+   Each phase explicitly switches the agent's mindset ("skill"), which is
+   what produces *defensible* ideas instead of plausible ones. Keep this
+   structure when tuning the prompt.
+
+#### Reusable workflow inputs
+
+| Input | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `project_context` | yes | — | 3-5 sentence project description; the only required input |
+| `focus_area` | no | `''` | Optional research focus, typically wired to `workflow_dispatch` input |
+| `research_depth` | no | `'standard'` | `quick` / `standard` / `deep` |
+| `model` | no | `'claude-opus-4-6'` | Override only for cost experiments — see gotcha #2 |
+| `timeout_minutes` | no | `60` | Analyst job timeout (signal collection has its own short timeout) |
+
+| Secret | Required | Notes |
+|--------|----------|-------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | yes | Org-level secret, must be passed explicitly by the caller |
 
 #### Reference implementation
 
 [`petry-projects/TalkTerm`](https://github.com/petry-projects/TalkTerm/blob/main/.github/workflows/feature-ideation.yml)
-is the pilot adopter. The TalkTerm workflow is identical to the template
-except that `PROJECT_CONTEXT` is replaced with a TalkTerm-specific paragraph
-and the codebase scan instructions reference TalkTerm's specific port files.
+is the pilot adopter. The TalkTerm workflow is the standard caller stub
+with `project_context` set to a TalkTerm-specific paragraph — no other
+customisation.
 
 ---
 
