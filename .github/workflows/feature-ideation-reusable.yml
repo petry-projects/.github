@@ -74,6 +74,9 @@ jobs:
       - name: Collect project signals
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2016
+          # The GraphQL queries below use `$variable` syntax for GraphQL
+          # variables, not shell expansion — single quotes are required.
           REPO="${{ github.repository }}"
           SIGNALS_FILE=$(mktemp)
 
