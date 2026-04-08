@@ -215,6 +215,21 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
    secrets are confirmed in place, delete any per-repo copies so there's a
    single source of truth and rotations propagate everywhere.
+
+   **Verify before deleting per-repo copies.** Run
+
+   ```bash
+   gh secret list --org petry-projects | grep -E '^(APP_ID|APP_PRIVATE_KEY)\s'
+   ```
+
+   to confirm both org-level secrets exist with `visibility: all`. Then
+   confirm the dependabot caller stubs in the target repo include
+   `secrets: inherit` (they will if copied verbatim from
+   `standards/workflows/dependabot-automerge.yml` and
+   `standards/workflows/dependabot-rebase.yml`). Only after both checks
+   pass should you run `gh secret delete APP_ID --repo <repo>` etc. to
+   clean up the per-repo copies — otherwise the workflow falls back to
+   nothing and `gh pr review` calls fail with `Secret APP_ID is required`.
 6. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
 7. Add `dependency-audit / Detect ecosystems` as a required status check in
