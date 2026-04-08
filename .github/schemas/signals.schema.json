@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/petry-projects/TalkTerm/.github/schemas/signals.schema.json",
+  "$id": "https://github.com/petry-projects/.github/blob/main/.github/schemas/signals.schema.json",
   "title": "Feature Ideation Signals",
   "description": "Canonical contract between collect-signals.sh and the BMAD Analyst (Mary) prompt. Any change to this schema is a breaking change to the workflow.",
   "type": "object",

@@ -39,8 +39,9 @@ except OSError as exc:
     sys.stderr.write(f"[lint-prompt] cannot read {path}: {exc}\n")
     sys.exit(2)
 
-# Find direct_prompt: blocks. We treat everything indented MORE than the
-# `direct_prompt:` line as part of that block, until we hit a less-indented
+# Find prompt blocks. claude-code-action v0 used `direct_prompt:`, v1 uses
+# plain `prompt:`. Both forms are scanned. We treat everything indented MORE
+# than the marker line as part of the block, until we hit a less-indented
 # non-blank line.
 in_block = False
 block_indent = -1
@@ -50,13 +51,16 @@ findings = []
 # because that's evaluated before the prompt is rendered.
 shell_expansion = re.compile(r'(?<!\\)\$\([^)]*\)|(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}')
 
+# Recognise both `direct_prompt:` (v0) and `prompt:` (v1) markers, with
+# optional `|` or `>` block scalar indicators.
+prompt_marker = re.compile(r'(?:direct_prompt|prompt):\s*[|>]?\s*$')
+
 for lineno, raw in enumerate(lines, start=1):
     stripped = raw.lstrip(" ")
     indent = len(raw) - len(stripped)
 
     if not in_block:
-        # Look for `direct_prompt:` or `direct_prompt: |` or `direct_prompt: >`
-        if re.match(r'direct_prompt:\s*[|>]?\s*$', stripped):
+        if prompt_marker.match(stripped):
             in_block = True
             block_indent = indent
             continue

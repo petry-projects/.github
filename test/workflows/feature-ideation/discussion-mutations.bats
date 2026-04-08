@@ -100,3 +100,35 @@ teardown() {
     run comment_on_discussion "D_1" "body"
   [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Regression test for Copilot review on PR petry-projects/.github#85:
+# add_label_to_discussion previously sent labelIds via -f as the literal
+# string `["L_1"]` which the GraphQL API rejects (labelIds is [ID!]!).
+# The fix routes through gh_safe_graphql_input with a properly built JSON
+# variables block.
+# ---------------------------------------------------------------------------
+
+@test "live: add_label_to_discussion variables block has labelIds as JSON array" {
+  # Replace the gh stub with one that captures stdin to a file so we can
+  # introspect the actual request body that gh would have received.
+  body_file="${TT_TMP}/captured-body.json"
+  stub_dir="${TT_TMP}/bin"
+  mkdir -p "$stub_dir"
+  cat >"$stub_dir/gh" <<EOF
+#!/usr/bin/env bash
+cat >"$body_file"
+echo '{"data":{"addLabelsToLabelable":{"clientMutationId":null}}}'
+EOF
+  chmod +x "$stub_dir/gh"
+  PATH="${stub_dir}:${PATH}" add_label_to_discussion "D_1" "L_enhancement"
+
+  [ -f "$body_file" ]
+  # Body must parse as JSON and have variables.labelIds as a length-1 array
+  # whose sole element is the literal label id.
+  jq -e '.variables.labelIds | type == "array"' "$body_file" >/dev/null
+  jq -e '.variables.labelIds | length == 1' "$body_file" >/dev/null
+  jq -e '.variables.labelIds[0] == "L_enhancement"' "$body_file" >/dev/null
+  jq -e '.variables.labelableId == "D_1"' "$body_file" >/dev/null
+  jq -e '.query | contains("addLabelsToLabelable")' "$body_file" >/dev/null
+}

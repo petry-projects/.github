@@ -31,47 +31,28 @@
 
 set -euo pipefail
 
-normalize_title() {
-  python3 -c '
-import re, sys, unicodedata
-raw = sys.argv[1]
-# Strip emoji and other symbol/other categories.
-no_emoji = "".join(ch for ch in raw if unicodedata.category(ch)[0] not in ("S",))
-# Lowercase + ascii fold.
-ascii_text = unicodedata.normalize("NFKD", no_emoji).encode("ascii", "ignore").decode()
-ascii_text = ascii_text.lower()
-# Replace non-alphanumeric with space.
-collapsed = re.sub(r"[^a-z0-9]+", " ", ascii_text).strip()
-# Drop stopwords.
-stopwords = {"a","an","the","of","for","to","and","or","with","in","on","by","via","as","is","are","be","support","add","new","feature","idea"}
-tokens = [t for t in collapsed.split() if t and t not in stopwords]
-print(" ".join(tokens))
-' "$1"
-}
-export -f normalize_title
-
-# Compute Jaccard similarity between two normalized token strings.
-jaccard_similarity() {
-  python3 -c '
-import sys
-a = set(sys.argv[1].split())
-b = set(sys.argv[2].split())
-if not a and not b:
-    print("1.0")
-elif not a or not b:
-    print("0.0")
-else:
-    inter = len(a & b)
-    union = len(a | b)
-    print(f"{inter / union:.4f}")
-' "$1" "$2"
-}
-export -f jaccard_similarity
+# NB: matching logic is implemented entirely in the embedded Python block
+# below. Earlier drafts had standalone bash `normalize_title` /
+# `jaccard_similarity` helpers that were never called; removed per Copilot
+# review on PR petry-projects/.github#85.
 
 match_discussions_main() {
   local signals_path="$1"
   local proposals_path="$2"
   local threshold="${MATCH_THRESHOLD:-0.6}"
+
+  # Validate threshold is a parseable float in [0, 1] BEFORE handing it to
+  # Python, so a typo doesn't surface as an opaque traceback. Caught by
+  # Copilot review on PR petry-projects/.github#85.
+  if ! printf '%s' "$threshold" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
+    printf '[match-discussions] MATCH_THRESHOLD must be a non-negative number, got: %s\n' "$threshold" >&2
+    return 64
+  fi
+  # Validate range using awk (portable, no bash float math).
+  if ! awk -v t="$threshold" 'BEGIN { exit !(t >= 0 && t <= 1) }'; then
+    printf '[match-discussions] MATCH_THRESHOLD must be in [0, 1], got: %s\n' "$threshold" >&2
+    return 64
+  fi
 
   if [ ! -f "$signals_path" ]; then
     printf '[match-discussions] signals not found: %s\n' "$signals_path" >&2

@@ -161,6 +161,31 @@ build_proposals() {
   [ "$new" = "0" ]
 }
 
+@test "match: rejects non-numeric MATCH_THRESHOLD with usage error" {
+  # Caught by Copilot review on PR petry-projects/.github#85: previously
+  # a typo in MATCH_THRESHOLD produced an opaque Python traceback.
+  build_signals '[]'
+  build_proposals '[{"title":"x"}]'
+  MATCH_THRESHOLD="not-a-number" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -eq 64 ]
+}
+
+@test "match: rejects MATCH_THRESHOLD outside [0, 1]" {
+  build_signals '[]'
+  build_proposals '[{"title":"x"}]'
+  MATCH_THRESHOLD="1.5" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -eq 64 ]
+}
+
+@test "match: accepts boundary MATCH_THRESHOLD values 0 and 1" {
+  build_signals '[]'
+  build_proposals '[{"title":"x"}]'
+  MATCH_THRESHOLD="0" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -eq 0 ]
+  MATCH_THRESHOLD="1" run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -eq 0 ]
+}
+
 @test "match: idempotent re-run of same proposals against existing matches yields all-matched" {
   # Simulates the R6 idempotency case: run 1 created Discussions, run 2
   # finds them and should NOT propose duplicates.

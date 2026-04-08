@@ -120,3 +120,41 @@ YML
   run bash "$LINTER"
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Coverage of claude-code-action v1 `prompt:` form (in addition to v0 `direct_prompt:`)
+# Caught by Copilot review on PR #85 — the original linter only scanned
+# `direct_prompt:` and would silently miss R2 regressions in the actual
+# reusable workflow which uses the v1 `prompt:` form.
+# ---------------------------------------------------------------------------
+
+@test "lint-prompt: scans v1 prompt: blocks (not just direct_prompt:)" {
+  write_yml "${TT_TMP}/v1-prompt.yml" <<'YML'
+jobs:
+  analyze:
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            You are Mary.
+            Date: $(date -u +%Y-%m-%d)
+YML
+  run bash "$LINTER" "${TT_TMP}/v1-prompt.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "lint-prompt: clean v1 prompt: passes" {
+  write_yml "${TT_TMP}/v1-clean.yml" <<'YML'
+jobs:
+  analyze:
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            You are Mary.
+            Repo: ${{ github.repository }}
+            Read RUN_DATE from the environment at runtime via printenv.
+YML
+  run bash "$LINTER" "${TT_TMP}/v1-clean.yml"
+  [ "$status" -eq 0 ]
+}

@@ -13,6 +13,7 @@ FIX="${TT_FIXTURES_DIR}/expected"
 @test "schema: validator script exists and is executable" {
   [ -f "$VALIDATOR" ]
   [ -r "$VALIDATOR" ]
+  [ -x "$VALIDATOR" ]
 }
 
 @test "schema: schema file is valid JSON" {
@@ -49,4 +50,21 @@ FIX="${TT_FIXTURES_DIR}/expected"
   jq '. + {unexpected: "value"}' "${FIX}/empty-repo.signals.json" >"$bad_file"
   run python3 "$VALIDATOR" "$bad_file" "$SCHEMA"
   [ "$status" -eq 1 ]
+}
+
+@test "schema: invalid date-time scan_date FAILS validation (format checker enforced)" {
+  # Caught by Copilot review on PR petry-projects/.github#85:
+  # Draft202012Validator does NOT enforce `format` keywords by default.
+  # The validator must instantiate FormatChecker explicitly.
+  bad_file="${BATS_TEST_TMPDIR}/bad-scan-date.json"
+  jq '.scan_date = "not-a-real-timestamp"' "${FIX}/empty-repo.signals.json" >"$bad_file"
+  run python3 "$VALIDATOR" "$bad_file" "$SCHEMA"
+  [ "$status" -eq 1 ]
+}
+
+@test "schema: well-formed date-time scan_date passes" {
+  good_file="${BATS_TEST_TMPDIR}/good-scan-date.json"
+  jq '.scan_date = "2026-04-08T12:34:56Z"' "${FIX}/empty-repo.signals.json" >"$good_file"
+  run python3 "$VALIDATOR" "$good_file" "$SCHEMA"
+  [ "$status" -eq 0 ]
 }
