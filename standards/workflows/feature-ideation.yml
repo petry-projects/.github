@@ -1,3 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE OF TRUTH: petry-projects/.github/standards/workflows/feature-ideation.yml
+# Standard:        petry-projects/.github/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
+# Reusable:        petry-projects/.github/.github/workflows/feature-ideation-reusable.yml
+#
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. The 5-phase ideation pipeline, the
+#     Opus 4.6 model selection, the github_token override, and the
+#     ANTHROPIC_MODEL env var all live in the reusable workflow above.
+#   • You MAY change: the `project_context` value (the only required edit
+#     per repo), and optionally the cron schedule.
+#   • You MUST NOT change: trigger event shape, the `uses:` line, the
+#     job-level `permissions:` block, or the `secrets:` block — these are
+#     required for the reusable to work.
+#   • If you need different behaviour, open a PR against the reusable in
+#     the central repo. The change will propagate everywhere on next run.
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Feature Ideation workflow stub — for BMAD Method-enabled repos.
 #
 # This is a thin caller for the org-wide reusable workflow at
@@ -62,7 +80,7 @@ jobs:
       pull-requests: read
       discussions: write
       id-token: write
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@main
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@v1
     with:
       # === CUSTOMISE THIS PER REPO — the only required edit ===
       # Replace this paragraph with a 3-5 sentence description of your project,

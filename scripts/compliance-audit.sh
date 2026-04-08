@@ -35,7 +35,16 @@ ISSUES_FILE="$REPORT_DIR/issues.json"
 
 REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
 
-REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation in-progress)
+# name:hex-color:description (color without leading #)
+REQUIRED_LABEL_SPECS=(
+  "security:d93f0b:Security-related PRs and issues"
+  "dependencies:0075ca:Dependency update PRs"
+  "scorecard:d93f0b:OpenSSF Scorecard findings (auto-created)"
+  "bug:d73a4a:Bug reports"
+  "enhancement:a2eeef:Feature requests"
+  "documentation:0075ca:Documentation changes"
+  "in-progress:fbca04:An agent is actively working this issue"
+)
 
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
@@ -304,11 +313,28 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
-  for label in "${REQUIRED_LABELS[@]}"; do
+  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
+    IFS=':' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
-      add_finding "$repo" "labels" "missing-label-$label" "warning" \
-        "Required label \`$label\` is missing" \
-        "standards/github-settings.md#labels--standard-set"
+      if [ "$DRY_RUN" = "true" ]; then
+        add_finding "$repo" "labels" "missing-label-$label" "warning" \
+          "Required label \`$label\` is missing" \
+          "standards/github-settings.md#labels--standard-set"
+      else
+        info "Auto-creating missing label '$label' on $repo"
+        if gh label create "$label" \
+            --repo "$ORG/$repo" \
+            --color "$color" \
+            --description "$description" \
+            --force 2>/dev/null; then
+          info "Label '$label' created successfully on $repo"
+        else
+          warn "Failed to create label '$label' on $repo — filing finding for manual remediation"
+          add_finding "$repo" "labels" "missing-label-$label" "warning" \
+            "Required label \`$label\` is missing and could not be auto-created" \
+            "standards/github-settings.md#labels--standard-set"
+        fi
+      fi
     fi
   done
 }
@@ -439,6 +465,87 @@ check_claude_workflow_checkout() {
         "The \`${job}\` job in \`claude.yml\` is missing a checkout step — claude-code-action requires the repo to be checked out to read \`CLAUDE.md\` and \`AGENTS.md\`" \
         "standards/workflows/claude.yml"
     fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
+#
+# For each workflow that the org has centralized into a reusable workflow,
+# verify the downstream repo's copy is a stub that delegates via:
+#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@v1
+#
+# This prevents drift: a repo that copies the inline pre-centralization
+# version (or pins to @main, or pins to an older tag) is flagged so it
+# can be re-synced from the standard. The central .github repo itself is
+# exempt because it owns the reusables and may legitimately reference
+# its own workflows by @main during release prep.
+# ---------------------------------------------------------------------------
+check_centralized_workflow_stubs() {
+  local repo="$1"
+
+  # The .github repo is the source of truth and is allowed to reference its
+  # own reusables by @main; skip the stub check for it.
+  [ "$repo" = ".github" ] && return
+
+  # workflow-filename:expected-reusable-basename
+  local centralized=(
+    "claude.yml:claude-code-reusable"
+    "dependency-audit.yml:dependency-audit-reusable"
+    "dependabot-automerge.yml:dependabot-automerge-reusable"
+    "dependabot-rebase.yml:dependabot-rebase-reusable"
+    "agent-shield.yml:agent-shield-reusable"
+    "feature-ideation.yml:feature-ideation-reusable"
+  )
+
+  # List the repo's workflow directory once instead of probing each file.
+  # If the listing fails (no workflows dir), there's nothing to check.
+  local workflow_list
+  workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  [ -z "$workflow_list" ] && return
+
+  local entry wf reusable
+  for entry in "${centralized[@]}"; do
+    IFS=':' read -r wf reusable <<< "$entry"
+
+    # Skip workflows that don't exist in this repo. Required workflows are
+    # checked separately by check_required_workflows; conditional ones
+    # (dependabot-rebase, feature-ideation) are intentionally optional.
+    if ! echo "$workflow_list" | grep -qxF "$wf"; then
+      continue
+    fi
+
+    local content
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+
+    local decoded
+    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$decoded" ] && continue
+
+    # Required pattern: a non-comment line whose `uses:` value is exactly
+    # petry-projects/.github/.github/workflows/<reusable>.yml@v1
+    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
+    # cannot satisfy the check.
+    local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@v1"
+
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
+      continue  # stub is correctly pinned to @v1 — compliant
+    fi
+
+    # Determine why it's non-compliant for a more actionable message.
+    local why
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
+      why="references the reusable but is not pinned to \`@v1\` (org standard)"
+    elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
+      why="references the reusable but the \`uses:\` line does not match the canonical stub"
+    else
+      why="is an inline copy instead of a thin caller stub — re-sync from \`standards/workflows/${wf}\`"
+    fi
+
+    add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@v1\`." \
+      "standards/ci-standards.md#centralization-tiers"
   done
 }
 
@@ -918,6 +1025,7 @@ main() {
     check_sonarcloud "$repo"
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
+    check_centralized_workflow_stubs "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
 

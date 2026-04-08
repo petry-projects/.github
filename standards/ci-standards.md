@@ -6,6 +6,63 @@ repository must implement.
 
 ---
 
+## Using Templates from `standards/workflows/`
+
+> **Rule:** When fixing a compliance finding by adding a workflow file, **copy
+> the template from [`standards/workflows/`](workflows/) verbatim.** Do not
+> generate the file from scratch, even if the change seems trivial. The
+> templates are the source of truth — anything generated from scratch is, by
+> definition, drift.
+
+### Centralization tiers
+
+Every standard workflow falls into one of three tiers. Knowing the tier tells
+you how much of the file you may edit when adopting it in a new repo, and
+where to send a fix when behavior needs to change.
+
+| Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
+|---|---|---|---|---|
+| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the change propagates everywhere on next run. |
+| **2. Per-repo template** | `ci.yml`, `codeql.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
+| **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
+
+Tier 1 stubs all carry an identical `SOURCE OF TRUTH` header block telling
+agents what they may and may not edit. If you're considering modifying a
+file with that header, **stop and read the header first** — if the change
+isn't allowed by the contract, the right move is a PR against the central
+reusable, not a local edit.
+
+> **Why pin to `@v1`?** Stubs reference reusables by tag, not `@main`, so a
+> bad commit on the central repo's `main` branch cannot break every
+> downstream repo simultaneously. The `v1` tag is bumped deliberately when
+> a backward-compatible release is ready; breaking changes will publish a
+> `v2` tag that downstream repos opt into explicitly.
+
+### Available templates
+
+| Template | Tier | Purpose |
+|----------|------|---------|
+| [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
+| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
+| [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
+
+**Adapt only when the template genuinely requires repo-specific content** (e.g., a
+project name in a comment, a different cron schedule for a known reason). Anything
+beyond surface adaptation indicates either a missing template or a missing standard
+— file an issue against `petry-projects/.github` rather than diverging silently.
+
+**Fetching a template programmatically** (e.g., from a Claude Code automation run):
+
+```bash
+gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
+  --jq '.content' | base64 -d > .github/workflows/<file>.yml
+```
+
+---
+
 ## Required Workflows
 
 Every repository MUST have these 7 workflows. Reusable templates for Dependabot
@@ -544,6 +601,31 @@ version for human readability.
 Dependabot keeps pinned SHAs up to date via the `github-actions` ecosystem
 entry in `dependabot.yml`.
 
+### Looking Up the Correct SHA
+
+> **Never guess or fabricate a SHA.** A SHA that doesn't exist in the upstream
+> repo will fail at runtime — and worse, may "pass CI" if the job that uses it
+> is conditionally skipped, leaving a latent failure waiting to bite the next
+> developer.
+
+Use the GitHub API to resolve a tag or branch to its current commit SHA:
+
+```bash
+# For a tag (e.g., v6.0.2)
+gh api repos/actions/checkout/git/refs/tags/v6.0.2 --jq '.object.sha'
+
+# For a branch (e.g., stable)
+gh api repos/dtolnay/rust-toolchain/branches/stable --jq '.commit.sha'
+
+# Verify a SHA exists in the upstream repo before pinning
+gh api repos/actions/checkout/commits/de0fac2e4500dabe0009e67214ff5f5447ce83dd --jq '.sha'
+```
+
+**If the lookup fails or the network is unavailable, do not pin.** Leave the
+action with its tag reference and document the blocker in the PR body so a
+human can complete the fix. A correct unpinned reference is better than an
+incorrect pinned one.
+
 > **Note on examples in this document:** The "Workflow Patterns by Tech Stack"
 > section uses tag references (e.g., `@v4`) for readability since those are
 > illustrative patterns, not copy-paste templates. The "Required Workflows"
@@ -579,6 +661,19 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 | Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
 | CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
+
+> **Note on admin operations from Claude Code:** GitHub Actions does **not**
+> expose an `administration` permission scope. The valid set is documented at
+> [docs.github.com](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs).
+> Admin-level operations the `claude-issue` job needs — creating repository
+> rulesets, enabling Discussions, modifying repo settings — must be performed
+> with a token that already carries the right scope. The reusable workflow
+> passes `GH_PAT_WORKFLOWS` to `claude-code-action` for exactly this reason:
+> as long as that org-level secret is a classic PAT with `repo` scope (which
+> includes admin capability for the authenticated user's repos) or a
+> fine-grained PAT with `Administration: Read and write`, admin calls
+> succeed. Granting a non-existent workflow permission has no effect and
+> will fail `actionlint`.
 
 ---
 

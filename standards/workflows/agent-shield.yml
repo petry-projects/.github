@@ -1,12 +1,22 @@
-# AgentShield — Agent configuration security validation
-# See: standards/agent-standards.md
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE OF TRUTH: petry-projects/.github/standards/workflows/agent-shield.yml
+# Standard:        petry-projects/.github/standards/agent-standards.md
+# Reusable:        petry-projects/.github/.github/workflows/agent-shield-reusable.yml
 #
-# Two-layer approach:
-#   1. affaan-m/agentshield action — deep security scan (102 rules across
-#      secrets, permissions, hooks, MCP servers, and agent config)
-#   2. Org-specific structural checks — required files, cross-references,
-#      SKILL.md frontmatter validation
-
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. The AgentShield CLI scan and the
+#     org-specific structural checks live in the reusable workflow above.
+#   • You MAY change: the `with:` inputs (min-severity, agentshield-version,
+#     required-files, org-standards-ref) — only if your repo genuinely needs
+#     a different policy.
+#   • You MUST NOT change: trigger events, the `uses:` line, or the job name
+#     (used as a required status check).
+#   • If you need different behaviour beyond the inputs, open a PR against
+#     the reusable in the central repo.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# AgentShield — thin caller for the org-level reusable.
+# To adopt: copy this file to .github/workflows/agent-shield.yml in your repo.
 name: AgentShield
 
 on:
@@ -20,84 +30,4 @@ permissions:
 
 jobs:
   agent-shield:
-    name: AgentShield
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      # --- Deep security scan via AgentShield CLI ---
-      # Uses ecc-agentshield (https://github.com/affaan-m/agentshield)
-      # 102 rules: secrets, permissions, hooks, MCP servers, agent config
-      - name: AgentShield Security Scan
-        run: |
-          npx ecc-agentshield@1.4.0 scan \
-            --path . \
-            --min-severity high \
-            --format terminal
-
-      # --- Org-specific structural checks ---
-      - name: Check required agent files exist
-        run: |
-          status=0
-
-          if [ ! -f "CLAUDE.md" ]; then
-            echo "::error::Missing CLAUDE.md"
-            status=1
-          fi
-
-          if [ ! -f "AGENTS.md" ]; then
-            echo "::error::Missing AGENTS.md"
-            status=1
-          fi
-
-          exit $status
-
-      - name: Validate cross-references
-        run: |
-          status=0
-
-          if [ -f "CLAUDE.md" ] && \
-             ! grep -qi 'AGENTS.md' CLAUDE.md; then
-            echo "::error file=CLAUDE.md::Must reference AGENTS.md"
-            status=1
-          fi
-
-          if [ -f "AGENTS.md" ] && \
-             ! grep -qi 'petry-projects/\.github' AGENTS.md; then
-            echo "::error file=AGENTS.md::Must reference org standards"
-            status=1
-          fi
-
-          exit $status
-
-      - name: Validate SKILL.md frontmatter
-        run: |
-          status=0
-
-          while IFS= read -r file; do
-            frontmatter=$(awk \
-              '/^---$/{n++; next} n==1{print} n>=2{exit}' \
-              "$file")
-
-            if [ -z "$frontmatter" ]; then
-              echo "::error file=$file::Missing YAML frontmatter"
-              status=1
-              continue
-            fi
-
-            if ! echo "$frontmatter" | grep -q '^name:'; then
-              echo "::error file=$file::Missing 'name' field"
-              status=1
-            fi
-            if ! echo "$frontmatter" | grep -q '^description:'; then
-              echo "::error file=$file::Missing 'description' field"
-              status=1
-            fi
-          done < <(find . -name 'SKILL.md' \
-            -not -path '*/node_modules/*' \
-            -not -path '*/.git/*')
-
-          if [ "$status" -eq 0 ]; then
-            echo "All SKILL.md frontmatter validated."
-          fi
-          exit $status
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1

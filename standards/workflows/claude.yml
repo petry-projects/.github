@@ -1,14 +1,23 @@
-# Claude Code workflow template
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE OF TRUTH: petry-projects/.github/standards/workflows/claude.yml
+# Standard:        petry-projects/.github/standards/ci-standards.md#4-claude-code-claudeyml
+# Reusable:        petry-projects/.github/.github/workflows/claude-code-reusable.yml
 #
-# Both jobs MUST include the "Checkout repository" step.
-# claude-code-action reads CLAUDE.md and AGENTS.md from the working tree;
-# without checkout it errors on every PR/issue trigger.
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. All Claude Code logic, the prompt,
+#     allowedTools, and trigger gating live in the reusable workflow above.
+#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MUST NOT change: trigger events, job permissions, the `uses:` line,
+#     or `secrets: inherit`. These are required for the reusable to work.
+#   • If you need different behaviour, open a PR against the reusable in the
+#     central repo. The change will propagate everywhere on next run.
+# ─────────────────────────────────────────────────────────────────────────────
 #
-# Copy this file to .github/workflows/claude.yml in each repo.
-# Adjust the `prompt` in the claude-issue job to reference the correct issue number
-# expression (${{ github.event.issue.number }}) — no other customisation is needed.
-#
-# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#4-claude-code-claudeyml
+# Claude Code — thin caller that delegates to the org-level reusable workflow.
+# To adopt: copy this file to .github/workflows/claude.yml in your repo.
+# Required org/repo secret: CLAUDE_CODE_OAUTH_TOKEN
+# Optional org/repo secret: GH_PAT_WORKFLOWS (PAT with `workflow` scope —
+#   required if Claude needs to push changes to .github/workflows/*.yml)
 
 name: Claude Code
 
@@ -26,20 +35,9 @@ on:
 permissions: {}
 
 jobs:
-  # Interactive mode: PR reviews and @claude mentions
-  # NOTE: This job also requires a checkout step (see below).
-  claude:
-    if: >-
-      (github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_review_comment' &&
-        contains(github.event.comment.body, '@claude') &&
-        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+  claude-code:
+    uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+    secrets: inherit
     permissions:
       contents: write
       id-token: write
@@ -47,68 +45,3 @@ jobs:
       issues: write
       actions: read
       checks: read
-    steps:
-      # REQUIRED: checkout must be present so claude-code-action can read CLAUDE.md / AGENTS.md
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-      - name: Run Claude Code
-        if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          additional_permissions: |
-            actions: read
-            checks: read
-
-  # Automation mode: issue-triggered work — implement, open PR, review, and notify
-  # NOTE: This job also requires a checkout step (see below).
-  claude-issue:
-    if: >-
-      github.event_name == 'issues' && github.event.action == 'labeled' &&
-        github.event.label.name == 'claude'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
-      id-token: write
-      pull-requests: write
-      issues: write
-      actions: read
-      checks: read
-    steps:
-      # REQUIRED: checkout must be present so claude-code-action can read CLAUDE.md / AGENTS.md
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-      - name: Run Claude Code
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          label_trigger: "claude"
-          track_progress: "true"
-          additional_permissions: |
-            actions: read
-            checks: read
-          claude_args: |
-            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run watch:*),Bash(cat:*),Edit,Write"
-          prompt: |
-            Implement a fix for issue #${{ github.event.issue.number }}.
-
-            After implementing:
-            1. Create a pull request with a clear title and description.
-               Include "Closes #${{ github.event.issue.number }}" in the PR body.
-            2. Self-review your own PR — look for bugs, style issues,
-               missed edge cases, and test gaps. If you find problems, push fixes.
-            3. Review all comments and review threads on the PR. For each one:
-               - If you can address the feedback, make the fix, push, and
-                 mark the conversation as resolved.
-               - If the comment requires human judgment, leave a reply
-                 explaining what you need.
-            4. Check CI status. If CI fails, read the logs, fix the issues,
-               and push again. Repeat until CI passes.
-            5. When CI is green, all actionable review comments are resolved,
-               and the PR is ready, read the CODEOWNERS file and leave a
-               comment tagging the relevant code owners to review and merge.
