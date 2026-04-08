@@ -7,6 +7,24 @@ It follows the [AGENTS.md convention](https://agents.md/) and is intended to be 
 
 ---
 
+## Organization Standards
+
+The full set of org standards lives at
+**[`petry-projects/.github/tree/main/standards/`](https://github.com/petry-projects/.github/tree/main/standards)**.
+Read the relevant standard *before* making changes that touch CI, repo settings, agent configuration, or labels.
+
+| Topic | Standard | What it covers |
+|-------|----------|----------------|
+| **CI/CD workflows** | [`standards/ci-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md) | Required workflows, action pinning, permissions, job naming, tech-stack patterns |
+| **Workflow templates** | [`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows) | Copy-paste-ready templates: `agent-shield.yml`, `claude.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `dependency-audit.yml`, `feature-ideation.yml` |
+| **Agent configuration** | [`standards/agent-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md) | CLAUDE.md / AGENTS.md / SKILL.md required structure, frontmatter rules, cross-references |
+| **Repo settings + labels** | [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md) | Required settings, label set with exact colors, code-quality ruleset, branch protection |
+| **Dependabot config** | [`standards/dependabot-policy.md`](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md) and [`standards/dependabot/`](https://github.com/petry-projects/.github/tree/main/standards/dependabot) | Per-ecosystem dependabot.yml templates and policy |
+
+**When fixing a compliance finding, the rule is: read the standard, then copy the template — do not generate from scratch.** Anything generated from scratch is, by definition, drift from the standard. If a needed standard or template is missing, file an issue against `petry-projects/.github` rather than diverging silently.
+
+---
+
 ## Project Context
 
 - **Assume brownfield.** When exploring a repo, check for existing source code before assuming it is greenfield.
