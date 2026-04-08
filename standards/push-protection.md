@@ -166,8 +166,15 @@ Install locally with:
 ```bash
 pip install pre-commit
 pre-commit install
-pre-commit run gitleaks --all-files   # one-off scan of existing history
+pre-commit run gitleaks --all-files   # one-off scan of tracked files in the working tree
+# For a full git-history scan, use gitleaks directly:
+gitleaks git --redact --exit-code 1
 ```
+
+> **Note:** `pre-commit run --all-files` only scans the current working tree,
+> not the full git history. Use `gitleaks git` (or `gitleaks detect
+> --log-opts="--all"` on older versions) to scan every commit reachable from
+> every branch.
 
 ### Agent workstation requirements
 
@@ -211,9 +218,10 @@ secret-scan:
         fetch-depth: 0
 
     - name: Run gitleaks
-      # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-      # Look up current SHA: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
-      uses: gitleaks/gitleaks-action@v2 # TODO: replace with pinned SHA before merging
+      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
+      # then dereference if it points at an annotated tag.
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
@@ -367,8 +375,9 @@ When onboarding a repository to this standard:
    `secret-scan` check, then re-apply rulesets org-wide. Update
    [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
    if the ruleset template needs a new entry.
-5. **Scan existing history** one time with `gitleaks detect --source .`
-   before enabling enforcement, to surface any pre-existing secrets.
+5. **Scan existing history** one time with `gitleaks git --redact --exit-code 1`
+   before enabling enforcement, to surface any pre-existing secrets across all
+   commits (not just the current working tree).
 6. **Rotate anything found** during the initial scan — do not whitelist
    existing findings without rotation.
 
