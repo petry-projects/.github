@@ -105,7 +105,8 @@ gh api -X PATCH "repos/petry-projects/<repo>" \
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
-    "secret_scanning_non_provider_patterns": {"status": "enabled"}
+    "secret_scanning_non_provider_patterns": {"status": "enabled"},
+    "dependabot_security_updates": {"status": "enabled"}
   }'
 ```
 
@@ -203,12 +204,16 @@ secret-scan:
     security-events: write
   steps:
     - name: Checkout (full history)
-      uses: actions/checkout@v5
+      # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+      # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v4 --jq '.object.sha'
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0
 
     - name: Run gitleaks
-      uses: gitleaks/gitleaks-action@v2
+      # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+      # Look up current SHA: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
+      uses: gitleaks/gitleaks-action@v2 # TODO: replace with pinned SHA before merging
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
@@ -220,8 +225,7 @@ The job MUST:
 - Use `fetch-depth: 0` so the full git history is scanned, not just the
   PR diff
 - Pass `--redact` so leaked values are NEVER written to workflow logs
-- Fail the build (`--exit-code 1`) when any finding at or above severity
-  `medium` is detected
+- Fail the build (`--exit-code 1`) when any finding is detected
 - Run as a **required check** via the `code-quality` ruleset
   (see [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories))
 
@@ -357,8 +361,11 @@ When onboarding a repository to this standard:
 2. **Verify gitignore** contains the standard entries listed in
    [Required gitignore entries](#required-gitignore-entries).
 3. **Add the `secret-scan` job** to `ci.yml` per [Layer 3](#layer-3--ci-secret-scanning-secondary-defense).
-4. **Add `secret-scan` as a required check** in the `code-quality` ruleset —
-   update [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
+4. **Add `secret-scan` as a required check** in the `code-quality` ruleset.
+   If provisioning is done via `scripts/apply-rulesets.sh`, first update
+   `detect_required_checks()` in that script to recognize and insert the
+   `secret-scan` check, then re-apply rulesets org-wide. Update
+   [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
    if the ruleset template needs a new entry.
 5. **Scan existing history** one time with `gitleaks detect --source .`
    before enabling enforcement, to surface any pre-existing secrets.
@@ -369,14 +376,19 @@ When onboarding a repository to this standard:
 
 ## Compliance Audit Checks
 
-The weekly compliance audit ([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh))
-MUST verify the following for every repository:
+The target state for the weekly compliance audit
+([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)) is to verify
+the following for every repository. Until `scripts/compliance-audit.sh` is
+extended with these checks, treat them as required controls validated by a
+combination of automation and manual review:
 
 | Check | Severity | Detail |
 |-------|----------|--------|
 | `secret_scanning_enabled` | error | `security_and_analysis.secret_scanning.status == "enabled"` |
 | `push_protection_enabled` | error | `security_and_analysis.secret_scanning_push_protection.status == "enabled"` |
+| `ai_detection_enabled` | warning | `security_and_analysis.secret_scanning_ai_detection.status == "enabled"` |
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
+| `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks` |
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
