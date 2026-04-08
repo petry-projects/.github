@@ -371,6 +371,7 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` (required for
    all repos using the `code-quality` ruleset with `require_branches_to_be_up_to_date: true`).
    Copy verbatim from [`standards/workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml)
@@ -430,10 +431,47 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
 =======
 3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/`.
+=======
+3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` **only if the
+   repo enforces strict required-status-checks** (i.e., "branches must be up
+   to date before merging" is on, either via the new ruleset system's
+   `strict_required_status_checks_policy: true` or classic branch protection's
+   `required_status_checks.strict: true`). If strict checks are off, the
+   rebase workflow is unnecessary because Dependabot PRs that fall behind can
+   merge as-is — adding it just creates churn and failure noise.
+>>>>>>> ae9709f (docs(dependabot): App secrets at org level + rebase workflow optional for non-strict repos (#97))
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-5. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
-   configured for auto-merge and rebase.
+5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
+   **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
+   not per-repo. Caller stubs use `secrets: inherit` so any repo with at least
+   one centralized dependabot workflow picks them up automatically. Per-repo
+   `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
+   secrets are confirmed in place, delete any per-repo copies so there's a
+   single source of truth and rotations propagate everywhere.
+
+   **Verify before deleting per-repo copies.** Run
+
+   ```bash
+   gh secret list --org petry-projects | grep -E '^(APP_ID|APP_PRIVATE_KEY)\s'
+   ```
+
+   to confirm both org-level secrets exist with `visibility: all`. Then
+   confirm the dependabot caller stubs in the target repo include
+   `secrets: inherit` (they will if copied verbatim from
+   `standards/workflows/dependabot-automerge.yml` and
+   `standards/workflows/dependabot-rebase.yml`). Only after both checks
+   pass should you run `gh secret delete APP_ID --repo <repo>` etc. to
+   clean up the per-repo copies — otherwise the workflow falls back to
+   nothing and `gh pr review` calls fail with `Secret APP_ID is required`.
 6. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
+<<<<<<< HEAD
 7. Add `dependency-audit` as a required status check in branch protection rules.
 >>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
+=======
+7. Add `dependency-audit / Detect ecosystems` as a required status check in
+   branch protection rules. Do **not** require the per-ecosystem audit jobs
+   (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
+   they're conditional on lockfile presence and report `SKIPPED` when absent,
+   and a required-but-skipped check fails the merge gate.
+>>>>>>> ae9709f (docs(dependabot): App secrets at org level + rebase workflow optional for non-strict repos (#97))
