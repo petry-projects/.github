@@ -595,15 +595,15 @@ check_centralized_check_names() {
     "Detect ecosystems:dependency-audit / Detect ecosystems"
   )
 
-  # Names that should never be required checks regardless of how they
-  # got there (legacy or post-centralization). Removing them from the
-  # required-checks list is the only valid remediation.
-  local forbidden_required=(
-    "claude"
-    "claude-issue"
-    "claude-code / claude"
-    "claude-code / claude-issue"
-  )
+  # Patterns for required checks that are structurally broken and
+  # should be removed (not renamed). Matched as either:
+  #   - the bare legacy name ("claude" / "claude-issue"), or
+  #   - any reusable-workflow check whose suffix is "/ claude" or
+  #     "/ claude-issue", regardless of caller-job-id prefix
+  #     (so a custom caller named e.g. "Claude Code / claude" is
+  #     also caught, not just the canonical "claude-code / claude").
+  #
+  # The match is computed against each context line below.
 
   # Collect every required-status-check context from every source.
   # Sources: (1) every active ruleset, (2) classic branch protection.
@@ -638,24 +638,35 @@ check_centralized_check_names() {
   # required. These cannot be made compliant by renaming because the
   # post-centralization name is itself broken — the only safe action
   # is to remove the check from required-status-checks entirely.
-  local forbidden
-  for forbidden in "${forbidden_required[@]}"; do
-    if echo "$contexts" | grep -qxF "$forbidden"; then
-      # Use a stable check id so this finding can be tracked across
-      # audit runs without churn from the slash in the canonical name.
-      local check_id
-      case "$forbidden" in
-        "claude")                       check_id="required-claude-check-broken" ;;
-        "claude-issue")                 check_id="required-claude-issue-check-broken" ;;
-        "claude-code / claude")         check_id="required-claude-code-check-broken" ;;
-        "claude-code / claude-issue")   check_id="required-claude-code-issue-check-broken" ;;
-        *)                              check_id="required-claude-broken" ;;
-      esac
-      add_finding "$repo" "rulesets" "$check_id" "error" \
-        "Required-status-check ruleset includes \`$forbidden\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$forbidden\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
-        "standards/ci-standards.md#centralization-tiers"
+  #
+  # We classify each context line by suffix so any caller-job-id prefix
+  # is caught (e.g. "claude-code / claude", "Claude Code / claude",
+  # "review-claude / claude" all match).
+  local context match_type
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    match_type=""
+    case "$context" in
+      "claude")              match_type="claude" ;;
+      "claude-issue")        match_type="claude-issue" ;;
+      *"/ claude")           match_type="claude" ;;
+      *"/ claude-issue")     match_type="claude-issue" ;;
+      *) continue ;;
+    esac
+
+    # Stable check id per match type so findings don't churn across
+    # audit runs from variations in caller-job-id prefixes.
+    local check_id
+    if [ "$match_type" = "claude-issue" ]; then
+      check_id="required-claude-issue-check-broken"
+    else
+      check_id="required-claude-check-broken"
     fi
-  done
+
+    add_finding "$repo" "rulesets" "$check_id" "error" \
+      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+      "standards/ci-standards.md#centralization-tiers"
+  done <<< "$contexts"
 }
 
 # ---------------------------------------------------------------------------
