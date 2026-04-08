@@ -93,6 +93,13 @@ gh_safe_graphql() {
   local i=0
   while [ "$i" -lt "${#args[@]}" ]; do
     if [ "${args[$i]}" = "--jq" ]; then
+      # Guard bounds before dereferencing args[i+1]: under set -u an out-of-
+      # bounds access aborts the shell. Caught by CodeRabbit review on PR
+      # petry-projects/.github#85.
+      if [ $((i + 1)) -ge "${#args[@]}" ]; then
+        _gh_safe_err "graphql-bad-args" "--jq requires a jq filter argument"
+        return 64
+      fi
       has_jq=1
       jq_filter="${args[$((i + 1))]}"
       break
@@ -187,6 +194,13 @@ gh_safe_graphql() {
 # Same defensive contract as `gh_safe_graphql`: any auth/network/schema
 # failure exits non-zero with a structured stderr message.
 gh_safe_graphql_input() {
+  # Guard arg count before reading $1: under set -u a zero-arg call aborts the
+  # shell instead of reaching the JSON validation. Caught by CodeRabbit review
+  # on PR petry-projects/.github#85.
+  if [ "$#" -ne 1 ]; then
+    _gh_safe_err "graphql-bad-input" "expected 1 arg: JSON request body, got $#"
+    return 64
+  fi
   local body="$1"
   if ! gh_safe_is_json "$body"; then
     _gh_safe_err "graphql-bad-input" "request body is not valid JSON"

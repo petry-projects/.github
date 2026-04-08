@@ -58,13 +58,33 @@ main() {
   local discussion_limit="${DISCUSSION_LIMIT:-100}"
   local output_path="${SIGNALS_OUTPUT:-./signals.json}"
 
-  local owner repo_name
-  owner="${REPO%%/*}"
-  repo_name="${REPO##*/}"
-  if [ "$owner" = "$REPO" ] || [ -z "$repo_name" ]; then
+  # Validate that limit overrides are positive integers before forwarding to
+  # GraphQL — a value like `ISSUE_LIMIT=foo` would cause an opaque downstream
+  # failure instead of a clean usage error. Caught by CodeRabbit review on
+  # PR petry-projects/.github#85.
+  local _lim_name _lim_val
+  for _lim_name in ISSUE_LIMIT PR_LIMIT DISCUSSION_LIMIT; do
+    case "$_lim_name" in
+      ISSUE_LIMIT)      _lim_val="$issue_limit" ;;
+      PR_LIMIT)         _lim_val="$pr_limit" ;;
+      DISCUSSION_LIMIT) _lim_val="$discussion_limit" ;;
+    esac
+    if [[ ! $_lim_val =~ ^[1-9][0-9]*$ ]]; then
+      printf '[collect-signals] %s must be a positive integer, got: %s\n' "$_lim_name" "$_lim_val" >&2
+      return 64
+    fi
+  done
+
+  # Strict owner/name format — reject leading/trailing slashes, empty segments,
+  # and extra path parts (e.g. "org//repo", "/repo", "org/repo/extra").
+  # Caught by CodeRabbit review on PR petry-projects/.github#85.
+  if [[ ! $REPO =~ ^[^/]+/[^/]+$ ]]; then
     printf '[collect-signals] REPO must be in owner/name format, got: %s\n' "$REPO" >&2
     return 64
   fi
+  local owner repo_name
+  owner="${REPO%%/*}"
+  repo_name="${REPO##*/}"
 
   local thirty_days_ago
   thirty_days_ago=$(date_days_ago 30)
