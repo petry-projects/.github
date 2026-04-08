@@ -163,16 +163,57 @@ jobs:
 
       - name: Audit Cargo dependencies
         run: |
-          # cargo audit operates on Cargo.lock at workspace root
-          # For workspaces, a single audit at root covers all crates
+          # cargo audit operates on Cargo.lock at workspace root, so for a
+          # workspace a single audit at the root covers every member crate.
+          # Iterating every Cargo.toml would re-audit the same lockfile N
+          # times in workspaces.
+          #
+          # Strategy:
+          #   1. Find every Cargo.toml that declares [workspace] — those
+          #      are workspace roots; emit them.
+          #   2. Find every Cargo.toml that does NOT declare [workspace];
+          #      those are either standalone crates or workspace members.
+          #      Emit them only if no parent dir is already a workspace
+          #      root we found in step 1.
           status=0
-          while IFS= read -r dir; do
+
+          mapfile -t WORKSPACES < <(
+            find . -name Cargo.toml -not -path '*/target/*' -print0 \
+              | xargs -0 grep -l '^\[workspace\]' 2>/dev/null \
+              | xargs -n1 dirname 2>/dev/null \
+              | sort -u
+          )
+
+          mapfile -t NON_WORKSPACES < <(
+            find . -name Cargo.toml -not -path '*/target/*' -print0 \
+              | xargs -0 grep -L '^\[workspace\]' 2>/dev/null \
+              | xargs -n1 dirname 2>/dev/null \
+              | sort -u
+          )
+
+          # Standalone crates: those whose dir is not under any workspace root
+          STANDALONE=()
+          for dir in "${NON_WORKSPACES[@]}"; do
+            covered=0
+            for ws in "${WORKSPACES[@]}"; do
+              # Trim trailing slash from $ws for accurate prefix match
+              ws_trim="${ws%/}"
+              case "$dir/" in
+                "$ws_trim/"*) covered=1; break ;;
+              esac
+            done
+            if [ "$covered" -eq 0 ]; then
+              STANDALONE+=("$dir")
+            fi
+          done
+
+          for dir in "${WORKSPACES[@]}" "${STANDALONE[@]}"; do
             echo "::group::cargo audit $dir"
             if ! (cd "$dir" && cargo generate-lockfile 2>/dev/null; cargo audit); then
               status=1
             fi
             echo "::endgroup::"
-          done < <(find . -name 'Cargo.toml' -not -path '*/target/*' -exec dirname {} \; | sort -u)
+          done
           exit $status
 
   audit-pip:
@@ -193,14 +234,18 @@ jobs:
       - name: Audit Python dependencies
         run: |
           status=0
-          # Audit each Python project found in the repo
+          # Audit each Python project found in the repo. Some projects ship
+          # both pyproject.toml (tooling/build) and requirements.txt (pinned
+          # runtime deps) — audit BOTH when both are present rather than
+          # short-circuiting on pyproject.toml.
           while IFS= read -r dir; do
             echo "::group::pip-audit $dir"
             if [ -f "$dir/pyproject.toml" ]; then
               if ! pip-audit "$dir"; then
                 status=1
               fi
-            elif [ -f "$dir/requirements.txt" ]; then
+            fi
+            if [ -f "$dir/requirements.txt" ]; then
               if ! pip-audit -r "$dir/requirements.txt"; then
                 status=1
               fi

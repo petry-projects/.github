@@ -113,17 +113,26 @@ jobs:
               continue
             fi
 
-            # Check if all required checks pass (look at overall rollup)
-            CHECKS_PASS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-              --json statusCheckRollup \
-              --jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED") | .conclusion] | all(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED")')
-
-            CHECKS_PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-              --json statusCheckRollup \
-              --jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
+            # Check the status check rollup. We need:
+            #   - at least one completed check (so an empty rollup is NOT
+            #     vacuously "passing"), and
+            #   - every completed check is SUCCESS / NEUTRAL / SKIPPED, and
+            #   - zero checks still pending.
+            ROLLUP=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup)
+            CHECKS_COMPLETED=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED")] | length')
+            CHECKS_PASS=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED") | .conclusion] | all(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED")')
+            CHECKS_PENDING=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
 
             if [[ "$CHECKS_PENDING" -gt 0 ]]; then
               echo "  Skipping — $CHECKS_PENDING check(s) still pending"
+              continue
+            fi
+
+            if [[ "$CHECKS_COMPLETED" -eq 0 ]]; then
+              echo "  Skipping — no completed status checks (cannot confirm safety)"
               continue
             fi
 

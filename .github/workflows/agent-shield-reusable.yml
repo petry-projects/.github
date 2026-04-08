@@ -112,11 +112,13 @@ jobs:
               continue
             fi
 
-            if ! echo "$frontmatter" | grep -q '^name:'; then
+            # Allow optional leading whitespace so indented YAML keys
+            # (e.g. under a `metadata:` parent) are recognised.
+            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*name:'; then
               echo "::error file=$file::Missing 'name' field"
               status=1
             fi
-            if ! echo "$frontmatter" | grep -q '^description:'; then
+            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*description:'; then
               echo "::error file=$file::Missing 'description' field"
               status=1
             fi
