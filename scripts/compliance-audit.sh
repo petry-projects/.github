@@ -521,7 +521,7 @@ check_centralized_workflow_stubs() {
     local why
     if echo "$decoded" | grep -qE "uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
       why="references the reusable but is not pinned to \`@v1\` (org standard)"
-    elif echo "$decoded" | grep -q "petry-projects/.github/.github/workflows/${reusable}"; then
+    elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
       why="is an inline copy instead of a thin caller stub — re-sync from \`standards/workflows/${wf}\`"
