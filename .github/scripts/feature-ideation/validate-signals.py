@@ -55,8 +55,12 @@ def main(argv: list[str]) -> int:
     try:
         signals = json.loads(signals_path.read_text())
     except json.JSONDecodeError as exc:
+        # Per the docstring contract, exit 2 means usage / file error and
+        # exit 1 means schema validation error. A malformed signals file
+        # is a file/data error, not a schema violation. Caught by
+        # CodeRabbit review on PR petry-projects/.github#85.
         sys.stderr.write(f"[validate-signals] invalid JSON in {signals_path}: {exc}\n")
-        return 1
+        return 2
 
     try:
         schema = json.loads(schema_path.read_text())

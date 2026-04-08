@@ -38,7 +38,18 @@ filter_bots_build_list() {
     local IFS=','
     # shellcheck disable=SC2206
     local extras=($FEATURE_IDEATION_BOT_AUTHORS)
-    list+=("${extras[@]}")
+    # Trim leading/trailing whitespace from each comma-separated entry so
+    # `"bot1, bot2"` resolves to `bot1` and `bot2`, not `bot1` and ` bot2`.
+    # Caught by CodeRabbit review on PR petry-projects/.github#85.
+    local trimmed=()
+    local entry
+    for entry in "${extras[@]}"; do
+      # Strip leading whitespace, then trailing whitespace.
+      entry="${entry#"${entry%%[![:space:]]*}"}"
+      entry="${entry%"${entry##*[![:space:]]}"}"
+      [ -n "$entry" ] && trimmed+=("$entry")
+    done
+    list+=("${trimmed[@]}")
   fi
   printf '%s\n' "${list[@]}" | jq -R . | jq -sc .
 }
