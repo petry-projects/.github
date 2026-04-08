@@ -30,4 +30,8 @@ permissions:
 
 jobs:
   agent-shield:
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
+=======
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
+>>>>>>> 6ff2a91 (feat: add agent-shield.yml workflow for compliance (#98))
