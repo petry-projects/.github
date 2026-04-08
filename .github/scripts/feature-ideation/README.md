@@ -1,9 +1,10 @@
 # Feature Ideation — Scripts & Test Strategy
 
 This directory contains the bash + Python helpers that back
-`.github/workflows/feature-ideation.yml`. Every line of logic that used to
-live inside the workflow's heredoc has been extracted here so it can be unit
-tested with bats.
+`.github/workflows/feature-ideation-reusable.yml`. Every line of logic that
+used to live inside the workflow's heredoc has been extracted here so it can
+be unit tested with bats. Downstream BMAD repos call the reusable workflow
+via the standards stub at `standards/workflows/feature-ideation.yml`.
 
 ## Why this exists
 
@@ -21,7 +22,7 @@ caught **before UAT** instead of after.
 
 | File | Purpose | Killed risk |
 |------|---------|------------|
-| `lib/gh-safe.sh` | Wraps every `gh` and `gh api graphql` call. Fails loud on auth, rate-limit, network, GraphQL errors envelope, or `data: null`. Replaces the original `2>/dev/null \|\| echo '[]'` swallow. | R1, R7, R8 |
+| `lib/gh-safe.sh` | Wraps every `gh` and `gh api graphql` call. Fails loud on auth, rate-limit, network, GraphQL errors envelope, or `data: null`. Replaces the original `2>/dev/null` + `echo '[]'` swallow pattern. | R1, R7, R8 |
 | `lib/compose-signals.sh` | Validates JSON inputs before `jq --argjson` and assembles the canonical signals.json document. | R3, R4 |
 | `lib/filter-bots.sh` | Configurable bot blocklist via `FEATURE_IDEATION_BOT_AUTHORS` (extends the default list of bot logins to remove from results). | R10 |
 | `lib/date-utils.sh` | Cross-platform date arithmetic helpers. | R9 |
@@ -29,7 +30,7 @@ caught **before UAT** instead of after.
 | `validate-signals.py` | JSON Schema 2020-12 validator for signals.json against `../schemas/signals.schema.json`. | R3 |
 | `match-discussions.sh` | Deterministic Jaccard-similarity matcher between Mary's proposals and existing Ideas Discussions. Replaces the prose "use fuzzy matching" instruction. | R5, R6 |
 | `discussion-mutations.sh` | `create_discussion`, `comment_on_discussion`, `add_label_to_discussion` wrappers with `DRY_RUN=1` audit-log mode. | Smoke testing |
-| `lint-prompt.sh` | Scans every workflow file for unescaped `$()` / `${VAR}` inside `direct_prompt:` blocks (which YAML and `claude-code-action` pass verbatim instead of expanding). | R2 |
+| `lint-prompt.sh` | Scans every workflow file for unescaped `$()` / `${VAR}` inside `direct_prompt:` (v0) and `prompt:` (v1) blocks (which YAML and `claude-code-action` pass verbatim instead of expanding). | R2 |
 
 ## Running the tests
 
