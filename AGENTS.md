@@ -20,6 +20,7 @@ Read the relevant standard *before* making changes that touch CI, repo settings,
 | **Agent configuration** | [`standards/agent-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md) | CLAUDE.md / AGENTS.md / SKILL.md required structure, frontmatter rules, cross-references |
 | **Repo settings + labels** | [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md) | Required settings, label set with exact colors, code-quality ruleset, branch protection |
 | **Dependabot config** | [`standards/dependabot-policy.md`](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md) and [`standards/dependabot/`](https://github.com/petry-projects/.github/tree/main/standards/dependabot) | Per-ecosystem dependabot.yml templates and policy |
+| **Push protection** | [`standards/push-protection.md`](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md) | Secret scanning + push protection, local gitleaks hooks, CI secret-scan job, incident response |
 
 **When fixing a compliance finding, the rule is: read the standard, then copy
 the template — do not generate from scratch.** Anything generated from scratch
