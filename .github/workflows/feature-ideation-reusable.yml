@@ -63,9 +63,18 @@ on:
         default: false
         type: boolean
       tooling_ref:
-        description: 'Ref of petry-projects/.github to source the feature-ideation scripts from. Defaults to main; override only for testing forks.'
+        description: |
+          Ref of petry-projects/.github to source the feature-ideation scripts from.
+          Defaults to `v1` to align with the @v1 pin convention used by caller stubs
+          (see standards/ci-standards.md tier model). When the v1 tag is moved
+          forward to a new release, callers automatically pick up the matching
+          script + schema versions in lockstep with the workflow file.
+
+          Override only for:
+            - Testing a fork or PR branch end-to-end (`tooling_ref: my-feature-branch`)
+            - Bleeding-edge testing against the latest main (`tooling_ref: main`)
         required: false
-        default: 'main'
+        default: 'v1'
         type: string
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
