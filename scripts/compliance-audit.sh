@@ -575,13 +575,34 @@ check_centralized_check_names() {
   # reference whatever check names it likes.
   [ "$repo" = ".github" ] && return
 
-  # Map from stale name → current canonical name. Order matters for
-  # readability of the emitted finding only.
+  # Map from stale name → current canonical name. Used for the rename
+  # remediation message. The remediation here is "rename in the
+  # ruleset" because both the old and new names refer to a check that
+  # CAN be required (it runs on PRs and reports a definitive result).
+  #
+  # NOTE: `claude` and `claude-issue` are deliberately NOT in this map.
+  # The post-centralization equivalents are `claude-code / claude` and
+  # `claude-code / claude-issue`, but those checks are themselves
+  # incompatible with workflow-modifying PRs (claude-code-action's app
+  # token validation refuses to mint a token for any PR whose diff
+  # includes a workflow file, so the check fails on every workflow PR
+  # and the merge gate becomes a deadlock). The remediation for the
+  # `claude*` cases is therefore "remove from required checks", not
+  # "rename" — handled below as a separate finding so the message
+  # never recommends a name that creates a new deadlock.
   local renames=(
-    "claude:claude-code / claude"
-    "claude-issue:claude-code / claude-issue"
     "AgentShield:agent-shield / AgentShield"
     "Detect ecosystems:dependency-audit / Detect ecosystems"
+  )
+
+  # Names that should never be required checks regardless of how they
+  # got there (legacy or post-centralization). Removing them from the
+  # required-checks list is the only valid remediation.
+  local forbidden_required=(
+    "claude"
+    "claude-issue"
+    "claude-code / claude"
+    "claude-code / claude-issue"
   )
 
   # Collect every required-status-check context from every source.
@@ -602,7 +623,7 @@ check_centralized_check_names() {
 
   [ -z "$(echo "$contexts" | tr -d '[:space:]')" ] && return
 
-  # Check 1: stale pre-centralization names
+  # Check 1: stale pre-centralization names that have a safe rename
   local entry old new
   for entry in "${renames[@]}"; do
     IFS=':' read -r old new <<< "$entry"
@@ -613,12 +634,28 @@ check_centralized_check_names() {
     fi
   done
 
-  # Check 2: claude-code / claude as required is structurally broken
-  if echo "$contexts" | grep -qxF "claude-code / claude"; then
-    add_finding "$repo" "rulesets" "required-claude-code-check-broken" "error" \
-      "Required-status-check ruleset includes \`claude-code / claude\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. Remove \`claude-code / claude\` from required status checks; the check still runs and surfaces review feedback on normal PRs without being a merge gate." \
-      "standards/ci-standards.md#centralization-tiers"
-  fi
+  # Check 2: claude-* checks (legacy or post-centralization) listed as
+  # required. These cannot be made compliant by renaming because the
+  # post-centralization name is itself broken — the only safe action
+  # is to remove the check from required-status-checks entirely.
+  local forbidden
+  for forbidden in "${forbidden_required[@]}"; do
+    if echo "$contexts" | grep -qxF "$forbidden"; then
+      # Use a stable check id so this finding can be tracked across
+      # audit runs without churn from the slash in the canonical name.
+      local check_id
+      case "$forbidden" in
+        "claude")                       check_id="required-claude-check-broken" ;;
+        "claude-issue")                 check_id="required-claude-issue-check-broken" ;;
+        "claude-code / claude")         check_id="required-claude-code-check-broken" ;;
+        "claude-code / claude-issue")   check_id="required-claude-code-issue-check-broken" ;;
+        *)                              check_id="required-claude-broken" ;;
+      esac
+      add_finding "$repo" "rulesets" "$check_id" "error" \
+        "Required-status-check ruleset includes \`$forbidden\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$forbidden\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+        "standards/ci-standards.md#centralization-tiers"
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
