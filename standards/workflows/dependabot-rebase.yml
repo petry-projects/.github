@@ -39,5 +39,5 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@main
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@v1
     secrets: inherit

@@ -14,16 +14,40 @@ repository must implement.
 > templates are the source of truth — anything generated from scratch is, by
 > definition, drift.
 
-Available templates:
+### Centralization tiers
 
-| Template | Purpose |
-|----------|---------|
-| [`agent-shield.yml`](workflows/agent-shield.yml) | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | Thin caller delegating to the org-level reusable Claude Code workflow |
-| [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | Auto-approve and squash-merge eligible Dependabot PRs |
-| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | Rebase Dependabot PRs on demand |
-| [`dependency-audit.yml`](workflows/dependency-audit.yml) | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
-| [`feature-ideation.yml`](workflows/feature-ideation.yml) | BMAD Method ideation pipeline (BMAD-enabled repos only) |
+Every standard workflow falls into one of three tiers. Knowing the tier tells
+you how much of the file you may edit when adopting it in a new repo, and
+where to send a fix when behavior needs to change.
+
+| Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
+|---|---|---|---|---|
+| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A ~30-line caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`). To change behavior, open a PR against the reusable in this repo — the change propagates everywhere on next run. |
+| **2. Per-repo template** | `ci.yml`, `codeql.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
+| **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
+
+Tier 1 stubs all carry an identical `SOURCE OF TRUTH` header block telling
+agents what they may and may not edit. If you're considering modifying a
+file with that header, **stop and read the header first** — if the change
+isn't allowed by the contract, the right move is a PR against the central
+reusable, not a local edit.
+
+> **Why pin to `@v1`?** Stubs reference reusables by tag, not `@main`, so a
+> bad commit on the central repo's `main` branch cannot break every
+> downstream repo simultaneously. The `v1` tag is bumped deliberately when
+> a backward-compatible release is ready; breaking changes will publish a
+> `v2` tag that downstream repos opt into explicitly.
+
+### Available templates
+
+| Template | Tier | Purpose |
+|----------|------|---------|
+| [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
+| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
+| [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
