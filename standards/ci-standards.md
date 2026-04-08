@@ -7,6 +7,9 @@ repository must implement.
 ---
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 2272db6 (fix: encode compliance-fix learnings into standards and Claude prompt (#86))
 ## Using Templates from `standards/workflows/`
 
 > **Rule:** When fixing a compliance finding by adding a workflow file, **copy
@@ -15,6 +18,7 @@ repository must implement.
 > templates are the source of truth — anything generated from scratch is, by
 > definition, drift.
 
+<<<<<<< HEAD
 ### Centralization tiers
 
 Every standard workflow falls into one of three tiers. Knowing the tier tells
@@ -151,6 +155,18 @@ release-strategy initiative
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 | [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
+=======
+Available templates:
+
+| Template | Purpose |
+|----------|---------|
+| [`agent-shield.yml`](workflows/agent-shield.yml) | Deep agent-config security scan via `ecc-agentshield` |
+| [`claude.yml`](workflows/claude.yml) | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | Auto-approve and squash-merge eligible Dependabot PRs |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | Rebase Dependabot PRs on demand |
+| [`dependency-audit.yml`](workflows/dependency-audit.yml) | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
+| [`feature-ideation.yml`](workflows/feature-ideation.yml) | BMAD Method ideation pipeline (BMAD-enabled repos only) |
+>>>>>>> 2272db6 (fix: encode compliance-fix learnings into standards and Claude prompt (#86))
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -1379,6 +1395,9 @@ Dependabot keeps pinned SHAs up to date via the `github-actions` ecosystem
 entry in `dependabot.yml`.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 2272db6 (fix: encode compliance-fix learnings into standards and Claude prompt (#86))
 ### Looking Up the Correct SHA
 
 > **Never guess or fabricate a SHA.** A SHA that doesn't exist in the upstream
@@ -1404,8 +1423,11 @@ action with its tag reference and document the blocker in the PR body so a
 human can complete the fix. A correct unpinned reference is better than an
 incorrect pinned one.
 
+<<<<<<< HEAD
 =======
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+>>>>>>> 2272db6 (fix: encode compliance-fix learnings into standards and Claude prompt (#86))
 > **Note on examples in this document:** The "Workflow Patterns by Tech Stack"
 > section uses tag references (e.g., `@v4`) for readability since those are
 > illustrative patterns, not copy-paste templates. The "Required Workflows"
@@ -1506,7 +1528,23 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 | CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
+<<<<<<< HEAD
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+> **Note on admin operations from Claude Code:** GitHub Actions does **not**
+> expose an `administration` permission scope. The valid set is documented at
+> [docs.github.com](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs).
+> Admin-level operations the `claude-issue` job needs — creating repository
+> rulesets, enabling Discussions, modifying repo settings — must be performed
+> with a token that already carries the right scope. The reusable workflow
+> passes `GH_PAT_WORKFLOWS` to `claude-code-action` for exactly this reason:
+> as long as that org-level secret is a classic PAT with `repo` scope (which
+> includes admin capability for the authenticated user's repos) or a
+> fine-grained PAT with `Administration: Read and write`, admin calls
+> succeed. Granting a non-existent workflow permission has no effect and
+> will fail `actionlint`.
+
+>>>>>>> 2272db6 (fix: encode compliance-fix learnings into standards and Claude prompt (#86))
 ---
 
 ## Organization-Level Secrets for Standard CI
