@@ -119,7 +119,7 @@ jobs:
 >>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
 =======
   claude-code:
-    uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@main
+    uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
     secrets: inherit
 >>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
     permissions:

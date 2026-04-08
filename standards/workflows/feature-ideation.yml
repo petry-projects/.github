@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/feature-ideation.yml
 # Standard:        petry-projects/.github/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
@@ -17,8 +20,11 @@
 #     the central repo. The change will propagate everywhere on next run.
 # ─────────────────────────────────────────────────────────────────────────────
 #
+<<<<<<< HEAD
 =======
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+>>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
 # Feature Ideation workflow stub — for BMAD Method-enabled repos.
 #
 # This is a thin caller for the org-wide reusable workflow at
@@ -112,11 +118,15 @@ jobs:
       discussions: write
       id-token: write
 <<<<<<< HEAD
+<<<<<<< HEAD
       actions: read
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d # v1
 =======
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@main
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@v1
+>>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
     with:
       # === CUSTOMISE THIS PER REPO — the only required edit ===
       # Replace this paragraph with a 3-5 sentence description of your project,

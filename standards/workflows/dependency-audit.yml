@@ -266,5 +266,9 @@ jobs:
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
 =======
   dependency-audit:
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/dependency-audit-reusable.yml@main
 >>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
+=======
+    uses: petry-projects/.github/.github/workflows/dependency-audit-reusable.yml@v1
+>>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))

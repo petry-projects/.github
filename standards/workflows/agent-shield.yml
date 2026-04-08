@@ -65,6 +65,7 @@ jobs:
   agent-shield:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
 =======
     name: AgentShield
@@ -152,3 +153,6 @@ jobs:
 =======
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@main
 >>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
+=======
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
+>>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
