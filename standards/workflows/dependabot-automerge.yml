@@ -8,7 +8,10 @@
 #     App token dance live in the reusable workflow above.
 #   • You MAY change: nothing in this file in normal use. Adopt verbatim.
 #   • You MUST NOT change: trigger event (must be `pull_request_target`),
-#     the `uses:` line, or `secrets: inherit`.
+#     the `uses:` line, `secrets: inherit`, or the job-level `permissions:`
+#     block — reusable workflows can be granted no more permissions than the
+#     calling job has, so removing the stanza breaks the reusable's gh API
+#     calls.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 # ─────────────────────────────────────────────────────────────────────────────
