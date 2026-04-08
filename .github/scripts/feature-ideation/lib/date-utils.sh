@@ -10,6 +10,13 @@ set -euo pipefail
 
 # Print an ISO date (YYYY-MM-DD) for N days ago in UTC.
 date_days_ago() {
+  # Guard arg count before reading $1: under set -u a zero-arg call would abort
+  # the shell with "unbound variable" instead of reaching the validation path.
+  # Caught by CodeRabbit review on PR petry-projects/.github#85.
+  if [ "$#" -ne 1 ]; then
+    printf '[date-utils] expected 1 arg (days), got: %d\n' "$#" >&2
+    return 64
+  fi
   local days="$1"
   if [ -z "$days" ] || ! printf '%s' "$days" | grep -Eq '^[0-9]+$'; then
     printf '[date-utils] days must be a non-negative integer, got: %s\n' "$days" >&2

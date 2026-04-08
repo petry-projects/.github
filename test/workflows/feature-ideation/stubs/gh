@@ -31,8 +31,11 @@ if [ -n "${GH_STUB_LOG:-}" ]; then
 fi
 
 # Multi-call mode.
+# NOTE: TT_TMP (or BATS_TEST_TMPDIR as fallback) must be set so the counter
+# file is isolated per test. Without it the fallback /tmp path can collide
+# across parallel test suites. Caught by CodeRabbit review on PR #85.
 if [ -n "${GH_STUB_SCRIPT:-}" ] && [ -f "${GH_STUB_SCRIPT}" ]; then
-  counter_file="${TT_TMP:-/tmp}/.gh-stub-counter"
+  counter_file="${TT_TMP:-${BATS_TEST_TMPDIR:-/tmp}}/.gh-stub-counter"
   count=0
   if [ -f "$counter_file" ]; then
     count=$(cat "$counter_file")

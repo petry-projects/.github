@@ -192,6 +192,22 @@ build_proposals() {
   [ "$status" -eq 0 ]
 }
 
+@test "match: malformed JSON in signals file exits non-zero" {
+  # Caught by CodeRabbit review on PR petry-projects/.github#85.
+  printf 'not valid json' >"${TT_TMP}/signals.json"
+  build_proposals '[{"title":"x"}]'
+  run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "match: malformed JSON in proposals file exits non-zero" {
+  # Caught by CodeRabbit review on PR petry-projects/.github#85.
+  build_signals '[]'
+  printf 'not valid json' >"${TT_TMP}/proposals.json"
+  run bash "$MATCH" "${TT_TMP}/signals.json" "${TT_TMP}/proposals.json"
+  [ "$status" -ne 0 ]
+}
+
 @test "match: idempotent re-run of same proposals against existing matches yields all-matched" {
   # Simulates the R6 idempotency case: run 1 created Discussions, run 2
   # finds them and should NOT propose duplicates.

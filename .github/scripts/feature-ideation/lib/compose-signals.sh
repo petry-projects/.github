@@ -49,8 +49,11 @@ compose_signals() {
   for input in "$open_issues" "$closed_issues" "$ideas_discussions" "$releases" \
                "$merged_prs" "$feature_requests" "$bug_reports" "$truncation_warnings"; do
     idx=$((idx + 1))
-    if ! printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
-      printf '[compose-signals] arg #%d is not valid JSON: %s\n' "$idx" "${input:0:120}" >&2
+    # Require a JSON array, not just valid JSON. Objects/strings/nulls accepted
+    # by `jq -e .` would silently produce wrong counts (key count, char count).
+    # Caught by CodeRabbit review on PR petry-projects/.github#85.
+    if ! printf '%s' "$input" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      printf '[compose-signals] arg #%d must be a JSON array: %s\n' "$idx" "${input:0:120}" >&2
       return 65  # EX_DATAERR
     fi
   done

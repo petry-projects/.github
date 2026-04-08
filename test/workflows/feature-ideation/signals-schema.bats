@@ -69,6 +69,15 @@ FIX="${TT_FIXTURES_DIR}/expected"
   [ "$status" -eq 0 ]
 }
 
+@test "schema: malformed JSON signals file FAILS with exit code 2" {
+  # Validates that the OSError/JSONDecodeError path returns 2 (file/data error)
+  # not 1 (schema validation error). Caught by CodeRabbit review on PR #85.
+  bad_file="${BATS_TEST_TMPDIR}/malformed.json"
+  printf '{"schema_version":"1.0.0",' >"$bad_file"
+  run python3 "$VALIDATOR" "$bad_file" "$SCHEMA"
+  [ "$status" -eq 2 ]
+}
+
 @test "schema: SCHEMA_VERSION constant matches schema file version comment" {
   # CodeRabbit on PR petry-projects/.github#85: enforce that the
   # SCHEMA_VERSION constant in collect-signals.sh stays in lockstep with

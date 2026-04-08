@@ -158,3 +158,57 @@ YML
   run bash "$LINTER" "${TT_TMP}/v1-clean.yml"
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Exit-code precedence: file errors (2) must not be downgraded by later lint
+# findings (1). Caught by CodeRabbit review on PR petry-projects/.github#85.
+# ---------------------------------------------------------------------------
+
+@test "lint-prompt: missing file before lint-failing file still exits 2" {
+  write_yml "${TT_TMP}/bad.yml" <<'YML'
+jobs:
+  analyze:
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            Date: $(date -u +%Y-%m-%d)
+YML
+  # Pass a non-existent file FIRST, then a file with a lint finding.
+  # The aggregate exit code must be 2 (file error) not 1 (lint finding).
+  run bash "$LINTER" "${TT_TMP}/missing.yml" "${TT_TMP}/bad.yml"
+  [ "$status" -eq 2 ]
+}
+
+@test "lint-prompt: YAML chomping modifiers are recognised (prompt: |-)" {
+  # YAML block-scalar headers like `|-`, `|+`, `>-`, `>+` must be detected
+  # as prompt markers so their bodies are linted. Caught by CodeRabbit on PR #85.
+  write_yml "${TT_TMP}/chomping.yml" <<'YML'
+jobs:
+  analyze:
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |-
+            Date: $(date -u +%Y-%m-%d)
+YML
+  run bash "$LINTER" "${TT_TMP}/chomping.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "lint-prompt: GitHub Actions expressions with nested braces do not false-positive" {
+  # ${{ format('${FOO}', github.ref) }} should be stripped entirely so ${FOO}
+  # inside the expression is not flagged as a bare shell expansion.
+  # Caught by CodeRabbit review on PR petry-projects/.github#85.
+  write_yml "${TT_TMP}/nested-expr.yml" <<'YML'
+jobs:
+  analyze:
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            Ref: ${{ format('{0}', github.ref) }}
+YML
+  run bash "$LINTER" "${TT_TMP}/nested-expr.yml"
+  [ "$status" -eq 0 ]
+}
