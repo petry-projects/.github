@@ -117,6 +117,7 @@ jobs:
             fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             # Allow optional leading whitespace so indented YAML keys
             # (e.g. under a `metadata:` parent) are recognised.
             if ! echo "$frontmatter" | grep -qE '^[[:space:]]*name:'; then
@@ -131,6 +132,15 @@ jobs:
             fi
             if ! echo "$frontmatter" | grep -q '^description:'; then
 >>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
+=======
+            # Allow optional leading whitespace so indented YAML keys
+            # (e.g. under a `metadata:` parent) are recognised.
+            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*name:'; then
+              echo "::error file=$file::Missing 'name' field"
+              status=1
+            fi
+            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*description:'; then
+>>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
               echo "::error file=$file::Missing 'description' field"
               status=1
             fi

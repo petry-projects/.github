@@ -59,10 +59,14 @@ name: Feature Research & Ideation (BMAD Analyst)
 on:
   schedule:
 <<<<<<< HEAD
+<<<<<<< HEAD
     - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
 =======
     - cron: '0 7 * * 5'   # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+    - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
+>>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
   workflow_dispatch:
     inputs:
       focus_area:

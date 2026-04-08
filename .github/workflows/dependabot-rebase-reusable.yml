@@ -196,6 +196,7 @@ jobs:
             fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             # Trust GitHub's MERGEABLE state: it already accounts for all
             # REQUIRED status checks, review rules, and branch-up-to-date.
             # Non-required checks (e.g. gitleaks false positives) that happen
@@ -223,6 +224,20 @@ jobs:
               --json statusCheckRollup \
               --jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
 >>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
+=======
+            # Check the status check rollup. We need:
+            #   - at least one completed check (so an empty rollup is NOT
+            #     vacuously "passing"), and
+            #   - every completed check is SUCCESS / NEUTRAL / SKIPPED, and
+            #   - zero checks still pending.
+            ROLLUP=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup)
+            CHECKS_COMPLETED=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED")] | length')
+            CHECKS_PASS=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED") | .conclusion] | all(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED")')
+            CHECKS_PENDING=$(echo "$ROLLUP" | \
+              jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
+>>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
 
             if [[ "$CHECKS_PENDING" -gt 0 ]]; then
               echo "  Skipping — $CHECKS_PENDING check(s) still pending"
@@ -230,12 +245,20 @@ jobs:
             fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             echo "  All required checks pass — merging PR #$PR_NUMBER"
             # Use app token for merge so the resulting push to main is attributed to the
             # app bot — this triggers the workflow again via push event, enabling the
             # self-sustaining chain that serializes Dependabot PR merges one at a time.
             if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
 =======
+=======
+            if [[ "$CHECKS_COMPLETED" -eq 0 ]]; then
+              echo "  Skipping — no completed status checks (cannot confirm safety)"
+              continue
+            fi
+
+>>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
             if [[ "$CHECKS_PASS" != "true" ]]; then
               echo "  Skipping — some checks failed"
               continue
