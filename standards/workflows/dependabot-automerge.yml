@@ -1,8 +1,12 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/dependabot-automerge.yml
 # Standard:        petry-projects/.github/standards/dependabot-policy.md
 # Reusable:        petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml
+<<<<<<< HEAD
 #
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All eligibility logic and the GitHub
@@ -25,10 +29,28 @@
 =======
 # Dependabot auto-merge workflow
 # Copy to .github/workflows/dependabot-automerge.yml
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 #
-# Requires repository secrets:
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. All eligibility logic and the GitHub
+#     App token dance live in the reusable workflow above.
+#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MUST NOT change: trigger event (must be `pull_request_target`),
+#     the `uses:` line, `secrets: inherit`, or the job-level `permissions:`
+#     block — reusable workflows can be granted no more permissions than the
+#     calling job has, so removing the stanza breaks the reusable's gh API
+#     calls.
+#   • If you need different behaviour, open a PR against the reusable in the
+#     central repo.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Dependabot auto-merge — thin caller for the org-level reusable.
+# To adopt: copy this file to .github/workflows/dependabot-automerge.yml in your repo.
+# Required org/repo secrets (inherited):
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
+<<<<<<< HEAD
 #
 # Auto-approves and enables auto-merge for Dependabot PRs that are:
 #   - GitHub Actions updates (patch or minor version bumps)
@@ -42,6 +64,8 @@
 # security updates. This workflow adds defense-in-depth by also checking
 # the package ecosystem.
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 name: Dependabot auto-merge
 
 on:
@@ -52,6 +76,7 @@ on:
 permissions: {}
 
 jobs:
+<<<<<<< HEAD
 <<<<<<< HEAD
   dependabot-automerge:
     permissions:
@@ -122,3 +147,11 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+  dependabot-automerge:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml@main
+    secrets: inherit
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))

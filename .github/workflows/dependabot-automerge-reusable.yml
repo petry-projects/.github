@@ -4,10 +4,17 @@
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md
 #
 # Auto-approves and enables auto-merge for Dependabot PRs that are:
+<<<<<<< HEAD
 #   - GitHub Actions updates (any version bump, including major)
 #   - Security updates for any ecosystem (patch or minor)
 #   - Indirect (transitive) dependency updates
 # Major version updates for non-Actions ecosystems are left for human review.
+=======
+#   - GitHub Actions updates (patch or minor version bumps)
+#   - Security updates for any ecosystem (patch or minor)
+#   - Indirect (transitive) dependency updates
+# Major version updates are always left for human review.
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 # Uses --auto so the merge waits for all required CI checks to pass.
 #
 # Safety model: application ecosystems use open-pull-requests-limit: 0 in
@@ -40,7 +47,11 @@ jobs:
     steps:
       - name: Dependabot metadata
         id: metadata
+<<<<<<< HEAD
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v2
+=======
+        uses: dependabot/fetch-metadata@ffa630c65fa7e0ecfa0625b5ceda64399aea1b36 # v2
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           skip-commit-verification: true
@@ -52,6 +63,7 @@ jobs:
           DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
           ECOSYSTEM="${{ steps.metadata.outputs.package-ecosystem }}"
 
+<<<<<<< HEAD
           # GitHub Actions are SHA-pinned and don't affect app runtime,
           # so all version bumps (including major) are eligible.
           # App ecosystem PRs can only exist as security updates (limit: 0)
@@ -65,6 +77,19 @@ jobs:
             exit 0
           fi
 
+=======
+          # Must be patch, minor, or indirect
+          if [[ "$UPDATE_TYPE" != "version-update:semver-patch" && \
+                "$UPDATE_TYPE" != "version-update:semver-minor" && \
+                "$DEP_TYPE" != "indirect" ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: major update requires human review"
+            exit 0
+          fi
+
+          # GitHub Actions version updates are always eligible
+          # App ecosystem PRs can only exist as security updates (limit: 0)
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
           echo "eligible=true" >> "$GITHUB_OUTPUT"
           echo "Auto-merge eligible: ecosystem=$ECOSYSTEM update=$UPDATE_TYPE"
 
@@ -81,7 +106,11 @@ jobs:
       - name: Generate app token
         if: steps.eligible.outputs.eligible == 'true'
         id: app-token
+<<<<<<< HEAD
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+=======
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}

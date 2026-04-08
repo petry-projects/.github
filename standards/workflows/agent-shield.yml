@@ -1,8 +1,12 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/agent-shield.yml
 # Standard:        petry-projects/.github/standards/agent-standards.md
 # Reusable:        petry-projects/.github/.github/workflows/agent-shield-reusable.yml
+<<<<<<< HEAD
 #
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. The AgentShield CLI scan and the
@@ -29,6 +33,23 @@
 #      SKILL.md frontmatter validation
 
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+#
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. The AgentShield CLI scan and the
+#     org-specific structural checks live in the reusable workflow above.
+#   • You MAY change: the `with:` inputs (min-severity, agentshield-version,
+#     required-files, org-standards-ref) — only if your repo genuinely needs
+#     a different policy.
+#   • You MUST NOT change: trigger events, the `uses:` line, or the job name
+#     (used as a required status check).
+#   • If you need different behaviour beyond the inputs, open a PR against
+#     the reusable in the central repo.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# AgentShield — thin caller for the org-level reusable.
+# To adopt: copy this file to .github/workflows/agent-shield.yml in your repo.
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 name: AgentShield
 
 on:
@@ -42,6 +63,7 @@ permissions:
 
 jobs:
   agent-shield:
+<<<<<<< HEAD
 <<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
 =======
@@ -127,3 +149,6 @@ jobs:
           fi
           exit $status
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@main
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))

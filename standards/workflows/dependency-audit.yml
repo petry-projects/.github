@@ -1,8 +1,12 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/dependency-audit.yml
 # Standard:        petry-projects/.github/standards/ci-standards.md#5-dependency-audit-dependency-auditym
 # Reusable:        petry-projects/.github/.github/workflows/dependency-audit-reusable.yml
+<<<<<<< HEAD
 #
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All ecosystem-detection and audit logic
@@ -21,15 +25,31 @@
 =======
 # Dependency vulnerability audit
 # Copy to .github/workflows/dependency-audit.yml
+=======
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 #
-# Auto-detects ecosystems present in the repository and runs the appropriate
-# audit tool. Fails the build if any dependency has a known security advisory.
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. All ecosystem-detection and audit logic
+#     lives in the reusable workflow above.
+#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MUST NOT change: trigger events, the `uses:` line, or job name
+#     (used as a required status check).
+#   • If you need different behaviour (new ecosystem, tool version bump),
+#     open a PR against the reusable in the central repo.
+# ─────────────────────────────────────────────────────────────────────────────
 #
+<<<<<<< HEAD
 # Add "dependency-audit" as a required status check in branch protection.
 #
 # Pinned tool versions (update deliberately):
 #   govulncheck v1.1.4 | cargo-audit 0.22.1 | pip-audit 2.9.0
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+# Dependency vulnerability audit — thin caller for the org-level reusable.
+# To adopt: copy this file to .github/workflows/dependency-audit.yml in your repo.
+# Add "dependency-audit / Detect ecosystems" as a required status check
+# in branch protection.
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
 name: Dependency audit
 
 on:
@@ -42,6 +62,7 @@ permissions:
   contents: read
 
 jobs:
+<<<<<<< HEAD
 <<<<<<< HEAD
   dependency-audit:
     uses: petry-projects/.github/.github/workflows/dependency-audit-reusable.yml@v1
@@ -243,3 +264,7 @@ jobs:
           )
           exit $status
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+  dependency-audit:
+    uses: petry-projects/.github/.github/workflows/dependency-audit-reusable.yml@main
+>>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
