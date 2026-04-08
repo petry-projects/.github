@@ -902,6 +902,7 @@ check_claude_workflow_checkout() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: ci.yml uses SHA-scoped concurrency group
 #
 # Per-ref concurrency groups (`ci-${{ github.ref }}`) with cancel-in-progress
@@ -949,6 +950,19 @@ check_ci_concurrency() {
 # its own workflows by @main during release prep.
 #
 # Array format: "workflow-filename:expected-reusable-basename:version-tag"
+=======
+# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
+#
+# For each workflow that the org has centralized into a reusable workflow,
+# verify the downstream repo's copy is a stub that delegates via:
+#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@v1
+#
+# This prevents drift: a repo that copies the inline pre-centralization
+# version (or pins to @main, or pins to an older tag) is flagged so it
+# can be re-synced from the standard. The central .github repo itself is
+# exempt because it owns the reusables and may legitimately reference
+# its own workflows by @main during release prep.
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
 # ---------------------------------------------------------------------------
 check_centralized_workflow_stubs() {
   local repo="$1"
@@ -957,6 +971,7 @@ check_centralized_workflow_stubs() {
   # own reusables by @main; skip the stub check for it.
   [ "$repo" = ".github" ] && return
 
+<<<<<<< HEAD
   # workflow-filename:expected-reusable-basename:version-tag
   # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
   # the private petry-projects/.github-private repo and is pinned @main (not a
@@ -970,6 +985,16 @@ check_centralized_workflow_stubs() {
     "agent-shield.yml:agent-shield-reusable:v1"
     "feature-ideation.yml:feature-ideation-reusable:v1"
     "pr-review-mention.yml:pr-review-mention-reusable:v2"
+=======
+  # workflow-filename:expected-reusable-basename
+  local centralized=(
+    "claude.yml:claude-code-reusable"
+    "dependency-audit.yml:dependency-audit-reusable"
+    "dependabot-automerge.yml:dependabot-automerge-reusable"
+    "dependabot-rebase.yml:dependabot-rebase-reusable"
+    "agent-shield.yml:agent-shield-reusable"
+    "feature-ideation.yml:feature-ideation-reusable"
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -978,10 +1003,16 @@ check_centralized_workflow_stubs() {
   workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
   [ -z "$workflow_list" ] && return
 
+<<<<<<< HEAD
   local entry wf reusable version
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable version <<< "$entry"
     [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
+=======
+  local entry wf reusable
+  for entry in "${centralized[@]}"; do
+    IFS=':' read -r wf reusable <<< "$entry"
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
@@ -999,6 +1030,7 @@ check_centralized_workflow_stubs() {
     [ -z "$decoded" ] && continue
 
     # Required pattern: a non-comment line whose `uses:` value is exactly
+<<<<<<< HEAD
     # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
     # Anchor to start-of-line + optional indent so a `# uses: ...` comment
     # cannot satisfy the check.
@@ -1009,12 +1041,26 @@ check_centralized_workflow_stubs() {
 
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
       continue  # stub is correctly pinned to the canonical version — compliant
+=======
+    # petry-projects/.github/.github/workflows/<reusable>.yml@v1
+    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
+    # cannot satisfy the check.
+    local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@v1"
+
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
+      continue  # stub is correctly pinned to @v1 — compliant
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
     fi
 
     # Determine why it's non-compliant for a more actionable message.
     local why
+<<<<<<< HEAD
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to \`@${version}\` (org standard)"
+=======
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
+      why="references the reusable but is not pinned to \`@v1\` (org standard)"
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -1022,12 +1068,17 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
+<<<<<<< HEAD
       "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
+=======
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@v1\`." \
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
       "standards/ci-standards.md#centralization-tiers"
   done
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: dev-lead.yml caller stub conforms to the centralized contract
 #
 # Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
@@ -1215,6 +1266,8 @@ check_centralized_check_names() {
 
 # ---------------------------------------------------------------------------
 >>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
+=======
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -2299,7 +2352,11 @@ main() {
     check_centralized_check_names "$repo"
 =======
     check_claude_workflow_checkout "$repo"
+<<<<<<< HEAD
 >>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
+=======
+    check_centralized_workflow_stubs "$repo"
+>>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
     check_claude_md "$repo"
     check_agents_md "$repo"
     check_copilot_setup_steps "$repo"
