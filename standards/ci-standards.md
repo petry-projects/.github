@@ -634,18 +634,22 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 |----------|------------|
 | CI (build/test) | `contents: read` |
 | SonarCloud | `contents: read`, `pull-requests: read` |
-| Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read`, `administration: write` |
+| Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
 | CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
-> **Note on Claude Code `administration: write`:** Required so the
-> `claude-issue` job can autonomously create labels, repository rulesets, and
-> enable settings like Discussions. Without it, compliance fixes that touch
-> repo-level configuration (Discussions, code-quality ruleset, missing
-> labels) require manual human action. The grant only takes effect on the
-> `claude-issue` job in the reusable workflow — repo-level callers don't
-> need to set it themselves because they use `secrets: inherit` and inherit
-> the called workflow's permission shape via the intersection rule.
+> **Note on admin operations from Claude Code:** GitHub Actions does **not**
+> expose an `administration` permission scope. The valid set is documented at
+> [docs.github.com](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs).
+> Admin-level operations the `claude-issue` job needs — creating repository
+> rulesets, enabling Discussions, modifying repo settings — must be performed
+> with a token that already carries the right scope. The reusable workflow
+> passes `GH_PAT_WORKFLOWS` to `claude-code-action` for exactly this reason:
+> as long as that org-level secret is a classic PAT with `repo` scope (which
+> includes admin capability for the authenticated user's repos) or a
+> fine-grained PAT with `Administration: Read and write`, admin calls
+> succeed. Granting a non-existent workflow permission has no effect and
+> will fail `actionlint`.
 
 ---
 
