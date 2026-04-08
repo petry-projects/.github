@@ -550,6 +550,126 @@ check_centralized_workflow_stubs() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: required-status-check rulesets reference current names
+#
+# After centralizing workflows into reusables (#87, #88), GitHub composes
+# check names as `<caller-job-id> / <reusable-job-id-or-name>`. Repos
+# that updated their workflow files but didn't update their rulesets
+# are silently broken — the merge gate references a name that no
+# longer exists, so it can never be satisfied.
+#
+# Inspects both the new ruleset system and classic branch protection.
+# Flags two distinct problems:
+#   1. Stale pre-centralization name (e.g. `claude`, `AgentShield`)
+#      → emit "stale-required-check-<old-name>"
+#   2. `claude-code / claude` listed as required
+#      → emit "required-claude-code-check-broken" because that check
+#        is structurally incompatible with workflow-modifying PRs
+#        (claude-code-action's app-token validation refuses to mint
+#        a token whenever the PR diff includes any workflow file)
+# ---------------------------------------------------------------------------
+check_centralized_check_names() {
+  local repo="$1"
+
+  # The .github repo owns the reusables; its own ruleset is allowed to
+  # reference whatever check names it likes.
+  [ "$repo" = ".github" ] && return
+
+  # Map from stale name → current canonical name. Used for the rename
+  # remediation message. The remediation here is "rename in the
+  # ruleset" because both the old and new names refer to a check that
+  # CAN be required (it runs on PRs and reports a definitive result).
+  #
+  # NOTE: `claude` and `claude-issue` are deliberately NOT in this map.
+  # The post-centralization equivalents are `claude-code / claude` and
+  # `claude-code / claude-issue`, but those checks are themselves
+  # incompatible with workflow-modifying PRs (claude-code-action's app
+  # token validation refuses to mint a token for any PR whose diff
+  # includes a workflow file, so the check fails on every workflow PR
+  # and the merge gate becomes a deadlock). The remediation for the
+  # `claude*` cases is therefore "remove from required checks", not
+  # "rename" — handled below as a separate finding so the message
+  # never recommends a name that creates a new deadlock.
+  local renames=(
+    "AgentShield:agent-shield / AgentShield"
+    "Detect ecosystems:dependency-audit / Detect ecosystems"
+  )
+
+  # Patterns for required checks that are structurally broken and
+  # should be removed (not renamed). Matched as either:
+  #   - the bare legacy name ("claude" / "claude-issue"), or
+  #   - any reusable-workflow check whose suffix is "/ claude" or
+  #     "/ claude-issue", regardless of caller-job-id prefix
+  #     (so a custom caller named e.g. "Claude Code / claude" is
+  #     also caught, not just the canonical "claude-code / claude").
+  #
+  # The match is computed against each context line below.
+
+  # Collect every required-status-check context from every source.
+  # Sources: (1) every active ruleset, (2) classic branch protection.
+  local contexts=""
+
+  # Source 1: rulesets that apply to main
+  local ruleset_contexts
+  ruleset_contexts=$(gh_api "repos/$ORG/$repo/rules/branches/main" \
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null || echo "")
+  contexts+="$ruleset_contexts"$'\n'
+
+  # Source 2: classic branch protection (may not exist)
+  local classic_contexts
+  classic_contexts=$(gh_api "repos/$ORG/$repo/branches/main/protection/required_status_checks" \
+    --jq '.contexts[]' 2>/dev/null || echo "")
+  contexts+="$classic_contexts"
+
+  [ -z "$(echo "$contexts" | tr -d '[:space:]')" ] && return
+
+  # Check 1: stale pre-centralization names that have a safe rename
+  local entry old new
+  for entry in "${renames[@]}"; do
+    IFS=':' read -r old new <<< "$entry"
+    if echo "$contexts" | grep -qxF "$old"; then
+      add_finding "$repo" "rulesets" "stale-required-check-${old// /-}" "error" \
+        "Required-status-check ruleset references the stale check name \`$old\`. After workflow centralization (petry-projects/.github#87) this check is published as \`$new\`. Update the ruleset (and any classic branch protection) to use the new name." \
+        "standards/ci-standards.md#centralization-tiers"
+    fi
+  done
+
+  # Check 2: claude-* checks (legacy or post-centralization) listed as
+  # required. These cannot be made compliant by renaming because the
+  # post-centralization name is itself broken — the only safe action
+  # is to remove the check from required-status-checks entirely.
+  #
+  # We classify each context line by suffix so any caller-job-id prefix
+  # is caught (e.g. "claude-code / claude", "Claude Code / claude",
+  # "review-claude / claude" all match).
+  local context match_type
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    match_type=""
+    case "$context" in
+      "claude")              match_type="claude" ;;
+      "claude-issue")        match_type="claude-issue" ;;
+      *"/ claude")           match_type="claude" ;;
+      *"/ claude-issue")     match_type="claude-issue" ;;
+      *) continue ;;
+    esac
+
+    # Stable check id per match type so findings don't churn across
+    # audit runs from variations in caller-job-id prefixes.
+    local check_id
+    if [ "$match_type" = "claude-issue" ]; then
+      check_id="required-claude-issue-check-broken"
+    else
+      check_id="required-claude-check-broken"
+    fi
+
+    add_finding "$repo" "rulesets" "$check_id" "error" \
+      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+      "standards/ci-standards.md#centralization-tiers"
+  done <<< "$contexts"
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -1026,6 +1146,7 @@ main() {
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
     check_centralized_workflow_stubs "$repo"
+    check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
 
