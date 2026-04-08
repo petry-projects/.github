@@ -72,14 +72,19 @@ main() {
   local open_issues_raw
   open_issues_raw=$(gh_safe_rest issue list --repo "$REPO" --state open --limit "$issue_limit" \
     --json number,title,labels,createdAt,author)
-  local open_issues
-  open_issues=$(printf '%s' "$open_issues_raw" | filter_bots_apply)
-
-  if [ "$(printf '%s' "$open_issues" | jq 'length')" -ge "$issue_limit" ]; then
+  # Compute truncation warning BEFORE bot filtering. If we filter out bots
+  # first, the count could drop below the limit and mask a real truncation.
+  # Caught by Copilot review on PR petry-projects/.github#85.
+  local raw_open_count
+  raw_open_count=$(printf '%s' "$open_issues_raw" | jq 'length')
+  if [ "$raw_open_count" -ge "$issue_limit" ]; then
     truncation_warnings=$(printf '%s' "$truncation_warnings" \
       | jq --arg src "open_issues" --argjson lim "$issue_limit" \
           '. + [{source: $src, limit: $lim, message: "result count equals limit; possible truncation"}]')
   fi
+
+  local open_issues
+  open_issues=$(printf '%s' "$open_issues_raw" | filter_bots_apply)
 
   # --- Recently closed issues ------------------------------------------------
   printf '[collect-signals] fetching closed issues (since %s)\n' "$thirty_days_ago" >&2

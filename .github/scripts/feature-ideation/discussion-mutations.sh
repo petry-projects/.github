@@ -153,7 +153,14 @@ mutation($labelableId: ID!, $labelIds: [ID!]!) {
 }
 GRAPHQL
 
-  gh_safe_graphql -f query="$query" \
-    -f labelableId="$discussion_id" \
-    -f labelIds="[\"$label_id\"]"
+  # GraphQL `labelIds: [ID!]!` requires a JSON array variable. `gh api`'s
+  # `-f`/`-F` flags don't express GraphQL array variables, so build the
+  # full request body as JSON and send it via stdin. Caught by Copilot
+  # review on PR petry-projects/.github#85: the previous version sent
+  # labelIds as the literal string `["L_1"]`, which the API rejects.
+  local body
+  body=$(jq -nc --arg q "$query" --arg id "$discussion_id" --arg label "$label_id" \
+    '{query: $q, variables: {labelableId: $id, labelIds: [$label]}}')
+
+  gh_safe_graphql_input "$body"
 }
