@@ -48,8 +48,11 @@ block_indent = -1
 findings = []
 
 # Pattern matches $(...) and ${VAR} but NOT GitHub Actions ${{ ... }}
-# because that's evaluated before the prompt is rendered.
-shell_expansion = re.compile(r'(?<!\\)\$\([^)]*\)|(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*\}')
+# (which is evaluated before the prompt is rendered) and NOT \$ or $$
+# escapes (which produce literal characters in the rendered prompt).
+# Both branches use the same lookbehind so escape handling is consistent.
+# Caught by CodeRabbit review on PR petry-projects/.github#85.
+shell_expansion = re.compile(r'(?<![\\$])\$\([^)]*\)|(?<![\\$])\$\{[A-Za-z_][A-Za-z0-9_]*\}')
 
 # Recognise both `direct_prompt:` (v0) and `prompt:` (v1) markers, with
 # optional `|` or `>` block scalar indicators.

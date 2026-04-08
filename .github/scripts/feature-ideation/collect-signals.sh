@@ -25,6 +25,12 @@
 
 set -euo pipefail
 
+# SCHEMA_VERSION must stay in lockstep with the `version` field in
+# .github/schemas/signals.schema.json. Bumping one without the other is a
+# compatibility break: validate-signals.py will reject the runtime output
+# if the constants drift, AND the bats `signals-schema: SCHEMA_VERSION
+# constant matches schema file` test enforces this in CI.
+# Caught by CodeRabbit review on PR petry-projects/.github#85.
 SCHEMA_VERSION="1.0.0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

@@ -68,3 +68,17 @@ FIX="${TT_FIXTURES_DIR}/expected"
   run python3 "$VALIDATOR" "$good_file" "$SCHEMA"
   [ "$status" -eq 0 ]
 }
+
+@test "schema: SCHEMA_VERSION constant matches schema file version comment" {
+  # CodeRabbit on PR petry-projects/.github#85: enforce that the
+  # SCHEMA_VERSION constant in collect-signals.sh stays in lockstep with
+  # the version annotation in signals.schema.json. Bumping one without
+  # the other is a compatibility break.
+  script_version=$(grep -E '^SCHEMA_VERSION=' "${TT_REPO_ROOT}/.github/scripts/feature-ideation/collect-signals.sh" \
+    | head -1 | sed -E 's/^SCHEMA_VERSION="([^"]+)".*/\1/')
+  schema_version=$(jq -r '."$comment"' "$SCHEMA" \
+    | grep -oE 'version: [0-9]+\.[0-9]+\.[0-9]+' | sed 's/version: //')
+  [ -n "$script_version" ]
+  [ -n "$schema_version" ]
+  [ "$script_version" = "$schema_version" ]
+}

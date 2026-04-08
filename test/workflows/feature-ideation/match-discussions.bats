@@ -18,8 +18,14 @@ teardown() {
 }
 
 # Helper: build a signals.json with the given discussions array.
+# Computes the discussions count from the array length so the fixture
+# always satisfies the producer/consumer contract (even though the
+# matcher only reads .items, validating contracts in test fixtures
+# is good hygiene). CodeRabbit on PR petry-projects/.github#85.
 build_signals() {
   local discussions="$1"
+  local count
+  count=$(printf '%s' "$discussions" | jq 'length')
   cat >"${TT_TMP}/signals.json" <<JSON
 {
   "schema_version": "1.0.0",
@@ -27,7 +33,7 @@ build_signals() {
   "repo": "petry-projects/talkterm",
   "open_issues": { "count": 0, "items": [] },
   "closed_issues_30d": { "count": 0, "items": [] },
-  "ideas_discussions": { "count": 0, "items": ${discussions} },
+  "ideas_discussions": { "count": ${count}, "items": ${discussions} },
   "releases": [],
   "merged_prs_30d": { "count": 0, "items": [] },
   "feature_requests": { "count": 0, "items": [] },

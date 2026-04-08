@@ -4,6 +4,8 @@
 # These tests kill R1: the original "2>/dev/null || echo '[]'" pattern that
 # silently swallowed every kind of failure. Each test pins one failure mode.
 
+bats_require_minimum_version 1.5.0
+
 load 'helpers/setup'
 
 setup() {
@@ -67,12 +69,16 @@ teardown() {
 # gh_safe_rest — failure modes (R1 kill list)
 # ---------------------------------------------------------------------------
 
-@test "rest: EXITS NON-ZERO on auth failure (gh exit 4)" {
+@test "rest: EXITS NON-ZERO on auth failure (gh exit 4) and reports the failure category" {
+  # CodeRabbit on PR petry-projects/.github#85: the previous assertion
+  # ended with `|| true`, so it always passed regardless of the message
+  # content. Use --separate-stderr to capture stderr and assert the
+  # structured `[gh-safe][rest-failure]` prefix is emitted.
   GH_STUB_EXIT=4 \
   GH_STUB_STDERR='HTTP 401: Bad credentials' \
-    run gh_safe_rest issue list --repo foo/bar
+    run --separate-stderr gh_safe_rest issue list --repo foo/bar
   [ "$status" -ne 0 ]
-  [[ "$output" == *"rest-failure"* ]] || [[ "$stderr" == *"rest-failure"* ]] || true
+  [[ "$stderr" == *"rest-failure"* ]]
 }
 
 @test "rest: EXITS NON-ZERO on rate limit (gh exit 1 + 403)" {
