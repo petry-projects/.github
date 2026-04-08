@@ -66,6 +66,7 @@ jobs:
       issues: write
       actions: read
       checks: read
+      administration: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -83,9 +84,44 @@ jobs:
             actions: read
             checks: read
           claude_args: |
-            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
+            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Bash(gh api:*),Bash(gh label create:*),Edit,Write"
           prompt: |
             Implement a fix for issue #${{ github.event.issue.number }}.
+
+            **Standards-conformance rules — read these before writing any code:**
+
+            - **For workflow files** (`.github/workflows/*.yml`): if a template
+              exists in `petry-projects/.github/standards/workflows/` for what
+              you're adding, **copy it verbatim** rather than writing from
+              scratch. Available templates: `agent-shield.yml`, `claude.yml`,
+              `dependabot-automerge.yml`, `dependabot-rebase.yml`,
+              `dependency-audit.yml`, `feature-ideation.yml`. Fetch via:
+              `gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml --jq '.content' | base64 -d`
+              Adapt only when the file genuinely needs repo-specific content.
+
+            - **For org standards** (labels, settings, rulesets, CODEOWNERS):
+              read `petry-projects/.github/standards/` first via `gh api`.
+              Match colors, names, and structure exactly. The full standards
+              tree is at `petry-projects/.github/tree/main/standards/`.
+
+            - **For SHA pinning** (Action Pinning Policy in
+              `standards/ci-standards.md`): never guess or fabricate SHAs.
+              Always look them up:
+                * Tags:     `gh api repos/{owner}/{repo}/git/refs/tags/{tag} --jq '.object.sha'`
+                * Branches: `gh api repos/{owner}/{repo}/branches/{branch} --jq '.commit.sha'`
+              If the lookup fails, do not pin — open the PR with the action
+              still using its tag and clearly explain the blocker in the PR
+              body so a human can complete the fix.
+
+            - **For CodeQL** (`codeql.yml`): all ecosystems present in the repo
+              MUST be configured as CodeQL languages. Repos with
+              `.github/workflows/*.yml` files MUST scan the `actions`
+              ecosystem. Use a matrix strategy for multi-language repos.
+
+            - **Do not skip the work** if previous comments say "blocked": the
+              prior infrastructure issues that produced those comments may
+              have been resolved. Attempt the fix; if you hit a *new* error,
+              report the actual error message rather than referring to history.
 
             After implementing:
             1. Create a pull request with a clear title and description. Include "Closes #${{ github.event.issue.number }}" in the PR body.
