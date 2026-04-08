@@ -498,28 +498,44 @@ check_centralized_workflow_stubs() {
     "feature-ideation.yml:feature-ideation-reusable"
   )
 
+  # List the repo's workflow directory once instead of probing each file.
+  # If the listing fails (no workflows dir), there's nothing to check.
+  local workflow_list
+  workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  [ -z "$workflow_list" ] && return
+
   local entry wf reusable
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable <<< "$entry"
 
+    # Skip workflows that don't exist in this repo. Required workflows are
+    # checked separately by check_required_workflows; conditional ones
+    # (dependabot-rebase, feature-ideation) are intentionally optional.
+    if ! echo "$workflow_list" | grep -qxF "$wf"; then
+      continue
+    fi
+
     local content
     content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
-    [ -z "$content" ] && continue  # missing workflow caught by check_required_workflows
+    [ -z "$content" ] && continue
 
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-    # Required pattern: uses: petry-projects/.github/.github/workflows/<reusable>.yml@v1
+    # Required pattern: a non-comment line whose `uses:` value is exactly
+    # petry-projects/.github/.github/workflows/<reusable>.yml@v1
+    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
+    # cannot satisfy the check.
     local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@v1"
 
-    if echo "$decoded" | grep -qE "uses:[[:space:]]*${expected}([[:space:]]|$)"; then
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
       continue  # stub is correctly pinned to @v1 — compliant
     fi
 
-    # Determine why it's non-compliant for a more actionable message
+    # Determine why it's non-compliant for a more actionable message.
     local why
-    if echo "$decoded" | grep -qE "uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
       why="references the reusable but is not pinned to \`@v1\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
