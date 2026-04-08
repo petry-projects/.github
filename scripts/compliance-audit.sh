@@ -55,6 +55,7 @@ ISSUES_REMOVED=0
 ISSUES_RETRIGGERED=0
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
@@ -62,6 +63,8 @@ REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml 
 # function below verifies the API state and treats stray codeql.yml files
 # as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
 
+=======
+>>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
 # name:hex-color:description (color without leading #)
 REQUIRED_LABEL_SPECS=(
   "security:d93f0b:Security-related PRs and issues"
@@ -72,6 +75,7 @@ REQUIRED_LABEL_SPECS=(
   "documentation:0075ca:Documentation changes"
   "in-progress:fbca04:An agent is actively working this issue"
 )
+<<<<<<< HEAD
 
 # App IDs whose auto_trigger_checks must be disabled org-wide.
 # 1236702 = Claude (anthropics/claude-code-action)
@@ -80,6 +84,8 @@ CHECK_SUITE_APP_IDS=(1236702 347564)
 =======
 REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation in-progress)
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
+=======
+>>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
 
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
@@ -534,6 +540,7 @@ check_labels() {
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
     IFS=':' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
@@ -563,6 +570,30 @@ check_labels() {
         "Required label \`$label\` is missing" \
         "standards/github-settings.md#labels--standard-set"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
+    IFS=':' read -r label color description <<< "$spec"
+    if ! echo "$existing_labels" | grep -qx "$label"; then
+      if [ "$DRY_RUN" = "true" ]; then
+        add_finding "$repo" "labels" "missing-label-$label" "warning" \
+          "Required label \`$label\` is missing" \
+          "standards/github-settings.md#labels--standard-set"
+      else
+        info "Auto-creating missing label '$label' on $repo"
+        if gh label create "$label" \
+            --repo "$ORG/$repo" \
+            --color "$color" \
+            --description "$description" \
+            --force 2>/dev/null; then
+          info "Label '$label' created successfully on $repo"
+        else
+          warn "Failed to create label '$label' on $repo — filing finding for manual remediation"
+          add_finding "$repo" "labels" "missing-label-$label" "warning" \
+            "Required label \`$label\` is missing and could not be auto-created" \
+            "standards/github-settings.md#labels--standard-set"
+        fi
+      fi
+>>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
     fi
   done
 }
