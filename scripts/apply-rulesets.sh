@@ -91,16 +91,33 @@ detect_required_checks() {
     fi
   fi
 
-  # --- Claude Code ---
-  if echo "$workflows" | grep -qx "claude.yml"; then
-    local cl_wf_name
-    cl_wf_name=$(workflow_name "claude.yml")
-    if [ -n "$cl_wf_name" ]; then
-      checks+=("$cl_wf_name / claude")
-    else
-      checks+=("claude")
-    fi
+  # --- Tier 1 centralized workflows ---
+  # Caller-job-ids are fixed by the canonical stubs in
+  # standards/workflows/, so the resulting reusable check names
+  # (<caller-job-id> / <reusable-job-id-or-name>) are known constants.
+  # See standards/ci-standards.md#centralization-tiers
+  #
+  # NOTE: claude-code / claude is intentionally NOT added as a required
+  # check. claude-code-action's GitHub App refuses to mint a token for
+  # any PR that touches workflow files, which would deadlock every
+  # workflow-modifying PR. The check is still useful for review feedback
+  # on normal PRs, but it must not be a merge gate.
+  if echo "$workflows" | grep -qx "agent-shield.yml"; then
+    checks+=("agent-shield / AgentShield")
   fi
+  if echo "$workflows" | grep -qx "dependency-audit.yml"; then
+    # Only the detect job runs unconditionally; per-ecosystem audit jobs
+    # (npm audit, govulncheck, cargo audit, pip-audit, pnpm audit) are
+    # gated on lockfile presence and report SKIPPED when absent. A
+    # required-but-skipped check fails the gate, so we cannot require
+    # the per-ecosystem jobs.
+    checks+=("dependency-audit / Detect ecosystems")
+  fi
+  # dependabot-automerge / dependabot-rebase are intentionally NOT
+  # required: dependabot-automerge runs only on dependabot[bot] PRs and
+  # dependabot-rebase runs only on push to main, neither of which are
+  # regular contributor PRs.
+  # feature-ideation runs on a schedule, never on PRs, so also not required.
 
   # --- CI Pipeline ---
   if echo "$workflows" | grep -qx "ci.yml"; then
