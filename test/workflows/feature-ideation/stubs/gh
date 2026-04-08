@@ -9,7 +9,10 @@
 #   GH_STUB_STDOUT  — literal text or @file:/abs/path to load from disk
 #   GH_STUB_STDERR  — literal text or @file:/abs/path
 #   GH_STUB_EXIT    — exit code (default 0)
-#   GH_STUB_LOG     — append-only log of argv invocations (one TSV line each)
+#   GH_STUB_LOG     — append-only log of argv invocations. Each invocation
+#                     is logged as a single line of shell-quoted tokens
+#                     (via `printf '%q '`) so it can be re-parsed losslessly
+#                     even when arguments contain spaces or special chars.
 #
 # For multi-call tests (where the same stub is invoked multiple times with
 # different responses), set GH_STUB_SCRIPT to a file containing one
@@ -19,7 +22,12 @@
 set -euo pipefail
 
 if [ -n "${GH_STUB_LOG:-}" ]; then
-  printf '%s\n' "$*" >>"$GH_STUB_LOG"
+  # Use %q so each arg is shell-quoted; tests can re-parse argv losslessly.
+  # Caught by Copilot review on PR petry-projects/.github#85: previously
+  # used $* which joined with spaces and lost argument boundaries.
+  # shellcheck disable=SC2059
+  printf '%q ' "$@" >>"$GH_STUB_LOG"
+  printf '\n' >>"$GH_STUB_LOG"
 fi
 
 # Multi-call mode.

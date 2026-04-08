@@ -150,16 +150,78 @@ gh_safe_graphql() {
 
   # If caller asked for a jq filter, apply it now and return that.
   if [ "$has_jq" -eq 1 ]; then
-    local filtered
-    filtered=$(printf '%s' "$raw" | jq -c "$jq_filter" 2>/dev/null || true)
-    if [ -z "$filtered" ] || [ "$filtered" = "null" ]; then
-      # The filter resolved to null/empty — caller probably wants "[]" semantics
-      # for "no nodes found". Return the empty array sentinel.
+    # NB: do NOT swallow jq errors with `|| true`. A typo or wrong path in
+    # the filter must surface as a hard failure, not a silent empty result —
+    # otherwise we re-introduce R1 in a different shape. Caught by Copilot
+    # review on PR petry-projects/.github#85.
+    local filtered jq_rc jq_err
+    jq_err=$(mktemp)
+    set +e
+    filtered=$(printf '%s' "$raw" | jq -c "$jq_filter" 2>"$jq_err")
+    jq_rc=$?
+    set -e
+    if [ "$jq_rc" -ne 0 ]; then
+      _gh_safe_err "graphql-jq-failed" "filter='$jq_filter' err=$(cat "$jq_err")"
+      rm -f "$jq_err"
+      return 65
+    fi
+    rm -f "$jq_err"
+    if [ "$filtered" = "null" ] || [ -z "$filtered" ]; then
+      # Filter resolved to JSON null (e.g. nodes path returned null) — this
+      # is the documented "no results" case. Normalize to empty array.
       printf '%s' "$GH_SAFE_EMPTY_ARRAY"
       return 0
     fi
     printf '%s' "$filtered"
     return 0
+  fi
+
+  printf '%s' "$raw"
+}
+
+# Send a fully-formed GraphQL request body via stdin. Use this when the
+# variables include arrays or other shapes that `gh api`'s -f/-F flags
+# cannot express (e.g. `labelIds: [ID!]!`). The body must be a JSON
+# document with `query` and `variables` top-level fields.
+#
+# Same defensive contract as `gh_safe_graphql`: any auth/network/schema
+# failure exits non-zero with a structured stderr message.
+gh_safe_graphql_input() {
+  local body="$1"
+  if ! gh_safe_is_json "$body"; then
+    _gh_safe_err "graphql-bad-input" "request body is not valid JSON"
+    return 64
+  fi
+
+  local raw stderr rc tmp_err
+  tmp_err=$(mktemp)
+  set +e
+  raw=$(printf '%s' "$body" | gh api graphql --input - 2>"$tmp_err")
+  rc=$?
+  set -e
+  stderr=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+
+  if [ "$rc" -ne 0 ]; then
+    _gh_safe_err "graphql-failure" "exit=$rc stderr=$stderr"
+    return "$rc"
+  fi
+
+  if ! gh_safe_is_json "$raw"; then
+    _gh_safe_err "graphql-bad-json" "first 200 bytes: ${raw:0:200}"
+    return 65
+  fi
+
+  if printf '%s' "$raw" | jq -e '(.errors // empty | type) == "array" and (.errors | length > 0)' >/dev/null 2>&1; then
+    local errs
+    errs=$(printf '%s' "$raw" | jq -c '.errors')
+    _gh_safe_err "graphql-errors" "$errs"
+    return 66
+  fi
+
+  if printf '%s' "$raw" | jq -e '.data == null' >/dev/null 2>&1; then
+    _gh_safe_err "graphql-null-data" "data field is null"
+    return 66
   fi
 
   printf '%s' "$raw"

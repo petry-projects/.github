@@ -7,7 +7,9 @@
 #   pollute the signals payload and crowd out real user feedback.
 #
 # Configurable via FEATURE_IDEATION_BOT_AUTHORS (comma-separated, optional).
-# Defaults to a sensible allowlist of known automation accounts.
+# Defaults to a sensible blocklist of known automation accounts. Items
+# matching this list are REMOVED from the result. Adopters can add their
+# own bot logins via the env var to extend the blocklist.
 
 set -euo pipefail
 

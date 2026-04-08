@@ -23,7 +23,7 @@ caught **before UAT** instead of after.
 |------|---------|------------|
 | `lib/gh-safe.sh` | Wraps every `gh` and `gh api graphql` call. Fails loud on auth, rate-limit, network, GraphQL errors envelope, or `data: null`. Replaces the original `2>/dev/null \|\| echo '[]'` swallow. | R1, R7, R8 |
 | `lib/compose-signals.sh` | Validates JSON inputs before `jq --argjson` and assembles the canonical signals.json document. | R3, R4 |
-| `lib/filter-bots.sh` | Configurable bot allowlist via `FEATURE_IDEATION_BOT_AUTHORS`. | R10 |
+| `lib/filter-bots.sh` | Configurable bot blocklist via `FEATURE_IDEATION_BOT_AUTHORS` (extends the default list of bot logins to remove from results). | R10 |
 | `lib/date-utils.sh` | Cross-platform date arithmetic helpers. | R9 |
 | `collect-signals.sh` | Orchestrator: drives all `gh` calls, composes signals.json, emits truncation warnings. | R1, R3, R4, R11 |
 | `validate-signals.py` | JSON Schema 2020-12 validator for signals.json against `../schemas/signals.schema.json`. | R3 |

@@ -161,3 +161,58 @@ teardown() {
     run gh_safe_graphql -f query='q'
   [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Regression tests for Copilot review feedback on PR petry-projects/.github#85
+# ---------------------------------------------------------------------------
+
+@test "graphql: invalid --jq filter EXITS NON-ZERO instead of returning []" {
+  # Catches the typo class: previously the wrapper used `jq ... || true`
+  # which silently swallowed filter syntax errors and returned an empty
+  # array, masking R1-class bugs.
+  GH_STUB_STDOUT='{"data":{"repository":{"id":"R_1"}}}' \
+    run gh_safe_graphql -f query='q' --jq '.data.repository.does_not_exist | bogus_function'
+  [ "$status" -ne 0 ]
+}
+
+@test "graphql: --jq returning explicit JSON null still normalizes to []" {
+  GH_STUB_STDOUT='{"data":{"repository":{"nodes":null}}}' \
+    run gh_safe_graphql -f query='q' --jq '.data.repository.nodes'
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+}
+
+# ---------------------------------------------------------------------------
+# gh_safe_graphql_input — for mutations with array variables
+# ---------------------------------------------------------------------------
+
+@test "graphql_input: rejects non-JSON body" {
+  run gh_safe_graphql_input 'not json'
+  [ "$status" -eq 64 ]
+}
+
+@test "graphql_input: forwards body to gh via stdin and returns response" {
+  GH_STUB_STDOUT='{"data":{"addLabelsToLabelable":{"clientMutationId":null}}}' \
+    run gh_safe_graphql_input '{"query":"mutation{...}","variables":{"labelIds":["L_1"]}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'addLabelsToLabelable'* ]]
+}
+
+@test "graphql_input: EXITS NON-ZERO on errors envelope" {
+  GH_STUB_STDOUT='{"errors":[{"message":"forbidden"}],"data":null}' \
+    run gh_safe_graphql_input '{"query":"q","variables":{}}'
+  [ "$status" -ne 0 ]
+}
+
+@test "graphql_input: EXITS NON-ZERO on data:null" {
+  GH_STUB_STDOUT='{"data":null}' \
+    run gh_safe_graphql_input '{"query":"q","variables":{}}'
+  [ "$status" -ne 0 ]
+}
+
+@test "graphql_input: EXITS NON-ZERO on gh hard failure" {
+  GH_STUB_EXIT=1 \
+  GH_STUB_STDERR='HTTP 401' \
+    run gh_safe_graphql_input '{"query":"q","variables":{}}'
+  [ "$status" -ne 0 ]
+}
