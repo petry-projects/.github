@@ -21,7 +21,11 @@ Read the relevant standard *before* making changes that touch CI, repo settings,
 | **Repo settings + labels** | [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md) | Required settings, label set with exact colors, code-quality ruleset, branch protection |
 | **Dependabot config** | [`standards/dependabot-policy.md`](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md) and [`standards/dependabot/`](https://github.com/petry-projects/.github/tree/main/standards/dependabot) | Per-ecosystem dependabot.yml templates and policy |
 
-**When fixing a compliance finding, the rule is: read the standard, then copy the template — do not generate from scratch.** Anything generated from scratch is, by definition, drift from the standard. If a needed standard or template is missing, file an issue against `petry-projects/.github` rather than diverging silently.
+**When fixing a compliance finding, the rule is: read the standard, then copy
+the template — do not generate from scratch.** Anything generated from scratch
+is, by definition, drift from the standard. If a needed standard or template
+is missing, file an issue against `petry-projects/.github` rather than
+diverging silently.
 
 ---
 
