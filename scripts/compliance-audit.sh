@@ -1079,6 +1079,7 @@ check_centralized_workflow_stubs() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Check: dev-lead.yml caller stub conforms to the centralized contract
 #
 # Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
@@ -1139,6 +1140,8 @@ check_dev_lead_stub() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
 # Check: required-status-check rulesets reference current names
 #
 # After centralizing workflows into reusables (#87, #88), GitHub composes
@@ -1259,6 +1262,7 @@ check_centralized_check_names() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 =======
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
 =======
@@ -1268,6 +1272,8 @@ check_centralized_check_names() {
 >>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
 =======
 >>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
+=======
+>>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -2348,6 +2354,7 @@ main() {
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
+<<<<<<< HEAD
     check_dev_lead_stub "$repo"
     check_centralized_check_names "$repo"
 =======
@@ -2357,6 +2364,9 @@ main() {
 =======
     check_centralized_workflow_stubs "$repo"
 >>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
+=======
+    check_centralized_check_names "$repo"
+>>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
     check_claude_md "$repo"
     check_agents_md "$repo"
     check_copilot_setup_steps "$repo"
