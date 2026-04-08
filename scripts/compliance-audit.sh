@@ -550,6 +550,78 @@ check_centralized_workflow_stubs() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: required-status-check rulesets reference current names
+#
+# After centralizing workflows into reusables (#87, #88), GitHub composes
+# check names as `<caller-job-id> / <reusable-job-id-or-name>`. Repos
+# that updated their workflow files but didn't update their rulesets
+# are silently broken — the merge gate references a name that no
+# longer exists, so it can never be satisfied.
+#
+# Inspects both the new ruleset system and classic branch protection.
+# Flags two distinct problems:
+#   1. Stale pre-centralization name (e.g. `claude`, `AgentShield`)
+#      → emit "stale-required-check-<old-name>"
+#   2. `claude-code / claude` listed as required
+#      → emit "required-claude-code-check-broken" because that check
+#        is structurally incompatible with workflow-modifying PRs
+#        (claude-code-action's app-token validation refuses to mint
+#        a token whenever the PR diff includes any workflow file)
+# ---------------------------------------------------------------------------
+check_centralized_check_names() {
+  local repo="$1"
+
+  # The .github repo owns the reusables; its own ruleset is allowed to
+  # reference whatever check names it likes.
+  [ "$repo" = ".github" ] && return
+
+  # Map from stale name → current canonical name. Order matters for
+  # readability of the emitted finding only.
+  local renames=(
+    "claude:claude-code / claude"
+    "claude-issue:claude-code / claude-issue"
+    "AgentShield:agent-shield / AgentShield"
+    "Detect ecosystems:dependency-audit / Detect ecosystems"
+  )
+
+  # Collect every required-status-check context from every source.
+  # Sources: (1) every active ruleset, (2) classic branch protection.
+  local contexts=""
+
+  # Source 1: rulesets that apply to main
+  local ruleset_contexts
+  ruleset_contexts=$(gh_api "repos/$ORG/$repo/rules/branches/main" \
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null || echo "")
+  contexts+="$ruleset_contexts"$'\n'
+
+  # Source 2: classic branch protection (may not exist)
+  local classic_contexts
+  classic_contexts=$(gh_api "repos/$ORG/$repo/branches/main/protection/required_status_checks" \
+    --jq '.contexts[]' 2>/dev/null || echo "")
+  contexts+="$classic_contexts"
+
+  [ -z "$(echo "$contexts" | tr -d '[:space:]')" ] && return
+
+  # Check 1: stale pre-centralization names
+  local entry old new
+  for entry in "${renames[@]}"; do
+    IFS=':' read -r old new <<< "$entry"
+    if echo "$contexts" | grep -qxF "$old"; then
+      add_finding "$repo" "rulesets" "stale-required-check-${old// /-}" "error" \
+        "Required-status-check ruleset references the stale check name \`$old\`. After workflow centralization (petry-projects/.github#87) this check is published as \`$new\`. Update the ruleset (and any classic branch protection) to use the new name." \
+        "standards/ci-standards.md#centralization-tiers"
+    fi
+  done
+
+  # Check 2: claude-code / claude as required is structurally broken
+  if echo "$contexts" | grep -qxF "claude-code / claude"; then
+    add_finding "$repo" "rulesets" "required-claude-code-check-broken" "error" \
+      "Required-status-check ruleset includes \`claude-code / claude\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. Remove \`claude-code / claude\` from required status checks; the check still runs and surfaces review feedback on normal PRs without being a merge gate." \
+      "standards/ci-standards.md#centralization-tiers"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -1026,6 +1098,7 @@ main() {
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
     check_centralized_workflow_stubs "$repo"
+    check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
 
