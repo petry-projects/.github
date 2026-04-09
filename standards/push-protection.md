@@ -110,8 +110,12 @@ gh api -X PATCH "repos/petry-projects/<repo>" \
   }'
 ```
 
-`scripts/apply-repo-settings.sh` MUST enforce these values alongside the
-existing merge and label settings — see
+The target state is for `scripts/apply-repo-settings.sh` to enforce these
+values alongside the existing merge and label settings on every run. The
+script currently only applies the merge/label block, so until the
+`apply_settings()` function is extended with a `security_and_analysis`
+payload, these settings MUST be applied manually (via the `gh api` command
+above) or by a follow-up PR against the script. See
 [Application](#application-to-a-repository) below.
 
 ### Custom secret scanning patterns
@@ -221,7 +225,7 @@ secret-scan:
       # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
       # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
       # then dereference if it points at an annotated tag.
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
