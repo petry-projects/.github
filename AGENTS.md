@@ -287,7 +287,8 @@ Repository-level AGENTS.md or CLAUDE.md files may specify how each principle map
 
 ### Fail Loud, Never Fake
 
-Prefer a visible failure over a silent fallback. A crashed system with a stack trace is a 5-minute fix; a system silently returning fake data is a full day lost — and only discovered after the wrong data has caused downstream problems.
+Prefer a visible failure over a silent fallback. A crashed system with a stack trace is a 5-minute fix; a system silently
+returning fake data is a full day lost — and only discovered after the wrong data has caused downstream problems.
 
 **Priority order when something can fail:**
 
@@ -304,7 +305,9 @@ Prefer a visible failure over a silent fallback. A crashed system with a stack t
 - Reporting "I've set up X" or "X is working" when X actually failed and a fallback was substituted.
 - Disabling, skipping, or weakening tests to make a failing run look green.
 
-**Disclosed fallbacks are fine.** A local model stepping in when a cloud API is down is good engineering — *as long as the caller can tell.* Examples of acceptable disclosure: a `degraded: true` field on the response, a `WARN` log line with the reason, a UI banner ("Showing cached data from 2h ago"), a metric increment on a `fallback_used` counter.
+**Disclosed fallbacks are fine.** A local model stepping in when a cloud API is down is good engineering — *as long as the
+caller can tell.* Examples of acceptable disclosure: a `degraded: true` field on the response, a `WARN` log line with the
+reason, a UI banner ("Showing cached data from 2h ago"), a metric increment on a `fallback_used` counter.
 
 **Agentic directives:**
 
