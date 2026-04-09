@@ -167,6 +167,64 @@ apply_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
+#
+# Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
+# CodeQL is configured via the code-scanning/default-setup endpoint, not a
+# per-repo workflow file. Languages are auto-detected from the default branch.
+#
+# Idempotent: if state is already "configured", we no-op. If "not-configured",
+# we PATCH to enable. Repos listed in CODEQL_ADVANCED_EXCEPTIONS are skipped
+# (they are approved to keep an inline codeql.yml; see the escape hatch in
+# ci-standards.md §2). The API rejects updates on repos without code scanning
+# capability (e.g. private repos without GHAS); we log a warning and continue
+# so that --all runs are not blocked by a single unsupported repo.
+# ---------------------------------------------------------------------------
+
+# Repos approved for advanced CodeQL setup (inline codeql.yml).
+# Each entry must have a corresponding standards PR documenting the exception.
+CODEQL_ADVANCED_EXCEPTIONS=()
+
+apply_codeql_default_setup() {
+  local repo="$1"
+  info "Configuring CodeQL default setup for $ORG/$repo ..."
+
+  # Skip repos approved for advanced (inline workflow) CodeQL setup.
+  for exception in "${CODEQL_ADVANCED_EXCEPTIONS[@]}"; do
+    if [ "$repo" = "$exception" ]; then
+      skip "  $repo is in CODEQL_ADVANCED_EXCEPTIONS — skipping default setup"
+      return 0
+    fi
+  done
+
+  local current_state
+  current_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$current_state" = "configured" ]; then
+    ok "  CodeQL default setup already configured"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "true" ]; then
+    skip "DRY_RUN=true — would enable CodeQL default setup (current state: ${current_state:-unknown})"
+    return 0
+  fi
+
+  local api_err
+  if api_err=$(gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
+       -F state=configured \
+       -F query_suite=default 2>&1); then
+    ok "  CodeQL default setup enabled"
+  else
+    # Non-fatal: log warning and continue so --all runs are not blocked by
+    # repos that lack code scanning capability (private without GHAS,
+    # archived, or empty default branch).
+    warn "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
+    return 0
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -194,6 +252,7 @@ if [ "$1" = "--all" ]; then
     apply_settings "$repo" || failed=$((failed + 1))
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
+    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -206,4 +265,5 @@ else
   apply_settings "$1"
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
+  apply_codeql_default_setup "$1"
 fi
