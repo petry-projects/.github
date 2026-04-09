@@ -167,7 +167,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
 
 ## Required Workflows
 
-Every repository MUST have these 7 workflows. Reusable templates for Dependabot
+Every repository MUST have these 6 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
 SonarCloud, and Dev-Lead Agent workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack. CodeQL is
