@@ -70,8 +70,12 @@ jobs:
 
       - name: Run ShellCheck
         run: |
-          if compgen -G "scripts/*.sh" > /dev/null; then
-            shellcheck --severity=warning scripts/*.sh
+          # Recurse so subdirectories like scripts/lib/ (sourceable libraries)
+          # are linted too. -x follows `# shellcheck source=...` directives.
+          shopt -s globstar nullglob
+          shell_files=(scripts/**/*.sh)
+          if [ ${#shell_files[@]} -gt 0 ]; then
+            shellcheck --severity=warning -x "${shell_files[@]}"
           else
             echo "No shell scripts found — skipping"
           fi

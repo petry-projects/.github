@@ -98,6 +98,13 @@ gh_api() {
   return 1
 }
 
+# Source the shared push-protection library — provides pp_run_all_checks()
+# and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
+# add_finding() are defined, since the lib's check functions call them.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/push-protection.sh
+. "$SCRIPT_DIR/lib/push-protection.sh"
+
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -1149,6 +1156,7 @@ main() {
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
+    pp_run_all_checks "$repo"
 
     log_end
   done

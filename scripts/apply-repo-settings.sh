@@ -35,6 +35,12 @@ ok()    { echo "[OK]    $*"; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
+# Source the shared push-protection library — provides
+# pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/push-protection.sh
+. "$SCRIPT_DIR/lib/push-protection.sh"
+
 usage() {
   echo "Usage: $0 <repo-name>"
   echo "       $0 --all"
@@ -187,6 +193,7 @@ if [ "$1" = "--all" ]; then
   for repo in $repos; do
     apply_settings "$repo" || failed=$((failed + 1))
     apply_labels "$repo"
+    pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -198,4 +205,5 @@ if [ "$1" = "--all" ]; then
 else
   apply_settings "$1"
   apply_labels "$1"
+  pp_apply_security_and_analysis "$1"
 fi
