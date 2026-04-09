@@ -192,6 +192,7 @@ build_proposals() {
   [ "$status" -eq 0 ]
 }
 
+<<<<<<< HEAD
 @test "match: malformed JSON in signals file exits non-zero" {
   # Caught by CodeRabbit review on PR petry-projects/.github#85.
   printf 'not valid json' >"${TT_TMP}/signals.json"
@@ -208,6 +209,8 @@ build_proposals() {
   [ "$status" -ne 0 ]
 }
 
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 @test "match: idempotent re-run of same proposals against existing matches yields all-matched" {
   # Simulates the R6 idempotency case: run 1 created Discussions, run 2
   # finds them and should NOT propose duplicates.

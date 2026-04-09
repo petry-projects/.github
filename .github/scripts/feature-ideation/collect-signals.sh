@@ -58,6 +58,7 @@ main() {
   local discussion_limit="${DISCUSSION_LIMIT:-100}"
   local output_path="${SIGNALS_OUTPUT:-./signals.json}"
 
+<<<<<<< HEAD
   # Validate that limit overrides are positive integers before forwarding to
   # GraphQL — a value like `ISSUE_LIMIT=foo` would cause an opaque downstream
   # failure instead of a clean usage error. Caught by CodeRabbit review on
@@ -85,6 +86,15 @@ main() {
   local owner repo_name
   owner="${REPO%%/*}"
   repo_name="${REPO##*/}"
+=======
+  local owner repo_name
+  owner="${REPO%%/*}"
+  repo_name="${REPO##*/}"
+  if [ "$owner" = "$REPO" ] || [ -z "$repo_name" ]; then
+    printf '[collect-signals] REPO must be in owner/name format, got: %s\n' "$REPO" >&2
+    return 64
+  fi
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
   local thirty_days_ago
   thirty_days_ago=$(date_days_ago 30)

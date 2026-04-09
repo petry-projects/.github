@@ -83,13 +83,19 @@ on:
           - standard
           - deep
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
       dry_run:
         description: 'Skip Discussion mutations and log them to a JSONL artifact instead. Use this on a fork to smoke-test before going live.'
         required: false
         default: false
         type: boolean
+<<<<<<< HEAD
 =======
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
 permissions: {}
 
@@ -150,9 +156,12 @@ jobs:
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
       dry_run: ${{ inputs.dry_run || false }}
+<<<<<<< HEAD
 =======
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

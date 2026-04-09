@@ -97,6 +97,7 @@ def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+<<<<<<< HEAD
 def _load_json(path: str, label: str):
     """Load JSON from path, exiting with code 2 on any read or parse error."""
     try:
@@ -112,12 +113,19 @@ def _load_json(path: str, label: str):
 
 signals = _load_json(signals_path, "signals")
 proposals = _load_json(proposals_path, "proposals")
+=======
+with open(signals_path) as f:
+    signals = json.load(f)
+with open(proposals_path) as f:
+    proposals = json.load(f)
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
 if not isinstance(proposals, list):
     sys.stderr.write("[match-discussions] proposals must be a JSON array\n")
     sys.exit(65)
 
 discussions = signals.get("ideas_discussions", {}).get("items", []) or []
+<<<<<<< HEAD
 # Skip discussions without an id to avoid all id-less entries collapsing into
 # a single `None` key in seen_disc_ids. Caught by CodeRabbit on PR #85.
 disc_norm = [
@@ -182,6 +190,41 @@ for p_idx, proposal in proposals_indexed:
         default=0.0,
     )
     new_candidates.append({"proposal": proposal, "best_similarity": round(best_sim, 4)})
+=======
+disc_norm = [(d, normalize(d.get("title", ""))) for d in discussions]
+
+matched = []
+new_candidates = []
+seen_disc_ids = set()
+
+for proposal in proposals:
+    if not isinstance(proposal, dict) or "title" not in proposal:
+        sys.stderr.write(f"[match-discussions] skipping malformed proposal: {proposal!r}\n")
+        continue
+    p_norm = normalize(proposal["title"])
+
+    best = None
+    best_sim = 0.0
+    for disc, d_norm in disc_norm:
+        if disc.get("id") in seen_disc_ids:
+            continue
+        sim = jaccard(p_norm, d_norm)
+        if sim > best_sim:
+            best_sim = sim
+            best = disc
+
+    if best is not None and best_sim >= threshold:
+        matched.append(
+            {
+                "proposal": proposal,
+                "discussion": best,
+                "similarity": round(best_sim, 4),
+            }
+        )
+        seen_disc_ids.add(best.get("id"))
+    else:
+        new_candidates.append({"proposal": proposal, "best_similarity": round(best_sim, 4)})
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
 result = {
     "matched": matched,

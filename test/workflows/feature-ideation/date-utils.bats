@@ -15,10 +15,14 @@ setup() {
 }
 
 @test "date_days_ago: 0 returns today" {
+<<<<<<< HEAD
   # Use the helper function rather than the raw system `date` call so the test
   # validates behaviour consistently on both GNU and BSD systems.
   # Caught by CodeRabbit review on PR petry-projects/.github#85.
   today=$(date_today)
+=======
+  today=$(date -u +%Y-%m-%d)
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
   run date_days_ago 0
   [ "$status" -eq 0 ]
   [ "$output" = "$today" ]

@@ -31,6 +31,7 @@ scan_file() {
 import re
 import sys
 
+<<<<<<< HEAD
 
 def _strip_github_expressions(s: str) -> str:
     """Remove ${{ ... }} GitHub Actions expressions from s.
@@ -59,6 +60,8 @@ def _strip_github_expressions(s: str) -> str:
     return "".join(result)
 
 
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 path = sys.argv[1]
 try:
     with open(path, "r", encoding="utf-8") as f:
@@ -83,10 +86,15 @@ findings = []
 shell_expansion = re.compile(r'(?<![\\$])\$\([^)]*\)|(?<![\\$])\$\{[A-Za-z_][A-Za-z0-9_]*\}')
 
 # Recognise both `direct_prompt:` (v0) and `prompt:` (v1) markers, with
+<<<<<<< HEAD
 # optional `|` or `>` block scalar indicators plus YAML chomping modifiers
 # (`-` or `+`) so `prompt: |-`, `prompt: |+`, `prompt: >-`, `prompt: >+`
 # are all recognised. Caught by CodeRabbit review on PR petry-projects/.github#85.
 prompt_marker = re.compile(r'(?:direct_prompt|prompt):\s*[|>]?[-+]?\s*$')
+=======
+# optional `|` or `>` block scalar indicators.
+prompt_marker = re.compile(r'(?:direct_prompt|prompt):\s*[|>]?\s*$')
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
 for lineno, raw in enumerate(lines, start=1):
     stripped = raw.lstrip(" ")
@@ -108,6 +116,7 @@ for lineno, raw in enumerate(lines, start=1):
             continue
 
         # We're inside the prompt body. Scan for shell expansions.
+<<<<<<< HEAD
         # First, strip out GitHub Actions ${{ ... }} expressions.
         # The naive `[^}]*` regex stops at the first `}`, so expressions that
         # contain `}` internally (e.g. format() calls or string literals) are
@@ -115,6 +124,10 @@ for lineno, raw in enumerate(lines, start=1):
         # Use a small stateful scanner instead.
         # Caught by CodeRabbit review on PR petry-projects/.github#85.
         no_gh = _strip_github_expressions(raw)
+=======
+        # First, strip out any GitHub Actions expressions so they don't trip us.
+        no_gh = re.sub(r'\$\{\{[^}]*\}\}', '', raw)
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
         for match in shell_expansion.finditer(no_gh):
             findings.append((lineno, match.group(0), raw.rstrip()))
 
@@ -142,13 +155,17 @@ main() {
   fi
 
   local exit=0
+<<<<<<< HEAD
   local file_rc=0
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
   for file in "$@"; do
     if [ ! -f "$file" ]; then
       printf '[lint-prompt] not found: %s\n' "$file" >&2
       exit=2
       continue
     fi
+<<<<<<< HEAD
     # Capture the actual exit code so we preserve exit-2 (file error) over
     # exit-1 (lint finding). A later lint failure must not overwrite an earlier
     # file error. Caught by CodeRabbit review on PR petry-projects/.github#85.
@@ -163,6 +180,11 @@ main() {
       2) exit=2 ;;
       *) return "$file_rc" ;;
     esac
+=======
+    if ! scan_file "$file"; then
+      exit=1
+    fi
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
   done
   return "$exit"
 }

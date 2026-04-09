@@ -158,6 +158,7 @@ YML
   run bash "$LINTER" "${TT_TMP}/v1-clean.yml"
   [ "$status" -eq 0 ]
 }
+<<<<<<< HEAD
 
 # ---------------------------------------------------------------------------
 # Exit-code precedence: file errors (2) must not be downgraded by later lint
@@ -212,3 +213,5 @@ YML
   run bash "$LINTER" "${TT_TMP}/nested-expr.yml"
   [ "$status" -eq 0 ]
 }
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))

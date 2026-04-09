@@ -222,6 +222,7 @@ teardown() {
     run gh_safe_graphql_input '{"query":"q","variables":{}}'
   [ "$status" -ne 0 ]
 }
+<<<<<<< HEAD
 
 # ---------------------------------------------------------------------------
 # gh stub — self-tests for stub defensive behaviour
@@ -233,3 +234,5 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"not found"* ]]
 }
+=======
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))

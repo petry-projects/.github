@@ -1563,6 +1563,7 @@ ensure_audit_label() {
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
 <<<<<<< HEAD
+<<<<<<< HEAD
   gh label create "dev-lead" \
     --repo "$ORG/$repo" \
     --description "For dev-lead agent pickup" \
@@ -1594,6 +1595,13 @@ ensure_required_labels() {
   done
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  gh label create "claude" \
+    --repo "$ORG/$repo" \
+    --description "For Claude agent pickup" \
+    --color "8B5CF6" \
+    --force 2>/dev/null || true
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 }
 
 # Create all required labels (idempotent — uses --force to update if present)
@@ -1731,6 +1739,8 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 
 =======
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
+    # Ensure claude label is present on pre-existing issues
+    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
     # Record existing issue for umbrella
     jq --null-input \
@@ -1776,6 +1786,7 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
   local issue_url
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
@@ -1797,6 +1808,13 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
+=======
+  # Individual finding issues get both compliance-audit and claude labels so agents can pick them up.
+  issue_url=$(gh issue create --repo "$ORG/$repo" \
+    --title "$search_title" \
+    --label "$AUDIT_LABEL" \
+    --label "claude" \
+>>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -2488,8 +2506,7 @@ main() {
 =======
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
-    # Only the umbrella gets the `claude` label — individual issues do not — so one coordinated
-    # agent handles related findings together instead of multiple agents producing duplicate PRs.
+    # Both individual issues and the umbrella get the `claude` label for agent pickup.
     create_umbrella_issue
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
   else
