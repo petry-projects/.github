@@ -414,7 +414,7 @@ check_sonarcloud() {
 # ---------------------------------------------------------------------------
 # Check: CodeQL default setup is configured (and no stray codeql.yml exists)
 #
-# After petry-projects/.github#<this-pr>, CodeQL is configured via GitHub's
+# After petry-projects/.github#103, CodeQL is configured via GitHub's
 # managed default setup, not a per-repo workflow file. Two distinct findings:
 #
 #   1. codeql-default-setup-not-configured (error): the repo has not enabled

@@ -174,12 +174,28 @@ apply_settings() {
 # per-repo workflow file. Languages are auto-detected from the default branch.
 #
 # Idempotent: if state is already "configured", we no-op. If "not-configured",
-# we PATCH to enable. The API rejects updates on repos without code scanning
-# capability (e.g. private repos without GHAS); we surface that as a warning.
+# we PATCH to enable. Repos listed in CODEQL_ADVANCED_EXCEPTIONS are skipped
+# (they are approved to keep an inline codeql.yml; see the escape hatch in
+# ci-standards.md §2). The API rejects updates on repos without code scanning
+# capability (e.g. private repos without GHAS); we log a warning and continue
+# so that --all runs are not blocked by a single unsupported repo.
 # ---------------------------------------------------------------------------
+
+# Repos approved for advanced CodeQL setup (inline codeql.yml).
+# Each entry must have a corresponding standards PR documenting the exception.
+CODEQL_ADVANCED_EXCEPTIONS=()
+
 apply_codeql_default_setup() {
   local repo="$1"
   info "Configuring CodeQL default setup for $ORG/$repo ..."
+
+  # Skip repos approved for advanced (inline workflow) CodeQL setup.
+  for exception in "${CODEQL_ADVANCED_EXCEPTIONS[@]}"; do
+    if [ "$repo" = "$exception" ]; then
+      skip "  $repo is in CODEQL_ADVANCED_EXCEPTIONS — skipping default setup"
+      return 0
+    fi
+  done
 
   local current_state
   current_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
@@ -194,13 +210,17 @@ apply_codeql_default_setup() {
     return 0
   fi
 
-  if gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
+  local api_err
+  if api_err=$(gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
        -F state=configured \
-       -F query_suite=default > /dev/null 2>&1; then
+       -F query_suite=default 2>&1); then
     ok "  CodeQL default setup enabled"
   else
-    err "  Failed to enable CodeQL default setup — repo may lack code scanning capability (private without GHAS, archived, or empty default branch). Manual review required."
-    return 1
+    # Non-fatal: log warning and continue so --all runs are not blocked by
+    # repos that lack code scanning capability (private without GHAS,
+    # archived, or empty default branch).
+    warn "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
+    return 0
   fi
 }
 

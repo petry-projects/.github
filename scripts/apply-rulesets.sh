@@ -89,12 +89,18 @@ detect_required_checks() {
   # by compliance-audit.sh#check_codeql_default_setup. We do NOT fall back
   # to a workflow-derived check name here, because doing so would let drift
   # silently satisfy the rule and bypass remediation.
-  local codeql_state
-  codeql_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
-  if [ "$codeql_state" = "configured" ]; then
-    checks+=("CodeQL")
+  local codeql_state codeql_err
+  if codeql_err=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>&1); then
+    codeql_state="$codeql_err"  # on success, stdout holds the state value
+    if [ "$codeql_state" = "configured" ]; then
+      checks+=("CodeQL")
+    else
+      info "  CodeQL default setup not configured for $repo (state: $codeql_state) — skipping CodeQL required check. Run apply-repo-settings.sh first."
+    fi
   else
-    info "  CodeQL default setup not configured for $repo (state: ${codeql_state:-unknown}) — skipping CodeQL required check. Run apply-repo-settings.sh first."
+    err "  Failed to probe CodeQL default-setup state for $repo. API error: $codeql_err"
+    err "  Check that GH_TOKEN has code-scanning scope and the repo exists."
+    return 1
   fi
 
   # --- Tier 1 centralized workflows ---

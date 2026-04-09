@@ -636,7 +636,7 @@ steps:
   # Project-specific: pip install, pytest, etc.
 ```
 
-**Repos using this pattern:** _(none currently — Python coverage in TalkTerm previously came from its `codeql.yml`, which has been removed in favor of GitHub default setup)_
+**Repos using this pattern:** _(none currently)_
 
 ---
 
@@ -723,7 +723,7 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 > default setup, not a workflow file. GitHub manages the analyzer's
 > permissions internally; no `permissions:` block exists in this repo to
 > audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup).
-
+>
 > **Note on admin operations from Claude Code:** GitHub Actions does **not**
 > expose an `administration` permission scope. The valid set is documented at
 > [docs.github.com](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs).
