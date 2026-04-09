@@ -265,24 +265,32 @@ for a PR to merge.
 
 ### Required gitignore entries
 
-Every repository's `.gitignore` MUST include at minimum:
+Every repository MUST start its `.gitignore` from the org baseline at
+[`/.gitignore`](../.gitignore) in this repo. The baseline is **secrets-only**
+and language-agnostic — it covers the dotenv family, cloud-provider credential
+files, Kubernetes / Helm secrets, SSH/TLS/GPG key material, Terraform/IaC
+state and `*.tfvars`, secret-manager local caches (sops, age, vault, doppler,
+1password, infisical), database dumps and DB client dotfiles, package-registry
+credential dotfiles (`.npmrc`, `.pypirc`, `.cargo/credentials`, etc.), cloud
+CLI session caches, IDE files known to cache credentials (JetBrains
+`workspace.xml`, VS Code `sftp.json`, Cursor `mcp.json`), and modern AI/LLM
+tooling config files.
 
-```gitignore
-# Secrets — never commit
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-secrets/
-credentials.json
-service-account*.json
-```
+> **Per-repo overrides are expected.** The baseline covers secrets only.
+> Each repo MUST append its own language-specific entries (`node_modules/`,
+> `target/`, `__pycache__/`, etc.) and OS cruft. Use the matching template
+> from [github/gitignore](https://github.com/github/gitignore) and append
+> below the baseline section.
+>
+> **Negation rules.** Several baseline patterns include `!` negations that
+> re-allow legitimate files (e.g. `!.env.example`, `!*.crt`). Per-repo
+> additions MUST NOT re-ignore those files. Always negate by **specific
+> file path**, never by directory — a negation inside an ignored directory
+> does not re-include the file.
 
-The compliance audit checks for these entries and flags repositories missing
-them as a `warning`.
+The minimum compliance audit check is that the file contains at least
+`.env`, `*.pem`, `*.key`, and a `secrets`-style entry. Repos that copy the
+org baseline verbatim satisfy this automatically.
 
 ### Writing tests and fixtures
 
