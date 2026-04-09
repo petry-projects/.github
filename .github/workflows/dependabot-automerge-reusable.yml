@@ -30,6 +30,8 @@ on:
         description: "GitHub App private key"
         required: true
 
+permissions: {}
+
 jobs:
   dependabot:
     runs-on: ubuntu-latest
