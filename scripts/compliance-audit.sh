@@ -794,6 +794,11 @@ ensure_audit_label() {
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
+  gh label create "claude" \
+    --repo "$ORG/$repo" \
+    --description "For Claude agent pickup" \
+    --color "8B5CF6" \
+    --force 2>/dev/null || true
 }
 
 # Create all required labels (idempotent — uses --force to update if present)
@@ -847,6 +852,8 @@ This finding is still open.
 **Detail:** $detail
 
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
+    # Ensure claude label is present on pre-existing issues
+    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
     # Record existing issue for umbrella
     jq --null-input \
@@ -885,11 +892,11 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
-  # Individual finding issues get compliance-audit label only — NOT the claude label.
-  # The umbrella issue (created separately) gets the claude label to trigger one coordinated agent run.
+  # Individual finding issues get both compliance-audit and claude labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
+    --label "claude" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -1246,8 +1253,7 @@ main() {
     done
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
-    # Only the umbrella gets the `claude` label — individual issues do not — so one coordinated
-    # agent handles related findings together instead of multiple agents producing duplicate PRs.
+    # Both individual issues and the umbrella get the `claude` label for agent pickup.
     create_umbrella_issue
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
