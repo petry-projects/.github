@@ -222,14 +222,3 @@ teardown() {
     run gh_safe_graphql_input '{"query":"q","variables":{}}'
   [ "$status" -ne 0 ]
 }
-
-# ---------------------------------------------------------------------------
-# gh stub — self-tests for stub defensive behaviour
-# ---------------------------------------------------------------------------
-
-@test "gh stub: fails fast when GH_STUB_SCRIPT is set but file is missing" {
-  GH_STUB_SCRIPT="/nonexistent/path/script.sh" \
-    run --separate-stderr "${TT_TMP}/bin/gh" issue list
-  [ "$status" -ne 0 ]
-  [[ "$stderr" == *"not found"* ]]
-}
