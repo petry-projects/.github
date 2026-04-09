@@ -167,6 +167,44 @@ apply_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
+#
+# Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
+# CodeQL is configured via the code-scanning/default-setup endpoint, not a
+# per-repo workflow file. Languages are auto-detected from the default branch.
+#
+# Idempotent: if state is already "configured", we no-op. If "not-configured",
+# we PATCH to enable. The API rejects updates on repos without code scanning
+# capability (e.g. private repos without GHAS); we surface that as a warning.
+# ---------------------------------------------------------------------------
+apply_codeql_default_setup() {
+  local repo="$1"
+  info "Configuring CodeQL default setup for $ORG/$repo ..."
+
+  local current_state
+  current_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$current_state" = "configured" ]; then
+    ok "  CodeQL default setup already configured"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "true" ]; then
+    skip "DRY_RUN=true — would enable CodeQL default setup (current state: ${current_state:-unknown})"
+    return 0
+  fi
+
+  if gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
+       -F state=configured \
+       -F query_suite=default > /dev/null 2>&1; then
+    ok "  CodeQL default setup enabled"
+  else
+    err "  Failed to enable CodeQL default setup — repo may lack code scanning capability (private without GHAS, archived, or empty default branch). Manual review required."
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -194,6 +232,7 @@ if [ "$1" = "--all" ]; then
     apply_settings "$repo" || failed=$((failed + 1))
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
+    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -206,4 +245,5 @@ else
   apply_settings "$1"
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
+  apply_codeql_default_setup "$1"
 fi

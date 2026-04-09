@@ -33,7 +33,12 @@ FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 
-REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+# Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
+# configured via GitHub-managed default setup (Settings → Code security →
+# Code scanning), not a per-repo workflow file. The check_codeql_default_setup
+# function below verifies the API state and treats stray codeql.yml files
+# as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
 
 # name:hex-color:description (color without leading #)
 REQUIRED_LABEL_SPECS=(
@@ -403,6 +408,54 @@ check_sonarcloud() {
         "SonarCloud workflow exists but \`sonar-project.properties\` is missing" \
         "standards/ci-standards.md#3-sonarcloud-analysis-sonarcloudyml"
     fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: CodeQL default setup is configured (and no stray codeql.yml exists)
+#
+# After petry-projects/.github#<this-pr>, CodeQL is configured via GitHub's
+# managed default setup, not a per-repo workflow file. Two distinct findings:
+#
+#   1. codeql-default-setup-not-configured (error): the repo has not enabled
+#      default setup. Remediate by running:
+#        gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup \
+#          -F state=configured -F query_suite=default
+#      (or by running scripts/apply-repo-settings.sh against the repo).
+#
+#   2. stray-codeql-workflow (error): the repo still ships a codeql.yml
+#      workflow file. Default setup and an inline workflow are mutually
+#      exclusive at the GitHub level — leaving the file behind double-bills
+#      CI minutes and creates two competing analyses. Remediation: delete
+#      .github/workflows/codeql.yml.
+# ---------------------------------------------------------------------------
+check_codeql_default_setup() {
+  local repo="$1"
+
+  # Query the default-setup state. The endpoint returns 200 with a JSON body
+  # describing the state, OR a 4xx if the repo has no code scanning capability
+  # (e.g. private without GHAS, archived). Treat any non-"configured" state
+  # as a finding so the audit surfaces what needs remediation.
+  local state
+  state=$(gh_api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$state" != "configured" ]; then
+    local detail
+    if [ -z "$state" ]; then
+      detail="CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    else
+      detail="CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    fi
+    add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+      "$detail" \
+      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+  fi
+
+  # Stray workflow check: any codeql.yml under .github/workflows is drift.
+  if gh_api "repos/$ORG/$repo/contents/.github/workflows/codeql.yml" --jq '.name' > /dev/null 2>&1; then
+    add_finding "$repo" "ci-workflows" "stray-codeql-workflow" "error" \
+      "Repo still ships \`.github/workflows/codeql.yml\`. The org standard now uses GitHub-managed CodeQL default setup; per-repo workflow files are drift and run a duplicate analysis alongside default setup. Delete the file. If a documented exception applies (custom query pack, build mode, path filters), open a standards PR against \`standards/ci-standards.md\` to record the exception before re-adding the workflow." \
+      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
   fi
 }
 
@@ -1150,6 +1203,7 @@ main() {
     check_rulesets "$repo"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
+    check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
     check_centralized_workflow_stubs "$repo"
