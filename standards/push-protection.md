@@ -110,13 +110,14 @@ gh api -X PATCH "repos/petry-projects/<repo>" \
   }'
 ```
 
-The target state is for `scripts/apply-repo-settings.sh` to enforce these
-values alongside the existing merge and label settings on every run. The
-script currently only applies the merge/label block, so until the
-`apply_settings()` function is extended with a `security_and_analysis`
-payload, these settings MUST be applied manually (via the `gh api` command
-above) or by a follow-up PR against the script. See
-[Application](#application-to-a-repository) below.
+`scripts/apply-repo-settings.sh` MUST enforce these values alongside the
+existing merge and label settings — it sources
+[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh) and
+calls `pp_apply_security_and_analysis` after the standard settings and
+labels have been applied. The required `security_and_analysis` keys live
+in the `PP_REQUIRED_SA_SETTINGS` array in that library — adding a new
+required flag there automatically extends both the apply script and the
+weekly audit. See [Application](#application-to-a-repository) below.
 
 ### Custom secret scanning patterns
 
@@ -397,11 +398,13 @@ When onboarding a repository to this standard:
 
 ## Compliance Audit Checks
 
-The target state for the weekly compliance audit
-([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)) is to verify
-the following for every repository. Until `scripts/compliance-audit.sh` is
-extended with these checks, treat them as required controls validated by a
-combination of automation and manual review:
+The weekly compliance audit
+([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)) verifies the
+following for every repository. The check logic lives in
+[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh) and is
+sourced by both the audit and the apply script so a single edit to
+`PP_REQUIRED_SA_SETTINGS` (or the gitignore baseline list) propagates to
+both at once:
 
 | Check | Severity | Detail |
 |-------|----------|--------|
