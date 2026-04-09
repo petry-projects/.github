@@ -48,11 +48,20 @@ ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
+<<<<<<< HEAD
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
 ISSUES_EXISTING=0
 ISSUES_REMOVED=0
 ISSUES_RETRIGGERED=0
+=======
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+# Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
+# configured via GitHub-managed default setup (Settings → Code security →
+# Code scanning), not a per-repo workflow file. The check_codeql_default_setup
+# function below verifies the API state and treats stray codeql.yml files
+# as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -743,6 +752,9 @@ check_sonarcloud() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # Check: CodeQL default setup is configured (and no stray codeql.yml exists)
 #
 # After petry-projects/.github#103, CodeQL is configured via GitHub's
@@ -763,6 +775,7 @@ check_sonarcloud() {
 check_codeql_default_setup() {
   local repo="$1"
 
+<<<<<<< HEAD
   # Query the default-setup state.
   # IMPORTANT: Do NOT use the gh_api() retry wrapper here. When gh api gets a
   # 403 it outputs the error JSON body to stdout before exiting non-zero. The
@@ -800,6 +813,25 @@ check_codeql_default_setup() {
         "CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
         "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
     fi
+=======
+  # Query the default-setup state. The endpoint returns 200 with a JSON body
+  # describing the state, OR a 4xx if the repo has no code scanning capability
+  # (e.g. private without GHAS, archived). Treat any non-"configured" state
+  # as a finding so the audit surfaces what needs remediation.
+  local state
+  state=$(gh_api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$state" != "configured" ]; then
+    local detail
+    if [ -z "$state" ]; then
+      detail="CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    else
+      detail="CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    fi
+    add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+      "$detail" \
+      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
   fi
 
   # Stray workflow check: any codeql.yml under .github/workflows is drift.
@@ -811,8 +843,11 @@ check_codeql_default_setup() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # Check: Workflow permissions follow least-privilege
 # ---------------------------------------------------------------------------
 check_workflow_permissions() {
@@ -2353,6 +2388,9 @@ main() {
     check_codeowners "$repo"
     check_sonarcloud "$repo"
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
 <<<<<<< HEAD

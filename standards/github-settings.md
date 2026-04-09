@@ -265,6 +265,7 @@ categories are universal.
 |-------|----------|---------------|-------|
 | **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
 | **Claude Code** | All repos | `claude` | AI code review on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
@@ -281,6 +282,9 @@ categories are universal.
 > ```
 =======
 | **CodeQL** | All repos | `Analyze` or `Analyze (<language>)` | SAST — all ecosystems present in the repo must be configured |
+=======
+| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 | **Claude Code** | All repos | `claude` | AI code review on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |

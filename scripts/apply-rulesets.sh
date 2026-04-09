@@ -9,12 +9,15 @@
 <<<<<<< HEAD
 #   pr-quality    — pull request review requirements and merge policy
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
+<<<<<<< HEAD
 =======
 =======
 #   pr-quality    — pull request review requirements and merge policy
 >>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -87,6 +90,9 @@ detect_required_checks() {
   fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
   # --- CodeQL (GitHub-managed default setup) ---
   # CodeQL is no longer driven by a per-repo workflow file. We probe the
   # default-setup API: if the state is "configured", GitHub publishes results

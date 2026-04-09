@@ -273,6 +273,9 @@ apply_settings() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
 #
 # Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
@@ -331,6 +334,7 @@ apply_codeql_default_setup() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # apply_check_suite_prefs — disable auto-trigger check suites for Claude and
 # CodeRabbit. Without this, GitHub auto-creates "queued" suites on every push
 # that are never completed, permanently blocking auto-merge.
@@ -384,6 +388,8 @@ apply_check_suite_prefs() {
 # ---------------------------------------------------------------------------
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -421,6 +427,7 @@ if [ "$1" = "--all" ]; then
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
 <<<<<<< HEAD
+<<<<<<< HEAD
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
 =======
@@ -432,6 +439,9 @@ if [ "$1" = "--all" ]; then
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -452,6 +462,7 @@ else
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
 <<<<<<< HEAD
+<<<<<<< HEAD
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
 =======
@@ -463,4 +474,7 @@ else
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+  apply_codeql_default_setup "$1"
+>>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 fi
