@@ -417,8 +417,21 @@ split into two parts:
    Defines the schedule, the `workflow_dispatch` inputs, and calls the
    reusable workflow with a single required parameter: `project_context`.
 
-When we tune the prompt, the model, or the gotchas, we change one file in
-this repo and every adopter picks up the change on their next scheduled run.
+3. **Reputable Source List** (curated, org-wide):
+   [`standards/feature-ideation-sources.md`](feature-ideation-sources.md).
+   The reusable workflow checks this repo out into `.petry-standards/` on
+   the runner before invoking Claude, and the Phase 2 prompt instructs Mary
+   to read the source list as her **starting set** for market research —
+   vendor blogs, RSS feeds, podcasts, and YouTube channels organised by
+   category (AI labs, dev tooling, security, industry analysis, etc.).
+   Mary may follow threads to other reputable sources, and is asked to
+   suggest additions in the run's step summary when a high-value source
+   keeps recurring. Add or remove entries via PR — changes propagate to
+   every BMAD adopter on its next scheduled run.
+
+When we tune the prompt, the model, the gotchas, or the source list, we
+change one file in this repo and every adopter picks up the change on
+their next scheduled run.
 
 #### Adopting in a new repo
 
