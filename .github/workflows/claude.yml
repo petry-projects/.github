@@ -18,7 +18,7 @@ permissions: {}
 
 jobs:
   claude-code:
-    uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@main
+    uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@208ec2d69b75227d375edf8745d84fbac05a76b2 # v1
     secrets: inherit
     permissions:
       contents: write
