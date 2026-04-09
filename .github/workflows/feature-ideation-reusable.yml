@@ -215,6 +215,19 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Checkout the central petry-projects/.github repo so Mary can read
+      # the curated Reputable Source List during Phase 2 (Market Research).
+      # The repo is public, so the default GITHUB_TOKEN is sufficient.
+      # Updating standards/feature-ideation-sources.md in the central repo
+      # propagates to every BMAD adopter on its next scheduled run.
+      - name: Checkout central standards (reputable source list)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: petry-projects/.github
+          ref: v1
+          path: .petry-standards
+          fetch-depth: 1
+
       - name: Download signals artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -332,8 +345,39 @@ jobs:
             **Adopt the "Market Research" mindset.** Your sole job in this phase is to gather
             hard evidence — not to generate ideas yet. Be a detective, not a brainstormer.
 
-            Using the **Project Context** above as your starting point, research the
-            competitive landscape and emerging trends. Cover at minimum:
+            ### Start from the curated Reputable Source List
+
+            Before running open-ended web searches, **read the org-curated source list**
+            checked out alongside the repo:
+
+            ```
+            Read: .petry-standards/standards/feature-ideation-sources.md
+            ```
+
+            That file lists vendor blogs, RSS feeds, podcasts, and YouTube channels the
+            org trusts as primary signal sources, organised by category (AI/ML labs,
+            developer tooling, security, industry analysis, newsletters, podcasts,
+            YouTube, conferences). Treat it as your **starting set**:
+
+            - Pick the categories most relevant to the **Project Context** above. A
+              CLI dev tool warrants different sources than a security scanner or a
+              data pipeline.
+            - For each relevant source, do a targeted `WebFetch` or `WebSearch`
+              scoped to that domain (e.g. `site:github.blog/changelog "discussions"`)
+              to find what's new since the last scan. Prefer fetching the listed
+              RSS/Atom feed URL when one is given — it gives you structured "what
+              changed" data without scraping.
+            - The list is a **floor, not a ceiling.** If a thread takes you to a
+              source not in the list and that source is reputable, follow it. After
+              the run, if a high-value source kept coming up but wasn't listed,
+              **mention it in the step summary** under a "Suggested additions to
+              source list" heading so a human can PR it in.
+            - If the list itself is missing or empty, log a warning to the step
+              summary and proceed with open web search — do not fail the run.
+
+            Using the **Project Context** above as your starting point and the
+            source list as your seed, research the competitive landscape and
+            emerging trends. Cover at minimum:
 
             ### Competitive Landscape
             - What are competitors in this space shipping recently?
@@ -655,6 +699,13 @@ jobs:
 
             ### Market & Trend Summary
             <2-3 bullet points on the most notable trends this week>
+
+            ### Suggested Additions to Reputable Source List
+            <Optional. Only include this section if a high-value source kept coming
+            up during research but is NOT listed in
+            .petry-standards/standards/feature-ideation-sources.md. Format each as:
+            `- <Source name> — <URL> — <one-line justification>`. Omit the section
+            entirely if you have nothing to suggest.>
 
             ---
             *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
