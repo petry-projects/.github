@@ -75,11 +75,16 @@ pp_apply_security_and_analysis() {
   current=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$current" = "{}" ] || [ -z "$current" ]; then
+<<<<<<< HEAD
     # Cannot read the current security_and_analysis state — the token may lack
     # admin or security_events scope, or the settings have not yet been
     # configured.  Apply all required settings unconditionally: every required
     # value is "enabled", so this is idempotent and safe.
     info "  security_and_analysis is currently unreadable — applying all required settings"
+=======
+    err "Could not fetch security_and_analysis for $ORG/$repo — check token has admin scope"
+    return 1
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
   fi
 
   local needs_patch=false
@@ -117,7 +122,11 @@ pp_apply_security_and_analysis() {
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
     ok "$ORG/$repo security_and_analysis updated successfully"
   else
+<<<<<<< HEAD
     err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
+=======
+    err "Failed to PATCH security_and_analysis for $ORG/$repo — check admin scope and that the org plan supports these features"
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
     return 1
   fi
 }
@@ -134,6 +143,7 @@ pp_check_security_and_analysis() {
   sa=$(gh_api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$sa" = "{}" ] || [ -z "$sa" ]; then
+<<<<<<< HEAD
     # security_and_analysis is not readable via the current token (requires
     # admin permissions on the repository).  Use the secret-scanning alerts
     # endpoint as a proxy: an admin with the security_events scope (but not
@@ -164,6 +174,11 @@ pp_check_security_and_analysis() {
         "Could not fetch security_and_analysis and the secret-scanning alerts proxy check also returned a non-array response — token may lack admin or \`security_events\` OAuth scope, or secret scanning may be disabled. Run \`scripts/apply-repo-settings.sh $repo\` with an admin token to enable all required settings, then add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\` to allow the audit to verify them." \
         "$PP_STANDARD_REF#required-repo-level-settings"
     fi
+=======
+    add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
+      "Could not fetch security_and_analysis — token may lack admin scope, or the repo's plan does not expose these settings" \
+      "$PP_STANDARD_REF#required-repo-level-settings"
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
     return
   fi
 
@@ -230,10 +245,14 @@ pp_check_secret_scan_ci_job() {
     return
   fi
 
+<<<<<<< HEAD
   # Accept either the gitleaks action or the gitleaks CLI (inline or block run:).
   # The action requires a paid org license (gitleaks.io); the CLI installed via
   # binary download is a license-free alternative.
   if ! echo "$ci_content" | grep -qE '(^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@|gitleaks[[:space:]]+detect([[:space:]]|$))'; then
+=======
+  if ! echo "$ci_content" | grep -qiE 'gitleaks'; then
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
     add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
       "\`ci.yml\` does not contain a job using \`gitleaks\` — add the secret-scan job from the standard" \
       "$PP_STANDARD_REF#required-ci-job"

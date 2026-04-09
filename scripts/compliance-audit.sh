@@ -170,6 +170,9 @@ gh_api() {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 # Source the shared push-protection library — provides pp_run_all_checks()
 # and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
 # add_finding() are defined, since the lib's check functions call them.
@@ -177,6 +180,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
+<<<<<<< HEAD
 # Shared dev-lead retrigger helpers — dl_dev_lead_active() and
 # dl_cycle_trigger_label(). Used to re-engage dev-lead on persistent findings.
 # shellcheck source=lib/dev-lead-retrigger.sh
@@ -184,6 +188,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -2369,6 +2375,7 @@ main() {
 >>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
     check_claude_md "$repo"
     check_agents_md "$repo"
+<<<<<<< HEAD
     check_copilot_setup_steps "$repo"
     check_copilot_instructions "$repo"
     check_check_suite_prefs "$repo"
@@ -2380,6 +2387,9 @@ main() {
     check_claude_md "$repo"
     check_agents_md "$repo"
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
+=======
+    pp_run_all_checks "$repo"
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 
     log_end
   done

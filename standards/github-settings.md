@@ -50,12 +50,15 @@ the enforcement primitives behind the [Push Protection Standard](push-protection
 
 > See the full requirements, custom patterns, CI job, incident response flow,
 > and compliance audit checks in [`push-protection.md`](push-protection.md).
+<<<<<<< HEAD
 =======
 | **Has Discussions** | `true` | Enabled for community engagement |
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
 =======
 | **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
 >>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 
 ### Merge Settings
 

@@ -106,9 +106,18 @@ jobs:
 
       - name: Run ShellCheck
         run: |
+<<<<<<< HEAD
           if compgen -G "scripts/*.sh" > /dev/null; then
             shellcheck --severity=warning scripts/*.sh
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+          # Recurse so subdirectories like scripts/lib/ (sourceable libraries)
+          # are linted too. -x follows `# shellcheck source=...` directives.
+          shopt -s globstar nullglob
+          shell_files=(scripts/**/*.sh)
+          if [ ${#shell_files[@]} -gt 0 ]; then
+            shellcheck --severity=warning -x "${shell_files[@]}"
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
           else
             echo "No shell scripts found — skipping"
           fi

@@ -389,4 +389,7 @@ private.yml
 # ============================================================================
 # End of petry-projects secrets baseline
 # ============================================================================
+<<<<<<< HEAD
 .dev-lead/
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))

@@ -57,6 +57,7 @@ warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
+<<<<<<< HEAD
 # App IDs whose auto_trigger_checks must be disabled — these apps create
 # orphaned "queued" suites on every push that are never completed, permanently
 # blocking GitHub auto-merge.
@@ -64,17 +65,22 @@ skip()  { echo "[SKIP]  $*"; }
 # 347564  = CodeRabbit
 CHECK_SUITE_APP_IDS=(1236702 347564)
 
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 # Source the shared push-protection library — provides
 # pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
+<<<<<<< HEAD
 =======
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 usage() {
   echo "Usage: $0 <repo-name>"
   echo "       $0 --all"
@@ -414,6 +420,7 @@ if [ "$1" = "--all" ]; then
     apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
+<<<<<<< HEAD
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
 =======
@@ -423,6 +430,8 @@ if [ "$1" = "--all" ]; then
 =======
     apply_labels "$repo"
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -442,6 +451,7 @@ else
   apply_settings "$1" "$repo_json"
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
+<<<<<<< HEAD
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
 =======
@@ -451,4 +461,6 @@ else
 =======
   apply_labels "$1"
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
+=======
+>>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 fi
