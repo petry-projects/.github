@@ -253,7 +253,7 @@ check_dependabot_config() {
       # Check if this ecosystem has limit: 0
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
-      block=$(echo "$decoded" | awk "/package-ecosystem:.*$eco/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/$eco/) exit}" | head -15)
+      block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
