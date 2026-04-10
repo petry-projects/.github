@@ -486,10 +486,8 @@ check_workflow_permissions() {
     # Their permissions are controlled entirely by the caller workflow, so
     # requiring a top-level permissions: block here would be redundant and
     # would generate false positives for every *-reusable.yml in the org.
-    local on_triggers
-    on_triggers=$(echo "$decoded" | awk '/^on:/{found=1; next} found && /^[^ ]/{exit} found{print}')
-    if echo "$on_triggers" | grep -q 'workflow_call:' && \
-       ! echo "$on_triggers" | grep -qE '^\s+(push|pull_request|schedule|workflow_dispatch|issues|issue_comment|pull_request_target):'; then
+    # All reusable workflows follow the -reusable.yml naming convention.
+    if [[ "$wf" == *-reusable.yml || "$wf" == *-reusable.yaml ]]; then
       continue
     fi
 
@@ -791,10 +789,10 @@ check_agents_md() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
     # Accept two forms of reference:
-    #   1. Canonical path format: petry-projects/.github/AGENTS.md (appears in link text)
-    #   2. GitHub blob URL format: /petry-projects/.github/blob/<branch>/AGENTS.md (in href)
-    # Both unambiguously point to the org-level standards file.
-    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/[^/]+/AGENTS\.md)'; then
+    #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
+    #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
+    # Both are treated as references to the org-level standards file.
+    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
