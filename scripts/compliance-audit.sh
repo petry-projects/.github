@@ -238,20 +238,22 @@ check_dependabot_config() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
   # Check github-actions ecosystem entry exists
-  if ! echo "$decoded" | grep -q 'package-ecosystem:.*"github-actions"'; then
+  # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
+  if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
     add_finding "$repo" "dependabot" "missing-github-actions-ecosystem" "error" \
       "Dependabot config missing \`github-actions\` ecosystem entry" \
       "standards/dependabot-policy.md#github-actions-all-repos"
   fi
 
   # Check that app ecosystem entries use open-pull-requests-limit: 0
-  # Extract ecosystem blocks and check limits
+  # Extract ecosystem blocks and check limits.
+  # Accept both double-quoted and single-quoted YAML string values.
   for eco in npm pip gomod cargo terraform; do
-    if echo "$decoded" | grep -q "package-ecosystem:.*\"$eco\""; then
+    if echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"$eco\"|'$eco')"; then
       # Check if this ecosystem has limit: 0
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
-      block=$(echo "$decoded" | awk "/package-ecosystem:.*\"$eco\"/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/\"$eco\"/) exit}" | head -15)
+      block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
@@ -262,13 +264,14 @@ check_dependabot_config() {
     fi
   done
 
-  # Check for required labels in dependabot config
-  if ! echo "$decoded" | grep -q '"security"'; then
+  # Check for required labels in dependabot config.
+  # Accept both double-quoted and single-quoted YAML string values.
+  if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
     add_finding "$repo" "dependabot" "missing-security-label" "warning" \
       "Dependabot config missing \`security\` label on updates" \
       "standards/dependabot-policy.md#policy"
   fi
-  if ! echo "$decoded" | grep -q '"dependencies"'; then
+  if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
     add_finding "$repo" "dependabot" "missing-dependencies-label" "warning" \
       "Dependabot config missing \`dependencies\` label on updates" \
       "standards/dependabot-policy.md#policy"
@@ -478,6 +481,15 @@ check_workflow_permissions() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
+
+    # Skip reusable workflows (workflow_call-only triggers).
+    # Their permissions are controlled entirely by the caller workflow, so
+    # requiring a top-level permissions: block here would be redundant and
+    # would generate false positives for every *-reusable.yml in the org.
+    # All reusable workflows follow the -reusable.yml naming convention.
+    if [[ "$wf" == *-reusable.yml || "$wf" == *-reusable.yaml ]]; then
+      continue
+    fi
 
     # Check if the workflow has a top-level permissions key
     # Single-job workflows may define permissions at job level instead
@@ -776,7 +788,11 @@ check_agents_md() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
-    if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
+    # Accept two forms of reference:
+    #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
+    #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
+    # Both are treated as references to the org-level standards file.
+    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
