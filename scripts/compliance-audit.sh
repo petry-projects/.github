@@ -401,17 +401,23 @@ check_dependabot_config() {
 
   # Check github-actions ecosystem entry exists
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
   if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
 =======
   if ! echo "$decoded" | grep -q 'package-ecosystem:.*"github-actions"'; then
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
+  if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-github-actions-ecosystem" "error" \
       "Dependabot config missing \`github-actions\` ecosystem entry" \
       "standards/dependabot-policy.md#github-actions-all-repos"
   fi
 
   # Check that app ecosystem entries use open-pull-requests-limit: 0
+<<<<<<< HEAD
 <<<<<<< HEAD
   # Extract ecosystem blocks and check limits.
   # Accept both double-quoted and single-quoted YAML string values.
@@ -423,13 +429,21 @@ check_dependabot_config() {
       block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
 =======
   # Extract ecosystem blocks and check limits
+=======
+  # Extract ecosystem blocks and check limits.
+  # Accept both double-quoted and single-quoted YAML string values.
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
   for eco in npm pip gomod cargo terraform; do
-    if echo "$decoded" | grep -q "package-ecosystem:.*\"$eco\""; then
+    if echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"$eco\"|'$eco')"; then
       # Check if this ecosystem has limit: 0
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
+<<<<<<< HEAD
       block=$(echo "$decoded" | awk "/package-ecosystem:.*\"$eco\"/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/\"$eco\"/) exit}" | head -15)
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+      block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
@@ -441,6 +455,7 @@ check_dependabot_config() {
   done
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Check for required labels in dependabot config.
   # Accept both double-quoted and single-quoted YAML string values.
   if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
@@ -448,15 +463,24 @@ check_dependabot_config() {
   # Check for required labels in dependabot config
   if ! echo "$decoded" | grep -q '"security"'; then
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  # Check for required labels in dependabot config.
+  # Accept both double-quoted and single-quoted YAML string values.
+  if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-security-label" "warning" \
       "Dependabot config missing \`security\` label on updates" \
       "standards/dependabot-policy.md#policy"
   fi
 <<<<<<< HEAD
+<<<<<<< HEAD
   if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
 =======
   if ! echo "$decoded" | grep -q '"dependencies"'; then
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-dependencies-label" "warning" \
       "Dependabot config missing \`dependencies\` label on updates" \
       "standards/dependabot-policy.md#policy"
@@ -868,6 +892,9 @@ check_workflow_permissions() {
     [ -z "$decoded" ] && continue
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Skip reusable workflows (workflow_call-only triggers).
     # Their permissions are controlled entirely by the caller workflow, so
     # requiring a top-level permissions: block here would be redundant and
@@ -877,8 +904,11 @@ check_workflow_permissions() {
       continue
     fi
 
+<<<<<<< HEAD
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Check if the workflow has a top-level permissions key
     # Single-job workflows may define permissions at job level instead
     if ! echo "$decoded" | grep -qE '^permissions:'; then
@@ -1362,14 +1392,20 @@ check_agents_md() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Accept two forms of reference:
     #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
     #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
     # Both are treated as references to the org-level standards file.
     if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
+<<<<<<< HEAD
 =======
     if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
+=======
+>>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
