@@ -304,10 +304,11 @@ jobs:
             - Who is winning, who is losing, and why?
             - What user segments are underserved?
 
-            ### Emerging Capabilities
-            - New platform / SDK / model / framework features that unlock new approaches
-            - Industry trend reports, analyst commentary, conference announcements
-            - Technology shifts that change what is feasible or affordable
+             ### Emerging Capabilities
+             - New platform / SDK / model / framework features that unlock new approaches
+             - GitHub platform updates from https://github.blog/changelog/
+             - Industry trend reports, analyst commentary, conference announcements
+             - Technology shifts that change what is feasible or affordable
 
             ### User Need Signals
             - Patterns in `.open_issues` and `.feature_requests`
