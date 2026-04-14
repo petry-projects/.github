@@ -300,7 +300,7 @@ check_repo_settings() {
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
+    actual=$(echo "$settings" | jq -r "if .$key == null then \"null\" else (.$key | tostring) end")
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
