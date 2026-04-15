@@ -36,6 +36,12 @@ ok()    { echo "[OK]    $*"; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
+# Source the shared push-protection library — provides
+# pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/push-protection.sh
+. "$SCRIPT_DIR/lib/push-protection.sh"
+
 usage() {
   echo "Usage: $0 <repo-name>"
   echo "       $0 --all"
@@ -162,80 +168,62 @@ apply_settings() {
   ok "$ORG/$repo settings updated successfully"
 }
 
-apply_security_analysis() {
+# ---------------------------------------------------------------------------
+# apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
+#
+# Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
+# CodeQL is configured via the code-scanning/default-setup endpoint, not a
+# per-repo workflow file. Languages are auto-detected from the default branch.
+#
+# Idempotent: if state is already "configured", we no-op. If "not-configured",
+# we PATCH to enable. Repos listed in CODEQL_ADVANCED_EXCEPTIONS are skipped
+# (they are approved to keep an inline codeql.yml; see the escape hatch in
+# ci-standards.md §2). The API rejects updates on repos without code scanning
+# capability (e.g. private repos without GHAS); we log a warning and continue
+# so that --all runs are not blocked by a single unsupported repo.
+# ---------------------------------------------------------------------------
+
+# Repos approved for advanced CodeQL setup (inline codeql.yml).
+# Each entry must have a corresponding standards PR documenting the exception.
+CODEQL_ADVANCED_EXCEPTIONS=()
+
+apply_codeql_default_setup() {
   local repo="$1"
-  local repo_json="$2"
-  info "Applying security & analysis settings to $ORG/$repo ..."
+  info "Configuring CodeQL default setup for $ORG/$repo ..."
 
-  # Extract current security_and_analysis from the pre-fetched repo JSON
-  local sa
-  sa=$(echo "$repo_json" | jq '{
-    secret_scanning: .security_and_analysis.secret_scanning.status,
-    secret_scanning_push_protection: .security_and_analysis.secret_scanning_push_protection.status,
-    secret_scanning_ai_detection: .security_and_analysis.secret_scanning_ai_detection.status,
-    secret_scanning_non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status,
-    dependabot_security_updates: .security_and_analysis.dependabot_security_updates.status
-  }' 2>/dev/null || echo "{}")
-
-  if [ "$sa" = "{}" ]; then
-    err "Could not fetch security_and_analysis for $ORG/$repo — check token permissions"
-    return 1
-  fi
-
-  # Expected: all features enabled
-  # standards/push-protection.md#required-repo-level-settings
-  declare -A SA_EXPECTED=(
-    [secret_scanning]="enabled"
-    [secret_scanning_push_protection]="enabled"
-    [secret_scanning_ai_detection]="enabled"
-    [secret_scanning_non_provider_patterns]="enabled"
-    [dependabot_security_updates]="enabled"
-  )
-
-  local needs_patch=false
-
-  for key in "${!SA_EXPECTED[@]}"; do
-    local actual
-    actual=$(echo "$sa" | jq -r ".$key // \"null\"")
-    local expected="${SA_EXPECTED[$key]}"
-
-    if [ "$actual" != "$expected" ]; then
-      info "  $key: $actual → $expected"
-      needs_patch=true
-    else
-      ok "  $key: already $actual"
+  # Skip repos approved for advanced (inline workflow) CodeQL setup.
+  for exception in "${CODEQL_ADVANCED_EXCEPTIONS[@]}"; do
+    if [ "$repo" = "$exception" ]; then
+      skip "  $repo is in CODEQL_ADVANCED_EXCEPTIONS — skipping default setup"
+      return 0
     fi
   done
 
-  if [ "$needs_patch" = false ]; then
-    ok "$ORG/$repo security_and_analysis already fully compliant"
+  local current_state
+  current_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$current_state" = "configured" ]; then
+    ok "  CodeQL default setup already configured"
     return 0
   fi
 
   if [ "$DRY_RUN" = "true" ]; then
-    skip "DRY_RUN=true — skipping security_and_analysis PATCH for $ORG/$repo"
+    skip "DRY_RUN=true — would enable CodeQL default setup (current state: ${current_state:-unknown})"
     return 0
   fi
 
-  # Build the full request body and send it as JSON via --input.
-  # -F cannot send nested objects; --input passes the body directly.
-  local payload
-  payload=$(jq -n '{
-    security_and_analysis: {
-      secret_scanning: {status: "enabled"},
-      secret_scanning_push_protection: {status: "enabled"},
-      secret_scanning_ai_detection: {status: "enabled"},
-      secret_scanning_non_provider_patterns: {status: "enabled"},
-      dependabot_security_updates: {status: "enabled"}
-    }
-  }')
-
-  if ! gh api -X PATCH "repos/$ORG/$repo" \
-    --input - <<<"$payload" > /dev/null 2>&1; then
-    err "Failed to update security_and_analysis for $ORG/$repo (token may lack admin scope)"
-    return 1
+  local api_err
+  if api_err=$(gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
+       -F state=configured \
+       -F query_suite=default 2>&1); then
+    ok "  CodeQL default setup enabled"
+  else
+    # Non-fatal: log warning and continue so --all runs are not blocked by
+    # repos that lack code scanning capability (private without GHAS,
+    # archived, or empty default branch).
+    warn "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
+    return 0
   fi
-  ok "$ORG/$repo security_and_analysis updated successfully"
 }
 
 # ---------------------------------------------------------------------------
@@ -272,8 +260,9 @@ if [ "$1" = "--all" ]; then
     fi
 
     apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
-    apply_security_analysis "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
+    pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
+    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -290,6 +279,7 @@ else
   fi
 
   apply_settings "$1" "$repo_json"
-  apply_security_analysis "$1" "$repo_json"
   apply_labels "$1"
+  pp_apply_security_and_analysis "$1"
+  apply_codeql_default_setup "$1"
 fi

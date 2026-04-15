@@ -6,7 +6,7 @@
 #
 # Rulesets managed:
 #   pr-quality    — pull request review requirements and merge policy
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
+#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -78,29 +78,58 @@ detect_required_checks() {
     fi
   fi
 
-  # --- CodeQL ---
-  if echo "$workflows" | grep -qx "codeql.yml"; then
-    local cq_wf_name
-    cq_wf_name=$(workflow_name "codeql.yml")
-    if [ -n "$cq_wf_name" ]; then
-      # CodeQL uses "Analyze" or "Analyze (<language>)" as job names;
-      # add the generic "Analyze" and language-specific variants below
-      checks+=("$cq_wf_name / Analyze")
+  # --- CodeQL (GitHub-managed default setup) ---
+  # CodeQL is no longer driven by a per-repo workflow file. We probe the
+  # default-setup API: if the state is "configured", GitHub publishes results
+  # under the required-status-check context name `CodeQL` (single context,
+  # regardless of how many languages are detected). See
+  # standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
+  #
+  # Note: a stray .github/workflows/codeql.yml is drift and will be flagged
+  # by compliance-audit.sh#check_codeql_default_setup. We do NOT fall back
+  # to a workflow-derived check name here, because doing so would let drift
+  # silently satisfy the rule and bypass remediation.
+  local codeql_state codeql_err
+  if codeql_err=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>&1); then
+    codeql_state="$codeql_err"  # on success, stdout holds the state value
+    if [ "$codeql_state" = "configured" ]; then
+      checks+=("CodeQL")
     else
-      checks+=("Analyze")
+      info "  CodeQL default setup not configured for $repo (state: $codeql_state) — skipping CodeQL required check. Run apply-repo-settings.sh first."
     fi
+  else
+    err "  Failed to probe CodeQL default-setup state for $repo. API error: $codeql_err"
+    err "  Check that GH_TOKEN has code-scanning scope and the repo exists."
+    return 1
   fi
 
-  # --- Claude Code ---
-  if echo "$workflows" | grep -qx "claude.yml"; then
-    local cl_wf_name
-    cl_wf_name=$(workflow_name "claude.yml")
-    if [ -n "$cl_wf_name" ]; then
-      checks+=("$cl_wf_name / claude")
-    else
-      checks+=("claude")
-    fi
+  # --- Tier 1 centralized workflows ---
+  # Caller-job-ids are fixed by the canonical stubs in
+  # standards/workflows/, so the resulting reusable check names
+  # (<caller-job-id> / <reusable-job-id-or-name>) are known constants.
+  # See standards/ci-standards.md#centralization-tiers
+  #
+  # NOTE: claude-code / claude is intentionally NOT added as a required
+  # check. claude-code-action's GitHub App refuses to mint a token for
+  # any PR that touches workflow files, which would deadlock every
+  # workflow-modifying PR. The check is still useful for review feedback
+  # on normal PRs, but it must not be a merge gate.
+  if echo "$workflows" | grep -qx "agent-shield.yml"; then
+    checks+=("agent-shield / AgentShield")
   fi
+  if echo "$workflows" | grep -qx "dependency-audit.yml"; then
+    # Only the detect job runs unconditionally; per-ecosystem audit jobs
+    # (npm audit, govulncheck, cargo audit, pip-audit, pnpm audit) are
+    # gated on lockfile presence and report SKIPPED when absent. A
+    # required-but-skipped check fails the gate, so we cannot require
+    # the per-ecosystem jobs.
+    checks+=("dependency-audit / Detect ecosystems")
+  fi
+  # dependabot-automerge / dependabot-rebase are intentionally NOT
+  # required: dependabot-automerge runs only on dependabot[bot] PRs and
+  # dependabot-rebase runs only on push to main, neither of which are
+  # regular contributor PRs.
+  # feature-ideation runs on a schedule, never on PRs, so also not required.
 
   # --- CI Pipeline ---
   if echo "$workflows" | grep -qx "ci.yml"; then

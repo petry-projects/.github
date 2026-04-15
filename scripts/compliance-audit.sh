@@ -34,7 +34,12 @@ FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 
-REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+# Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
+# configured via GitHub-managed default setup (Settings → Code security →
+# Code scanning), not a per-repo workflow file. The check_codeql_default_setup
+# function below verifies the API state and treats stray codeql.yml files
+# as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
 
 # name:hex-color:description (color without leading #)
 REQUIRED_LABEL_SPECS=(
@@ -98,6 +103,13 @@ gh_api() {
   done
   return 1
 }
+
+# Source the shared push-protection library — provides pp_run_all_checks()
+# and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
+# add_finding() are defined, since the lib's check functions call them.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/push-protection.sh
+. "$SCRIPT_DIR/lib/push-protection.sh"
 
 # ---------------------------------------------------------------------------
 # Ecosystem detection
@@ -227,20 +239,22 @@ check_dependabot_config() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
   # Check github-actions ecosystem entry exists
-  if ! echo "$decoded" | grep -q 'package-ecosystem:.*"github-actions"'; then
+  # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
+  if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
     add_finding "$repo" "dependabot" "missing-github-actions-ecosystem" "error" \
       "Dependabot config missing \`github-actions\` ecosystem entry" \
       "standards/dependabot-policy.md#github-actions-all-repos"
   fi
 
   # Check that app ecosystem entries use open-pull-requests-limit: 0
-  # Extract ecosystem blocks and check limits
+  # Extract ecosystem blocks and check limits.
+  # Accept both double-quoted and single-quoted YAML string values.
   for eco in npm pip gomod cargo terraform; do
-    if echo "$decoded" | grep -q "package-ecosystem:.*\"$eco\""; then
+    if echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"$eco\"|'$eco')"; then
       # Check if this ecosystem has limit: 0
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
-      block=$(echo "$decoded" | awk "/package-ecosystem:.*\"$eco\"/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/\"$eco\"/) exit}" | head -15)
+      block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
@@ -251,13 +265,14 @@ check_dependabot_config() {
     fi
   done
 
-  # Check for required labels in dependabot config
-  if ! echo "$decoded" | grep -q '"security"'; then
+  # Check for required labels in dependabot config.
+  # Accept both double-quoted and single-quoted YAML string values.
+  if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
     add_finding "$repo" "dependabot" "missing-security-label" "warning" \
       "Dependabot config missing \`security\` label on updates" \
       "standards/dependabot-policy.md#policy"
   fi
-  if ! echo "$decoded" | grep -q '"dependencies"'; then
+  if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
     add_finding "$repo" "dependabot" "missing-dependencies-label" "warning" \
       "Dependabot config missing \`dependencies\` label on updates" \
       "standards/dependabot-policy.md#policy"
@@ -287,7 +302,7 @@ check_repo_settings() {
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
+    actual=$(echo "$settings" | jq -r ".$key | if . == null then \"null\" else tostring end")
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
@@ -304,143 +319,6 @@ check_repo_settings() {
       "standards/github-settings.md#general"
   fi
 
-}
-
-# ---------------------------------------------------------------------------
-# Check: Push protection (secret scanning + gitleaks CI)
-# ---------------------------------------------------------------------------
-check_push_protection() {
-  local repo="$1"
-  local repo_json="$2"
-
-  # --- security_and_analysis flags ---
-  # Uses the pre-fetched repo JSON to avoid a duplicate API call.
-  # Checks all 5 settings that apply-repo-settings.sh enforces.
-  local sa
-  sa=$(echo "$repo_json" | jq '{
-    secret_scanning: .security_and_analysis.secret_scanning.status,
-    push_protection: .security_and_analysis.secret_scanning_push_protection.status,
-    ai_detection: .security_and_analysis.secret_scanning_ai_detection.status,
-    non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status,
-    dependabot_security_updates: .security_and_analysis.dependabot_security_updates.status
-  }' 2>/dev/null || echo "{}")
-
-  if [ "$sa" != "{}" ]; then
-    local ss_status
-    ss_status=$(echo "$sa" | jq -r '.secret_scanning // "null"')
-    if [ "$ss_status" != "enabled" ]; then
-      add_finding "$repo" "push-protection" "secret_scanning_enabled" "error" \
-        "Secret scanning is not enabled (current: \`$ss_status\`)" \
-        "standards/push-protection.md#required-repo-level-settings"
-    fi
-
-    local pp_status
-    pp_status=$(echo "$sa" | jq -r '.push_protection // "null"')
-    if [ "$pp_status" != "enabled" ]; then
-      add_finding "$repo" "push-protection" "push_protection_enabled" "error" \
-        "Push protection is not enabled (current: \`$pp_status\`)" \
-        "standards/push-protection.md#required-repo-level-settings"
-    fi
-
-    local ai_status
-    ai_status=$(echo "$sa" | jq -r '.ai_detection // "null"')
-    if [ "$ai_status" != "enabled" ]; then
-      add_finding "$repo" "push-protection" "ai_detection_enabled" "warning" \
-        "Secret scanning AI detection not enabled (current: \`$ai_status\`)" \
-        "standards/push-protection.md#required-repo-level-settings"
-    fi
-
-    local np_status
-    np_status=$(echo "$sa" | jq -r '.non_provider_patterns // "null"')
-    if [ "$np_status" != "enabled" ]; then
-      add_finding "$repo" "push-protection" "non_provider_patterns_enabled" "warning" \
-        "Secret scanning non-provider patterns not enabled (current: \`$np_status\`)" \
-        "standards/push-protection.md#required-repo-level-settings"
-    fi
-
-    local ds_status
-    ds_status=$(echo "$sa" | jq -r '.dependabot_security_updates // "null"')
-    if [ "$ds_status" != "enabled" ]; then
-      add_finding "$repo" "push-protection" "dependabot_security_updates_enabled" "warning" \
-        "Dependabot security updates not enabled (current: \`$ds_status\`)" \
-        "standards/push-protection.md#required-repo-level-settings"
-    fi
-  fi
-
-  # --- Open secret scanning alerts ---
-  local alert_count=0
-  local alert_raw
-  if alert_raw=$(gh_api "repos/$ORG/$repo/secret-scanning/alerts?state=open" 2>/dev/null); then
-    alert_count=$(echo "$alert_raw" | jq 'length' 2>/dev/null || echo "0")
-  else
-    add_finding "$repo" "push-protection" "open_secret_alerts_unverified" "warning" \
-      "Could not query open secret scanning alerts; verify token scopes and feature availability" \
-      "standards/push-protection.md#incident-response"
-  fi
-  if [ "$alert_count" -gt 0 ]; then
-    add_finding "$repo" "push-protection" "open_secret_alerts" "error" \
-      "$alert_count open secret scanning alert(s) — rotate and remediate immediately" \
-      "standards/push-protection.md#incident-response"
-  fi
-
-  # --- CI secret-scan job using gitleaks ---
-  local ci_content
-  ci_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null || echo "")
-  if [ -n "$ci_content" ]; then
-    local ci_decoded
-    ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
-    if [ -n "$ci_decoded" ] && ! echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
-      add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
-        "CI workflow \`ci.yml\` does not contain a \`gitleaks\` secret-scan job" \
-        "standards/push-protection.md#layer-3--ci-secret-scanning-secondary-defense"
-    fi
-  fi
-
-  # --- .gitignore secrets block ---
-  local gi_content
-  gi_content=$(gh_api "repos/$ORG/$repo/contents/.gitignore" --jq '.content' 2>/dev/null || echo "")
-  if [ -n "$gi_content" ]; then
-    local gi_decoded
-    gi_decoded=$(echo "$gi_content" | base64 -d 2>/dev/null || echo "")
-    local missing_entries=()
-    for pattern in '.env' '*.pem' '*.key'; do
-      if ! echo "$gi_decoded" | grep -qF "$pattern"; then
-        missing_entries+=("$pattern")
-      fi
-    done
-    if [ ${#missing_entries[@]} -gt 0 ]; then
-      add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-        ".gitignore missing secret-related entries: ${missing_entries[*]}" \
-        "standards/push-protection.md#required-gitignore-entries"
-    fi
-  else
-    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-      "No \`.gitignore\` file found — secrets-related entries are required" \
-      "standards/push-protection.md#required-gitignore-entries"
-  fi
-
-  # --- Recent push protection bypasses (last 30 days) ---
-  local bypass_count=0
-  local bypass_raw
-  if bypass_raw=$(gh_api "repos/$ORG/$repo/secret-scanning/push-protection-bypasses" 2>/dev/null); then
-    # Filter to last 30 days
-    local cutoff
-    cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-30d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
-    if [ -n "$cutoff" ]; then
-      bypass_count=$(echo "$bypass_raw" | jq --arg cutoff "$cutoff" '[.[] | select(.created_at > $cutoff)] | length' 2>/dev/null || echo "0")
-    else
-      bypass_count=$(echo "$bypass_raw" | jq 'length' 2>/dev/null || echo "0")
-    fi
-  else
-    add_finding "$repo" "push-protection" "push_protection_bypasses_unverified" "warning" \
-      "Could not query push protection bypasses; verify token scopes and feature availability" \
-      "standards/push-protection.md#what-to-do-when-push-protection-blocks-your-push"
-  fi
-  if [ "$bypass_count" -gt 0 ]; then
-    add_finding "$repo" "push-protection" "push_protection_bypasses_recent" "warning" \
-      "$bypass_count push protection bypass(es) in the last 30 days — verify each has a documented justification" \
-      "standards/push-protection.md#what-to-do-when-push-protection-blocks-your-push"
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -539,6 +417,54 @@ check_sonarcloud() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: CodeQL default setup is configured (and no stray codeql.yml exists)
+#
+# After petry-projects/.github#103, CodeQL is configured via GitHub's
+# managed default setup, not a per-repo workflow file. Two distinct findings:
+#
+#   1. codeql-default-setup-not-configured (error): the repo has not enabled
+#      default setup. Remediate by running:
+#        gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup \
+#          -F state=configured -F query_suite=default
+#      (or by running scripts/apply-repo-settings.sh against the repo).
+#
+#   2. stray-codeql-workflow (error): the repo still ships a codeql.yml
+#      workflow file. Default setup and an inline workflow are mutually
+#      exclusive at the GitHub level — leaving the file behind double-bills
+#      CI minutes and creates two competing analyses. Remediation: delete
+#      .github/workflows/codeql.yml.
+# ---------------------------------------------------------------------------
+check_codeql_default_setup() {
+  local repo="$1"
+
+  # Query the default-setup state. The endpoint returns 200 with a JSON body
+  # describing the state, OR a 4xx if the repo has no code scanning capability
+  # (e.g. private without GHAS, archived). Treat any non-"configured" state
+  # as a finding so the audit surfaces what needs remediation.
+  local state
+  state=$(gh_api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$state" != "configured" ]; then
+    local detail
+    if [ -z "$state" ]; then
+      detail="CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    else
+      detail="CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+    fi
+    add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+      "$detail" \
+      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+  fi
+
+  # Stray workflow check: any codeql.yml under .github/workflows is drift.
+  if gh_api "repos/$ORG/$repo/contents/.github/workflows/codeql.yml" --jq '.name' > /dev/null 2>&1; then
+    add_finding "$repo" "ci-workflows" "stray-codeql-workflow" "error" \
+      "Repo still ships \`.github/workflows/codeql.yml\`. The org standard now uses GitHub-managed CodeQL default setup; per-repo workflow files are drift and run a duplicate analysis alongside default setup. Delete the file. If a documented exception applies (custom query pack, build mode, path filters), open a standards PR against \`standards/ci-standards.md\` to record the exception before re-adding the workflow." \
+      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Check: Workflow permissions follow least-privilege
 # ---------------------------------------------------------------------------
 check_workflow_permissions() {
@@ -557,6 +483,15 @@ check_workflow_permissions() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
+
+    # Skip reusable workflows (workflow_call-only triggers).
+    # Their permissions are controlled entirely by the caller workflow, so
+    # requiring a top-level permissions: block here would be redundant and
+    # would generate false positives for every *-reusable.yml in the org.
+    # All reusable workflows follow the -reusable.yml naming convention.
+    if [[ "$wf" == *-reusable.yml || "$wf" == *-reusable.yaml ]]; then
+      continue
+    fi
 
     # Check if the workflow has a top-level permissions key
     # Single-job workflows may define permissions at job level instead
@@ -689,6 +624,126 @@ check_centralized_workflow_stubs() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: required-status-check rulesets reference current names
+#
+# After centralizing workflows into reusables (#87, #88), GitHub composes
+# check names as `<caller-job-id> / <reusable-job-id-or-name>`. Repos
+# that updated their workflow files but didn't update their rulesets
+# are silently broken — the merge gate references a name that no
+# longer exists, so it can never be satisfied.
+#
+# Inspects both the new ruleset system and classic branch protection.
+# Flags two distinct problems:
+#   1. Stale pre-centralization name (e.g. `claude`, `AgentShield`)
+#      → emit "stale-required-check-<old-name>"
+#   2. `claude-code / claude` listed as required
+#      → emit "required-claude-code-check-broken" because that check
+#        is structurally incompatible with workflow-modifying PRs
+#        (claude-code-action's app-token validation refuses to mint
+#        a token whenever the PR diff includes any workflow file)
+# ---------------------------------------------------------------------------
+check_centralized_check_names() {
+  local repo="$1"
+
+  # The .github repo owns the reusables; its own ruleset is allowed to
+  # reference whatever check names it likes.
+  [ "$repo" = ".github" ] && return
+
+  # Map from stale name → current canonical name. Used for the rename
+  # remediation message. The remediation here is "rename in the
+  # ruleset" because both the old and new names refer to a check that
+  # CAN be required (it runs on PRs and reports a definitive result).
+  #
+  # NOTE: `claude` and `claude-issue` are deliberately NOT in this map.
+  # The post-centralization equivalents are `claude-code / claude` and
+  # `claude-code / claude-issue`, but those checks are themselves
+  # incompatible with workflow-modifying PRs (claude-code-action's app
+  # token validation refuses to mint a token for any PR whose diff
+  # includes a workflow file, so the check fails on every workflow PR
+  # and the merge gate becomes a deadlock). The remediation for the
+  # `claude*` cases is therefore "remove from required checks", not
+  # "rename" — handled below as a separate finding so the message
+  # never recommends a name that creates a new deadlock.
+  local renames=(
+    "AgentShield:agent-shield / AgentShield"
+    "Detect ecosystems:dependency-audit / Detect ecosystems"
+  )
+
+  # Patterns for required checks that are structurally broken and
+  # should be removed (not renamed). Matched as either:
+  #   - the bare legacy name ("claude" / "claude-issue"), or
+  #   - any reusable-workflow check whose suffix is "/ claude" or
+  #     "/ claude-issue", regardless of caller-job-id prefix
+  #     (so a custom caller named e.g. "Claude Code / claude" is
+  #     also caught, not just the canonical "claude-code / claude").
+  #
+  # The match is computed against each context line below.
+
+  # Collect every required-status-check context from every source.
+  # Sources: (1) every active ruleset, (2) classic branch protection.
+  local contexts=""
+
+  # Source 1: rulesets that apply to main
+  local ruleset_contexts
+  ruleset_contexts=$(gh_api "repos/$ORG/$repo/rules/branches/main" \
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null || echo "")
+  contexts+="$ruleset_contexts"$'\n'
+
+  # Source 2: classic branch protection (may not exist)
+  local classic_contexts
+  classic_contexts=$(gh_api "repos/$ORG/$repo/branches/main/protection/required_status_checks" \
+    --jq '.contexts[]' 2>/dev/null || echo "")
+  contexts+="$classic_contexts"
+
+  [ -z "$(echo "$contexts" | tr -d '[:space:]')" ] && return
+
+  # Check 1: stale pre-centralization names that have a safe rename
+  local entry old new
+  for entry in "${renames[@]}"; do
+    IFS=':' read -r old new <<< "$entry"
+    if echo "$contexts" | grep -qxF "$old"; then
+      add_finding "$repo" "rulesets" "stale-required-check-${old// /-}" "error" \
+        "Required-status-check ruleset references the stale check name \`$old\`. After workflow centralization (petry-projects/.github#87) this check is published as \`$new\`. Update the ruleset (and any classic branch protection) to use the new name." \
+        "standards/ci-standards.md#centralization-tiers"
+    fi
+  done
+
+  # Check 2: claude-* checks (legacy or post-centralization) listed as
+  # required. These cannot be made compliant by renaming because the
+  # post-centralization name is itself broken — the only safe action
+  # is to remove the check from required-status-checks entirely.
+  #
+  # We classify each context line by suffix so any caller-job-id prefix
+  # is caught (e.g. "claude-code / claude", "Claude Code / claude",
+  # "review-claude / claude" all match).
+  local context match_type
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    match_type=""
+    case "$context" in
+      "claude")              match_type="claude" ;;
+      "claude-issue")        match_type="claude-issue" ;;
+      *"/ claude")           match_type="claude" ;;
+      *"/ claude-issue")     match_type="claude-issue" ;;
+      *) continue ;;
+    esac
+
+    # Stable check id per match type so findings don't churn across
+    # audit runs from variations in caller-job-id prefixes.
+    local check_id
+    if [ "$match_type" = "claude-issue" ]; then
+      check_id="required-claude-issue-check-broken"
+    else
+      check_id="required-claude-check-broken"
+    fi
+
+    add_finding "$repo" "rulesets" "$check_id" "error" \
+      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+      "standards/ci-standards.md#centralization-tiers"
+  done <<< "$contexts"
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -735,7 +790,11 @@ check_agents_md() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
-    if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
+    # Accept two forms of reference:
+    #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
+    #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
+    # Both are treated as references to the org-level standards file.
+    if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
@@ -752,6 +811,11 @@ ensure_audit_label() {
     --repo "$ORG/$repo" \
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
+    --force 2>/dev/null || true
+  gh label create "claude" \
+    --repo "$ORG/$repo" \
+    --description "For Claude agent pickup" \
+    --color "8B5CF6" \
     --force 2>/dev/null || true
 }
 
@@ -806,6 +870,8 @@ This finding is still open.
 **Detail:** $detail
 
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
+    # Ensure claude label is present on pre-existing issues
+    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
     # Record existing issue for umbrella
     jq --null-input \
@@ -844,11 +910,11 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
-  # Individual finding issues get compliance-audit label only — NOT the claude label.
-  # The umbrella issue (created separately) gets the claude label to trigger one coordinated agent run.
+  # Individual finding issues get both compliance-audit and claude labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
+    --label "claude" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -1170,16 +1236,18 @@ main() {
     check_action_pinning "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
-    check_push_protection "$repo" "$repo_json"
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
+    check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
     check_centralized_workflow_stubs "$repo"
+    check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
+    pp_run_all_checks "$repo"
 
     log_end
   done
@@ -1215,8 +1283,7 @@ main() {
     done
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
-    # Only the umbrella gets the `claude` label — individual issues do not — so one coordinated
-    # agent handles related findings together instead of multiple agents producing duplicate PRs.
+    # Both individual issues and the umbrella get the `claude` label for agent pickup.
     create_umbrella_issue
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"

@@ -23,7 +23,8 @@ where to send a fix when behavior needs to change.
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
 | **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the change propagates everywhere on next run. |
-| **2. Per-repo template** | `ci.yml`, `codeql.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
+| **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
+| **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
 
 Tier 1 stubs all carry an identical `SOURCE OF TRUTH` header block telling
@@ -65,10 +66,12 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
 
 ## Required Workflows
 
-Every repository MUST have these 7 workflows. Reusable templates for Dependabot
+Every repository MUST have these 6 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
-CodeQL, SonarCloud, and Claude Code workflows are documented as patterns
-below — copy and adapt the examples to each repo's tech stack.
+SonarCloud, and Claude Code workflows are documented as patterns
+below — copy and adapt the examples to each repo's tech stack. CodeQL is
+**not** a workflow file: it is configured via GitHub-managed default setup
+(see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
 [Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
@@ -110,27 +113,82 @@ concurrency:
   cancel-in-progress: true
 ```
 
-### 2. CodeQL Analysis (`codeql.yml`)
+### 2. CodeQL Analysis (GitHub-managed default setup)
 
-Static Application Security Testing (SAST) via GitHub's CodeQL.
+Static Application Security Testing (SAST) via GitHub's CodeQL, configured
+through **default setup** (Settings → Code security → Code scanning), not via
+a per-repo workflow file.
 
-**Standard configuration:**
+**Why default setup, not a `codeql.yml` workflow:**
 
-```yaml
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: '0 17 * * 5'    # Weekly scan (Friday 12:00 PM EST / 17:00 UTC)
+Every prior version of this standard required each repo to carry an
+`advanced` CodeQL workflow file. In practice the workflow we copied across
+the fleet did nothing that default setup doesn't already do — no custom
+query packs, no path filters, no build steps, no language matrix beyond a
+single auto-detected ecosystem. The advanced setup gave us SHA-pinned
+`github/codeql-action` references and an explicit `permissions: {}` block,
+but `github/codeql-action` is a first-party GitHub action and the
+permissions are managed by GitHub when default setup is enabled. The cost
+of maintaining N copies of a workflow that re-derives what GitHub already
+detects automatically outweighed the marginal supply-chain benefit.
+
+**Default setup also gives us behavior the workflow file did not:**
+
+- **Automatic language re-detection.** When a repo gains a new supported
+  language (e.g. a Python utility lands in a TypeScript repo), default
+  setup picks it up on the next scan. The static workflow file would
+  silently miss it until somebody edited the YAML.
+- **Managed analyzer versions.** No Dependabot bumps, no SHA churn, no
+  drift between repos.
+- **Lower CI surface area.** One fewer workflow file per repo to lint,
+  audit, and centralize.
+
+**Standard configuration (per repo):**
+
+| Setting | Required value |
+|---|---|
+| Code scanning → Default setup | **Configured** (state = `"configured"`) |
+| Languages | All CodeQL-supported languages auto-detected from the default branch |
+| Query suite | `default` (use `extended` only when a documented threat model justifies the noise) |
+| Schedule | Weekly (managed by GitHub; not configurable) |
+| Triggers | Push to default branch and PRs targeting it (managed by GitHub) |
+
+**Enabling default setup:**
+
+```bash
+# State the desired configuration. Languages may be omitted to let
+# GitHub auto-detect, or enumerated explicitly.
+gh api -X PATCH "repos/petry-projects/<repo>/code-scanning/default-setup" \
+  -F state=configured \
+  -F query_suite=default
 ```
 
-**Language configuration rule:** All ecosystems present in the repository MUST
-be configured as CodeQL languages. If a repo contains `package.json`, add
-`javascript-typescript`. If it contains `go.mod`, add `go`. If it contains
-`.github/workflows/*.yml`, add `actions`. Multi-language repos configure
-multiple languages via a matrix strategy.
+> **Required token scope:** `repo` (classic) or `Administration: write` +
+> `Code scanning alerts: write` (fine-grained). The org `apply-repo-settings.sh`
+> script will run this automatically when onboarding new repos.
+
+**`.github/workflows/codeql.yml` is now drift, not a requirement.** The
+weekly compliance audit (`check_codeql_default_setup`) flags any repo whose
+default setup is not in the `configured` state, **and** flags any repo that
+still ships an inline `codeql.yml` workflow file as a remediation: delete
+the file and enable default setup. The two configurations are mutually
+exclusive at the GitHub level — leaving the workflow file behind after
+flipping default setup on causes both to run and double-bills CI minutes.
+
+**Status check name:** GitHub publishes default setup results under the
+required-status-check context name **`CodeQL`** (single context, regardless
+of how many languages are detected). The org `apply-rulesets.sh` script
+adds this context to the `code-quality` ruleset for any repo where default
+setup is configured.
+
+**Escape hatch — when advanced setup is justified:** A repo MAY revert to
+an inline `codeql.yml` workflow only when it has a concrete need that
+default setup cannot serve: a custom query pack, path filters to exclude
+generated code, a build mode for a compiled language that needs a
+non-default toolchain, or a language CodeQL supports only via manual
+build. **Document the reason in the workflow file's header and open a
+standards PR against this document** so the exception is recorded
+alongside the rule.
 
 ### 3. SonarCloud Analysis (`sonarcloud.yml`)
 
@@ -578,7 +636,7 @@ steps:
   # Project-specific: pip install, pytest, etc.
 ```
 
-**Repos using this pattern:** TalkTerm (CodeQL only currently)
+**Repos using this pattern:** _(none currently)_
 
 ---
 
@@ -659,9 +717,13 @@ For single-job workflows, top-level least-privilege permissions are acceptable
 | CI (build/test) | `contents: read` |
 | SonarCloud | `contents: read`, `pull-requests: read` |
 | Claude Code | `contents: write`, `id-token: write`, `pull-requests: write`, `issues: write`, `actions: read`, `checks: read` |
-| CodeQL | `actions: read`, `security-events: write`, `contents: read` |
 | Dependabot auto-merge | `contents: read`, `pull-requests: read` (+ app token for merge) |
 
+> **CodeQL is not in this table** because it is configured via GitHub
+> default setup, not a workflow file. GitHub manages the analyzer's
+> permissions internally; no `permissions:` block exists in this repo to
+> audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup).
+>
 > **Note on admin operations from Claude Code:** GitHub Actions does **not**
 > expose an `administration` permission scope. The valid set is documented at
 > [docs.github.com](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs).
@@ -704,7 +766,7 @@ references. Use consistent, descriptive names:
 |---------|---------|-------|
 | Language / tool name | `TypeScript`, `Go`, `SonarCloud` | For multi-language repos |
 | `build-and-test` | `build-and-test` | For single-language repos |
-| `Analyze` or `Analyze (<lang>)` | `Analyze`, `Analyze (Python)` | CodeQL jobs |
+| `CodeQL` | `CodeQL` | Default-setup CodeQL — single context regardless of language count |
 | `claude` | `claude` | Claude Code Action |
 
 These names are referenced in branch protection required status checks.
@@ -766,7 +828,7 @@ autofix:
 
 1. **Determine tech stack** and select the matching workflow patterns above
 2. **Create `ci.yml`** with lint, format, typecheck, and test stages
-3. **Add `codeql.yml`** with the appropriate language(s)
+3. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
 4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
 5. **Add `claude.yml`** for AI code review
 6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
@@ -785,24 +847,37 @@ All five check categories are **required on every repository** (see
 [GitHub Settings — code-quality ruleset](github-settings.md#code-quality--required-checks-ruleset-all-repositories)).
 The specific ecosystems configured in each check depend on the repo's stack.
 
-| Repository | CI | CodeQL | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config |
+The **CodeQL** column reflects GitHub default setup state (`configured` vs
+`not-configured`), not the presence of a workflow file. Repos still
+carrying a per-repo `codeql.yml` after this standard lands are flagged as
+drift, not as compliant.
+
+| Repository | CI | CodeQL† | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config |
 |------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|
-| **broodly** | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| **markets** | — | Yes | Yes | Yes | — | Yes | Yes | Partial |
-| **google-app-scripts** | Yes | Yes | Yes | Yes | Yes | Yes (older) | — | Non-standard |
-| **TalkTerm** | Yes | — | — | — | Yes | — | — | — |
-| **ContentTwin** | — | — | Yes | — | — | — | — | — |
-| **bmad-bgreat-suite** | — | — | — | — | — | — | — | — |
+| **broodly** | Yes | Pending | Yes | Yes | Yes | Yes | Yes | Yes |
+| **markets** | — | Pending | Yes | Yes | — | Yes | Yes | Partial |
+| **google-app-scripts** | Yes | Pending | Yes | Yes | Yes | Yes (older) | — | Non-standard |
+| **TalkTerm** | Yes | Pending | — | — | Yes | — | — | — |
+| **ContentTwin** | — | Pending | Yes | — | — | — | — | — |
+| **bmad-bgreat-suite** | — | Pending | — | — | — | — | — | — |
+
+† **CodeQL** values are listed as `Pending` for every repo because the
+default-setup migration is the work this standard introduces; the next
+weekly compliance audit (after `apply-repo-settings.sh` runs against the
+fleet) will flip the cells to `Yes` or surface specific failures via the
+`codeql-default-setup-not-configured` finding category. There is no
+`codeql.yml` workflow column anymore — that file is drift, not signal.
 
 ### Gaps to Address
 
 Every `—` in the table above is a gap that must be remediated. Priority order:
 
-1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding
-2. **ContentTwin:** Missing CI, CodeQL, Claude, Coverage, Dependabot — 5 of 8 categories missing
-3. **TalkTerm:** Missing CodeQL, SonarCloud, Claude, Dependabot — 4 of 8 categories missing
+1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding (CodeQL default setup will be enabled as part of onboarding)
+2. **ContentTwin:** Missing CI, Claude, Coverage, Dependabot — 4 of 8 categories missing
+3. **TalkTerm:** Missing SonarCloud, Claude, Dependabot — 3 of 8 categories missing
 4. **markets:** Missing CI pipeline and Coverage; Dependabot config only covers `github-actions` (missing `npm` ecosystem)
 5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
+6. **All repos:** Enable CodeQL default setup via `apply-repo-settings.sh` and remove any pre-existing `codeql.yml` workflow file
 
 ### Version Inconsistencies
 
@@ -811,5 +886,8 @@ All repos MUST align to the latest version of each action:
 | Action | Target Version | Repos Needing Update |
 |--------|---------------|---------------------|
 | **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
-| **CodeQL action** | v4 | markets (currently v3) |
 | **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
+
+> **`github/codeql-action` is no longer pinned per repo** because the
+> standard no longer ships a `codeql.yml` workflow. GitHub manages the
+> analyzer version internally for default-setup repos.

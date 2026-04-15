@@ -86,9 +86,8 @@ gh api -X PATCH "orgs/petry-projects" \
 
 ### Required repo-level settings
 
-Every repository MUST have the following security features turned on. These
-flags are exposed via `GET /repos/{owner}/{repo}` and SHOULD be verified by the
-compliance audit (see [Compliance Audit Checks](#compliance-audit-checks)):
+Every repository MUST have the following security features turned on. The
+compliance audit checks these flags via `GET /repos/{owner}/{repo}`:
 
 | Setting | Path in API response | Required value |
 |---------|----------------------|----------------|
@@ -114,9 +113,14 @@ gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
 JSON
 ```
 
-`scripts/apply-repo-settings.sh` enforces these values alongside the
-existing merge and label settings — see
-[Application](#application-to-a-repository) below.
+`scripts/apply-repo-settings.sh` MUST enforce these values alongside the
+existing merge and label settings — it sources
+[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh) and
+calls `pp_apply_security_and_analysis` after the standard settings and
+labels have been applied. The required `security_and_analysis` keys live
+in the `PP_REQUIRED_SA_SETTINGS` array in that library — adding a new
+required flag there automatically extends both the apply script and the
+weekly audit. See [Application](#application-to-a-repository) below.
 
 ### Custom secret scanning patterns
 
@@ -170,8 +174,15 @@ Install locally with:
 ```bash
 pip install pre-commit
 pre-commit install
-pre-commit run gitleaks --all-files   # one-off scan of all tracked files
+pre-commit run gitleaks --all-files   # one-off scan of tracked files in the working tree
+# For a full git-history scan, use gitleaks directly:
+gitleaks git --redact --exit-code 1
 ```
+
+> **Note:** `pre-commit run --all-files` only scans the current working tree,
+> not the full git history. Use `gitleaks git` (or `gitleaks detect
+> --log-opts="--all"` on older versions) to scan every commit reachable from
+> every branch.
 
 ### Agent workstation requirements
 
@@ -208,12 +219,17 @@ secret-scan:
     security-events: write
   steps:
     - name: Checkout (full history)
+      # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+      # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v4 --jq '.object.sha'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0
 
     - name: Run gitleaks
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
+      # then dereference if it points at an annotated tag.
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
@@ -225,7 +241,7 @@ The job MUST:
 - Use `fetch-depth: 0` so the full git history is scanned, not just the
   PR diff
 - Pass `--redact` so leaked values are NEVER written to workflow logs
-- Fail the build (`--exit-code 1`) when `gitleaks` reports any finding
+- Fail the build (`--exit-code 1`) when any finding is detected
 - Run as a **required check** via the `code-quality` ruleset
   (see [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories))
 
@@ -257,24 +273,32 @@ for a PR to merge.
 
 ### Required gitignore entries
 
-Every repository's `.gitignore` MUST include at minimum:
+Every repository MUST start its `.gitignore` from the org baseline at
+[`/.gitignore`](../.gitignore) in this repo. The baseline is **secrets-only**
+and language-agnostic — it covers the dotenv family, cloud-provider credential
+files, Kubernetes / Helm secrets, SSH/TLS/GPG key material, Terraform/IaC
+state and `*.tfvars`, secret-manager local caches (sops, age, vault, doppler,
+1password, infisical), database dumps and DB client dotfiles, package-registry
+credential dotfiles (`.npmrc`, `.pypirc`, `.cargo/credentials`, etc.), cloud
+CLI session caches, IDE files known to cache credentials (JetBrains
+`workspace.xml`, VS Code `sftp.json`, Cursor `mcp.json`), and modern AI/LLM
+tooling config files.
 
-```gitignore
-# Secrets — never commit
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-secrets/
-credentials.json
-service-account*.json
-```
+> **Per-repo overrides are expected.** The baseline covers secrets only.
+> Each repo MUST append its own language-specific entries (`node_modules/`,
+> `target/`, `__pycache__/`, etc.) and OS cruft. Use the matching template
+> from [github/gitignore](https://github.com/github/gitignore) and append
+> below the baseline section.
+>
+> **Negation rules.** Several baseline patterns include `!` negations that
+> re-allow legitimate files (e.g. `!.env.example`, `!*.crt`). Per-repo
+> additions MUST NOT re-ignore those files. Always negate by **specific
+> file path**, never by directory — a negation inside an ignored directory
+> does not re-include the file.
 
-The compliance audit checks for these entries and flags repositories missing
-them as a `warning`.
+The minimum compliance audit check is that the file contains at least
+`.env`, `*.pem`, `*.key`, and a `secrets`-style entry. Repos that copy the
+org baseline verbatim satisfy this automatically.
 
 ### Writing tests and fixtures
 
@@ -361,11 +385,15 @@ When onboarding a repository to this standard:
 2. **Verify gitignore** contains the standard entries listed in
    [Required gitignore entries](#required-gitignore-entries).
 3. **Add the `secret-scan` job** to `ci.yml` per [Layer 3](#layer-3--ci-secret-scanning-secondary-defense).
-4. **Add `secret-scan` as a required check** in the `code-quality` ruleset —
-   update [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
+4. **Add `secret-scan` as a required check** in the `code-quality` ruleset.
+   If provisioning is done via `scripts/apply-rulesets.sh`, first update
+   `detect_required_checks()` in that script to recognize and insert the
+   `secret-scan` check, then re-apply rulesets org-wide. Update
+   [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
    if the ruleset template needs a new entry.
-5. **Scan existing history** one time with `gitleaks detect --source .`
-   before enabling enforcement, to surface any pre-existing secrets.
+5. **Scan existing history** one time with `gitleaks git --redact --exit-code 1`
+   before enabling enforcement, to surface any pre-existing secrets across all
+   commits (not just the current working tree).
 6. **Rotate anything found** during the initial scan — do not whitelist
    existing findings without rotation.
 
@@ -373,16 +401,21 @@ When onboarding a repository to this standard:
 
 ## Compliance Audit Checks
 
-The weekly compliance audit ([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh))
-MUST verify the following for every repository:
+The weekly compliance audit
+([`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)) verifies the
+following for every repository. The check logic lives in
+[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh) and is
+sourced by both the audit and the apply script so a single edit to
+`PP_REQUIRED_SA_SETTINGS` (or the gitignore baseline list) propagates to
+both at once:
 
 | Check | Severity | Detail |
 |-------|----------|--------|
 | `secret_scanning_enabled` | error | `security_and_analysis.secret_scanning.status == "enabled"` |
 | `push_protection_enabled` | error | `security_and_analysis.secret_scanning_push_protection.status == "enabled"` |
+| `ai_detection_enabled` | warning | `security_and_analysis.secret_scanning_ai_detection.status == "enabled"` |
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
-| `ai_detection_enabled` | error | `security_and_analysis.secret_scanning_ai_detection.status == "enabled"` |
-| `dependabot_security_updates_enabled` | error | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
+| `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |

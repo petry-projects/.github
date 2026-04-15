@@ -37,7 +37,7 @@ name: Feature Research & Ideation (BMAD Analyst)
 
 on:
   schedule:
-    - cron: '0 7 * * 5'   # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
+    - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
   workflow_dispatch:
     inputs:
       focus_area:
@@ -53,6 +53,11 @@ on:
           - quick
           - standard
           - deep
+      dry_run:
+        description: 'Skip Discussion mutations and log them to a JSONL artifact instead. Use this on a fork to smoke-test before going live.'
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -87,5 +92,6 @@ jobs:
         include A, B, C. Key emerging trends in this space: X, Y, Z."
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
+      dry_run: ${{ inputs.dry_run || false }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
