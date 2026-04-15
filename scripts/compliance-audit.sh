@@ -372,6 +372,10 @@ check_push_protection() {
   local alert_raw
   if alert_raw=$(gh_api "repos/$ORG/$repo/secret-scanning/alerts?state=open" 2>/dev/null); then
     alert_count=$(echo "$alert_raw" | jq 'length' 2>/dev/null || echo "0")
+  else
+    add_finding "$repo" "push-protection" "open_secret_alerts_unverified" "warning" \
+      "Could not query open secret scanning alerts; verify token scopes and feature availability" \
+      "standards/push-protection.md#incident-response"
   fi
   if [ "$alert_count" -gt 0 ]; then
     add_finding "$repo" "push-protection" "open_secret_alerts" "error" \
@@ -385,7 +389,7 @@ check_push_protection() {
   if [ -n "$ci_content" ]; then
     local ci_decoded
     ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
-    if [ -n "$ci_decoded" ] && ! echo "$ci_decoded" | grep -q 'gitleaks'; then
+    if [ -n "$ci_decoded" ] && ! echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
       add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
         "CI workflow \`ci.yml\` does not contain a \`gitleaks\` secret-scan job" \
         "standards/push-protection.md#layer-3--ci-secret-scanning-secondary-defense"
@@ -427,6 +431,10 @@ check_push_protection() {
     else
       bypass_count=$(echo "$bypass_raw" | jq 'length' 2>/dev/null || echo "0")
     fi
+  else
+    add_finding "$repo" "push-protection" "push_protection_bypasses_unverified" "warning" \
+      "Could not query push protection bypasses; verify token scopes and feature availability" \
+      "standards/push-protection.md#what-to-do-when-push-protection-blocks-your-push"
   fi
   if [ "$bypass_count" -gt 0 ]; then
     add_finding "$repo" "push-protection" "push_protection_bypasses_recent" "warning" \
@@ -1150,6 +1158,13 @@ main() {
     # Fetch full repo JSON once and share with settings/push-protection checks
     local repo_json
     repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+    if [ "$repo_json" = "{}" ]; then
+      add_finding "$repo" "settings" "repo_metadata_unavailable" "error" \
+        "Could not fetch repository metadata; settings and push-protection checks were skipped" \
+        "standards/github-settings.md#repository-settings--standard-defaults"
+      log_end
+      continue
+    fi
 
     check_required_workflows "$repo"
     check_action_pinning "$repo"

@@ -217,18 +217,21 @@ apply_security_analysis() {
     return 0
   fi
 
-  # Build payload with jq to avoid string-concatenation pitfalls
+  # Build the full request body and send it as JSON via --input.
+  # -F cannot send nested objects; --input passes the body directly.
   local payload
   payload=$(jq -n '{
-    secret_scanning: {status: "enabled"},
-    secret_scanning_push_protection: {status: "enabled"},
-    secret_scanning_ai_detection: {status: "enabled"},
-    secret_scanning_non_provider_patterns: {status: "enabled"},
-    dependabot_security_updates: {status: "enabled"}
+    security_and_analysis: {
+      secret_scanning: {status: "enabled"},
+      secret_scanning_push_protection: {status: "enabled"},
+      secret_scanning_ai_detection: {status: "enabled"},
+      secret_scanning_non_provider_patterns: {status: "enabled"},
+      dependabot_security_updates: {status: "enabled"}
+    }
   }')
 
   if ! gh api -X PATCH "repos/$ORG/$repo" \
-    -F "security_and_analysis=$payload" > /dev/null 2>&1; then
+    --input - <<<"$payload" > /dev/null 2>&1; then
     err "Failed to update security_and_analysis for $ORG/$repo (token may lack admin scope)"
     return 1
   fi

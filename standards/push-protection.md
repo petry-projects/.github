@@ -101,14 +101,17 @@ compliance audit (see [Compliance Audit Checks](#compliance-audit-checks)):
 Apply per repo via:
 
 ```bash
-gh api -X PATCH "repos/petry-projects/<repo>" \
-  -F security_and_analysis='{
+gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
+{
+  "security_and_analysis": {
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
     "secret_scanning_non_provider_patterns": {"status": "enabled"},
     "dependabot_security_updates": {"status": "enabled"}
-  }'
+  }
+}
+JSON
 ```
 
 `scripts/apply-repo-settings.sh` enforces these values alongside the
@@ -378,8 +381,10 @@ MUST verify the following for every repository:
 | `secret_scanning_enabled` | error | `security_and_analysis.secret_scanning.status == "enabled"` |
 | `push_protection_enabled` | error | `security_and_analysis.secret_scanning_push_protection.status == "enabled"` |
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
+| `ai_detection_enabled` | error | `security_and_analysis.secret_scanning_ai_detection.status == "enabled"` |
+| `dependabot_security_updates_enabled` | error | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
-| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks` |
+| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 

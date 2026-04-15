@@ -106,11 +106,14 @@ detect_required_checks() {
   if echo "$workflows" | grep -qx "ci.yml"; then
     local ci_wf_name
     ci_wf_name=$(workflow_name "ci.yml")
+    # Fetch ci.yml content once; used for first-job detection and secret-scan check below
+    local ci_content ci_decoded
+    ci_content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
+      --jq '.content' 2>/dev/null || echo "")
+    ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
     # Fetch the first job name from ci.yml
     local ci_job_name
-    ci_job_name=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
-      --jq '.content' 2>/dev/null \
-      | base64 -d 2>/dev/null \
+    ci_job_name=$(echo "$ci_decoded" \
       | awk '
           /^jobs:/ { in_jobs=1; found=0; next }
           in_jobs && /^  [a-zA-Z0-9_-]+:/ && !found {
@@ -128,6 +131,11 @@ detect_required_checks() {
       checks+=("$ci_wf_name / $ci_job_name")
     else
       checks+=("$ci_job_name")
+    fi
+
+    # --- Secret scan (gitleaks) — included when ci.yml contains the gitleaks action ---
+    if echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
+      checks+=("Secret scan (gitleaks)")
     fi
   fi
 
