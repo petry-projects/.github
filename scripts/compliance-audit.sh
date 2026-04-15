@@ -6,6 +6,7 @@
 #   standards/dependabot-policy.md
 #   standards/github-settings.md
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   standards/push-protection.md
 #
 # Outputs:
@@ -13,6 +14,9 @@
 #   $REPORT_DIR/summary.md         — human-readable report
 #   $REPORT_DIR/issue-counts.json  — issue management counts (added/existing/removed)
 =======
+=======
+#   standards/push-protection.md
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 #
 # Outputs:
 #   $REPORT_DIR/findings.json   — machine-readable findings
@@ -493,6 +497,7 @@ check_dependabot_config() {
 check_repo_settings() {
   local repo="$1"
 <<<<<<< HEAD
+<<<<<<< HEAD
   local repo_json="$2"
 
   local settings
@@ -502,6 +507,12 @@ check_repo_settings() {
   local settings
   settings=$(gh_api "repos/$ORG/$repo" --jq '{
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  local repo_json="$2"
+
+  local settings
+  settings=$(echo "$repo_json" | jq '{
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     has_wiki: .has_wiki,
@@ -1931,9 +1942,13 @@ create_umbrella_issue() {
   local groups=(
     "settings|Repository Settings|apply-repo-settings.sh"
 <<<<<<< HEAD
+<<<<<<< HEAD
     "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
 =======
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
+=======
+    "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
@@ -2205,6 +2220,7 @@ HEREDOC
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
 =======
   for category in ci-workflows action-pinning dependabot settings labels rulesets; do
@@ -2212,6 +2228,9 @@ HEREDOC
 =======
   for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
+=======
+  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -2415,6 +2434,9 @@ main() {
     fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch full repo JSON once and share with settings/push-protection checks
     local repo_json
     repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
@@ -2426,6 +2448,7 @@ main() {
       continue
     fi
 
+<<<<<<< HEAD
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_reusable_workflow_paths "$repo"
@@ -2437,6 +2460,12 @@ main() {
     check_dependabot_config "$repo"
     check_repo_settings "$repo"
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+    check_required_workflows "$repo"
+    check_action_pinning "$repo"
+    check_dependabot_config "$repo"
+    check_repo_settings "$repo" "$repo_json"
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"

@@ -101,6 +101,7 @@ Apply per repo via:
 
 ```bash
 <<<<<<< HEAD
+<<<<<<< HEAD
 gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
 {
   "security_and_analysis": {
@@ -108,11 +109,17 @@ gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
 gh api -X PATCH "repos/petry-projects/<repo>" \
   -F security_and_analysis='{
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
+{
+  "security_and_analysis": {
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
     "secret_scanning_non_provider_patterns": {"status": "enabled"},
     "dependabot_security_updates": {"status": "enabled"}
+<<<<<<< HEAD
 <<<<<<< HEAD
   }
 }
@@ -120,6 +127,11 @@ JSON
 =======
   }'
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+  }
+}
+JSON
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 ```
 
 `scripts/apply-repo-settings.sh` MUST enforce these values alongside the
@@ -137,6 +149,7 @@ The org MUST configure the following custom patterns in addition to the
 provider-supplied ones:
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 | Pattern name | Pattern (illustrative) | Rationale |
 |--------------|------------------------|-----------|
 | `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
@@ -151,6 +164,14 @@ provider-supplied ones:
 | `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
 | `generic-high-entropy` | High-entropy strings assigned to `*_TOKEN`, `*_SECRET`, `*_KEY` env vars | Catches untyped long strings in YAML and `.env` files |
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+| Pattern name | Pattern (illustrative) | Rationale |
+|--------------|------------------------|-----------|
+| `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
+| `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
+| `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
+| `generic-high-entropy` | `(?:_TOKEN\|_SECRET\|_KEY)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{32,}` | Catches untyped long strings in YAML and `.env` files |
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
 Custom patterns are configured at **Org settings → Code security → Secret
 scanning → Custom patterns**. Each new pattern MUST be dry-run against all
@@ -465,10 +486,14 @@ both at once:
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
 =======
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks` |
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 

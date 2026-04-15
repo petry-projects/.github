@@ -196,11 +196,15 @@ detect_required_checks() {
     local ci_wf_name
     ci_wf_name=$(workflow_name "ci.yml")
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch ci.yml content once; used for first-job detection and secret-scan check below
     local ci_content ci_decoded
     ci_content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
       --jq '.content' 2>/dev/null || echo "")
     ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
+<<<<<<< HEAD
     # Fetch the first job name from ci.yml
     local ci_job_name
     ci_job_name=$(echo "$ci_decoded" \
@@ -211,6 +215,11 @@ detect_required_checks() {
       --jq '.content' 2>/dev/null \
       | base64 -d 2>/dev/null \
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
+=======
+    # Fetch the first job name from ci.yml
+    local ci_job_name
+    ci_job_name=$(echo "$ci_decoded" \
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
       | awk '
           /^jobs:/ { in_jobs=1; found=0; next }
           in_jobs && /^  [a-zA-Z0-9_-]+:/ && !found {
@@ -230,13 +239,19 @@ detect_required_checks() {
       checks+=("$ci_job_name")
     fi
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
     # --- Secret scan (gitleaks) — included when ci.yml contains the gitleaks action ---
     if echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
       checks+=("Secret scan (gitleaks)")
     fi
+<<<<<<< HEAD
 =======
 >>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
   fi
 
   # Output as newline-separated list (guard against empty array with set -u)

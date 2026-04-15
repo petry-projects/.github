@@ -4,9 +4,13 @@
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   standards/push-protection.md#required-repo-level-settings
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+#   standards/push-protection.md#required-repo-level-settings
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -145,12 +149,17 @@ apply_settings() {
 >>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 apply_settings() {
   local repo="$1"
+  local repo_json="$2"
   info "Applying standard settings to $ORG/$repo ..."
 
-  # Fetch current settings
+  # Extract current settings from the pre-fetched repo JSON
   local current
+<<<<<<< HEAD
   current=$(gh api "repos/$ORG/$repo" --jq '{
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+  current=$(echo "$repo_json" | jq '{
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
@@ -171,6 +180,7 @@ apply_settings() {
   }' 2>/dev/null || echo "{}")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
     err "Could not parse settings for $ORG/$repo"
     return 1
@@ -180,6 +190,10 @@ apply_settings() {
 =======
   if [ "$current" = "{}" ]; then
     err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+=======
+  if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
+    err "Could not parse settings for $ORG/$repo"
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     return 1
   fi
 
@@ -415,6 +429,9 @@ if [ "$1" = "--all" ]; then
   failed=0
   for repo in $repos; do
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch full repo JSON once and share across functions
     repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
     if [ "$repo_json" = "{}" ]; then
@@ -452,6 +469,9 @@ if [ "$1" = "--all" ]; then
   ok "All repos processed successfully"
 else
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
   repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
   if [ "$repo_json" = "{}" ]; then
     err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"

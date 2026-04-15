@@ -254,10 +254,16 @@ but the categories are universal.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
+<<<<<<< HEAD
 Every repository MUST have all five quality checks configured and required.
 The specific check names and ecosystem configurations vary by repo, but the
 categories are universal.
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+Every repository MUST have the following quality checks configured and
+required. The specific check names and ecosystem configurations vary by repo,
+but the categories are universal.
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
 #### Required Check Categories
 
@@ -271,6 +277,7 @@ categories are universal.
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
 | **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
+<<<<<<< HEAD
 
 > **Check names must match exactly.** GitHub-managed CodeQL produces a check named
 > `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
@@ -289,6 +296,8 @@ categories are universal.
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
 #### Ecosystem-Specific Configuration
 

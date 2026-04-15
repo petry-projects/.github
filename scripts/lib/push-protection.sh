@@ -246,6 +246,7 @@ pp_check_secret_scan_ci_job() {
   fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Accept either the gitleaks action or the gitleaks CLI (inline or block run:).
   # The action requires a paid org license (gitleaks.io); the CLI installed via
   # binary download is a license-free alternative.
@@ -253,6 +254,10 @@ pp_check_secret_scan_ci_job() {
 =======
   if ! echo "$ci_content" | grep -qiE 'gitleaks'; then
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+  # Match actual action references, not bare mentions in comments or docs.
+  if ! echo "$ci_content" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
+>>>>>>> eaa792d (Add org-wide push protection standard (#134))
     add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
       "\`ci.yml\` does not contain a job using \`gitleaks\` — add the secret-scan job from the standard" \
       "$PP_STANDARD_REF#required-ci-job"
