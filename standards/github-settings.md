@@ -142,9 +142,9 @@ rules are deprecated — migrate existing classic rules to rulesets.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have all six quality checks configured and required.
-The specific check names and ecosystem configurations vary by repo, but the
-categories are universal.
+Every repository MUST have the following quality checks configured and
+required. The specific check names and ecosystem configurations vary by repo,
+but the categories are universal.
 
 #### Required Check Categories
 

@@ -269,9 +269,10 @@ check_dependabot_config() {
 # ---------------------------------------------------------------------------
 check_repo_settings() {
   local repo="$1"
+  local repo_json="$2"
 
   local settings
-  settings=$(gh_api "repos/$ORG/$repo" --jq '{
+  settings=$(echo "$repo_json" | jq '{
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     has_wiki: .has_wiki,
@@ -310,13 +311,18 @@ check_repo_settings() {
 # ---------------------------------------------------------------------------
 check_push_protection() {
   local repo="$1"
+  local repo_json="$2"
 
   # --- security_and_analysis flags ---
+  # Uses the pre-fetched repo JSON to avoid a duplicate API call.
+  # Checks all 5 settings that apply-repo-settings.sh enforces.
   local sa
-  sa=$(gh_api "repos/$ORG/$repo" --jq '{
+  sa=$(echo "$repo_json" | jq '{
     secret_scanning: .security_and_analysis.secret_scanning.status,
     push_protection: .security_and_analysis.secret_scanning_push_protection.status,
-    non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status
+    ai_detection: .security_and_analysis.secret_scanning_ai_detection.status,
+    non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status,
+    dependabot_security_updates: .security_and_analysis.dependabot_security_updates.status
   }' 2>/dev/null || echo "{}")
 
   if [ "$sa" != "{}" ]; then
@@ -336,11 +342,27 @@ check_push_protection() {
         "standards/push-protection.md#required-repo-level-settings"
     fi
 
+    local ai_status
+    ai_status=$(echo "$sa" | jq -r '.ai_detection // "null"')
+    if [ "$ai_status" != "enabled" ]; then
+      add_finding "$repo" "push-protection" "ai_detection_enabled" "warning" \
+        "Secret scanning AI detection not enabled (current: \`$ai_status\`)" \
+        "standards/push-protection.md#required-repo-level-settings"
+    fi
+
     local np_status
     np_status=$(echo "$sa" | jq -r '.non_provider_patterns // "null"')
     if [ "$np_status" != "enabled" ]; then
       add_finding "$repo" "push-protection" "non_provider_patterns_enabled" "warning" \
         "Secret scanning non-provider patterns not enabled (current: \`$np_status\`)" \
+        "standards/push-protection.md#required-repo-level-settings"
+    fi
+
+    local ds_status
+    ds_status=$(echo "$sa" | jq -r '.dependabot_security_updates // "null"')
+    if [ "$ds_status" != "enabled" ]; then
+      add_finding "$repo" "push-protection" "dependabot_security_updates_enabled" "warning" \
+        "Dependabot security updates not enabled (current: \`$ds_status\`)" \
         "standards/push-protection.md#required-repo-level-settings"
     fi
   fi
@@ -1125,11 +1147,15 @@ main() {
       info "Detected ecosystems: ${ECOSYSTEMS[*]}"
     fi
 
+    # Fetch full repo JSON once and share with settings/push-protection checks
+    local repo_json
+    repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_dependabot_config "$repo"
-    check_repo_settings "$repo"
-    check_push_protection "$repo"
+    check_repo_settings "$repo" "$repo_json"
+    check_push_protection "$repo" "$repo_json"
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"

@@ -77,11 +77,12 @@ apply_labels() {
 
 apply_settings() {
   local repo="$1"
+  local repo_json="$2"
   info "Applying standard settings to $ORG/$repo ..."
 
-  # Fetch current settings
+  # Extract current settings from the pre-fetched repo JSON
   local current
-  current=$(gh api "repos/$ORG/$repo" --jq '{
+  current=$(echo "$repo_json" | jq '{
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
@@ -93,8 +94,8 @@ apply_settings() {
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
 
-  if [ "$current" = "{}" ]; then
-    err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+  if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
+    err "Could not parse settings for $ORG/$repo"
     return 1
   fi
 
@@ -163,11 +164,12 @@ apply_settings() {
 
 apply_security_analysis() {
   local repo="$1"
+  local repo_json="$2"
   info "Applying security & analysis settings to $ORG/$repo ..."
 
-  # Fetch current security_and_analysis settings
+  # Extract current security_and_analysis from the pre-fetched repo JSON
   local sa
-  sa=$(gh api "repos/$ORG/$repo" --jq '{
+  sa=$(echo "$repo_json" | jq '{
     secret_scanning: .security_and_analysis.secret_scanning.status,
     secret_scanning_push_protection: .security_and_analysis.secret_scanning_push_protection.status,
     secret_scanning_ai_detection: .security_and_analysis.secret_scanning_ai_detection.status,
@@ -191,7 +193,6 @@ apply_security_analysis() {
   )
 
   local needs_patch=false
-  local payload="{"
 
   for key in "${!SA_EXPECTED[@]}"; do
     local actual
@@ -204,12 +205,7 @@ apply_security_analysis() {
     else
       ok "  $key: already $actual"
     fi
-    # Always include all keys in the payload to keep the PATCH idempotent
-    payload+="\"${key}\": {\"status\": \"${expected}\"},"
   done
-
-  # Remove trailing comma, close object
-  payload="${payload%,}}"
 
   if [ "$needs_patch" = false ]; then
     ok "$ORG/$repo security_and_analysis already fully compliant"
@@ -221,10 +217,22 @@ apply_security_analysis() {
     return 0
   fi
 
-  gh api -X PATCH "repos/$ORG/$repo" \
-    -F "security_and_analysis=$payload" > /dev/null 2>&1 \
-    && ok "$ORG/$repo security_and_analysis updated successfully" \
-    || err "Failed to update security_and_analysis for $ORG/$repo (token may lack admin scope)"
+  # Build payload with jq to avoid string-concatenation pitfalls
+  local payload
+  payload=$(jq -n '{
+    secret_scanning: {status: "enabled"},
+    secret_scanning_push_protection: {status: "enabled"},
+    secret_scanning_ai_detection: {status: "enabled"},
+    secret_scanning_non_provider_patterns: {status: "enabled"},
+    dependabot_security_updates: {status: "enabled"}
+  }')
+
+  if ! gh api -X PATCH "repos/$ORG/$repo" \
+    -F "security_and_analysis=$payload" > /dev/null 2>&1; then
+    err "Failed to update security_and_analysis for $ORG/$repo (token may lack admin scope)"
+    return 1
+  fi
+  ok "$ORG/$repo security_and_analysis updated successfully"
 }
 
 # ---------------------------------------------------------------------------
@@ -252,8 +260,16 @@ if [ "$1" = "--all" ]; then
 
   failed=0
   for repo in $repos; do
-    apply_settings "$repo" || failed=$((failed + 1))
-    apply_security_analysis "$repo" || failed=$((failed + 1))
+    # Fetch full repo JSON once and share across functions
+    repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+    if [ "$repo_json" = "{}" ]; then
+      err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+      failed=$((failed + 1))
+      continue
+    fi
+
+    apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
+    apply_security_analysis "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
   done
 
@@ -264,7 +280,13 @@ if [ "$1" = "--all" ]; then
 
   ok "All repos processed successfully"
 else
-  apply_settings "$1"
-  apply_security_analysis "$1"
+  repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
+  if [ "$repo_json" = "{}" ]; then
+    err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"
+    exit 1
+  fi
+
+  apply_settings "$1" "$repo_json"
+  apply_security_analysis "$1" "$repo_json"
   apply_labels "$1"
 fi
