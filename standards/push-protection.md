@@ -86,8 +86,9 @@ gh api -X PATCH "orgs/petry-projects" \
 
 ### Required repo-level settings
 
-Every repository MUST have the following security features turned on. The
-compliance audit checks these flags via `GET /repos/{owner}/{repo}`:
+Every repository MUST have the following security features turned on. These
+flags are exposed via `GET /repos/{owner}/{repo}` and SHOULD be verified by the
+compliance audit (see [Compliance Audit Checks](#compliance-audit-checks)):
 
 | Setting | Path in API response | Required value |
 |---------|----------------------|----------------|
@@ -105,12 +106,15 @@ gh api -X PATCH "repos/petry-projects/<repo>" \
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
-    "secret_scanning_non_provider_patterns": {"status": "enabled"}
+    "secret_scanning_non_provider_patterns": {"status": "enabled"},
+    "dependabot_security_updates": {"status": "enabled"}
   }'
 ```
 
-`scripts/apply-repo-settings.sh` MUST enforce these values alongside the
-existing merge and label settings — see
+`scripts/apply-repo-settings.sh` does not yet enforce these
+`security_and_analysis` values. A follow-up change MUST add that enforcement
+alongside the existing merge and label settings; until then, apply these
+settings using the API example above. See
 [Application](#application-to-a-repository) below.
 
 ### Custom secret scanning patterns
@@ -118,12 +122,12 @@ existing merge and label settings — see
 The org MUST configure the following custom patterns in addition to the
 provider-supplied ones:
 
-| Pattern name | Regex (illustrative) | Rationale |
-|--------------|----------------------|-----------|
+| Pattern name | Pattern (illustrative) | Rationale |
+|--------------|------------------------|-----------|
 | `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
 | `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
 | `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
-| `generic-high-entropy` | High-entropy strings assigned to `*_TOKEN`, `*_SECRET`, `*_KEY` env vars | Catches untyped long strings in YAML and `.env` files |
+| `generic-high-entropy` | `(?:_TOKEN\|_SECRET\|_KEY)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{32,}` | Catches untyped long strings in YAML and `.env` files |
 
 Custom patterns are configured at **Org settings → Code security → Secret
 scanning → Custom patterns**. Each new pattern MUST be dry-run against all
@@ -165,7 +169,7 @@ Install locally with:
 ```bash
 pip install pre-commit
 pre-commit install
-pre-commit run gitleaks --all-files   # one-off scan of existing history
+pre-commit run gitleaks --all-files   # one-off scan of all tracked files
 ```
 
 ### Agent workstation requirements
@@ -203,25 +207,28 @@ secret-scan:
     security-events: write
   steps:
     - name: Checkout (full history)
-      uses: actions/checkout@v5
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0
 
     - name: Run gitleaks
-      uses: gitleaks/gitleaks-action@v2
+      uses: gitleaks/gitleaks-action@<lookup-sha> # v2 — SHA-pin per Action Pinning Policy
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+> **Note:** The `gitleaks/gitleaks-action` SHA above is a placeholder. When
+> adopting this pattern, look up the current SHA for the `v2` tag and pin to it
+> per the [Action Pinning Policy](ci-standards.md#action-pinning-policy).
+
 The job MUST:
 
 - Use `fetch-depth: 0` so the full git history is scanned, not just the
   PR diff
 - Pass `--redact` so leaked values are NEVER written to workflow logs
-- Fail the build (`--exit-code 1`) when any finding at or above severity
-  `medium` is detected
+- Fail the build (`--exit-code 1`) when `gitleaks` reports any finding
 - Run as a **required check** via the `code-quality` ruleset
   (see [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories))
 
