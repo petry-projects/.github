@@ -3,6 +3,7 @@
 #
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
+#   standards/push-protection.md#required-repo-level-settings
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -82,11 +83,12 @@ apply_labels() {
 
 apply_settings() {
   local repo="$1"
+  local repo_json="$2"
   info "Applying standard settings to $ORG/$repo ..."
 
-  # Fetch current settings
+  # Extract current settings from the pre-fetched repo JSON
   local current
-  current=$(gh api "repos/$ORG/$repo" --jq '{
+  current=$(echo "$repo_json" | jq '{
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
@@ -98,8 +100,8 @@ apply_settings() {
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
 
-  if [ "$current" = "{}" ]; then
-    err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+  if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
+    err "Could not parse settings for $ORG/$repo"
     return 1
   fi
 
@@ -249,7 +251,15 @@ if [ "$1" = "--all" ]; then
 
   failed=0
   for repo in $repos; do
-    apply_settings "$repo" || failed=$((failed + 1))
+    # Fetch full repo JSON once and share across functions
+    repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+    if [ "$repo_json" = "{}" ]; then
+      err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+      failed=$((failed + 1))
+      continue
+    fi
+
+    apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
@@ -262,7 +272,13 @@ if [ "$1" = "--all" ]; then
 
   ok "All repos processed successfully"
 else
-  apply_settings "$1"
+  repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
+  if [ "$repo_json" = "{}" ]; then
+    err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"
+    exit 1
+  fi
+
+  apply_settings "$1" "$repo_json"
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
   apply_codeql_default_setup "$1"
