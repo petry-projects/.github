@@ -531,7 +531,7 @@ check_repo_settings() {
 =======
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
+    actual=$(echo "$settings" | jq -r ".$key | if . == null then \"null\" else tostring end")
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
 >>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
