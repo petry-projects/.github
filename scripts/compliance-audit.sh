@@ -5,6 +5,7 @@
 #   standards/ci-standards.md
 #   standards/dependabot-policy.md
 #   standards/github-settings.md
+#   standards/push-protection.md
 #
 # Outputs:
 #   $REPORT_DIR/findings.json   — machine-readable findings
@@ -302,6 +303,114 @@ check_repo_settings() {
       "standards/github-settings.md#general"
   fi
 
+}
+
+# ---------------------------------------------------------------------------
+# Check: Push protection (secret scanning + gitleaks CI)
+# ---------------------------------------------------------------------------
+check_push_protection() {
+  local repo="$1"
+
+  # --- security_and_analysis flags ---
+  local sa
+  sa=$(gh_api "repos/$ORG/$repo" --jq '{
+    secret_scanning: .security_and_analysis.secret_scanning.status,
+    push_protection: .security_and_analysis.secret_scanning_push_protection.status,
+    non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status
+  }' 2>/dev/null || echo "{}")
+
+  if [ "$sa" != "{}" ]; then
+    local ss_status
+    ss_status=$(echo "$sa" | jq -r '.secret_scanning // "null"')
+    if [ "$ss_status" != "enabled" ]; then
+      add_finding "$repo" "push-protection" "secret_scanning_enabled" "error" \
+        "Secret scanning is not enabled (current: \`$ss_status\`)" \
+        "standards/push-protection.md#required-repo-level-settings"
+    fi
+
+    local pp_status
+    pp_status=$(echo "$sa" | jq -r '.push_protection // "null"')
+    if [ "$pp_status" != "enabled" ]; then
+      add_finding "$repo" "push-protection" "push_protection_enabled" "error" \
+        "Push protection is not enabled (current: \`$pp_status\`)" \
+        "standards/push-protection.md#required-repo-level-settings"
+    fi
+
+    local np_status
+    np_status=$(echo "$sa" | jq -r '.non_provider_patterns // "null"')
+    if [ "$np_status" != "enabled" ]; then
+      add_finding "$repo" "push-protection" "non_provider_patterns_enabled" "warning" \
+        "Secret scanning non-provider patterns not enabled (current: \`$np_status\`)" \
+        "standards/push-protection.md#required-repo-level-settings"
+    fi
+  fi
+
+  # --- Open secret scanning alerts ---
+  local alert_count=0
+  local alert_raw
+  if alert_raw=$(gh_api "repos/$ORG/$repo/secret-scanning/alerts?state=open" 2>/dev/null); then
+    alert_count=$(echo "$alert_raw" | jq 'length' 2>/dev/null || echo "0")
+  fi
+  if [ "$alert_count" -gt 0 ]; then
+    add_finding "$repo" "push-protection" "open_secret_alerts" "error" \
+      "$alert_count open secret scanning alert(s) — rotate and remediate immediately" \
+      "standards/push-protection.md#incident-response"
+  fi
+
+  # --- CI secret-scan job using gitleaks ---
+  local ci_content
+  ci_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null || echo "")
+  if [ -n "$ci_content" ]; then
+    local ci_decoded
+    ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
+    if [ -n "$ci_decoded" ] && ! echo "$ci_decoded" | grep -q 'gitleaks'; then
+      add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
+        "CI workflow \`ci.yml\` does not contain a \`gitleaks\` secret-scan job" \
+        "standards/push-protection.md#layer-3--ci-secret-scanning-secondary-defense"
+    fi
+  fi
+
+  # --- .gitignore secrets block ---
+  local gi_content
+  gi_content=$(gh_api "repos/$ORG/$repo/contents/.gitignore" --jq '.content' 2>/dev/null || echo "")
+  if [ -n "$gi_content" ]; then
+    local gi_decoded
+    gi_decoded=$(echo "$gi_content" | base64 -d 2>/dev/null || echo "")
+    local missing_entries=()
+    for pattern in '.env' '*.pem' '*.key'; do
+      if ! echo "$gi_decoded" | grep -qF "$pattern"; then
+        missing_entries+=("$pattern")
+      fi
+    done
+    if [ ${#missing_entries[@]} -gt 0 ]; then
+      add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
+        ".gitignore missing secret-related entries: ${missing_entries[*]}" \
+        "standards/push-protection.md#required-gitignore-entries"
+    fi
+  else
+    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
+      "No \`.gitignore\` file found — secrets-related entries are required" \
+      "standards/push-protection.md#required-gitignore-entries"
+  fi
+
+  # --- Recent push protection bypasses (last 30 days) ---
+  local bypass_count=0
+  local bypass_raw
+  if bypass_raw=$(gh_api "repos/$ORG/$repo/secret-scanning/push-protection-bypasses" 2>/dev/null); then
+    # Filter to last 30 days
+    local cutoff
+    cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-30d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+    if [ -n "$cutoff" ]; then
+      bypass_count=$(echo "$bypass_raw" | jq --arg cutoff "$cutoff" '[.[] | select(.created_at > $cutoff)] | length' 2>/dev/null || echo "0")
+    else
+      bypass_count=$(echo "$bypass_raw" | jq 'length' 2>/dev/null || echo "0")
+    fi
+  fi
+  if [ "$bypass_count" -gt 0 ]; then
+    add_finding "$repo" "push-protection" "push_protection_bypasses_recent" "warning" \
+      "$bypass_count push protection bypass(es) in the last 30 days — verify each has a documented justification" \
+      "standards/push-protection.md#what-to-do-when-push-protection-blocks-your-push"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -765,6 +874,7 @@ create_umbrella_issue() {
   # Each group: category_keys|display_name|remediation_script
   local groups=(
     "settings|Repository Settings|apply-repo-settings.sh"
+    "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
@@ -953,7 +1063,7 @@ HEREDOC
 
 HEREDOC
 
-  for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
+  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -1019,6 +1129,7 @@ main() {
     check_action_pinning "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo"
+    check_push_protection "$repo"
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"

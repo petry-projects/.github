@@ -3,6 +3,7 @@
 #
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
+#   standards/push-protection.md#required-repo-level-settings
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -160,6 +161,72 @@ apply_settings() {
   ok "$ORG/$repo settings updated successfully"
 }
 
+apply_security_analysis() {
+  local repo="$1"
+  info "Applying security & analysis settings to $ORG/$repo ..."
+
+  # Fetch current security_and_analysis settings
+  local sa
+  sa=$(gh api "repos/$ORG/$repo" --jq '{
+    secret_scanning: .security_and_analysis.secret_scanning.status,
+    secret_scanning_push_protection: .security_and_analysis.secret_scanning_push_protection.status,
+    secret_scanning_ai_detection: .security_and_analysis.secret_scanning_ai_detection.status,
+    secret_scanning_non_provider_patterns: .security_and_analysis.secret_scanning_non_provider_patterns.status,
+    dependabot_security_updates: .security_and_analysis.dependabot_security_updates.status
+  }' 2>/dev/null || echo "{}")
+
+  if [ "$sa" = "{}" ]; then
+    err "Could not fetch security_and_analysis for $ORG/$repo — check token permissions"
+    return 1
+  fi
+
+  # Expected: all features enabled
+  # standards/push-protection.md#required-repo-level-settings
+  declare -A SA_EXPECTED=(
+    [secret_scanning]="enabled"
+    [secret_scanning_push_protection]="enabled"
+    [secret_scanning_ai_detection]="enabled"
+    [secret_scanning_non_provider_patterns]="enabled"
+    [dependabot_security_updates]="enabled"
+  )
+
+  local needs_patch=false
+  local payload="{"
+
+  for key in "${!SA_EXPECTED[@]}"; do
+    local actual
+    actual=$(echo "$sa" | jq -r ".$key // \"null\"")
+    local expected="${SA_EXPECTED[$key]}"
+
+    if [ "$actual" != "$expected" ]; then
+      info "  $key: $actual → $expected"
+      needs_patch=true
+    else
+      ok "  $key: already $actual"
+    fi
+    # Always include all keys in the payload to keep the PATCH idempotent
+    payload+="\"${key}\": {\"status\": \"${expected}\"},"
+  done
+
+  # Remove trailing comma, close object
+  payload="${payload%,}}"
+
+  if [ "$needs_patch" = false ]; then
+    ok "$ORG/$repo security_and_analysis already fully compliant"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "true" ]; then
+    skip "DRY_RUN=true — skipping security_and_analysis PATCH for $ORG/$repo"
+    return 0
+  fi
+
+  gh api -X PATCH "repos/$ORG/$repo" \
+    -F "security_and_analysis=$payload" > /dev/null 2>&1 \
+    && ok "$ORG/$repo security_and_analysis updated successfully" \
+    || err "Failed to update security_and_analysis for $ORG/$repo (token may lack admin scope)"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -186,6 +253,7 @@ if [ "$1" = "--all" ]; then
   failed=0
   for repo in $repos; do
     apply_settings "$repo" || failed=$((failed + 1))
+    apply_security_analysis "$repo" || failed=$((failed + 1))
     apply_labels "$repo"
   done
 
@@ -197,5 +265,6 @@ if [ "$1" = "--all" ]; then
   ok "All repos processed successfully"
 else
   apply_settings "$1"
+  apply_security_analysis "$1"
   apply_labels "$1"
 fi

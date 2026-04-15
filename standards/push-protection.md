@@ -111,10 +111,8 @@ gh api -X PATCH "repos/petry-projects/<repo>" \
   }'
 ```
 
-`scripts/apply-repo-settings.sh` does not yet enforce these
-`security_and_analysis` values. A follow-up change MUST add that enforcement
-alongside the existing merge and label settings; until then, apply these
-settings using the API example above. See
+`scripts/apply-repo-settings.sh` enforces these values alongside the
+existing merge and label settings — see
 [Application](#application-to-a-repository) below.
 
 ### Custom secret scanning patterns
@@ -212,16 +210,12 @@ secret-scan:
         fetch-depth: 0
 
     - name: Run gitleaks
-      uses: gitleaks/gitleaks-action@<lookup-sha> # v2 — SHA-pin per Action Pinning Policy
+      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
       with:
         args: detect --source . --redact --verbose --exit-code 1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
-
-> **Note:** The `gitleaks/gitleaks-action` SHA above is a placeholder. When
-> adopting this pattern, look up the current SHA for the `v2` tag and pin to it
-> per the [Action Pinning Policy](ci-standards.md#action-pinning-policy).
 
 The job MUST:
 
