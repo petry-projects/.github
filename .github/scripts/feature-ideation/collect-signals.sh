@@ -92,7 +92,7 @@ main() {
   # against that here rather than requiring every test to stub this extra call.
   if [ -z "$last_successful_run" ] || [ "$last_successful_run" = "null" ] || \
      ! printf '%s' "$last_successful_run" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'; then
-    last_successful_run=$(date_days_ago 30)
+    last_successful_run="$(date_days_ago 30)T00:00:00Z"
     printf '[collect-signals] no prior successful run found; using 30-day fallback: %s\n' \
       "$last_successful_run" >&2
   else
