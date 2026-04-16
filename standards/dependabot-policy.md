@@ -16,6 +16,7 @@ security posture than chasing every minor/patch release.
    affect application stability and staying current reduces CI attack surface.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
 <<<<<<< HEAD
+<<<<<<< HEAD
 4. **Auto-merge** after all CI checks pass, approving and merging eligible PRs.
    Approvals come from members of the `@petry-projects/org-leads` team listed
    in every repo's `CODEOWNERS` file (see
@@ -28,6 +29,13 @@ security posture than chasing every minor/patch release.
 4. **Auto-merge** security patches and minor updates after all CI checks pass, using a
    GitHub App token to satisfy branch protection (CODEOWNERS review bypass for bot PRs).
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+4. **Auto-merge** after all CI checks pass, using a GitHub App token to satisfy
+   branch protection (CODEOWNERS review bypass for bot PRs). Eligible updates:
+   - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
+   - **App ecosystems**: patch and minor security updates only (major requires human review)
+   - **Indirect (transitive) dependencies**: all updates regardless of version bump
+>>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
    Uses `gh pr merge --auto` to wait for required checks before merging.
 5. **Vulnerability audit CI check** runs on every PR and push to `main`, failing the
    build if any dependency has a known advisory. This is a required status check.
@@ -174,6 +182,7 @@ Behavior:
   major, since actions are SHA-pinned and CI catches breaking interface changes
 - For **app ecosystems**: approves **patch** and **minor** updates (and indirect
   dependency updates); **major** updates are left for human review
+<<<<<<< HEAD
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
 ## Update and Merge Behind PRs Workflow
@@ -311,6 +320,8 @@ and submit a fresh approval.
 - For **patch** and **minor** updates (and indirect dependency updates):
   approves the PR and enables auto-merge (waits for all required CI checks)
 - **Major** updates are left for human review
+=======
+>>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
 <<<<<<< HEAD
