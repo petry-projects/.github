@@ -93,14 +93,30 @@ jobs:
               if gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
                 -X PUT -f update_method=merge \
                 --silent; then
-                echo "  Branch updated — re-approving to refresh stale approval"
-                # After update-branch, the approval becomes stale (dismiss_stale_reviews_on_push).
-                # Re-approve so the PR is both current AND approved, allowing merge to proceed.
-                if gh pr review "$PR_NUMBER" --repo "$REPO" --approve --body "Re-approved after branch update to keep-to-date with main." \
-                  --silent; then
-                  echo "  Re-approved PR #$PR_NUMBER"
+                echo "  Branch updated"
+                # Only re-approve if auto-merge is enabled. Auto-merge is set exclusively
+                # by the dependabot-automerge workflow after confirming eligibility (patch/
+                # minor updates or GitHub Actions). This guards against re-approving PRs
+                # that the policy intentionally leaves for human review (e.g. major non-
+                # Actions updates).
+                #
+                # Note: update-branch creates a merge commit authored by GitHub's
+                # infrastructure (not the app token), so require_last_push_approval is
+                # satisfied when the app re-approves — the pusher and approver are
+                # different identities.
+                AUTO_MERGE_ENABLED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json autoMergeRequest --jq '.autoMergeRequest != null')
+                if [[ "$AUTO_MERGE_ENABLED" == "true" ]]; then
+                  echo "  Re-approving to refresh stale approval"
+                  if gh pr review "$PR_NUMBER" --repo "$REPO" --approve \
+                    --body "Re-approved after branch update to keep up-to-date with main." \
+                    --silent; then
+                    echo "  Re-approved PR #$PR_NUMBER"
+                  else
+                    echo "  Warning: failed to re-approve PR #$PR_NUMBER — PR will remain blocked until manually re-approved"
+                  fi
                 else
-                  echo "  Warning: failed to re-approve PR #$PR_NUMBER (may still merge if approval is stale)"
+                  echo "  Skipping re-approval — auto-merge not enabled (PR may require human review)"
                 fi
               else
                 echo "Warning: failed to update PR #$PR_NUMBER"
