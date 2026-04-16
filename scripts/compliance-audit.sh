@@ -302,7 +302,7 @@ check_repo_settings() {
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key | if . == null then \"null\" else tostring end")
+    actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
@@ -312,7 +312,7 @@ check_repo_settings() {
 
   # Default branch
   local default_branch
-  default_branch=$(echo "$settings" | jq -r '.default_branch')
+  default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
   if [ "$default_branch" != "main" ]; then
     add_finding "$repo" "settings" "default-branch" "error" \
       "Default branch is \`$default_branch\`, should be \`main\`" \
