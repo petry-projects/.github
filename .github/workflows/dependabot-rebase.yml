@@ -42,11 +42,15 @@ on:
     branches:
       - main
 <<<<<<< HEAD
+<<<<<<< HEAD
   schedule:
     - cron: '0 */4 * * *' # every 4 hours — safety net when no pushes to main trigger the chain
   workflow_dispatch: # allow manual trigger to flush Dependabot PR queue
 =======
 >>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
+=======
+  workflow_dispatch: # allow manual trigger to flush Dependabot PR queue
+>>>>>>> 06f5ce5 (feat(dependabot-rebase): add workflow_dispatch trigger (#139))
 
 concurrency:
   group: dependabot-update-and-merge
