@@ -56,7 +56,7 @@ jobs:
           # so all version bumps (including major) are eligible.
           # App ecosystem PRs can only exist as security updates (limit: 0)
           # and must be patch/minor/indirect — major requires human review.
-          if [[ "$ECOSYSTEM" != "github-actions" && \
+          if [[ "$ECOSYSTEM" != "github_actions" && \
                 "$UPDATE_TYPE" != "version-update:semver-patch" && \
                 "$UPDATE_TYPE" != "version-update:semver-minor" && \
                 "$DEP_TYPE" != "indirect" ]]; then

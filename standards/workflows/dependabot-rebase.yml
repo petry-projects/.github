@@ -8,10 +8,10 @@
 #     lives in the reusable workflow above.
 #   • You MAY change: nothing in this file in normal use. Adopt verbatim.
 #   • You MUST NOT change: trigger event, the concurrency group name,
-#     the `uses:` line, `secrets: inherit`, or the job-level `permissions:`
-#     block — reusable workflows can be granted no more permissions than the
-#     calling job has, so removing the stanza breaks the reusable's gh API
-#     calls.
+#     the `uses:` line, the explicit secrets block, or the job-level
+#     `permissions:` block — reusable workflows can be granted no more
+#     permissions than the calling job has, so removing the stanza breaks
+#     the reusable's gh API calls.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,5 +39,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@v1
-    secrets: inherit
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@ae9709f4466dec60a5733c9e7487f69dcd004e05 # v1
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
