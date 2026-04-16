@@ -44,7 +44,6 @@ Each repository must have the following baseline files:
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
-| `.github/workflows/dependabot-rebase.yml` | Rebase behind Dependabot PRs after merges |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
 | `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
 
@@ -53,6 +52,12 @@ ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
 each merge to `main` leaves remaining Dependabot PRs behind and they stall
 indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
 not when a branch merely falls behind.
+
+The following file is conditional:
+
+| File | When required |
+|------|--------------|
+| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) or CODEOWNERS review enforcement (`require_code_owner_review: true`) applies. See [Applying to a Repository](#applying-to-a-repository) for details. |
 
 ## Dependabot Templates
 
