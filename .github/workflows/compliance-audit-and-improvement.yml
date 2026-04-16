@@ -291,7 +291,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_SCORECARD_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1
+        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
