@@ -7,10 +7,10 @@
 #   APP_PRIVATE_KEY — GitHub App private key
 #
 # Auto-approves and enables auto-merge for Dependabot PRs that are:
-#   - GitHub Actions updates (patch or minor version bumps)
+#   - GitHub Actions updates (any version bump, including major)
 #   - Security updates for any ecosystem (patch or minor)
 #   - Indirect (transitive) dependency updates
-# Major version updates are always left for human review.
+# Major version updates for non-Actions ecosystems are left for human review.
 # Uses --auto so the merge waits for all required CI checks to pass.
 #
 # Safety model: application ecosystems use open-pull-requests-limit: 0 in
@@ -47,17 +47,19 @@ jobs:
           DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
           ECOSYSTEM="${{ steps.metadata.outputs.package-ecosystem }}"
 
-          # Must be patch, minor, or indirect
-          if [[ "$UPDATE_TYPE" != "version-update:semver-patch" && \
+          # GitHub Actions are SHA-pinned and don't affect app runtime,
+          # so all version bumps (including major) are eligible.
+          # App ecosystem PRs can only exist as security updates (limit: 0)
+          # and must be patch/minor/indirect — major requires human review.
+          if [[ "$ECOSYSTEM" != "github-actions" && \
+                "$UPDATE_TYPE" != "version-update:semver-patch" && \
                 "$UPDATE_TYPE" != "version-update:semver-minor" && \
                 "$DEP_TYPE" != "indirect" ]]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping: major update requires human review"
+            echo "Skipping: major update for $ECOSYSTEM requires human review"
             exit 0
           fi
 
-          # GitHub Actions version updates are always eligible
-          # App ecosystem PRs can only exist as security updates (limit: 0)
           echo "eligible=true" >> "$GITHUB_OUTPUT"
           echo "Auto-merge eligible: ecosystem=$ECOSYSTEM update=$UPDATE_TYPE"
 
