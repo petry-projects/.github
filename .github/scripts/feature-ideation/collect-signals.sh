@@ -86,7 +86,12 @@ main() {
     --json createdAt \
     --jq '.[0].createdAt // empty' \
     2>/dev/null || true)
-  if [ -z "$last_successful_run" ] || [ "$last_successful_run" = "null" ]; then
+  # Validate that the result looks like an ISO-8601 datetime. The real `gh`
+  # CLI applies the --jq filter and emits a bare timestamp; in test environments
+  # the gh stub returns raw fixture JSON (without applying --jq), so we guard
+  # against that here rather than requiring every test to stub this extra call.
+  if [ -z "$last_successful_run" ] || [ "$last_successful_run" = "null" ] || \
+     ! printf '%s' "$last_successful_run" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'; then
     last_successful_run=$(date_days_ago 30)
     printf '[collect-signals] no prior successful run found; using 30-day fallback: %s\n' \
       "$last_successful_run" >&2
