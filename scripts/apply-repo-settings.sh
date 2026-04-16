@@ -3,6 +3,7 @@
 #
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
+#   standards/push-protection.md#required-repo-level-settings
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -34,6 +35,12 @@ info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
+
+# Source the shared push-protection library — provides
+# pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/push-protection.sh
+. "$SCRIPT_DIR/lib/push-protection.sh"
 
 usage() {
   echo "Usage: $0 <repo-name>"
@@ -76,11 +83,12 @@ apply_labels() {
 
 apply_settings() {
   local repo="$1"
+  local repo_json="$2"
   info "Applying standard settings to $ORG/$repo ..."
 
-  # Fetch current settings
+  # Extract current settings from the pre-fetched repo JSON
   local current
-  current=$(gh api "repos/$ORG/$repo" --jq '{
+  current=$(echo "$repo_json" | jq '{
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
@@ -92,8 +100,8 @@ apply_settings() {
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
 
-  if [ "$current" = "{}" ]; then
-    err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+  if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
+    err "Could not parse settings for $ORG/$repo"
     return 1
   fi
 
@@ -161,6 +169,64 @@ apply_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
+#
+# Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
+# CodeQL is configured via the code-scanning/default-setup endpoint, not a
+# per-repo workflow file. Languages are auto-detected from the default branch.
+#
+# Idempotent: if state is already "configured", we no-op. If "not-configured",
+# we PATCH to enable. Repos listed in CODEQL_ADVANCED_EXCEPTIONS are skipped
+# (they are approved to keep an inline codeql.yml; see the escape hatch in
+# ci-standards.md §2). The API rejects updates on repos without code scanning
+# capability (e.g. private repos without GHAS); we log a warning and continue
+# so that --all runs are not blocked by a single unsupported repo.
+# ---------------------------------------------------------------------------
+
+# Repos approved for advanced CodeQL setup (inline codeql.yml).
+# Each entry must have a corresponding standards PR documenting the exception.
+CODEQL_ADVANCED_EXCEPTIONS=()
+
+apply_codeql_default_setup() {
+  local repo="$1"
+  info "Configuring CodeQL default setup for $ORG/$repo ..."
+
+  # Skip repos approved for advanced (inline workflow) CodeQL setup.
+  for exception in "${CODEQL_ADVANCED_EXCEPTIONS[@]}"; do
+    if [ "$repo" = "$exception" ]; then
+      skip "  $repo is in CODEQL_ADVANCED_EXCEPTIONS — skipping default setup"
+      return 0
+    fi
+  done
+
+  local current_state
+  current_state=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+
+  if [ "$current_state" = "configured" ]; then
+    ok "  CodeQL default setup already configured"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" = "true" ]; then
+    skip "DRY_RUN=true — would enable CodeQL default setup (current state: ${current_state:-unknown})"
+    return 0
+  fi
+
+  local api_err
+  if api_err=$(gh api -X PATCH "repos/$ORG/$repo/code-scanning/default-setup" \
+       -F state=configured \
+       -F query_suite=default 2>&1); then
+    ok "  CodeQL default setup enabled"
+  else
+    # Non-fatal: log warning and continue so --all runs are not blocked by
+    # repos that lack code scanning capability (private without GHAS,
+    # archived, or empty default branch).
+    warn "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
+    return 0
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -185,8 +251,18 @@ if [ "$1" = "--all" ]; then
 
   failed=0
   for repo in $repos; do
-    apply_settings "$repo" || failed=$((failed + 1))
+    # Fetch full repo JSON once and share across functions
+    repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+    if [ "$repo_json" = "{}" ]; then
+      err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
+      failed=$((failed + 1))
+      continue
+    fi
+
+    apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
+    pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
+    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -196,6 +272,14 @@ if [ "$1" = "--all" ]; then
 
   ok "All repos processed successfully"
 else
-  apply_settings "$1"
+  repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
+  if [ "$repo_json" = "{}" ]; then
+    err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"
+    exit 1
+  fi
+
+  apply_settings "$1" "$repo_json"
   apply_labels "$1"
+  pp_apply_security_and_analysis "$1"
+  apply_codeql_default_setup "$1"
 fi

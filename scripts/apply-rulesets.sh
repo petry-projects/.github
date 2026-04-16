@@ -6,7 +6,7 @@
 #
 # Rulesets managed:
 #   pr-quality    — pull request review requirements and merge policy
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
+#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -78,17 +78,29 @@ detect_required_checks() {
     fi
   fi
 
-  # --- CodeQL ---
-  if echo "$workflows" | grep -qx "codeql.yml"; then
-    local cq_wf_name
-    cq_wf_name=$(workflow_name "codeql.yml")
-    if [ -n "$cq_wf_name" ]; then
-      # CodeQL uses "Analyze" or "Analyze (<language>)" as job names;
-      # add the generic "Analyze" and language-specific variants below
-      checks+=("$cq_wf_name / Analyze")
+  # --- CodeQL (GitHub-managed default setup) ---
+  # CodeQL is no longer driven by a per-repo workflow file. We probe the
+  # default-setup API: if the state is "configured", GitHub publishes results
+  # under the required-status-check context name `CodeQL` (single context,
+  # regardless of how many languages are detected). See
+  # standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
+  #
+  # Note: a stray .github/workflows/codeql.yml is drift and will be flagged
+  # by compliance-audit.sh#check_codeql_default_setup. We do NOT fall back
+  # to a workflow-derived check name here, because doing so would let drift
+  # silently satisfy the rule and bypass remediation.
+  local codeql_state codeql_err
+  if codeql_err=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>&1); then
+    codeql_state="$codeql_err"  # on success, stdout holds the state value
+    if [ "$codeql_state" = "configured" ]; then
+      checks+=("CodeQL")
     else
-      checks+=("Analyze")
+      info "  CodeQL default setup not configured for $repo (state: $codeql_state) — skipping CodeQL required check. Run apply-repo-settings.sh first."
     fi
+  else
+    err "  Failed to probe CodeQL default-setup state for $repo. API error: $codeql_err"
+    err "  Check that GH_TOKEN has code-scanning scope and the repo exists."
+    return 1
   fi
 
   # --- Tier 1 centralized workflows ---
@@ -123,11 +135,14 @@ detect_required_checks() {
   if echo "$workflows" | grep -qx "ci.yml"; then
     local ci_wf_name
     ci_wf_name=$(workflow_name "ci.yml")
+    # Fetch ci.yml content once; used for first-job detection and secret-scan check below
+    local ci_content ci_decoded
+    ci_content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
+      --jq '.content' 2>/dev/null || echo "")
+    ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
     # Fetch the first job name from ci.yml
     local ci_job_name
-    ci_job_name=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
-      --jq '.content' 2>/dev/null \
-      | base64 -d 2>/dev/null \
+    ci_job_name=$(echo "$ci_decoded" \
       | awk '
           /^jobs:/ { in_jobs=1; found=0; next }
           in_jobs && /^  [a-zA-Z0-9_-]+:/ && !found {
@@ -145,6 +160,11 @@ detect_required_checks() {
       checks+=("$ci_wf_name / $ci_job_name")
     else
       checks+=("$ci_job_name")
+    fi
+
+    # --- Secret scan (gitleaks) — included when ci.yml contains the gitleaks action ---
+    if echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
+      checks+=("Secret scan (gitleaks)")
     fi
   fi
 

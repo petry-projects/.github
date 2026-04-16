@@ -33,6 +33,22 @@ SHOULD be audited and brought into compliance.
 | **Has Wiki** | `false` | Disabled — documentation lives in the repo |
 | **Has Discussions** | `true` | **Required** — enables Discussions for ideation, feedback, and community engagement (see [Discussions Configuration](#discussions-configuration)) |
 
+### Security & Analysis
+
+All repositories MUST have the following security features enabled. These are
+the enforcement primitives behind the [Push Protection Standard](push-protection.md).
+
+| Setting | Standard Value | Rationale |
+|---------|---------------|-----------|
+| **Secret scanning** | `enabled` | Detect leaked credentials in history and new commits |
+| **Secret scanning push protection** | `enabled` | Block pushes containing known secret patterns at the server side |
+| **Secret scanning AI detection** | `enabled` | Catch generic secrets missed by regex patterns |
+| **Secret scanning non-provider patterns** | `enabled` | Private keys, HTTP basic auth, high-entropy strings |
+| **Dependabot security updates** | `enabled` | Automated patches for known-vulnerable dependencies |
+
+> See the full requirements, custom patterns, CI job, incident response flow,
+> and compliance audit checks in [`push-protection.md`](push-protection.md).
+
 ### Merge Settings
 
 | Setting | Standard Value | Rationale |
@@ -126,19 +142,20 @@ rules are deprecated — migrate existing classic rules to rulesets.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have all five quality checks configured and required.
-The specific check names and ecosystem configurations vary by repo, but the
-categories are universal.
+Every repository MUST have the following quality checks configured and
+required. The specific check names and ecosystem configurations vary by repo,
+but the categories are universal.
 
 #### Required Check Categories
 
 | Check | Required | Check Name(s) | Notes |
 |-------|----------|---------------|-------|
 | **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
-| **CodeQL** | All repos | `Analyze` or `Analyze (<language>)` | SAST — all ecosystems present in the repo must be configured |
+| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
 | **Claude Code** | All repos | `claude` | AI code review on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
+| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
 
 #### Ecosystem-Specific Configuration
 
