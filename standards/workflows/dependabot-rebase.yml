@@ -38,11 +38,12 @@
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All rebase/merge serialization logic
 #     lives in the reusable workflow above.
-#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MAY change: the SHA in the `uses:` line when upgrading the reusable
+#     workflow version (bump SHA to latest main of petry-projects/.github).
 #   • You MUST NOT change: trigger event, the concurrency group name,
-#     the `uses:` line, the explicit secrets block, or the job-level
-#     `permissions:` block — reusable workflows can be granted no more
-#     permissions than the calling job has, so removing the stanza breaks
+#     the explicit secrets block, or the job-level `permissions:` block —
+#     reusable workflows can be granted no more permissions than the calling
+#     job has, so removing the stanza breaks
 #     the reusable's gh API calls.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
@@ -111,8 +112,14 @@ jobs:
 <<<<<<< HEAD
   dependabot-rebase:
     permissions:
+<<<<<<< HEAD
       pull-requests: write # call update-branch API on behind PRs and merge when ready
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@b51e2edf830ea085be0277bcf3174c7b3ec8f958 # v1
+=======
+      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write  # re-approve PRs after branch update
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@f5c167c903b50ae64c1c6445a02d60cd940d4253 # v1
+>>>>>>> 6810a7f (fix(dependabot-rebase): update SHA pin and clarify caller stub header)
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
