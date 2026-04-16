@@ -48,8 +48,8 @@ jobs:
   update-and-merge:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
+      contents: write   # needed for update-branch (may touch .github/workflows/)
+      pull-requests: write
     steps:
       - name: Check app secrets
         env:
@@ -69,7 +69,8 @@ jobs:
 
       - name: Update and merge Dependabot PRs
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GITHUB_TOKEN for update-branch (has workflows permission)
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}  # app token reserved for approvals
           REPO: ${{ github.repository }}
         run: |
           # Find open Dependabot PRs
@@ -108,7 +109,10 @@ jobs:
                   --json autoMergeRequest --jq '.autoMergeRequest != null')
                 if [[ "$AUTO_MERGE_ENABLED" == "true" ]]; then
                   echo "  Re-approving to refresh stale approval"
-                  if gh pr review "$PR_NUMBER" --repo "$REPO" --approve \
+                  # Use app token for approval so it is attributed to the trusted app identity.
+                  # GITHUB_TOKEN (used above for update-branch) is the pusher, so the
+                  # approver (app) satisfies require_last_push_approval.
+                  if GH_TOKEN="$APP_TOKEN" gh pr review "$PR_NUMBER" --repo "$REPO" --approve \
                     --body "Re-approved after branch update to keep up-to-date with main." \
                     --silent; then
                     echo "  Re-approved PR #$PR_NUMBER"
@@ -170,7 +174,10 @@ jobs:
             fi
 
             echo "  All checks pass — merging PR #$PR_NUMBER"
-            if gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
+            # Use app token for merge so the resulting push to main is attributed to the
+            # app bot — this triggers the workflow again via push event, enabling the
+            # self-sustaining chain that serializes Dependabot PR merges one at a time.
+            if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
               -X PUT -f merge_method=squash \
               --silent; then
               echo "  Merged PR #$PR_NUMBER"
