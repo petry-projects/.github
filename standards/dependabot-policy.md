@@ -35,14 +35,19 @@ security posture than chasing every minor/patch release.
 
 ## Configuration Files
 
-Each repository must have:
+Each repository must have the following baseline files:
 
 | File | Purpose |
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
-| `.github/workflows/dependabot-rebase.yml` | Rebase behind Dependabot PRs after merges |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
+
+The following file is conditional:
+
+| File | When required |
+|------|--------------|
+| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) or CODEOWNERS review enforcement (`require_code_owner_review: true`) applies. See [Applying to a Repository](#applying-to-a-repository) for details. |
 
 ## Dependabot Templates
 
