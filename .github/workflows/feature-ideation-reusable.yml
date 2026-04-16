@@ -311,8 +311,12 @@ jobs:
           TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
+<<<<<<< HEAD
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
+>>>>>>> 27c7738 (chore(deps): Bump anthropics/claude-code-action from 1.0.89 to 1.0.93 (#128))
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # CRITICAL: pass the workflow's GITHUB_TOKEN explicitly so the
