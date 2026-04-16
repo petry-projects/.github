@@ -79,6 +79,9 @@ jobs:
           # App ecosystem PRs can only exist as security updates (limit: 0)
           # and must be patch/minor/indirect — major requires human review.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
           if [[ "$ECOSYSTEM" != "github_actions" && \
                 "$UPDATE_TYPE" != "version-update:semver-patch" && \
                 "$UPDATE_TYPE" != "version-update:semver-minor" && \
