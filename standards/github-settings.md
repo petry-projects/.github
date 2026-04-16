@@ -131,7 +131,7 @@ rules are deprecated — migrate existing classic rules to rulesets.
 | **Dismiss stale reviews on push** | **Yes** — prevents merging unreviewed code after approval |
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
-| **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
+| **Require last push approval** | **No** — redundant with `required_linear_history`; preventing merge-blocking interactions with Dependabot auto-merge on rebased PRs (see [Dependabot Auto-Merge Policy](dependabot-policy.md#update-and-merge-behind-prs-workflow)) |
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
@@ -139,6 +139,27 @@ rules are deprecated — migrate existing classic rules to rulesets.
 > **CODEOWNERS:** Repos SHOULD add a `CODEOWNERS` file defining ownership.
 > Without one, the "Require code owner review" setting has no effect. Add
 > CODEOWNERS incrementally as team structure and domain ownership solidifies.
+
+#### Ruleset Interaction with Dependabot Auto-Merge
+
+The `pr-quality` ruleset includes `required_linear_history: true` and previously
+had `require_last_push_approval: true`. These rules, while individually sound,
+interact poorly with Dependabot auto-merge:
+
+1. When a Dependabot PR is created, the ruleset requires approval before merge
+2. When a later Dependabot PR merges and advances `main`, earlier PRs fall BEHIND
+3. The `dependabot-rebase` workflow updates behind PRs to bring them current
+4. However, if `require_last_push_approval: true`, the rebase counts as a new "push"
+   and **stales all approvals**, requiring new approvals even though nothing
+   substantive changed
+5. Result: PRs get stuck in a rebase→need-approval→rebase loop
+
+**Solution**: Setting `require_last_push_approval: false` breaks this loop. The
+`required_linear_history` check is sufficient to prevent non-linear merges, so
+the additional `require_last_push_approval` gate adds friction without value.
+
+See [`dependabot-policy.md`](dependabot-policy.md) for more details on Dependabot
+auto-merge and the rebase workflow.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
