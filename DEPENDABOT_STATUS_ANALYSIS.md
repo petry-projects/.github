@@ -219,24 +219,38 @@ The `dependabot-rebase.yml` workflow is correct but could be more proactive:
 
 ---
 
-## Proposed PR: Relax Ruleset Constraint
+## Proposed Solution: Enhance Rebase Workflow (OPTION C)
 
-**Title**: `fix(pr-quality-ruleset): remove require_last_push_approval to unblock Dependabot auto-merge`
+**The Correct Fix**: The problem is not the rule, but the workflow.
+
+**Root Cause**: When `dependabot-rebase` updates a PR branch, the rebase counts as a "push" and `dismiss_stale_reviews_on_push: true` marks the approval stale. The PR is now current but un-approved.
+
+**Solution**: Have the rebase workflow re-approve PRs after updating them.
 
 **Changes**:
-- Update `.github/rulesets/14872168` to set `require_last_push_approval: false`
-- Update `standards/github-settings.md` to document the rationale
+- Update `.github/workflows/dependabot-rebase-reusable.yml`:
+  - After updating a Dependabot PR branch, immediately re-approve it
+  - Use the app-bot token to provide the approval
+  - Add explanatory comment
 
 **Rationale**:
-- `required_linear_history` already prevents non-current merges
-- `require_last_push_approval` is redundant and stalls Dependabot PRs
-- Approvals are still required (no weakening of review gates)
-- Applies to all repos org-wide, fixing Dependabot queues everywhere
+- Fixes the Dependabot stall without weakening developer safeguards
+- `require_last_push_approval: true` still protects against humans sneaking code
+- Re-approval after rebase is legitimate (branch-only change, no code change)
+- Workflow-level fix, not org-wide policy change
+- Surgical and specific — only affects Dependabot, not human PRs
+
+**Benefits**:
+- ✅ Dependabot PRs can merge once current AND approved
+- ✅ Human developers still have the safeguard
+- ✅ No ruleset changes (lowest risk)
+- ✅ No compensating controls needed
+- ✅ Applies immediately to all repos via reusable workflow
 
 **Testing**:
-- Current blocked PRs should merge immediately after rebase
-- Human-authored PRs continue to require approvals as before
-- No change to bot-bypass logic
+- PR #125 and #129 should merge automatically once rebased
+- Re-approvals from the workflow should be visible in PR history
+- Human-authored PRs continue to require separate approvals as before
 
 ---
 
@@ -247,6 +261,6 @@ The `dependabot-rebase.yml` workflow is correct but could be more proactive:
 | Dependabot auto-merge workflow for GitHub Actions | ✅ Working | PR #125, #129 approved and auto-merge enabled |
 | Policy document accuracy | ✅ Correct | Policy matches implementation |
 | Hourly review/approve workflow | ❌ None exists | Only event-driven approvals from automerge |
-| Root cause of stalled PRs | ✅ Identified | Ruleset `required_linear_history` + `require_last_push_approval` |
-| Recommended fix | ✅ Proposed | Relax `require_last_push_approval` to false |
+| Root cause of stalled PRs | ✅ Identified | Rebase workflow doesn't re-approve after updating branches |
+| Recommended fix | ✅ Proposed | Enhance rebase workflow to re-approve PRs after branch updates (Option C) |
 
