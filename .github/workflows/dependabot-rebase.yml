@@ -62,6 +62,7 @@ jobs:
   dependabot-rebase:
     permissions:
 <<<<<<< HEAD
+<<<<<<< HEAD
       contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
       pull-requests: write  # re-approve PRs after branch update
     uses: ./.github/workflows/dependabot-rebase-reusable.yml  # local ref — always current
@@ -70,6 +71,11 @@ jobs:
       pull-requests: read
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@ae9709f4466dec60a5733c9e7487f69dcd004e05 # v1
 >>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
+=======
+      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write  # re-approve PRs after branch update
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@35e0e20fc0fb3d8f40b0408a85b0eb208213cb1e # v1
+>>>>>>> f5c167c (fix(dependabot-rebase): use GITHUB_TOKEN for update-branch to fix HTTP 403 on workflow files)
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
