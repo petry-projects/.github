@@ -31,7 +31,7 @@ set -euo pipefail
 # if the constants drift, AND the bats `signals-schema: SCHEMA_VERSION
 # constant matches schema file` test enforces this in CI.
 # Caught by CodeRabbit review on PR petry-projects/.github#85.
-SCHEMA_VERSION="1.0.0"
+SCHEMA_VERSION="1.1.0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/gh-safe.sh
@@ -70,6 +70,29 @@ main() {
   thirty_days_ago=$(date_days_ago 30)
   local scan_date
   scan_date=$(date_now_iso)
+
+  # --- Feed checkpoint: last successful run ----------------------------------
+  # Used by the analyst to skip feed entries already reviewed. The current run
+  # is still in-progress, so --status=success --limit=1 reliably returns the
+  # previous successful run. Falls back to 30 days ago on first-ever run or
+  # after a long gap so the initial scan is bounded.
+  printf '[collect-signals] resolving feed checkpoint (last successful run)\n' >&2
+  local last_successful_run
+  last_successful_run=$(gh run list \
+    --repo "$REPO" \
+    --workflow="feature-ideation.yml" \
+    --status=success \
+    --limit=1 \
+    --json createdAt \
+    --jq '.[0].createdAt // empty' \
+    2>/dev/null || true)
+  if [ -z "$last_successful_run" ] || [ "$last_successful_run" = "null" ]; then
+    last_successful_run=$(date_days_ago 30)
+    printf '[collect-signals] no prior successful run found; using 30-day fallback: %s\n' \
+      "$last_successful_run" >&2
+  else
+    printf '[collect-signals] feed checkpoint: %s\n' "$last_successful_run" >&2
+  fi
 
   local truncation_warnings='[]'
 
@@ -201,6 +224,7 @@ GRAPHQL
     "$bug_reports" \
     "$REPO" \
     "$scan_date" \
+    "$last_successful_run" \
     "$SCHEMA_VERSION" \
     "$truncation_warnings")
 
@@ -217,6 +241,7 @@ GRAPHQL
       printf -- '- **Bug reports:** %s\n' "$(jq '.bug_reports.count' "$output_path")"
       printf -- '- **Merged PRs (30d):** %s\n' "$(jq '.merged_prs_30d.count' "$output_path")"
       printf -- '- **Existing Ideas discussions:** %s\n' "$(jq '.ideas_discussions.count' "$output_path")"
+      printf -- '- **Feed checkpoint (last successful run):** %s\n' "$(jq -r '.last_successful_run' "$output_path")"
       local warn_count
       warn_count=$(jq '.truncation_warnings | length' "$output_path")
       if [ "$warn_count" -gt 0 ]; then

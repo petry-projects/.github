@@ -475,8 +475,21 @@ split into two parts:
    Defines the schedule, the `workflow_dispatch` inputs, and calls the
    reusable workflow with a single required parameter: `project_context`.
 
+3. **Reputable Source List** (repo-local, per-repo):
+   Each adopting repo maintains its own copy at `.github/feature-ideation-sources.md`
+   (or the path passed via the `sources_file` workflow input).
+   Use [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   as a starter template, then customise it for your project. The Phase 2 prompt
+   instructs Mary to read that file as her **starting set** for market research —
+   vendor blogs, RSS feeds, podcasts, and YouTube channels organised by category.
+   If the file is absent Mary falls back to open web search automatically.
+   Each repo owns its own copy; add or remove entries via PR in that repo.
+
 When we tune the prompt, the model, or the gotchas, we change one file in
-this repo and every adopter picks up the change on their next scheduled run.
+this repo. Repos tracking `@main` pick up the change on their next scheduled
+run; repos pinned to `@v1` pick it up only after the `v1` tag is updated and
+then on their next scheduled run. The source list is repo-local and propagates
+only within the repo that owns it.
 
 #### Adopting in a new repo
 
@@ -485,11 +498,15 @@ this repo and every adopter picks up the change on their next scheduled run.
 2. Replace the `project_context` value with a 3-5 sentence description of
    what the project is, who it serves, and the competitive landscape Mary
    should research. This is the **only** required edit.
-3. (Optional) Adjust the cron schedule, focus area choices, or pin to a
+3. (Optional) Copy [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   to `.github/feature-ideation-sources.md` in the target repo and customise
+   it for your project. Mary reads YOUR copy — not the central template — so
+   each repo controls its own source list.
+4. (Optional) Adjust the cron schedule, focus area choices, or pin to a
    tag instead of `@main` if you want change isolation.
-4. Ensure GitHub Discussions is enabled with an "Ideas" category — see
+5. Ensure GitHub Discussions is enabled with an "Ideas" category — see
    [Discussions Configuration](github-settings.md#discussions-configuration).
-5. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
+6. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
 
 #### Critical gotchas (baked into the reusable workflow)
 

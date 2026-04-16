@@ -76,6 +76,16 @@ on:
         required: false
         default: 'v1'
         type: string
+      sources_file:
+        description: |
+          Path (relative to repo root) of the repo-local reputable source list.
+          Defaults to .github/feature-ideation-sources.md. Copy
+          standards/feature-ideation-sources.md from petry-projects/.github as
+          a starting point and customise it for your project. If the file is
+          absent Mary falls back to open web search automatically.
+        required: false
+        default: '.github/feature-ideation-sources.md'
+        type: string
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: 'Claude Code OAuth token (org-level secret)'
@@ -94,6 +104,7 @@ jobs:
       issues: read
       pull-requests: read
       discussions: read
+      actions: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -295,8 +306,54 @@ jobs:
             **Adopt the "Market Research" mindset.** Your sole job in this phase is to gather
             hard evidence — not to generate ideas yet. Be a detective, not a brainstormer.
 
-            Using the **Project Context** above as your starting point, research the
-            competitive landscape and emerging trends. Cover at minimum:
+            ### Start from the repo-local Reputable Source List
+
+            Before running open-ended web searches, **check for a repo-local source list**:
+
+            ```
+            Read: ${{ inputs.sources_file }}
+            ```
+
+            That file (if present) lists vendor blogs, RSS feeds, podcasts, and YouTube
+            channels this repo's maintainers trust as primary signal sources, organised
+            by category. Treat it as your **starting set**:
+
+            - Pick the categories most relevant to the **Project Context** above. A
+              CLI dev tool warrants different sources than a security scanner or a
+              data pipeline.
+            - For each relevant source, do a targeted `WebFetch` or `WebSearch`
+              scoped to that domain to find what's new. Prefer fetching the listed
+              RSS/Atom feed URL when one is given — it gives you structured "what
+              changed" data without scraping HTML.
+            - The list is a **floor, not a ceiling.** If a thread takes you to a
+              source not in the list and that source is reputable, follow it. After
+              the run, if a high-value source kept coming up but wasn't listed,
+              **mention it in the step summary** under a "Suggested additions to
+              source list" heading so a human can PR it in.
+            - If the file is missing or empty, log a warning to the step summary
+              and proceed with open web search — do not fail the run.
+
+            ### Use the feed checkpoint to avoid re-reviewing old content
+
+            `$SIGNALS_PATH` contains a `last_successful_run` ISO-8601 timestamp — the
+            date/time the previous successful run of this workflow completed.
+
+            **When fetching any RSS/Atom feed or scraping a changelog/blog:**
+            - Only consider entries whose `pubDate` / `updated` / `published` field
+              is **after** `last_successful_run`.
+            - If a feed does not expose dates, or if all entries predate the checkpoint,
+              note that in your research log and move on — do not re-summarise content
+              you have no evidence is new.
+            - If `last_successful_run` is more than 60 days in the past (e.g. after a
+              long workflow outage), ignore the checkpoint and process the full feed to
+              avoid missing major developments.
+
+            This keeps each weekly run focused on genuinely new signal rather than
+            re-processing the same content at Opus 4.6 cost.
+
+            Using the **Project Context** above as your starting point and the
+            source list as your seed, research the competitive landscape and
+            emerging trends. Cover at minimum:
 
             ### Competitive Landscape
             - What are competitors in this space shipping recently?
