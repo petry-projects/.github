@@ -50,7 +50,6 @@ jobs:
     permissions:
       contents: write   # needed for update-branch (may touch .github/workflows/)
       pull-requests: write
-      workflows: write  # needed to update branches containing workflow file changes
     steps:
       - name: Check app secrets
         env:
