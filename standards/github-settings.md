@@ -199,11 +199,15 @@ done
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
 | **Allow auto-merge** | **Yes** — enables automatic merge when all status checks pass and requirements are satisfied |
 =======
 | **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+| **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
+>>>>>>> 35e0e20 (fix(dependabot-rebase): re-approve PRs after branch updates to unblock auto-merge)
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
