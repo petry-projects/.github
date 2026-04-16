@@ -19,6 +19,7 @@ security posture than chasing every minor/patch release.
    branch protection (CODEOWNERS review bypass for bot PRs). Eligible updates:
    - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
    - **App ecosystems**: patch and minor security updates only (major requires human review)
+   - **Indirect (transitive) dependencies**: all updates regardless of version bump
    Uses `gh pr merge --auto` to wait for required checks before merging.
 5. **Vulnerability audit CI check** runs on every PR and push to `main`, failing the
    build if any dependency has a known advisory. This is a required status check.
