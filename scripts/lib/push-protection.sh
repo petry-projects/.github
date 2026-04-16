@@ -200,7 +200,8 @@ pp_check_secret_scan_ci_job() {
     return
   fi
 
-  if ! echo "$ci_content" | grep -qiE 'gitleaks'; then
+  # Match actual action references, not bare mentions in comments or docs.
+  if ! echo "$ci_content" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
     add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
       "\`ci.yml\` does not contain a job using \`gitleaks\` — add the secret-scan job from the standard" \
       "$PP_STANDARD_REF#required-ci-job"
