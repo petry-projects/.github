@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the change propagates everywhere on next run. |
+| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -475,8 +475,21 @@ split into two parts:
    Defines the schedule, the `workflow_dispatch` inputs, and calls the
    reusable workflow with a single required parameter: `project_context`.
 
+3. **Reputable Source List** (repo-local, per-repo):
+   Each adopting repo maintains its own copy at `.github/feature-ideation-sources.md`
+   (or the path passed via the `sources_file` workflow input).
+   Use [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   as a starter template, then customise it for your project. The Phase 2 prompt
+   instructs Mary to read that file as her **starting set** for market research —
+   vendor blogs, RSS feeds, podcasts, and YouTube channels organised by category.
+   If the file is absent Mary falls back to open web search automatically.
+   Each repo owns its own copy; add or remove entries via PR in that repo.
+
 When we tune the prompt, the model, or the gotchas, we change one file in
-this repo and every adopter picks up the change on their next scheduled run.
+this repo. Repos tracking `@main` pick up the change on their next scheduled
+run; repos pinned to `@v1` pick it up only after the `v1` tag is updated and
+then on their next scheduled run. The source list is repo-local and propagates
+only within the repo that owns it.
 
 #### Adopting in a new repo
 
@@ -485,11 +498,15 @@ this repo and every adopter picks up the change on their next scheduled run.
 2. Replace the `project_context` value with a 3-5 sentence description of
    what the project is, who it serves, and the competitive landscape Mary
    should research. This is the **only** required edit.
-3. (Optional) Adjust the cron schedule, focus area choices, or pin to a
+3. (Optional) Copy [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   to `.github/feature-ideation-sources.md` in the target repo and customise
+   it for your project. Mary reads YOUR copy — not the central template — so
+   each repo controls its own source list.
+4. (Optional) Adjust the cron schedule, focus area choices, or pin to a
    tag instead of `@main` if you want change isolation.
-4. Ensure GitHub Discussions is enabled with an "Ideas" category — see
+5. Ensure GitHub Discussions is enabled with an "Ideas" category — see
    [Discussions Configuration](github-settings.md#discussions-configuration).
-5. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
+6. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
 
 #### Critical gotchas (baked into the reusable workflow)
 
