@@ -21,15 +21,17 @@ teardown() {
 
 # Build a multi-call gh script for the standard happy path.
 # Order MUST match collect-signals.sh:
-#   1. gh issue list --state open
-#   2. gh issue list --state closed
-#   3. gh api graphql (categories)
-#   4. gh api graphql (discussions)
-#   5. gh release list
-#   6. gh pr list --state merged
+#   1. gh run list (feed checkpoint — last successful run)
+#   2. gh issue list --state open
+#   3. gh issue list --state closed
+#   4. gh api graphql (categories)
+#   5. gh api graphql (discussions)
+#   6. gh release list
+#   7. gh pr list --state merged
 build_happy_script() {
   local script="${TT_TMP}/gh-script.tsv"
   : >"$script"
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-open.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-closed.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/graphql-categories.json" >>"$script"
@@ -115,7 +117,9 @@ build_happy_script() {
   script="${TT_TMP}/gh-script.tsv"
   err_file="${TT_TMP}/auth-err.txt"
   printf 'HTTP 401: Bad credentials\n' >"$err_file"
-  printf '4\t-\t%s\n' "$err_file" >"$script"
+  # run list (feed checkpoint — silenced with || true, so failure falls back)
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >"$script"
+  printf '4\t-\t%s\n' "$err_file" >>"$script"
   export GH_STUB_SCRIPT="$script"
   rm -f "${TT_TMP}/.gh-stub-counter"
 
@@ -127,6 +131,7 @@ build_happy_script() {
 @test "collect-signals: FAILS LOUD on GraphQL errors envelope (categories)" {
   script="${TT_TMP}/gh-script.tsv"
   : >"$script"
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-open.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-closed.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/graphql-errors-envelope.json" >>"$script"
@@ -183,6 +188,7 @@ JSON
 
   script="${TT_TMP}/gh-script.tsv"
   : >"$script"
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >>"$script"  # feed checkpoint
   printf '0\t%s\t-\n' "$bot_file"   >>"$script"   # open issues — all bots
   printf '0\t%s\t-\n' "$empty_file" >>"$script"   # closed issues
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/graphql-no-ideas-category.json" >>"$script"
@@ -202,6 +208,7 @@ JSON
 @test "collect-signals: emits truncation warning when discussions hasNextPage=true" {
   script="${TT_TMP}/gh-script.tsv"
   : >"$script"
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-open.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-closed.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/graphql-categories.json" >>"$script"
@@ -225,6 +232,7 @@ JSON
 @test "collect-signals: skips discussions when Ideas category absent" {
   script="${TT_TMP}/gh-script.tsv"
   : >"$script"
+  printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/run-list-last-success.txt" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-open.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/issue-list-closed.json" >>"$script"
   printf '0\t%s\t-\n' "${TT_FIXTURES_DIR}/gh-responses/graphql-no-ideas-category.json" >>"$script"
