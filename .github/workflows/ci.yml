@@ -95,3 +95,34 @@ jobs:
       - name: Run AgentShield
         run: |
           npx ecc-agentshield scan --path . --format json --min-severity high
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history)
+        # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
+        # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v4 --jq '.object.sha'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        # Install gitleaks CLI via verified download (pinned version + checksum).
+        # Using the CLI directly avoids the gitleaks-action org license requirement.
+        # To update: gh api repos/gitleaks/gitleaks/releases/assets/<id> -H "Accept: application/octet-stream" | grep linux_x64
+        # Checksum source: gitleaks_8.24.0_checksums.txt (release asset ID 230829272)
+        run: |
+          GITLEAKS_VERSION="8.24.0"
+          GITLEAKS_SHA="cb49b7de5ee986510fe8666ca0273a6cc15eb82571f2f14832c9e8920751f3a4"
+          curl -sLo gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          rm gitleaks.tar.gz
+
+      - name: Run gitleaks
+        run: ./gitleaks detect --source . --redact --verbose --exit-code 1
