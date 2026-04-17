@@ -212,7 +212,7 @@ jobs:
           MATCH_PLAN_PATH: ${{ runner.temp }}/match-plan.json
           TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
-          SOURCES_INSTRUCTION: ${{ inputs.sources_file != '' && format('```\nRead: {0}\n```', inputs.sources_file) || '> No sources_file provided — use open web search.' }}
+          SOURCES_FILE_PATH: ${{ inputs.sources_file }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
         uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
         with:
@@ -311,9 +311,15 @@ jobs:
 
             ### Start from the repo-local Reputable Source List
 
-            Before running open-ended web searches, **check for a repo-local source list**:
+            Before running open-ended web searches, **check for a repo-local source list**.
+            If `$SOURCES_FILE_PATH` is non-empty, read it:
 
-            $SOURCES_INSTRUCTION
+            ```
+            Read: $SOURCES_FILE_PATH
+            ```
+
+            If the path is empty or the file does not exist, log a one-line warning
+            in the step summary under "Source list status" and proceed with open web search.
 
             That file (if present) lists vendor blogs, RSS feeds, podcasts, and YouTube
             channels this repo's maintainers trust as primary signal sources, organised
