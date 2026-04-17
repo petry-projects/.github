@@ -82,6 +82,7 @@ jobs:
           claude_args: |
             --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Edit,Write"
           # yamllint enable rule:line-length
+          # yamllint disable rule:line-length
           prompt: |
             CI check "${{ github.event.check_run.name }}" has failed on PR #${{ github.event.check_run.pull_requests[0].number }}.
 
@@ -98,6 +99,7 @@ jobs:
             4. Apply the minimal fix needed to address the reported issues.
             5. Commit and push the fix to the PR branch.
             6. Leave a concise comment on PR #${{ github.event.check_run.pull_requests[0].number }} explaining what you found and what you changed.
+          # yamllint enable rule:line-length
 
   # Automation mode: issue-triggered work — implement, open PR, review, and notify
   claude-issue:
