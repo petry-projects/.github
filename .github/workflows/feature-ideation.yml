@@ -1,13 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# TEST STUB — petry-projects/.github self-hosted ideation run.
+# TEST STUB — petry-projects/.github self-hosted ideation dry run.
 #
-# This file is NOT part of the PR being tested; it exists on the
-# feat/feature-ideation-sources-list branch only so we can trigger a
-# workflow_dispatch dry run against the new reusable workflow code before
-# the PR is merged to main.
+# This file exists on feat/feature-ideation-sources-list to allow triggering
+# a workflow_dispatch dry run exercising the new reusable workflow code before
+# the PR is merged to main and the v1 tag is bumped.
 #
-# uses: points at the same branch so we exercise our new sources_file input,
-# last_successful_run feed checkpoint, and WORKFLOW_FILE convention.
+# uses: is pinned to the branch HEAD SHA so SonarCloud is satisfied.
 # ─────────────────────────────────────────────────────────────────────────────
 name: Feature Research & Ideation — .github self-test
 
@@ -40,7 +38,7 @@ jobs:
       discussions: write
       actions: read
       id-token: write
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@feat/feature-ideation-sources-list
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@bc8e529ea0f7a9a081d5b3bf829af9e5c8045b0a # feat/feature-ideation-sources-list
     with:
       project_context: |
         petry-projects/.github is the org-level standards and tooling repository
@@ -53,7 +51,7 @@ jobs:
         code review tooling (CodeRabbit, Copilot), security hardening for AI-agent
         workflows (prompt injection, supply-chain), and developer-experience standards
         for LLM-heavy codebases. No public users — this is internal org DevX infrastructure.
-      tooling_ref: 'feat/feature-ideation-sources-list'
+      tooling_ref: 'bc8e529ea0f7a9a081d5b3bf829af9e5c8045b0a'
       sources_file: 'standards/feature-ideation-sources.md'
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
