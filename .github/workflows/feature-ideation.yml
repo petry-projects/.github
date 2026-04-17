@@ -48,6 +48,7 @@ concurrency:
 
 jobs:
   ideate:
+    name: Ideate
     # Permissions cascade from the calling job to the reusable workflow.
     # The reusable workflow's two jobs (gather-signals + analyze) need:
     #   - contents:      read   (checkout, file reads)
