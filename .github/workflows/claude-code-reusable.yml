@@ -49,6 +49,56 @@ jobs:
             actions: read
             checks: read
 
+  # Automation mode: CI failure response — diagnose and fix failing checks on PRs
+  claude-ci-fix:
+    if: >-
+      github.event_name == 'check_run' &&
+      github.event.check_run.conclusion == 'failure' &&
+      github.event.check_run.pull_requests[0].head.repo.full_name == github.repository
+    concurrency:
+      group: claude-ci-fix-pr-${{ github.event.check_run.pull_requests[0].number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          # yamllint disable rule:line-length
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Edit,Write"
+          # yamllint enable rule:line-length
+          prompt: |
+            CI check "${{ github.event.check_run.name }}" has failed on PR #${{ github.event.check_run.pull_requests[0].number }}.
+
+            Check details:
+            - Check: ${{ github.event.check_run.name }}
+            - Conclusion: ${{ github.event.check_run.conclusion }}
+            - Head SHA: ${{ github.event.check_run.head_sha }}
+            - Details URL: ${{ github.event.check_run.details_url }}
+
+            Please diagnose and fix the failure:
+            1. Check out the PR branch: gh pr checkout ${{ github.event.check_run.pull_requests[0].number }}
+            2. Read the failure details — visit the details URL or use `gh run list --commit ${{ github.event.check_run.head_sha }}` and `gh run view` to read the logs. For SonarCloud or external check services, inspect the PR annotations via `gh api repos/{owner}/{repo}/check-runs/${{ github.event.check_run.id }}/annotations`.
+            3. Read the relevant source files and understand the root cause.
+            4. Apply the minimal fix needed to address the reported issues.
+            5. Commit and push the fix to the PR branch.
+            6. Leave a concise comment on PR #${{ github.event.check_run.pull_requests[0].number }} explaining what you found and what you changed.
+
   # Automation mode: issue-triggered work — implement, open PR, review, and notify
   claude-issue:
     if: >-
