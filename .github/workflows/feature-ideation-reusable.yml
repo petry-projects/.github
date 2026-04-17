@@ -202,8 +202,12 @@ jobs:
             .feature-ideation-tooling/.github/schemas/signals.schema.json
 
       - name: Upload signals artifact
+<<<<<<< HEAD
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+>>>>>>> 9a694e5 (chore(deps): Bump actions/upload-artifact from 4.6.2 to 7.0.1 (#125))
         with:
           name: signals
           path: ${{ runner.temp }}/signals.json
@@ -1221,7 +1225,7 @@ jobs:
 
       - name: Upload dry-run log (if present)
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dry-run-log
           path: ${{ runner.temp }}/dry-run.jsonl
