@@ -91,9 +91,11 @@ jobs:
 
             if [[ "$BEHIND" -gt 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind — merging main into branch"
-              if gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
-                -X PUT -f update_method=merge \
-                --silent; then
+              # Capture both stdout and stderr; use if-then to avoid bash -e terminating
+              # the step on non-zero exit before we can inspect the error message.
+              if UPDATE_OUTPUT=$(gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
+                -X PUT -f update_method=merge 2>&1); then
+                if [[ -n "$UPDATE_OUTPUT" ]]; then echo "$UPDATE_OUTPUT"; fi
                 echo "  Branch updated"
                 # Only re-approve if auto-merge is enabled. Auto-merge is set exclusively
                 # by the dependabot-automerge workflow after confirming eligibility (patch/
@@ -123,7 +125,33 @@ jobs:
                   echo "  Skipping re-approval — auto-merge not enabled (PR may require human review)"
                 fi
               else
-                echo "Warning: failed to update PR #$PR_NUMBER"
+                # update-branch failed — check if it's the workflows-permission 403
+                echo "  $UPDATE_OUTPUT"
+                if echo "$UPDATE_OUTPUT" | grep -qF "without \`workflows\` permission"; then
+                  # GitHub blocks update-branch when merging main would add .github/workflows/
+                  # changes and the token (any token) lacks the GitHub App 'workflows' permission.
+                  # Fallback: post @dependabot rebase. Dependabot has the correct permissions to
+                  # push to its own branch. After rebase, the automerge workflow fires on
+                  # pull_request_target/synchronize and re-approves.
+                  #
+                  # Idempotent: skip if a @dependabot rebase comment already exists to avoid
+                  # spamming the PR on every push-to-main trigger.
+                  ALREADY_REQUESTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                    --json comments --jq '[.comments[] | select(.body == "@dependabot rebase")] | length')
+                  if [[ "$ALREADY_REQUESTED" -gt 0 ]]; then
+                    echo "  Skipping — @dependabot rebase already requested (waiting for Dependabot to process)"
+                  else
+                    echo "  Posting @dependabot rebase as fallback"
+                    if GH_TOKEN="$APP_TOKEN" gh pr comment "$PR_NUMBER" --repo "$REPO" \
+                      --body "@dependabot rebase"; then
+                      echo "  Posted @dependabot rebase on PR #$PR_NUMBER"
+                    else
+                      echo "  Warning: failed to post @dependabot rebase — PR #$PR_NUMBER will remain stuck"
+                    fi
+                  fi
+                else
+                  echo "  Warning: failed to update PR #$PR_NUMBER"
+                fi
               fi
               continue
             fi
