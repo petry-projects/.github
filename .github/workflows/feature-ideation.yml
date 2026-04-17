@@ -63,7 +63,11 @@ jobs:
       discussions: write
       actions: read
       id-token: write
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@7bf5a75b92730dedb6db7eacf2881f4c578080ac # v1
+=======
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@208ec2d69b75227d375edf8745d84fbac05a76b2 # v1 — bump SHA after tag update
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     with:
       project_context: |
         petry-projects/.github is the org-level standards and tooling repository

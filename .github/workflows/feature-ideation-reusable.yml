@@ -34,8 +34,14 @@
 # Why a reusable workflow:
 #   - The 5-phase ideation pipeline (Market Research → Brainstorming → Party
 #     Mode → Adversarial → Publish) is universal. Tuning the pattern in one
+<<<<<<< HEAD
 #     place propagates to every BMAD-enabled repo on next run.
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+#     place propagates to every BMAD-enabled repo after the v1 tag is bumped
+#     and their next scheduled run executes. Repos tracking @main pick it up
+#     immediately on their next run.
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 #   - The two critical gotchas (github_token override, ANTHROPIC_MODEL env var)
 #     are baked in here so callers cannot accidentally regress them.
 #
@@ -96,6 +102,9 @@ on:
         default: 'v1'
         type: string
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
       sources_file:
         description: |
           Path (relative to repo root) of the repo-local reputable source list.
@@ -106,10 +115,13 @@ on:
         required: false
         default: '.github/feature-ideation-sources.md'
         type: string
+<<<<<<< HEAD
 =======
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
 =======
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: 'Claude Code OAuth token (org-level secret)'
@@ -128,6 +140,7 @@ jobs:
       issues: read
       pull-requests: read
       discussions: read
+<<<<<<< HEAD
 <<<<<<< HEAD
       actions: read
     env:
@@ -167,6 +180,9 @@ jobs:
       - name: Upload signals artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
 =======
+=======
+      actions: read
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -318,6 +334,7 @@ jobs:
           MATCH_PLAN_PATH: ${{ runner.temp }}/match-plan.json
           TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
+          SOURCES_FILE_PATH: ${{ inputs.sources_file }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
 <<<<<<< HEAD
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
@@ -486,6 +503,9 @@ jobs:
             hard evidence — not to generate ideas yet. Be a detective, not a brainstormer.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
             ### Start from the repo-local Reputable Source List
 
             Before running open-ended web searches, **check for a repo-local source list**.
@@ -538,10 +558,13 @@ jobs:
             Using the **Project Context** above as your starting point and the
             source list as your seed, research the competitive landscape and
             emerging trends. Cover at minimum:
+<<<<<<< HEAD
 =======
             Using the **Project Context** above as your starting point, research the
             competitive landscape and emerging trends. Cover at minimum:
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+>>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 
             ### Competitive Landscape
             - What are competitors in this space shipping recently?
