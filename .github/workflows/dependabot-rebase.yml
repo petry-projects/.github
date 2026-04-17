@@ -6,8 +6,10 @@
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All rebase/merge serialization logic
 #     lives in the reusable workflow above.
-#   • You MAY change: the SHA in the `uses:` line when upgrading the reusable
-#     workflow version (bump SHA to latest main of petry-projects/.github).
+#   • You MAY change: nothing in normal use. NOTE: this file intentionally uses
+#     a LOCAL ref (`./`) instead of a pinned SHA — this repo IS the source of
+#     truth, so a local ref is always current. Other repos use pinned SHAs
+#     (see standards/workflows/dependabot-rebase.yml).
 #   • You MUST NOT change: trigger event, the concurrency group name,
 #     the explicit secrets block, or the job-level `permissions:` block —
 #     reusable workflows can be granted no more permissions than the calling
@@ -41,7 +43,7 @@ jobs:
     permissions:
       contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
       pull-requests: write  # re-approve PRs after branch update
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@f5c167c903b50ae64c1c6445a02d60cd940d4253 # v1
+    uses: ./.github/workflows/dependabot-rebase-reusable.yml  # local ref — always current
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
