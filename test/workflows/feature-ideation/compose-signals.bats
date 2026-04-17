@@ -18,6 +18,7 @@ compose_empty() {
     '[]' '[]' '[]' '[]' '[]' '[]' '[]' \
     'foo/bar' \
     '2026-04-07T00:00:00Z' \
+    '2026-03-07T00:00:00Z' \
     '1.0.0' \
     '[]'
 }
@@ -34,14 +35,14 @@ compose_empty() {
 @test "compose: rejects empty string for any JSON arg" {
   run compose_signals \
     '' '[]' '[]' '[]' '[]' '[]' '[]' \
-    'foo/bar' '2026-04-07T00:00:00Z' '1.0.0' '[]'
+    'foo/bar' '2026-04-07T00:00:00Z' '2026-03-07T00:00:00Z' '1.0.0' '[]'
   [ "$status" -ne 0 ]
 }
 
 @test "compose: rejects non-JSON for any JSON arg" {
   run compose_signals \
     'not json' '[]' '[]' '[]' '[]' '[]' '[]' \
-    'foo/bar' '2026-04-07T00:00:00Z' '1.0.0' '[]'
+    'foo/bar' '2026-04-07T00:00:00Z' '2026-03-07T00:00:00Z' '1.0.0' '[]'
   [ "$status" -ne 0 ]
 }
 
@@ -52,9 +53,9 @@ compose_empty() {
 @test "compose: produces all required top-level fields with empty inputs" {
   run compose_empty
   [ "$status" -eq 0 ]
-  for field in schema_version scan_date repo open_issues closed_issues_30d \
-               ideas_discussions releases merged_prs_30d feature_requests \
-               bug_reports truncation_warnings; do
+  for field in schema_version scan_date last_successful_run repo open_issues \
+               closed_issues_30d ideas_discussions releases merged_prs_30d \
+               feature_requests bug_reports truncation_warnings; do
     printf '%s' "$output" | jq -e "has(\"$field\")" >/dev/null
   done
 }
@@ -63,7 +64,7 @@ compose_empty() {
   open='[{"number":1,"title":"a","labels":[]},{"number":2,"title":"b","labels":[]}]'
   run compose_signals \
     "$open" '[]' '[]' '[]' '[]' '[]' '[]' \
-    'foo/bar' '2026-04-07T00:00:00Z' '1.0.0' '[]'
+    'foo/bar' '2026-04-07T00:00:00Z' '2026-03-07T00:00:00Z' '1.0.0' '[]'
   [ "$status" -eq 0 ]
   count=$(printf '%s' "$output" | jq '.open_issues.count')
   items_len=$(printf '%s' "$output" | jq '.open_issues.items | length')
@@ -74,7 +75,7 @@ compose_empty() {
 @test "compose: schema_version is preserved verbatim" {
   run compose_signals \
     '[]' '[]' '[]' '[]' '[]' '[]' '[]' \
-    'foo/bar' '2026-04-07T00:00:00Z' '2.5.1' '[]'
+    'foo/bar' '2026-04-07T00:00:00Z' '2026-03-07T00:00:00Z' '2.5.1' '[]'
   [ "$status" -eq 0 ]
   v=$(printf '%s' "$output" | jq -r '.schema_version')
   [ "$v" = "2.5.1" ]
@@ -84,7 +85,7 @@ compose_empty() {
   warnings='[{"source":"open_issues","limit":50,"message":"truncated"}]'
   run compose_signals \
     '[]' '[]' '[]' '[]' '[]' '[]' '[]' \
-    'foo/bar' '2026-04-07T00:00:00Z' '1.0.0' "$warnings"
+    'foo/bar' '2026-04-07T00:00:00Z' '2026-03-07T00:00:00Z' '1.0.0' "$warnings"
   [ "$status" -eq 0 ]
   src=$(printf '%s' "$output" | jq -r '.truncation_warnings[0].source')
   [ "$src" = "open_issues" ]
@@ -93,7 +94,7 @@ compose_empty() {
 @test "compose: scan_date and repo round-trip exactly" {
   run compose_signals \
     '[]' '[]' '[]' '[]' '[]' '[]' '[]' \
-    'octocat/hello-world' '2030-01-15T12:34:56Z' '1.0.0' '[]'
+    'octocat/hello-world' '2030-01-15T12:34:56Z' '2029-12-15T12:34:56Z' '1.0.0' '[]'
   [ "$status" -eq 0 ]
   d=$(printf '%s' "$output" | jq -r '.scan_date')
   r=$(printf '%s' "$output" | jq -r '.repo')
