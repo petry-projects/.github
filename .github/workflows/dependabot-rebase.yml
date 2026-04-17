@@ -8,10 +8,14 @@
 #     lives in the reusable workflow above.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> af3c1df (fix(dependabot-rebase): use local ref in this-repo caller, bump SHA in template)
 #   • You MAY change: nothing in normal use. NOTE: this file intentionally uses
 #     a LOCAL ref (`./`) instead of a pinned SHA — this repo IS the source of
 #     truth, so a local ref is always current. Other repos use pinned SHAs
 #     (see standards/workflows/dependabot-rebase.yml).
+<<<<<<< HEAD
 #   • You MUST NOT change: the concurrency group name, the explicit secrets
 #     block, or the job-level `permissions:` block — reusable workflows can
 #     be granted no more permissions than the calling job has, so removing
@@ -25,6 +29,8 @@
 #   • You MAY change: the SHA in the `uses:` line when upgrading the reusable
 #     workflow version (bump SHA to latest main of petry-projects/.github).
 >>>>>>> 6810a7f (fix(dependabot-rebase): update SHA pin and clarify caller stub header)
+=======
+>>>>>>> af3c1df (fix(dependabot-rebase): use local ref in this-repo caller, bump SHA in template)
 #   • You MUST NOT change: trigger event, the concurrency group name,
 #     the explicit secrets block, or the job-level `permissions:` block —
 #     reusable workflows can be granted no more permissions than the calling
@@ -71,6 +77,7 @@ jobs:
       contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
       pull-requests: write  # re-approve PRs after branch update
     uses: ./.github/workflows/dependabot-rebase-reusable.yml  # local ref — always current
+<<<<<<< HEAD
 =======
       contents: read
       pull-requests: read
@@ -85,6 +92,8 @@ jobs:
 =======
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@f5c167c903b50ae64c1c6445a02d60cd940d4253 # v1
 >>>>>>> 6810a7f (fix(dependabot-rebase): update SHA pin and clarify caller stub header)
+=======
+>>>>>>> af3c1df (fix(dependabot-rebase): use local ref in this-repo caller, bump SHA in template)
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
