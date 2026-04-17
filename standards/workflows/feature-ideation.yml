@@ -100,10 +100,10 @@ jobs:
         include A, B, C. Key emerging trends in this space: X, Y, Z."
       # === OPTIONAL: repo-local reputable source list ===
       # Copy standards/feature-ideation-sources.md from petry-projects/.github
-      # to .github/feature-ideation-sources.md and customise it.
-      # The default value below matches the expected location — override only
-      # if you store the file elsewhere.
-      # sources_file: '.github/feature-ideation-sources.md'
+      # to .github/feature-ideation-sources.md and customise it. The reusable
+      # workflow defaults to that path, so you only need to uncomment and change
+      # sources_file below if you store the list somewhere else.
+      # sources_file: 'docs/feature-ideation-sources.md'
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
       dry_run: ${{ inputs.dry_run || false }}

@@ -76,22 +76,31 @@ main() {
   # is still in-progress, so --status=success --limit=1 reliably returns the
   # previous successful run. Falls back to 30 days ago on first-ever run or
   # after a long gap so the initial scan is bounded.
+  # WORKFLOW_FILE — caller-supplied env var for repos that name their stub
+  # something other than the conventional "feature-ideation.yml". Defaults to
+  # the conventional name; no change needed for repos that follow the standard.
   printf '[collect-signals] resolving feed checkpoint (last successful run)\n' >&2
-  local last_successful_run
+  local last_successful_run _run_stderr _run_err
+  _run_stderr=$(mktemp)
   last_successful_run=$(gh run list \
     --repo "$REPO" \
-    --workflow="feature-ideation.yml" \
+    --workflow="${WORKFLOW_FILE:-feature-ideation.yml}" \
     --status=success \
     --limit=1 \
     --json createdAt \
     --jq '.[0].createdAt // empty' \
-    2>/dev/null || true)
+    2>"$_run_stderr" || true)
+  _run_err=$(cat "$_run_stderr")
+  rm -f "$_run_stderr"
   # Validate that the result looks like an ISO-8601 datetime. The real `gh`
   # CLI applies the --jq filter and emits a bare timestamp; in test environments
   # the gh stub returns raw fixture JSON (without applying --jq), so we guard
   # against that here rather than requiring every test to stub this extra call.
   if [ -z "$last_successful_run" ] || [ "$last_successful_run" = "null" ] || \
      ! printf '%s' "$last_successful_run" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'; then
+    if [ -n "$_run_err" ]; then
+      printf '[collect-signals] gh run list warning: %s\n' "$_run_err" >&2
+    fi
     last_successful_run="$(date_days_ago 30)T00:00:00Z"
     printf '[collect-signals] no prior successful run found; using 30-day fallback: %s\n' \
       "$last_successful_run" >&2

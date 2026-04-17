@@ -20,7 +20,9 @@
 # Why a reusable workflow:
 #   - The 5-phase ideation pipeline (Market Research → Brainstorming → Party
 #     Mode → Adversarial → Publish) is universal. Tuning the pattern in one
-#     place propagates to every BMAD-enabled repo on next run.
+#     place propagates to every BMAD-enabled repo after the v1 tag is bumped
+#     and their next scheduled run executes. Repos tracking @main pick it up
+#     immediately on their next run.
 #   - The two critical gotchas (github_token override, ANTHROPIC_MODEL env var)
 #     are baked in here so callers cannot accidentally regress them.
 #
