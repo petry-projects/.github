@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST STUB — petry-projects/.github self-hosted ideation run.
+#
+# This file is NOT part of the PR being tested; it exists on the
+# feat/feature-ideation-sources-list branch only so we can trigger a
+# workflow_dispatch dry run against the new reusable workflow code before
+# the PR is merged to main.
+#
+# uses: points at the same branch so we exercise our new sources_file input,
+# last_successful_run feed checkpoint, and WORKFLOW_FILE convention.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Feature Research & Ideation — .github self-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      research_depth:
+        description: 'Research depth'
+        required: false
+        default: 'standard'
+        type: choice
+        options: [quick, standard, deep]
+      focus_area:
+        description: 'Optional focus area'
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: feature-ideation-self-test
+  cancel-in-progress: true
+
+jobs:
+  ideate:
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      discussions: write
+      actions: read
+      id-token: write
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@feat/feature-ideation-sources-list
+    with:
+      project_context: |
+        petry-projects/.github is the org-level standards and tooling repository
+        for the petry-projects GitHub organisation. It contains the canonical CI/CD
+        standards (ci-standards.md), reusable GitHub Actions workflows (claude-code,
+        feature-ideation, agent-shield, dependabot), and the BMAD Method agentic
+        development framework (multi-skill AI analyst pipeline). Primary consumers
+        are internal project repos (Broodly, TalkTerm, markets). Key emerging trends
+        to track: GitHub Actions platform improvements, agentic CI patterns, AI-assisted
+        code review tooling (CodeRabbit, Copilot), security hardening for AI-agent
+        workflows (prompt injection, supply-chain), and developer-experience standards
+        for LLM-heavy codebases. No public users — this is internal org DevX infrastructure.
+      tooling_ref: 'feat/feature-ideation-sources-list'
+      sources_file: 'standards/feature-ideation-sources.md'
+      focus_area: ${{ inputs.focus_area || '' }}
+      research_depth: ${{ inputs.research_depth || 'standard' }}
+      dry_run: true
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
