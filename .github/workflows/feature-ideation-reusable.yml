@@ -312,9 +312,7 @@ jobs:
 
             Before running open-ended web searches, **check for a repo-local source list**:
 
-            ```
-            Read: ${{ inputs.sources_file }}
-            ```
+            ${{ inputs.sources_file != '' && format('```\nRead: {0}\n```', inputs.sources_file) || '> ⚠️ No `sources_file` input was provided. Proceed with open web search and log a warning in the step summary under "Source list status".' }}
 
             That file (if present) lists vendor blogs, RSS feeds, podcasts, and YouTube
             channels this repo's maintainers trust as primary signal sources, organised
