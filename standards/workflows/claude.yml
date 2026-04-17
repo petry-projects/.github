@@ -88,10 +88,15 @@ on:
   issues:
     types: [labeled]
 <<<<<<< HEAD
+<<<<<<< HEAD
   check_run:
     types: [completed]
 =======
 >>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
+=======
+  check_run:
+    types: [completed]
+>>>>>>> 707a6a0 (feat(claude): trigger Claude to fix CI failures on PRs (#148))
 
 permissions: {}
 
