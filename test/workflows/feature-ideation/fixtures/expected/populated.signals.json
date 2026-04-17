@@ -1,6 +1,7 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "scan_date": "2026-04-07T07:00:00Z",
+  "last_successful_run": "2026-03-31T07:00:00Z",
   "repo": "petry-projects/talkterm",
   "open_issues": {
     "count": 2,

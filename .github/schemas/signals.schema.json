@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/petry-projects/.github/blob/main/.github/schemas/signals.schema.json",
-  "$comment": "version: 1.0.0 — must match SCHEMA_VERSION in collect-signals.sh; enforced by bats",
+  "$comment": "version: 1.1.0 — must match SCHEMA_VERSION in collect-signals.sh; enforced by bats",
   "title": "Feature Ideation Signals",
   "description": "Canonical contract between collect-signals.sh and the BMAD Analyst (Mary) prompt. Any change to this schema is a breaking change to the workflow.",
   "type": "object",
   "required": [
     "schema_version",
     "scan_date",
+    "last_successful_run",
     "repo",
     "open_issues",
     "closed_issues_30d",
@@ -25,6 +26,11 @@
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
     "scan_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_successful_run": {
+      "description": "ISO-8601 timestamp of the previous successful workflow run; used as a feed checkpoint by the analyst to skip already-reviewed content.",
       "type": "string",
       "format": "date-time"
     },
