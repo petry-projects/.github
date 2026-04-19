@@ -203,6 +203,7 @@ jobs:
           fi
 
       - name: Run Claude Code — BMAD Analyst
+        id: claude
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
@@ -627,6 +628,32 @@ jobs:
 
             <Advance / keep watching / retire — and why>
             ```
+
+      - name: Report execution cost
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -f "$EXECUTION_FILE" ]; then
+            echo "No execution file — skipping cost report." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cost=$(jq '[.[] | select(.type == "result") | .total_cost_usd // 0] | add // 0' "$EXECUTION_FILE")
+          turns=$(jq '[.[] | select(.type == "result") | .num_turns // 0] | add // 0' "$EXECUTION_FILE")
+          duration_s=$(jq '[.[] | select(.type == "result") | .duration_ms // 0] | add // 0 | . / 1000' "$EXECUTION_FILE")
+          {
+            echo ""
+            echo "## Execution Cost"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            printf "| Estimated cost | \$%s USD |\n" "$cost"
+            echo "| Turns | $turns |"
+            printf "| Duration | %ss |\n" "$duration_s"
+            echo ""
+            echo "> Cost is an SDK-side estimate based on model pricing. It reflects token consumption but does not represent a direct billing charge (OAuth subscription)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload dry-run log (if present)
         if: ${{ inputs.dry_run }}
