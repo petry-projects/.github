@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
+        uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1.0.101
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
@@ -76,7 +76,7 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
+        uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1.0.101
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
@@ -131,7 +131,7 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
+        uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1.0.101
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GH_PAT_WORKFLOWS }}
