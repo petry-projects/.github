@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE OF TRUTH: petry-projects/.github/standards/workflows/feature-ideation.yml
+# Standard:        petry-projects/.github/standards/ci-standards.md#8
+# Reusable:        petry-projects/.github/.github/workflows/feature-ideation-reusable.yml
+#
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. The 5-phase ideation pipeline, the
+#     Opus 4.6 model selection, the github_token override, and the
+#     ANTHROPIC_MODEL env var all live in the reusable workflow above.
+#   • You MAY change: the `project_context` value and optionally the cron
+#     schedule.
+#   • You MUST NOT change: trigger event shape, the `uses:` line, the
+#     job-level `permissions:` block, or the `secrets:` block.
+#   • If you need different behaviour, open a PR against the reusable in
+#     this repo. The change will propagate after the v1 tag is bumped.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Feature Research & Ideation (BMAD Analyst)
+
+on:
+  schedule:
+    - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
+  workflow_dispatch:
+    inputs:
+      focus_area:
+        description: 'Optional focus area (e.g., "CI patterns", "agent security")'
+        required: false
+        type: string
+      research_depth:
+        description: 'Research depth'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - quick
+          - standard
+          - deep
+      dry_run:
+        description: 'Log Discussion mutations to artifact instead of writing live'
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: feature-ideation
+  cancel-in-progress: false
+
+jobs:
+  ideate:
+    # Permissions cascade from the calling job to the reusable workflow.
+    # The reusable workflow's two jobs (gather-signals + analyze) need:
+    #   - contents:      read   (checkout, file reads)
+    #   - issues:        read   (signal collection)
+    #   - pull-requests: read   (signal collection)
+    #   - discussions:   write  (CRITICAL — create/update Discussion threads)
+    #   - actions:       read   (feed checkpoint via gh run list)
+    #   - id-token:      write  (claude-code-action OIDC for GitHub App token)
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      discussions: write
+      actions: read
+      id-token: write
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@208ec2d69b75227d375edf8745d84fbac05a76b2 # v1 — bump SHA after tag update
+    with:
+      project_context: |
+        petry-projects/.github is the org-level standards and tooling repository
+        for the petry-projects GitHub organisation. It owns the canonical CI/CD
+        standards (ci-standards.md), all reusable GitHub Actions workflows
+        (claude-code, feature-ideation, agent-shield, dependabot), the BMAD
+        Method agentic development framework, and org-wide security and
+        compliance tooling. Downstream consumers are internal product repos
+        (Broodly, TalkTerm, markets). Key trends to track: GitHub Actions
+        platform improvements (larger runners, step summaries, OIDC advances),
+        agentic CI patterns (LLM-driven PR review, automated ideation,
+        agent-shield threat models), AI-assisted code review tooling evolution
+        (CodeRabbit, Copilot Workspace), security hardening for AI-agent
+        workflows (prompt injection, supply-chain pinning, least-privilege
+        scopes), and developer-experience standards for LLM-heavy codebases.
+        No public users — this is internal DevX infrastructure.
+      sources_file: 'standards/feature-ideation-sources.md'
+      focus_area: ${{ inputs.focus_area || '' }}
+      research_depth: ${{ inputs.research_depth || 'standard' }}
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -6,11 +6,14 @@
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All rebase/merge serialization logic
 #     lives in the reusable workflow above.
-#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MAY change: nothing in normal use. NOTE: this file intentionally uses
+#     a LOCAL ref (`./`) instead of a pinned SHA — this repo IS the source of
+#     truth, so a local ref is always current. Other repos use pinned SHAs
+#     (see standards/workflows/dependabot-rebase.yml).
 #   • You MUST NOT change: trigger event, the concurrency group name,
-#     the `uses:` line, the explicit secrets block, or the job-level
-#     `permissions:` block — reusable workflows can be granted no more
-#     permissions than the calling job has, so removing the stanza breaks
+#     the explicit secrets block, or the job-level `permissions:` block —
+#     reusable workflows can be granted no more permissions than the calling
+#     job has, so removing the stanza breaks
 #     the reusable's gh API calls.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
@@ -38,9 +41,9 @@ permissions: {}
 jobs:
   dependabot-rebase:
     permissions:
-      contents: read
-      pull-requests: read
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@ae9709f4466dec60a5733c9e7487f69dcd004e05 # v1
+      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write  # re-approve PRs after branch update
+    uses: ./.github/workflows/dependabot-rebase-reusable.yml  # local ref — always current
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

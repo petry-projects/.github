@@ -131,7 +131,7 @@ rules are deprecated — migrate existing classic rules to rulesets.
 | **Dismiss stale reviews on push** | **Yes** — prevents merging unreviewed code after approval |
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
-| **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
+| **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |

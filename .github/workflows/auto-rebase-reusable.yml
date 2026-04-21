@@ -1,0 +1,127 @@
+# Reusable auto-rebase workflow — single source of truth for the org.
+# Repo-level auto-rebase.yml files call this to avoid duplicating
+# the branch-update logic.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md
+#
+# Problem: when branch protection requires branches to be up-to-date
+# (strict status checks), merging any PR makes other open PRs fall behind.
+# Non-Dependabot PRs have no equivalent of Dependabot's scheduled rebase,
+# so they silently fall behind until a human notices.
+#
+# Solution: after every push to main (typically a merged PR), this workflow:
+#   1. Finds all open non-Dependabot PRs from the same repo (no fork PRs)
+#   2. Updates behind PRs using the merge method (not rebase)
+#
+# Skips Dependabot PRs — those are handled by dependabot-rebase-reusable.yml.
+# Skips fork PRs — update-branch requires push access to the head branch.
+#
+# Important: never use the API update-branch endpoint with rebase method —
+# it rewrites SHAs, which can confuse CI and invalidate existing approvals.
+# The merge method preserves the original commits.
+#
+# Failure modes handled gracefully:
+#   - without `workflows` permission (403): posts an idempotent comment asking
+#     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
+#   - merge conflict (422): posts an idempotent comment asking the author to
+#     resolve conflicts (sentinel: <!-- auto-rebase-conflict -->)
+#
+# No secrets required — uses github.token only. No auto-merge logic.
+name: Auto-rebase non-Dependabot PRs (Reusable)
+
+on:
+  workflow_call:
+
+jobs:
+  auto-rebase:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # needed for update-branch (may touch .github/workflows/)
+      pull-requests: write # needed to post comments on PRs
+    steps:
+      - name: Update behind non-Dependabot PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Find open non-Dependabot PRs from the same repo (exclude forks)
+          PRS=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
+            --jq '.[] | select(.user.login != "dependabot[bot]") | select(.head.repo != null) | select(.head.repo.full_name == .base.repo.full_name) | "\(.number) \(.head.ref)"')
+
+          if [[ -z "$PRS" ]]; then
+            echo "No open non-Dependabot same-repo PRs"
+            exit 0
+          fi
+
+          while IFS=' ' read -r PR_NUMBER HEAD_REF; do
+            # Get the base branch for this PR
+            BASE_BRANCH=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.base.ref')
+
+            BEHIND=$(gh api "repos/$REPO/compare/${BASE_BRANCH}...${HEAD_REF}" \
+              --jq '.behind_by')
+
+            if [[ "$BEHIND" -eq 0 ]]; then
+              echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — skipping"
+              continue
+            fi
+
+            echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind $BASE_BRANCH — updating branch"
+
+            # Capture both stdout and stderr; use if-then to avoid bash -e terminating
+            # the step on non-zero exit before we can inspect the error message.
+            if UPDATE_OUTPUT=$(gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
+              -X PUT -f update_method=merge 2>&1); then
+              if [[ -n "$UPDATE_OUTPUT" ]]; then echo "$UPDATE_OUTPUT"; fi
+              echo "  Branch updated"
+            else
+              echo "  Update failed: $UPDATE_OUTPUT"
+
+              if echo "$UPDATE_OUTPUT" | grep -qF "without \`workflows\` permission"; then
+                # GitHub blocks update-branch when merging the base would add
+                # .github/workflows/ changes and the token lacks the 'workflows'
+                # permission. Ask the author to rebase manually.
+                #
+                # Idempotent: skip if sentinel comment already exists.
+                SENTINEL="<!-- auto-rebase-blocked -->"
+                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
+                  echo "  Skipping — blocked comment already posted"
+                else
+                  echo "  Posting manual-rebase request (workflows permission missing)"
+                  BLOCKED_BODY="<!-- auto-rebase-blocked -->"
+                  BLOCKED_BODY+=$'\n'"**Auto-rebase blocked** — the base branch contains \`.github/workflows/\` changes"
+                  BLOCKED_BODY+=" that require the \`workflows\` permission to merge into this branch,"
+                  BLOCKED_BODY+=" but the auto-rebase workflow's token does not have that permission."
+                  BLOCKED_BODY+=$'\n\n'"Please rebase this branch manually:"
+                  BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
+                  BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
+                  BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
+                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
+                fi
+              elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
+                # Merge conflict — ask the author to resolve it.
+                # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
+                #
+                # Idempotent: skip if sentinel comment already exists.
+                SENTINEL="<!-- auto-rebase-conflict -->"
+                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
+                  echo "  Skipping — conflict comment already posted"
+                else
+                  echo "  Posting conflict resolution request"
+                  CONFLICT_BODY="<!-- auto-rebase-conflict -->"
+                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
+                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved manually."
+                  CONFLICT_BODY+=$'\n\n'"Please resolve the conflicts and push:"
+                  CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
+                  CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
+                  CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
+                  CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
+                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
+                fi
+              else
+                echo "  Warning: failed to update PR #$PR_NUMBER — $UPDATE_OUTPUT"
+              fi
+            fi
+          done <<< "$PRS"
