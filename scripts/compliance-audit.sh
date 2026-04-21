@@ -220,6 +220,45 @@ check_action_pinning() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Reusable workflow path syntax (no duplicate .github/ segments)
+# ---------------------------------------------------------------------------
+check_reusable_workflow_paths() {
+  local repo="$1"
+
+  # List workflow files
+  local workflows
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+
+  for wf in $workflows; do
+    [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
+
+    local content
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+
+    local decoded
+    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$decoded" ] && continue
+
+    # Check for incorrect path with duplicate .github/ segment
+    # INCORRECT: petry-projects/.github/.github/workflows/...
+    # CORRECT:   petry-projects/.github/workflows/...
+    local bad_paths
+    bad_paths=$(echo "$decoded" | grep -E 'uses:[[:space:]]*petry-projects/\.github/\.github/workflows/' || true)
+
+    if [ -n "$bad_paths" ]; then
+      local count
+      count=$(echo "$bad_paths" | wc -l | tr -d ' ')
+      local examples
+      examples=$(echo "$bad_paths" | head -2 | sed 's/^[[:space:]]*//' | paste -sd ', ' -)
+      add_finding "$repo" "workflow-syntax" "reusable-workflow-path-duplicate-github" "error" \
+        "CRITICAL: Workflow \`$wf\` has $count reusable workflow reference(s) with incorrect path syntax (path does not exist). This causes the workflow to FAIL at runtime. MUST be fixed. Change from: \`petry-projects/.github/.github/workflows/\` Change to: \`petry-projects/.github/workflows/\` (remove the first .github/ — the second is the path within the repo)" \
+        "standards/ci-standards.md#action-pinning-policy"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -540,6 +579,14 @@ check_claude_workflow_checkout() {
         "standards/workflows/claude.yml"
     fi
   done
+
+  # Verify the check_run trigger is present — without it the claude-ci-fix job
+  # in the reusable can never fire to diagnose and fix CI failures on PRs.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]+check_run:"; then
+    add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
+      "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
+      "standards/ci-standards.md#4-claude-code-claudeyml"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -565,6 +612,7 @@ check_centralized_workflow_stubs() {
   # workflow-filename:expected-reusable-basename
   local centralized=(
     "claude.yml:claude-code-reusable"
+    "auto-rebase.yml:auto-rebase-reusable"
     "dependency-audit.yml:dependency-audit-reusable"
     "dependabot-automerge.yml:dependabot-automerge-reusable"
     "dependabot-rebase.yml:dependabot-rebase-reusable"
@@ -1234,6 +1282,7 @@ main() {
 
     check_required_workflows "$repo"
     check_action_pinning "$repo"
+    check_reusable_workflow_paths "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"

@@ -44,9 +44,10 @@ reusable, not a local edit.
 | Template | Tier | Purpose |
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
-| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 
@@ -74,7 +75,7 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
@@ -234,14 +235,15 @@ Each repo needs a `sonar-project.properties` file at root with project key and o
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
 
-> **Both jobs require a checkout step.** The `claude` job (PR reviews) and the
-> `claude-issue` job (issue automation) each need `actions/checkout` **before**
-> the `claude-code-action` step. Without it, `claude-code-action` cannot read
-> `CLAUDE.md` or `AGENTS.md` and will error on every trigger. The weekly
-> compliance audit (`check_claude_workflow_checkout`) detects repos missing this
-> step and creates a labeled issue to drive remediation.
+> **All three jobs require a checkout step.** The `claude` job (PR reviews), the
+> `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
+> response) each need `actions/checkout` **before** the `claude-code-action` step.
+> Without it, `claude-code-action` cannot read `CLAUDE.md` or `AGENTS.md` and
+> will error on every trigger. The weekly compliance audit
+> (`check_claude_workflow_checkout`) detects repos missing the checkout step or
+> the `check_run` trigger and creates a labeled issue to drive remediation.
 
-The workflow has two jobs:
+The workflow has three jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
   mentions in comments. No `prompt` input; runs in interactive mode.
@@ -249,6 +251,13 @@ The workflow has two jobs:
   applied to an issue. Uses a `prompt` to drive the full lifecycle:
   implement the fix, create a PR, self-review, resolve review comments,
   monitor CI, and tag the maintainer when ready for human review.
+- **`claude-ci-fix`** (CI failure response) — triggered by `check_run:
+  completed` when a non-Claude check fails on an open PR. Looks up the
+  associated PR (falling back to the GitHub API when the webhook payload
+  omits `pull_requests`), checks out the branch, reads the failure logs,
+  applies the minimal fix, pushes, and comments with a summary. Requires
+  the `check_run` trigger in the caller's `on:` block — the compliance audit
+  verifies this is present.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -269,6 +278,8 @@ on:
     types: [created]
   issues:
     types: [labeled]
+  check_run:          # enables claude-ci-fix — do not remove
+    types: [completed]
 
 permissions: {}
 
@@ -414,13 +425,31 @@ files, validates SKILL.md frontmatter, and detects permission bypasses.
 See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 [Agent Configuration Standards](agent-standards.md) for full details.
 
+### 8. Auto-Rebase (`auto-rebase.yml`)
+
+Keeps open non-Dependabot PRs up-to-date with the base branch.
+A copy-paste ready template is available at [`standards/workflows/auto-rebase.yml`](workflows/auto-rebase.yml).
+
+**Trigger:** every `push` to `main` (i.e., every merged PR) plus manual `workflow_dispatch`.
+
+On each run the workflow:
+
+1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
+2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
+4. On merge conflict (422): posts an idempotent comment (sentinel `<!-- auto-rebase-conflict -->`) asking the author to resolve conflicts.
+
+**No secrets required** — uses `GITHUB_TOKEN` only. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
+
 ---
 
 ## Conditional Workflows
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).
