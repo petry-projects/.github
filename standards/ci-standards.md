@@ -75,7 +75,7 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
@@ -423,6 +423,7 @@ A copy-paste ready template is available at [`standards/workflows/auto-rebase.ym
 **Trigger:** every `push` to `main` (i.e., every merged PR) plus manual `workflow_dispatch`.
 
 On each run the workflow:
+
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
 2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
