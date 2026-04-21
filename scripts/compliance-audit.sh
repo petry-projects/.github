@@ -579,6 +579,14 @@ check_claude_workflow_checkout() {
         "standards/workflows/claude.yml"
     fi
   done
+
+  # Verify the check_run trigger is present — without it the claude-ci-fix job
+  # in the reusable can never fire to diagnose and fix CI failures on PRs.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]+check_run:"; then
+    add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
+      "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
+      "standards/ci-standards.md#4-claude-code-claudeyml"
+  fi
 }
 
 # ---------------------------------------------------------------------------

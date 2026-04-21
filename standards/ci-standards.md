@@ -44,7 +44,7 @@ reusable, not a local edit.
 | Template | Tier | Purpose |
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
@@ -234,14 +234,15 @@ Each repo needs a `sonar-project.properties` file at root with project key and o
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
 
-> **Both jobs require a checkout step.** The `claude` job (PR reviews) and the
-> `claude-issue` job (issue automation) each need `actions/checkout` **before**
-> the `claude-code-action` step. Without it, `claude-code-action` cannot read
-> `CLAUDE.md` or `AGENTS.md` and will error on every trigger. The weekly
-> compliance audit (`check_claude_workflow_checkout`) detects repos missing this
-> step and creates a labeled issue to drive remediation.
+> **All three jobs require a checkout step.** The `claude` job (PR reviews), the
+> `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
+> response) each need `actions/checkout` **before** the `claude-code-action` step.
+> Without it, `claude-code-action` cannot read `CLAUDE.md` or `AGENTS.md` and
+> will error on every trigger. The weekly compliance audit
+> (`check_claude_workflow_checkout`) detects repos missing the checkout step or
+> the `check_run` trigger and creates a labeled issue to drive remediation.
 
-The workflow has two jobs:
+The workflow has three jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
   mentions in comments. No `prompt` input; runs in interactive mode.
@@ -249,6 +250,13 @@ The workflow has two jobs:
   applied to an issue. Uses a `prompt` to drive the full lifecycle:
   implement the fix, create a PR, self-review, resolve review comments,
   monitor CI, and tag the maintainer when ready for human review.
+- **`claude-ci-fix`** (CI failure response) — triggered by `check_run:
+  completed` when a non-Claude check fails on an open PR. Looks up the
+  associated PR (falling back to the GitHub API when the webhook payload
+  omits `pull_requests`), checks out the branch, reads the failure logs,
+  applies the minimal fix, pushes, and comments with a summary. Requires
+  the `check_run` trigger in the caller's `on:` block — the compliance audit
+  verifies this is present.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -269,6 +277,8 @@ on:
     types: [created]
   issues:
     types: [labeled]
+  check_run:          # enables claude-ci-fix — do not remove
+    types: [completed]
 
 permissions: {}
 
