@@ -89,13 +89,13 @@ jobs:
                 else
                   echo "  Posting manual-rebase request (workflows permission missing)"
                   BLOCKED_BODY="<!-- auto-rebase-blocked -->"
-                  BLOCKED_BODY+=$'\n''**Auto-rebase blocked** — the base branch contains `.github/workflows/` changes'
-                  BLOCKED_BODY+=' that require the `workflows` permission to merge into this branch,'
+                  BLOCKED_BODY+=$'\n'"**Auto-rebase blocked** — the base branch contains \`.github/workflows/\` changes"
+                  BLOCKED_BODY+=" that require the \`workflows\` permission to merge into this branch,"
                   BLOCKED_BODY+=" but the auto-rebase workflow's token does not have that permission."
-                  BLOCKED_BODY+=$'\n\n''Please rebase this branch manually:'
-                  BLOCKED_BODY+=$'\n''```'$'\n''git fetch origin'
+                  BLOCKED_BODY+=$'\n\n'"Please rebase this branch manually:"
+                  BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                   BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
-                  BLOCKED_BODY+=$'\n''git push --force-with-lease'$'\n''```'
+                  BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
                   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
@@ -111,13 +111,13 @@ jobs:
                 else
                   echo "  Posting conflict resolution request"
                   CONFLICT_BODY="<!-- auto-rebase-conflict -->"
-                  CONFLICT_BODY+=$'\n''**Auto-rebase failed — merge conflict** — this branch has conflicts'
+                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
                   CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved manually."
-                  CONFLICT_BODY+=$'\n\n''Please resolve the conflicts and push:'
-                  CONFLICT_BODY+=$'\n''```'$'\n''git fetch origin'
+                  CONFLICT_BODY+=$'\n\n'"Please resolve the conflicts and push:"
+                  CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                   CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
-                  CONFLICT_BODY+=$'\n''# resolve conflicts, then:'
-                  CONFLICT_BODY+=$'\n''git add .'$'\n''git commit'$'\n''git push'$'\n''```'
+                  CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
+                  CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
                   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
                 fi
               else
