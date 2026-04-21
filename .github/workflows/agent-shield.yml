@@ -31,7 +31,11 @@ permissions:
 jobs:
   agent-shield:
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
 =======
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
 >>>>>>> 6ff2a91 (feat: add agent-shield.yml workflow for compliance (#98))
+=======
+    uses: petry-projects/.github/workflows/agent-shield-reusable.yml@v1
+>>>>>>> 956b396 (fix: correct reusable workflow path syntax (remove duplicate .github) (#154))
