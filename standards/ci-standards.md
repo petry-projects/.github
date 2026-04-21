@@ -235,6 +235,22 @@ Each repo needs a `sonar-project.properties` file at root with project key and o
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
 
+> **OIDC security constraint — `claude.yml` is immutable on PR branches.**
+> Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
+> a PR branch is byte-for-byte identical to the same file on the default branch.
+> Any diff — including SHA-pinning the `uses:` line, adding a trigger, or
+> changing a comment — causes the OIDC token exchange to fail:
+> ```
+> App token exchange failed: 401 Unauthorized — Workflow validation failed.
+> The workflow file must exist and have identical content to the version
+> on the repository's default branch.
+> ```
+> Claude Code will not run on that PR. Agents must not open PRs that modify
+> `.github/workflows/claude.yml`. The caller stub template now includes a
+> `paths-ignore` guard that prevents this workflow from triggering on PRs that
+> only change this file. See also [Action Pinning Policy](#action-pinning-policy)
+> for the reusable workflow ref exemption.
+
 > **All three jobs require a checkout step.** The `claude` job (PR reviews), the
 > `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
 > response) each need `actions/checkout` **before** the `claude-code-action` step.
@@ -736,6 +752,30 @@ incorrect pinned one.
 > section above uses SHA-pinned references where possible. When copying any
 > example to a repository, always look up the current SHA for each action and
 > pin to it with a version comment.
+
+### Exception: Internal Reusable Workflow References
+
+Calls to `petry-projects/.github` reusable workflows use tag references
+(`@v1`, `@main`) — **not SHA pins** — and are exempt from this policy.
+
+```yaml
+# CORRECT — tag ref for internal reusable workflow
+uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+
+# WRONG — do not SHA-pin internal reusable workflow refs
+uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+```
+
+**Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
+the default branch. Anthropic's OIDC token endpoint validates that
+`.github/workflows/claude.yml` on a PR branch is identical to the default
+branch — any diff causes `401 Workflow validation failed` and Claude Code
+cannot run on that PR.
+
+The `@v1` tag on `petry-projects/.github` is managed deliberately (bumped only
+on backward-compatible releases) and is not subject to tag-force-push risk
+because the org controls the tag. **Do not open compliance PRs to pin these
+references.**
 
 ---
 
