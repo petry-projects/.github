@@ -22,6 +22,7 @@
 # Failure modes handled gracefully:
 #   - without `workflows` permission (403): posts an idempotent comment asking
 #     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
+<<<<<<< HEAD
 #   - merge conflict (422): posts an idempotent comment noting that dev-lead will
 #     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
 #     triggers the rebase intent in dev-lead.yml
@@ -31,14 +32,23 @@
 # issue_comment workflow runs (GitHub limitation). When the PAT is absent the
 # sentinel is still posted but dev-lead will not be scheduled.
 # No auto-merge logic.
+=======
+#   - merge conflict (422): posts an idempotent comment asking the author to
+#     resolve conflicts (sentinel: <!-- auto-rebase-conflict -->)
+#
+# No secrets required — uses github.token only. No auto-merge logic.
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
 name: Auto-rebase non-Dependabot PRs (Reusable)
 
 on:
   workflow_call:
+<<<<<<< HEAD
     secrets:
       GH_PAT_WORKFLOWS:
         description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false
+=======
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
 
 jobs:
   auto-rebase:
@@ -49,8 +59,12 @@ jobs:
     steps:
       - name: Update behind non-Dependabot PRs
         env:
+<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
           HAS_PAT: ${{ secrets.GH_PAT_WORKFLOWS != '' }}
+=======
+          GH_TOKEN: ${{ github.token }}
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
           REPO: ${{ github.repository }}
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
@@ -109,6 +123,7 @@ jobs:
                   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
+<<<<<<< HEAD
                 # Merge conflict — post the sentinel to trigger dev-lead rebase.
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
@@ -143,6 +158,23 @@ jobs:
                     CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
                     CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
                   fi
+=======
+                # Merge conflict — ask the author to resolve it.
+                # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
+                #
+                # Idempotent: skip if sentinel comment already exists.
+                SENTINEL="<!-- auto-rebase-conflict -->"
+                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
+                  echo "  Skipping — conflict comment already posted"
+                else
+                  echo "  Posting conflict resolution request"
+                  CONFLICT_BODY="<!-- auto-rebase-conflict -->"
+                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
+                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved manually."
+                  CONFLICT_BODY+=$'\n\n'"Please resolve the conflicts and push:"
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
                   CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                   CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
                   CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"

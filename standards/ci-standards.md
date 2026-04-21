@@ -201,7 +201,8 @@ reusable, not a local edit.
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
 | [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
-| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 >>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
@@ -257,7 +258,7 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
@@ -958,6 +959,9 @@ See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 [Agent Configuration Standards](agent-standards.md) for full details.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
 ### 8. Auto-Rebase (`auto-rebase.yml`)
 
 Keeps open non-Dependabot PRs up-to-date with the base branch.
@@ -970,6 +974,7 @@ On each run the workflow:
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
 2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
+<<<<<<< HEAD
 4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
    (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
    job in `claude-code-reusable.yml` to automatically resolve the conflict.
@@ -1241,13 +1246,21 @@ customisation.
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
 =======
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+4. On merge conflict (422): posts an idempotent comment (sentinel `<!-- auto-rebase-conflict -->`) asking the author to resolve conflicts.
+
+**No secrets required** — uses `GITHUB_TOKEN` only. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
+
+>>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
 ---
 
 ## Conditional Workflows
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).
