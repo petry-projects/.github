@@ -1015,6 +1015,9 @@ check_claude_workflow_checkout() {
     fi
   done
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e945246 (fix(claude-ci-fix): resolve PR via API when check_run payload is empty)
 
   # Verify the check_run trigger is present — without it the claude-ci-fix job
   # in the reusable can never fire to diagnose and fix CI failures on PRs.
