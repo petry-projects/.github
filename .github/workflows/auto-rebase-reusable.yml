@@ -45,7 +45,7 @@ jobs:
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
           PRS=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
-            --jq '.[] | select(.user.login != "dependabot[bot]") | select(.head.repo.full_name == .base.repo.full_name) | "\(.number) \(.head.ref)"')
+            --jq '.[] | select(.user.login != "dependabot[bot]") | select(.head.repo != null) | select(.head.repo.full_name == .base.repo.full_name) | "\(.number) \(.head.ref)"')
 
           if [[ -z "$PRS" ]]; then
             echo "No open non-Dependabot same-repo PRs"
@@ -73,8 +73,7 @@ jobs:
               if [[ -n "$UPDATE_OUTPUT" ]]; then echo "$UPDATE_OUTPUT"; fi
               echo "  Branch updated"
             else
-              HTTP_STATUS=$(echo "$UPDATE_OUTPUT" | grep -oP 'HTTP \K[0-9]+' | head -1)
-              echo "  Update failed (HTTP $HTTP_STATUS): $UPDATE_OUTPUT"
+              echo "  Update failed: $UPDATE_OUTPUT"
 
               if echo "$UPDATE_OUTPUT" | grep -qF "without \`workflows\` permission"; then
                 # GitHub blocks update-branch when merging the base would add
@@ -83,8 +82,8 @@ jobs:
                 #
                 # Idempotent: skip if sentinel comment already exists.
                 SENTINEL="<!-- auto-rebase-blocked -->"
-                ALREADY_POSTED=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
-                  --jq "[.[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
                 if [[ "$ALREADY_POSTED" -gt 0 ]]; then
                   echo "  Skipping — blocked comment already posted"
                 else
@@ -99,13 +98,14 @@ git rebase origin/$BASE_BRANCH
 git push --force-with-lease
 \`\`\`"
                 fi
-              elif echo "$UPDATE_OUTPUT" | grep -qE "HTTP 422|merge conflict"; then
+              elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
                 # Merge conflict — ask the author to resolve it.
+                # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
                 # Idempotent: skip if sentinel comment already exists.
                 SENTINEL="<!-- auto-rebase-conflict -->"
-                ALREADY_POSTED=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
-                  --jq "[.[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
                 if [[ "$ALREADY_POSTED" -gt 0 ]]; then
                   echo "  Skipping — conflict comment already posted"
                 else
