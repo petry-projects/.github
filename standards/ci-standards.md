@@ -46,7 +46,8 @@ reusable, not a local edit.
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
 | [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
-| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 
@@ -414,13 +415,30 @@ files, validates SKILL.md frontmatter, and detects permission bypasses.
 See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 [Agent Configuration Standards](agent-standards.md) for full details.
 
+### 8. Auto-Rebase (`auto-rebase.yml`)
+
+Keeps open non-Dependabot PRs up-to-date with the base branch.
+A copy-paste ready template is available at [`standards/workflows/auto-rebase.yml`](workflows/auto-rebase.yml).
+
+**Trigger:** every `push` to `main` (i.e., every merged PR) plus manual `workflow_dispatch`.
+
+On each run the workflow:
+1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
+2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
+4. On merge conflict (422): posts an idempotent comment (sentinel `<!-- auto-rebase-conflict -->`) asking the author to resolve conflicts.
+
+**No secrets required** — uses `GITHUB_TOKEN` only. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
+
 ---
 
 ## Conditional Workflows
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).

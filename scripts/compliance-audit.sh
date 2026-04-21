@@ -604,6 +604,7 @@ check_centralized_workflow_stubs() {
   # workflow-filename:expected-reusable-basename
   local centralized=(
     "claude.yml:claude-code-reusable"
+    "auto-rebase.yml:auto-rebase-reusable"
     "dependency-audit.yml:dependency-audit-reusable"
     "dependabot-automerge.yml:dependabot-automerge-reusable"
     "dependabot-rebase.yml:dependabot-rebase-reusable"
