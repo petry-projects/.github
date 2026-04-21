@@ -252,7 +252,7 @@ check_reusable_workflow_paths() {
       local examples
       examples=$(echo "$bad_paths" | head -2 | sed 's/^[[:space:]]*//' | paste -sd ', ' -)
       add_finding "$repo" "workflow-syntax" "reusable-workflow-path-duplicate-github" "error" \
-        "Workflow \`$wf\` has $count reusable workflow reference(s) with duplicate \`.github/\` segment. Change \`petry-projects/.github/.github/workflows/\` to \`petry-projects/.github/workflows/\`" \
+        "CRITICAL: Workflow \`$wf\` has $count reusable workflow reference(s) with incorrect path syntax (path does not exist). This causes the workflow to FAIL at runtime. MUST be fixed. Change from: \`petry-projects/.github/.github/workflows/\` Change to: \`petry-projects/.github/workflows/\` (remove the first .github/ — the second is the path within the repo)" \
         "standards/ci-standards.md#action-pinning-policy"
     fi
   done
