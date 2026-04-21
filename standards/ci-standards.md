@@ -911,7 +911,7 @@ customisation.
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).
