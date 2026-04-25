@@ -14,6 +14,23 @@ Every repository MUST have:
 | `CLAUDE.md` | Project-level instructions for Claude Code | error if missing |
 | `AGENTS.md` | Development standards for AI agents | error if missing |
 
+## Compliance Exemptions — Files Agents Must Not Modify
+
+The following files are structurally immutable. Agents must not open PRs that
+modify them. No compliance finding will ever require a change to these files;
+if an existing agent-created PR touches them, close it without merging.
+
+**Canonical source:** [`standards/workflow-exemptions.json`](workflow-exemptions.json)
+
+| File | Reason |
+|------|--------|
+| `.github/workflows/claude.yml` | Anthropic OIDC invariant — any diff from the default branch causes `401 Workflow validation failed`; Claude Code cannot run on that PR |
+| `.github/workflows/agent-shield.yml` | Security boundary — agents are not permitted to weaken security scanning; changes require explicit human review |
+
+These files must be adopted verbatim from `standards/workflows/` and updated
+only by merging a standards PR from `petry-projects/.github`, which propagates
+to all repos via the `@v1` tag bump.
+
 ### CLAUDE.md Requirements
 
 - MUST reference `AGENTS.md` for development standards
