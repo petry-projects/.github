@@ -240,17 +240,19 @@ A copy-paste ready template is available at [`standards/workflows/claude.yml`](w
 > a PR branch is byte-for-byte identical to the same file on the default branch.
 > Any diff — including SHA-pinning the `uses:` line, adding a trigger, or
 > changing a comment — causes the OIDC token exchange to fail:
-> ```
+>
+> ```text
 > App token exchange failed: 401 Unauthorized — Workflow validation failed.
 > The workflow file must exist and have identical content to the version
 > on the repository's default branch.
 > ```
+>
 > Claude Code will not run on that PR. Agents must not open PRs that modify
 > `.github/workflows/claude.yml`. The caller stub template now includes a
 > `paths-ignore` guard that prevents this workflow from triggering on PRs that
 > only change this file. See also [Action Pinning Policy](#action-pinning-policy)
 > for the reusable workflow ref exemption.
-
+>
 > **All three jobs require a checkout step.** The `claude` job (PR reviews), the
 > `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
 > response) each need `actions/checkout` **before** the `claude-code-action` step.

@@ -20,6 +20,8 @@ The following files are structurally immutable. Agents must not open PRs that
 modify them. No compliance finding will ever require a change to these files;
 if an existing agent-created PR touches them, close it without merging.
 
+**Canonical source:** [`standards/workflow-exemptions.json`](workflow-exemptions.json)
+
 | File | Reason |
 |------|--------|
 | `.github/workflows/claude.yml` | Anthropic OIDC invariant — any diff from the default branch causes `401 Workflow validation failed`; Claude Code cannot run on that PR |

@@ -21,6 +21,13 @@
 #   this file. Do not SHA-pin the `uses:` line — internal reusable workflow
 #   refs are exempt from the Action Pinning Policy (ci-standards.md
 #   §Action Pinning Policy). The @v1 tag is the correct, stable reference.
+#
+#   NARROW GUARD: The paths-ignore setting (lines 38-39) under pull_request
+#   prevents the workflow from triggering only when the PR's entire changeset
+#   is limited to claude.yml alone. PRs that modify claude.yml *plus other
+#   files* will still trigger the workflow and hit the 401 error at token
+#   exchange. Other triggers (issue_comment, pull_request_review_comment,
+#   issues, check_run) are unaffected by paths-ignore and run as configured.
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Claude Code — thin caller that delegates to the org-level reusable workflow.
