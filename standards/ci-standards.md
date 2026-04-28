@@ -518,6 +518,9 @@ jobs:
 Each repo needs a `sonar-project.properties` file at root with project key and org.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
 Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
@@ -570,6 +573,7 @@ If omitted, gitleaks runs in open-source mode (free, no license needed).
 | `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
 | Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
 
+<<<<<<< HEAD
 ### 5. Claude Code (`claude.yml`) — *Deprecated 2026-05*
 
 > **Deprecated.** `claude.yml` has been removed from all `petry-projects` repos and replaced by
@@ -631,6 +635,9 @@ UI feature which consumes Copilot premium requests.
 see [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent).
 =======
 ### 4. Claude Code (`claude.yml`)
+=======
+### 5. Claude Code (`claude.yml`)
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
@@ -946,18 +953,26 @@ are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 runtime to determine who to tag. No per-repo customization is needed as long
 as `CODEOWNERS` is present (checked by the compliance audit).
 
+<<<<<<< HEAD
 ### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 
 Automatically approves and squash-merges eligible Dependabot PRs.
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml)
 and the [Dependabot Policy](dependabot-policy.md) for full details.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 7. Dependency Audit (`dependency-audit.yml`)
 =======
 ### 6. Dependency Audit (`dependency-audit.yml`)
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+### 7. Dependency Audit (`dependency-audit.yml`)
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 
 Vulnerability scanning for all package ecosystems.
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
@@ -965,10 +980,14 @@ and the [Dependabot Policy](dependabot-policy.md).
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 8. AgentShield (`agent-shield.yml`)
 =======
 ### 7. AgentShield (`agent-shield.yml`)
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+### 8. AgentShield (`agent-shield.yml`)
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 
 Agent configuration security validation. Checks that CLAUDE.md and
 AGENTS.md exist and follow standards, scans for secrets in agent config
@@ -1755,9 +1774,13 @@ All secrets required by the standard CI workflows are configured at the
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
 =======
 >>>>>>> b7f6e7d (docs: add CI/CD standards and workflow patterns (#11))
+=======
+| `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
+>>>>>>> 5b345af (docs: document gitleaks license requirement in CI standards (#163))
 | `APP_ID` | GitHub App ID for Dependabot auto-merge |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 
