@@ -230,7 +230,65 @@ jobs:
 
 Each repo needs a `sonar-project.properties` file at root with project key and org.
 
-### 4. Claude Code (`claude.yml`)
+### 4. Secret Scanning (`ci.yml` — gitleaks job)
+
+Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
+for all organization repositories. The job scans commit history for hardcoded secrets,
+API keys, and other sensitive data.
+
+**Why a separate job?** Gitleaks requires a license key when scanning organization
+repositories (free for open-source). The job is part of the main `ci.yml` pipeline
+but documented separately to clarify the licensing requirement.
+
+**Standard configuration (add this job to `ci.yml`):**
+
+```yaml
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        with:
+          args: detect --source . --redact --verbose --exit-code 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+```
+
+**Required secrets:** `GITLEAKS_LICENSE` (org-level)
+
+**License requirement:** Gitleaks is free for open-source, but organization scans
+require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks.io).
+
+**License setup:**
+
+1. Create or log into your account at [gitleaks.io](https://gitleaks.io)
+2. Generate a free license key for your organization
+3. Add the license as the org-level secret `GITLEAKS_LICENSE`:
+   ```bash
+   gh secret set GITLEAKS_LICENSE --org petry-projects --body "<license-key>"
+   ```
+
+**For personal/user repos:** The `GITLEAKS_LICENSE` environment variable is optional.
+If omitted, gitleaks runs in open-source mode (free, no license needed).
+
+**CI failure — common causes and fixes:**
+
+| Failure | Root cause | Fix |
+|---------|-----------|-----|
+| `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
+| Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
+
+### 5. Claude Code (`claude.yml`)
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
@@ -423,19 +481,19 @@ are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 runtime to determine who to tag. No per-repo customization is needed as long
 as `CODEOWNERS` is present (checked by the compliance audit).
 
-### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
+### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
 Automatically approves and squash-merges eligible Dependabot PRs.
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml)
 and the [Dependabot Policy](dependabot-policy.md) for full details.
 
-### 6. Dependency Audit (`dependency-audit.yml`)
+### 7. Dependency Audit (`dependency-audit.yml`)
 
 Vulnerability scanning for all package ecosystems.
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
 and the [Dependabot Policy](dependabot-policy.md).
 
-### 7. AgentShield (`agent-shield.yml`)
+### 8. AgentShield (`agent-shield.yml`)
 
 Agent configuration security validation. Checks that CLAUDE.md and
 AGENTS.md exist and follow standards, scans for secrets in agent config
@@ -836,6 +894,7 @@ All secrets required by the standard CI workflows are configured at the
 |--------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
+| `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
 | `APP_ID` | GitHub App ID for Dependabot auto-merge |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 
