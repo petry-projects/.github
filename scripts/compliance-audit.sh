@@ -220,42 +220,19 @@ check_action_pinning() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: Reusable workflow path syntax (no duplicate .github/ segments)
+# Check: Reusable workflow path syntax
 # ---------------------------------------------------------------------------
+# NOTE: The correct pattern IS petry-projects/.github/.github/workflows/...
+# because the first .github is the repository name, and the second .github
+# is the directory path within that repository. This check is disabled as
+# a known false positive per petry-projects/.github standards.
+#
+# Reference: https://docs.github.com/en/actions/using-workflows/reusing-workflows
+# Example: uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
 check_reusable_workflow_paths() {
   local repo="$1"
-
-  # List workflow files
-  local workflows
-  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
-
-  for wf in $workflows; do
-    [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
-
-    local content
-    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
-    [ -z "$content" ] && continue
-
-    local decoded
-    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-    [ -z "$decoded" ] && continue
-
-    # Check for incorrect path with duplicate .github/ segment
-    # INCORRECT: petry-projects/.github/.github/workflows/...
-    # CORRECT:   petry-projects/.github/workflows/...
-    local bad_paths
-    bad_paths=$(echo "$decoded" | grep -E 'uses:[[:space:]]*petry-projects/\.github/\.github/workflows/' || true)
-
-    if [ -n "$bad_paths" ]; then
-      local count
-      count=$(echo "$bad_paths" | wc -l | tr -d ' ')
-      local examples
-      examples=$(echo "$bad_paths" | head -2 | sed 's/^[[:space:]]*//' | paste -sd ', ' -)
-      add_finding "$repo" "workflow-syntax" "reusable-workflow-path-duplicate-github" "error" \
-        "CRITICAL: Workflow \`$wf\` has $count reusable workflow reference(s) with incorrect path syntax (path does not exist). This causes the workflow to FAIL at runtime. MUST be fixed. Change from: \`petry-projects/.github/.github/workflows/\` Change to: \`petry-projects/.github/workflows/\` (remove the first .github/ — the second is the path within the repo)" \
-        "standards/ci-standards.md#action-pinning-policy"
-    fi
-  done
+  # This check is intentionally disabled — the double .github/ pattern is correct
+  return 0
 }
 
 # ---------------------------------------------------------------------------
