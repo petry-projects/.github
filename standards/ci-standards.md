@@ -275,12 +275,31 @@ require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks
 **For personal/user repos:** The `GITLEAKS_LICENSE` environment variable is optional.
 If omitted, gitleaks runs in open-source mode (free, no license needed).
 
+**Required repo artifact — `.gitleaks.toml`:**
+
+Every repo using the `secret-scan` job MUST ship a `.gitleaks.toml` at the
+repository root. The `Run gitleaks` step passes `--config .gitleaks.toml`;
+without the file the job fails immediately with a file-not-found error.
+
+Copy [`standards/gitleaks.toml`](gitleaks.toml) as a starting point and extend
+the `paths` allowlist for any repo-specific false-positive paths. BMAD Method
+repos **must** include `'''_bmad/'''` in the allowlist — the `generic-api-key`
+rule fires on knowledge file paths such as `api-request.md` and
+`auth-session.md`.
+
+> **Env var naming:** The binary checksum variable MUST be named
+> `GITLEAKS_CHECKSUM`, **not** `GITLEAKS_SHA256`. SonarCloud's security gate
+> flags env var names matching `*SHA256*` that contain hex strings as Security
+> Hotspots (hardcoded credential false positive). The canonical job in
+> `push-protection.md` already uses `GITLEAKS_CHECKSUM`.
+
 **CI failure — common causes and fixes:**
 
 | Failure | Root cause | Fix |
 |---------|-----------|-----|
-| `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
-| Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
+| `missing gitleaks license` | License not passed to job | Ensure `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` is set in the job's `env:` block |
+| `config file not found` | `.gitleaks.toml` missing at repo root | Copy `standards/gitleaks.toml` and commit it |
+| Secrets found | Legitimate secrets in the code | Add the path to `.gitleaks.toml` `allowlist.paths`, or remove the secret |
 
 ### 5. Claude Code (`claude.yml`)
 
@@ -969,16 +988,19 @@ autofix:
 
 1. **Determine tech stack** and select the matching workflow patterns above
 2. **Create `ci.yml`** with lint, format, typecheck, and test stages
-3. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
-4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
-5. **Add `claude.yml`** for AI code review
-6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
-7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
-8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
-9. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
-10. **Configure secrets** in the repository settings
-11. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
-12. **Pin all action references** to commit SHAs
+3. **Add `.gitleaks.toml`** at the repository root — copy [`standards/gitleaks.toml`](gitleaks.toml)
+   and extend the `paths` allowlist for any repo-specific false-positive paths. This file is
+   **required** by the `secret-scan` job; the job fails without it.
+4. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
+5. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
+6. **Add `claude.yml`** for AI code review
+7. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
+8. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
+9. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
+10. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
+11. **Configure secrets** in the repository settings
+12. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
+13. **Pin all action references** to commit SHAs
 
 ---
 
