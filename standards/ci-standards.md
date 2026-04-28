@@ -240,31 +240,24 @@ API keys, and other sensitive data.
 repositories (free for open-source). The job is part of the main `ci.yml` pipeline
 but documented separately to clarify the licensing requirement.
 
-**Standard configuration (add this job to `ci.yml`):**
+**Standard configuration:** See the canonical job specification in
+[`push-protection.md` — Layer 3: CI Secret Scanning](push-protection.md#layer-3--ci-secret-scanning-secondary-defense).
+
+**Organization repos only — GITLEAKS_LICENSE requirement:**
+
+When adding the `secret-scan` job to an organization repository's `ci.yml`, you **must**
+pass the `GITLEAKS_LICENSE` secret to the gitleaks action:
 
 ```yaml
-  secret-scan:
-    name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - name: Checkout (full history)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        with:
-          args: detect --source . --redact --verbose --exit-code 1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
 
-**Required secrets:** `GITLEAKS_LICENSE` (org-level)
+Without this environment variable, gitleaks will fail with "missing gitleaks license"
+when scanning in an organization context.
+
+**Required secrets:** `GITLEAKS_LICENSE` (org-level, organization repositories only)
 
 **License requirement:** Gitleaks is free for open-source, but organization scans
 require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks.io).
@@ -274,6 +267,7 @@ require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks
 1. Create or log into your account at [gitleaks.io](https://gitleaks.io)
 2. Generate a free license key for your organization
 3. Add the license as the org-level secret `GITLEAKS_LICENSE`:
+
    ```bash
    gh secret set GITLEAKS_LICENSE --org petry-projects --body "<license-key>"
    ```
