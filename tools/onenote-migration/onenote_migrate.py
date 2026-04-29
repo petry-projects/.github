@@ -277,9 +277,7 @@ def get_section_groups(notebook_id: str, session, cfg: Config) -> list[dict]:
 
 
 def get_pages(section_id: str, session, cfg: Config) -> list[dict]:
-    url = (f"{cfg.GRAPH_BASE}/sections/{section_id}/pages"
-           "?orderby=order&$select=id,title,createdDateTime,"
-           "lastModifiedDateTime,level,order,parentPage")
+    url = f"{cfg.GRAPH_BASE}/sections/{section_id}/pages"
     return get_all(url, session)
 
 
@@ -443,15 +441,24 @@ def migrate_section(
     section_name = section["displayName"]
     pages        = get_pages(section["id"], session, cfg)
 
-    # Build parent→children map for subpage nesting
+    # Build parent→children map using level field (0 = root, 1+ = subpage)
     children: dict[str, list[dict]] = {}
     roots: list[dict] = []
+    parent_stack: list[dict] = []  # track most recent page at each level
     for p in pages:
-        parent_ref = p.get("parentPage")
-        if parent_ref and parent_ref.get("id"):
-            children.setdefault(parent_ref["id"], []).append(p)
-        else:
+        level = p.get("level", 0)
+        if level == 0:
             roots.append(p)
+            parent_stack = [p]
+        else:
+            # parent is the last page seen at level-1
+            if len(parent_stack) >= level:
+                parent = parent_stack[level - 1]
+                children.setdefault(parent["id"], []).append(p)
+            else:
+                roots.append(p)
+            # trim stack to current level and push current page
+            parent_stack = parent_stack[:level] + [p]
 
     def process_page(page: dict, parent_dir: Path, depth: int = 0) -> None:
         pid   = page["id"]
