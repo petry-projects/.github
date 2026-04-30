@@ -76,7 +76,7 @@ class Config:
     # Back-off: first retry after BACKOFF_BASE seconds, doubles each time
     BACKOFF_BASE:    float = 2.0
     BACKOFF_MAX:     float = 60.0
-    BACKOFF_RETRIES: int   = 6
+    BACKOFF_RETRIES: int   = 10
 
 
 # ╔══════════════════════════════════════════════════════════════╗
@@ -155,21 +155,19 @@ def local_asset_name(url: str, index: int) -> str:
 
 def format_commit_date(iso: str) -> str:
     """
-    Ensure an ISO 8601 date string is formatted exactly as Git expects:
-    'YYYY-MM-DDTHH:MM:SS+00:00'
-    Accepts strings with or without milliseconds / timezone.
+    Convert an ISO 8601 date string to the format GitPython accepts:
+    '<unix-timestamp> +0000'
     """
-    # Strip milliseconds if present
     iso = re.sub(r"\.\d+", "", iso)
-    # Normalise Z → +00:00
     if iso.endswith("Z"):
         iso = iso[:-1] + "+00:00"
-    # Validate by parsing
     try:
         dt = datetime.fromisoformat(iso)
     except ValueError:
         dt = datetime.now(tz=timezone.utc)
-    return dt.isoformat()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return f"{int(dt.timestamp())} +0000"
 
 
 # ╔══════════════════════════════════════════════════════════════╗
@@ -201,7 +199,7 @@ def retry_with_backoff(
             wait = min(wait * 2, max_wait)
             continue
 
-        if response.status_code in (429, 503):
+        if response.status_code in (429, 503, 504):
             retry_after = int(response.headers.get("Retry-After", wait))
             actual_wait = max(wait, retry_after)
             if attempt == retries:
@@ -233,21 +231,44 @@ def get_all(url: str, session) -> list[dict]:
 # ║  Auth                                                        ║
 # ╚══════════════════════════════════════════════════════════════╝
 
+_TOKEN_CACHE_PATH = Path.home() / ".onenote_migrate_token_cache.json"
+
+
 def authenticate(cfg: Config) -> str:
     """
-    Run MSAL device-code flow and return an access token.
-    Prints the user-facing device-code message.
+    Return an access token, using a persistent file cache so sign-in
+    is only required once. Subsequent runs acquire tokens silently.
     """
     if _MSAL is None:                        # pragma: no cover
         raise RuntimeError("msal is not installed. Run: pip install msal")
-    app  = _MSAL(cfg.CLIENT_ID, authority=cfg.AUTHORITY)
-    flow = app.initiate_device_flow(scopes=cfg.SCOPES)
-    if "user_code" not in flow:
-        raise RuntimeError(f"Device flow failed: {flow.get('error_description', flow)}")
-    print(f"\n{flow['message']}\n")
-    result = app.acquire_token_by_device_flow(flow)
+
+    from msal import SerializableTokenCache
+    cache = SerializableTokenCache()
+    if _TOKEN_CACHE_PATH.exists():
+        cache.deserialize(_TOKEN_CACHE_PATH.read_text())
+
+    app = _MSAL(cfg.CLIENT_ID, authority=cfg.AUTHORITY, token_cache=cache)
+
+    # Try silent acquisition first (uses cached refresh token)
+    accounts = app.get_accounts()
+    result = None
+    if accounts:
+        result = app.acquire_token_silent(cfg.SCOPES, account=accounts[0])
+
+    if not result:
+        flow = app.initiate_device_flow(scopes=cfg.SCOPES)
+        if "user_code" not in flow:
+            raise RuntimeError(f"Device flow failed: {flow.get('error_description', flow)}")
+        print(f"\n{flow['message']}\n")
+        result = app.acquire_token_by_device_flow(flow)
+
     if "access_token" not in result:
         raise RuntimeError(f"Auth failed: {result.get('error_description', result)}")
+
+    # Persist updated cache
+    if cache.has_state_changed:
+        _TOKEN_CACHE_PATH.write_text(cache.serialize())
+
     return result["access_token"]
 
 
@@ -257,6 +278,10 @@ def make_session(token: str):
         raise RuntimeError("requests is not installed")
     s = _requests.Session()
     s.headers.update({"Authorization": f"Bearer {token}"})
+    # Prevent hung connections from stalling indefinitely
+    s.request = lambda method, url, **kw: _requests.Session.request(
+        s, method, url, timeout=kw.pop("timeout", (10, 60)), **kw
+    )
     return s
 
 
@@ -473,10 +498,17 @@ def migrate_section(
         indent = "  " * depth
         print(f"      {indent}↳ {page.get('title')!r}")
 
-        written = migrate_page(
-            page, pdir, notebook_name, section_name,
-            session, cfg, dry_run,
-        )
+        try:
+            written = migrate_page(
+                page, pdir, notebook_name, section_name,
+                session, cfg, dry_run,
+            )
+        except Exception as exc:
+            print(f"      {indent}⚠  Skipping page after repeated failures ({exc})")
+            counters["pages"] += 1
+            for child in children.get(pid, []):
+                process_page(child, pdir, depth + 1)
+            return
 
         if written and not dry_run:
             rel = [str(Path(w).relative_to(repo_path)) for w in written]
@@ -487,6 +519,7 @@ def migrate_section(
             )
 
         counters["pages"] += 1
+        time.sleep(1)  # pace requests to avoid rate limiting
 
         # Recurse into subpages
         for child in children.get(pid, []):
@@ -571,4 +604,18 @@ if __name__ == "__main__":
         print("❌  Set ONENOTE_CLIENT_ID env var or pass --client-id <your-id>")
         sys.exit(1)
 
-    migrate(Path(args.repo), cfg, dry_run=args.dry_run)
+    # Auto-restart on 401 (token expiry) or 429 (rate limit) — resume/skip makes this safe
+    while True:
+        try:
+            migrate(Path(args.repo), cfg, dry_run=args.dry_run)
+            break
+        except Exception as exc:
+            msg = str(exc)
+            if "401" in msg and "Unauthorized" in msg:
+                print("\n🔄 Token expired mid-run, refreshing and resuming …\n")
+                continue
+            if "429" in msg:
+                print("\n⏳ Persistent rate limit — waiting 5 minutes before resuming …\n")
+                time.sleep(300)
+                continue
+            raise
