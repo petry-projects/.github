@@ -3,7 +3,11 @@
 set -euo pipefail
 
 TODAY=$(date -u +%Y-%m-%d)
-SINCE=$(date -u -d '7 days ago' +%Y-%m-%d)
+if [[ "$(uname)" == "Darwin" ]]; then
+  SINCE=$(date -u -v-7d +%Y-%m-%d)
+else
+  SINCE=$(date -u -d '7 days ago' +%Y-%m-%d)
+fi
 DATA_DIR=$(mktemp -d)
 trap 'rm -rf "$DATA_DIR"' EXIT
 
@@ -31,7 +35,7 @@ collect_classify_prs() {
               labels(first:5){nodes{name}}
               reviewDecision
               statusCheckRollup{state}
-              reviews(last:5){nodes{state}}
+              reviews(last:20){nodes{state}}
             }
           }
         }
@@ -119,26 +123,36 @@ PERSONAL_MERGES=$(gh search prs --owner=don-petry --merged --merged-at=">=$SINCE
 
 MERGE_DAILY=$(jq -n --arg since "$SINCE" --arg today "$TODAY" \
   --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
-  # Build 7-day date list
-  def dates: [range(7) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
-  dates | map({
-    date: .,
-    org:      ([$org[]      | select(.closedAt[:10] == .)] | length),
-    personal: ([$personal[] | select(.closedAt[:10] == .)] | length)
+  # Build 8-day date list (since through today inclusive)
+  def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
+  # Capture $date before entering the generator so . refers to the right scope
+  dates | map(. as $date | {
+    date: $date,
+    org:      ([$org[]      | select(.closedAt[:10] == $date)] | length),
+    personal: ([$personal[] | select(.closedAt[:10] == $date)] | length)
   })')
 echo "::endgroup::" >&2
 
 # ── Issues ────────────────────────────────────────────────────────────────────
 echo "::group::Collecting issues" >&2
 ISSUES_BY_REPO='[]'
-for repo in $ORG_REPOS $PERSONAL_REPOS; do
-  owner=$(echo "$ORG_REPOS" | grep -qx "$repo" && echo "petry-projects" || echo "don-petry")
-  issues=$(gh issue list --repo "$owner/$repo" --state open \
+for repo in $ORG_REPOS; do
+  issues=$(gh issue list --repo "petry-projects/$repo" --state open \
     --json number,title,createdAt,labels --limit 1000 2>/dev/null || echo '[]')
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -gt 0 ]; then
-    echo "  $owner/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "$owner/$repo" '{repo: $repo, count: length, issues: .}')
+    echo "  petry-projects/$repo: $count open issues" >&2
+    entry=$(echo "$issues" | jq --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}')
+    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+  fi
+done
+for repo in $PERSONAL_REPOS; do
+  issues=$(gh issue list --repo "don-petry/$repo" --state open \
+    --json number,title,createdAt,labels --limit 1000 2>/dev/null || echo '[]')
+  count=$(echo "$issues" | jq 'length')
+  if [ "$count" -gt 0 ]; then
+    echo "  don-petry/$repo: $count open issues" >&2
+    entry=$(echo "$issues" | jq --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}')
     ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
   fi
 done
@@ -256,5 +270,6 @@ OUTPUT CONTRACT
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
+# --dangerously-skip-permissions: required in CI to bypass interactive tool-approval prompts
 echo "Generating report with Claude..." >&2
 claude -p "$(cat "$DATA_DIR/prompt.txt")" --dangerously-skip-permissions 2>/dev/null
