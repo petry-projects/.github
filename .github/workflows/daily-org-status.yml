@@ -22,7 +22,7 @@ jobs:
           node-version: '20'
 
       - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.123
+        run: npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.123
 
       - name: Generate org status report
         env:
