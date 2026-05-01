@@ -36,6 +36,7 @@ collect_classify_prs() {
               reviewDecision
               statusCheckRollup{state}
               reviews(last:20){nodes{state}}
+              closingIssuesReferences(first:10){nodes{number}}
             }
           }
         }
@@ -67,6 +68,7 @@ collect_classify_prs() {
       approvals: ([.reviews.nodes[] | select(.state=="APPROVED")] | length),
       needsHumanReview: ([.labels.nodes[].name] | any(. == "needs-human-review")),
       isDepBump: (.title | test("^chore\\(deps")),
+      closingIssues: [.closingIssuesReferences.nodes[].number],
       category: (
         if   .isDraft then "Draft"
         elif (.statusCheckRollup.state == "FAILURE" or .statusCheckRollup.state == "ERROR") then "CI Failing"
@@ -114,6 +116,15 @@ PR_BY_REPO=$(echo "$ALL_PRS" | jq '
 
 NEEDS_REVIEW_PRS=$(echo "$ALL_PRS" | jq '[.[] | select(.needsHumanReview)]')
 
+# Map of "owner/repo#issue_number" -> [{pr_number, pr_url}] for issues that have a linked PR
+ISSUE_PR_MAP=$(echo "$ALL_PRS" | jq '
+  [.[] | . as $pr | ($pr.closingIssues // [])[] |
+    {key: ($pr.repo + "#" + (. | tostring)), value: {number: $pr.number, url: $pr.url}}
+  ] | group_by(.key) | map({
+    key:   .[0].key,
+    value: [.[] | .value]
+  }) | from_entries')
+
 # ── Merge Activity ────────────────────────────────────────────────────────────
 echo "::group::Collecting merge activity" >&2
 ORG_MERGES=$(gh search prs --owner=petry-projects --merged --merged-at=">=$SINCE" \
@@ -138,7 +149,7 @@ echo "::group::Collecting issues" >&2
 ISSUES_BY_REPO='[]'
 for repo in $ORG_REPOS; do
   issues=$(gh issue list --repo "petry-projects/$repo" --state open \
-    --json number,title,createdAt,labels --limit 1000 2>/dev/null || echo '[]')
+    --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -gt 0 ]; then
     echo "  petry-projects/$repo: $count open issues" >&2
@@ -148,7 +159,7 @@ for repo in $ORG_REPOS; do
 done
 for repo in $PERSONAL_REPOS; do
   issues=$(gh issue list --repo "don-petry/$repo" --state open \
-    --json number,title,createdAt,labels --limit 1000 2>/dev/null || echo '[]')
+    --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -gt 0 ]; then
     echo "  don-petry/$repo: $count open issues" >&2
@@ -180,7 +191,15 @@ DISCUSSIONS=$(gh api graphql -f query='
 }' 2>/dev/null | jq '[
   .data.organization.repositories.nodes[]
   | select(.hasDiscussionsEnabled and .discussions.totalCount > 0)
-  | {repo: ("petry-projects/" + .name), discussions: .discussions.nodes}
+  | . as $r
+  | {
+      repo: ("petry-projects/" + .name),
+      discussions: [
+        .discussions.nodes[] | . + {
+          url: ("https://github.com/petry-projects/" + $r.name + "/discussions/" + (.number|tostring))
+        }
+      ]
+    }
 ]') || DISCUSSIONS='[]'
 echo "::endgroup::" >&2
 
@@ -197,10 +216,13 @@ Use ONLY the data below. Output ONLY the markdown report — no preamble, no com
 ### PR Counts by Repo (pre-classified)
 $(echo "$PR_BY_REPO" | jq -c '.')
 
-### PRs Needing Human Review (full detail)
+### PRs Needing Human Review (full detail, includes url field)
 $(echo "$NEEDS_REVIEW_PRS" | jq -c '.')
 
-### Merge Activity — Daily Counts (last 7 days, $SINCE to $TODAY)
+### Issue → Linked PR Map (key: "owner/repo#issue_number", value: [{number, url}])
+$(echo "$ISSUE_PR_MAP" | jq -c '.')
+
+### Merge Activity — Daily Counts (last 8 days, $SINCE to $TODAY)
 $(echo "$MERGE_DAILY" | jq -c '.')
 
 ### Org Merges Raw (for per-repo breakdown)
@@ -209,17 +231,20 @@ $(echo "$ORG_MERGES" | jq -c '[group_by(.repository.name) | .[] | {repo: .[0].re
 ### Personal Merges Raw (for per-repo breakdown)
 $(echo "$PERSONAL_MERGES" | jq -c '[group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
 
-### Open Issues by Repo
+### Open Issues by Repo (each issue has url field)
 $(echo "$ISSUES_BY_REPO" | jq -c '.')
 
-### Open Discussions
+### Open Discussions (each discussion has url field)
 $(echo "$DISCUSSIONS" | jq -c '.')
 
 ---
 
 ## REPORT FORMAT
 
-Produce these sections in order:
+Begin the report with this exact line (replace nothing):
+@don-petry
+
+Then produce these sections in order:
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
 Org-wide blocker summary table (sum all repos):
@@ -229,28 +254,36 @@ Rows in this order: Awaiting Review, CI Failing, CI Pending, Changes Requested, 
 
 Per-repo breakdown table (omit repos with 0 total PRs):
 | Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft |
-Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10.
+- Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
+- Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
 
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:
 | Repo | PR # | Opened | Title | CI | Approvals |
-PR # as markdown link: [#N](url)
-CI: PASS (SUCCESS) / FAIL (FAILURE or ERROR) / PENDING / N/A (null)
+- PR # as markdown link using url field: [#N](url)
+- Title as markdown link using url field: [title](url)
+- CI: PASS (SUCCESS) / FAIL (FAILURE or ERROR) / PENDING / N/A (null)
 If none: _none_
 
 ### \`## Open PRs — Automation (Dependency Bumps)\`
 Counts only per repo (dep_bumps > 0):
 | Repo | # Dep PRs |
+- Repo as link: [owner/repo](https://github.com/owner/repo)
 If none: _none_
 
 ### \`## Open Issues (N total)\`
 For each repo with issues, show top 20 rows:
-| Repo | # | Opened | Title | Labels |
-Opened = createdAt date only (YYYY-MM-DD).
-If issues count hits 1000, note "(truncated at 1000)" next to repo name.
+| Repo | # | Opened | Title | Labels | Linked PR |
+- # as markdown link using url field: [#N](url)
+- Title as markdown link using url field: [title](url)
+- Opened = createdAt date only (YYYY-MM-DD)
+- Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
+- If issues count hits 1000, note "(truncated at 1000)" next to the repo name
 
 ### \`## Open Discussions\`
 | Repo | # | Opened | Title | Replies |
+- # as markdown link using url field: [#N](url)
+- Title as markdown link using url field: [title](url)
 If none: _No open discussions found across petry-projects._
 
 ### \`## PR Merge Activity — Last 7 Days\`
@@ -258,6 +291,7 @@ Daily table (include zero rows):
 | Date | petry-projects | don-petry |
 Per-org repo breakdown sorted descending:
 | Repo | Merges |
+- Repo as link: [repo](https://github.com/owner/repo)
 Grand total. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
 
 ---
@@ -266,7 +300,7 @@ OUTPUT CONTRACT
 - Dates: YYYY-MM-DD
 - Section headers include total counts: \`## Open Issues (47 total)\`
 - Empty sections show _none_, never omit them
-- Links: [#N](url)
+- Every item with a url must be rendered as a markdown hyperlink
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
