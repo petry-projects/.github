@@ -17,18 +17,37 @@ jobs:
       contents: read
 
     steps:
+<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+=======
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        # postinstall (node install.cjs) downloads the claude binary — required for the CLI to function
+        run: npm install -g @anthropic-ai/claude-code@2.1.123  # NOSONAR: postinstall is the Anthropic binary fetcher, not an arbitrary script
+>>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
 
       - name: Generate org status report
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+<<<<<<< HEAD
         run: |
           chmod +x scripts/org_status.sh scripts/org_report.sh
+=======
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          chmod +x scripts/org_status.sh
+>>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
           bash scripts/org_status.sh > /tmp/report.md
           [ -s /tmp/report.md ] || { echo "Report is empty — aborting"; exit 1; }
 
       - name: Truncate report if near GitHub issue body limit
         run: |
+<<<<<<< HEAD
           MAX_BYTES=64000
           REPORT_SIZE=$(wc -c < /tmp/report.md)
           echo "Report size: ${REPORT_SIZE} bytes (limit: ${MAX_BYTES})"
@@ -42,6 +61,12 @@ jobs:
             printf '%s' "$FOOTER" >> /tmp/report_truncated.md
             mv /tmp/report_truncated.md /tmp/report.md
             echo "Final size: $(wc -c < /tmp/report.md) bytes"
+=======
+          MAX_BYTES=60000
+          if [ "$(wc -c < /tmp/report.md)" -gt "$MAX_BYTES" ]; then
+            truncated=$(head -c "$MAX_BYTES" /tmp/report.md)
+            printf '%s\n\n_Report truncated — exceeded GitHub issue body limit._\n' "$truncated" > /tmp/report.md
+>>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
           fi
 
       - name: Create daily-report issue
