@@ -5,6 +5,8 @@ on:
     - cron: '0 11 * * *'   # 6:00 AM CDT (UTC-5) — shifts to 5 AM in winter CST
   workflow_dispatch:         # allow manual trigger from Actions tab
 
+permissions: {}              # no default permissions; each job grants only what it needs
+
 jobs:
   report:
     name: Generate & post org status
@@ -31,6 +33,7 @@ jobs:
         run: |
           chmod +x scripts/org_status.sh
           bash scripts/org_status.sh > /tmp/report.md
+          [ -s /tmp/report.md ] || { echo "Report is empty — aborting"; exit 1; }
 
       - name: Truncate report if near GitHub issue body limit
         run: |

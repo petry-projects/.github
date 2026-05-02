@@ -13,26 +13,35 @@ trap 'rm -rf "$DATA_DIR"' EXIT
 
 # ── Repo Discovery ────────────────────────────────────────────────────────────
 echo "::group::Discovering repos" >&2
-ORG_REPOS=$(gh repo list petry-projects --json name --limit 100 | jq -r '.[].name' | sort)
-PERSONAL_REPOS=$(gh repo list don-petry --json name --limit 100 | jq -r '.[].name' | sort)
+ORG_REPOS=$(gh repo list petry-projects --json name --limit 1000 | jq -r '.[].name' | sort)
+PERSONAL_REPOS=$(gh repo list don-petry --json name --limit 1000 | jq -r '.[].name' | sort)
 echo "petry-projects: $(echo "$ORG_REPOS" | wc -l | tr -d ' ') repos  |  don-petry: $(echo "$PERSONAL_REPOS" | wc -l | tr -d ' ') repos" >&2
 echo "::endgroup::" >&2
 
 # ── PR Collection + Classification ───────────────────────────────────────────
 collect_classify_prs() {
   local owner=$1 repo=$2
-  local cursor="null" all_nodes='[]'
+  local cursor="" all_nodes='[]'
+  # cursor="" = first page (pass JSON null); cursor=VALUE = subsequent pages (pass as string)
 
   while true; do
     local result
+    local -a cursor_arg
+    if [ -z "$cursor" ]; then
+      cursor_arg=(-F cursor=null)   # -F = JSON-typed: passes null, not the string "null"
+    else
+      cursor_arg=(-f "cursor=$cursor")
+    fi
+
     result=$(gh api graphql \
+      "${cursor_arg[@]}" \
       -f query='query($owner:String!,$repo:String!,$cursor:String){
         repository(owner:$owner,name:$repo){
           pullRequests(states:OPEN,first:100,after:$cursor){
             pageInfo{hasNextPage endCursor}
             nodes{
               number title createdAt isDraft
-              labels(first:5){nodes{name}}
+              labels(first:20){nodes{name}}
               reviewDecision
               statusCheckRollup{state}
               reviews(last:20){nodes{state}}
@@ -41,17 +50,17 @@ collect_classify_prs() {
           }
         }
       }' \
-      -f owner="$owner" -f repo="$repo" -f cursor="$cursor" 2>/dev/null) \
+      -f owner="$owner" -f repo="$repo" 2>/dev/null) \
       || result='{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}'
 
     local nodes has_next end_cursor
     nodes=$(echo "$result" | jq '.data.repository.pullRequests.nodes // []')
     has_next=$(echo "$result" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false')
-    end_cursor=$(echo "$result" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // "null"')
+    end_cursor=$(echo "$result" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // ""')
 
     all_nodes=$(jq -n --argjson a "$all_nodes" --argjson b "$nodes" '$a + $b')
-    [ "$has_next" = "true" ] || break
-    cursor="\"$end_cursor\""
+    [ "$has_next" = "true" ] && [ -n "$end_cursor" ] || break
+    cursor="$end_cursor"
   done
 
   echo "$all_nodes" | jq --arg owner "$owner" --arg repo "$repo" '
@@ -63,8 +72,8 @@ collect_classify_prs() {
       url:    ("https://github.com/" + $owner + "/" + $repo + "/pull/" + (.number|tostring)),
       labels: [.labels.nodes[].name],
       isDraft: .isDraft,
-      ci:     (.statusCheckRollup.state // "null"),
-      review: (.reviewDecision // "null"),
+      ci:     (.statusCheckRollup.state // null),
+      review: (.reviewDecision // null),
       approvals: ([.reviews.nodes[] | select(.state=="APPROVED")] | length),
       needsHumanReview: ([.labels.nodes[].name] | any(. == "needs-human-review")),
       isDepBump: (.title | test("^chore\\(deps")),
@@ -101,7 +110,7 @@ echo "::endgroup::" >&2
 
 # Pre-aggregate PR counts by category per repo (keeps prompt size manageable)
 PR_BY_REPO=$(echo "$ALL_PRS" | jq '
-  group_by(.repo) | map({
+  sort_by(.repo) | group_by(.repo) | map({
     repo: .[0].repo,
     total: length,
     draft:             ([.[] | select(.category=="Draft")] | length),
@@ -226,10 +235,10 @@ $(echo "$ISSUE_PR_MAP" | jq -c '.')
 $(echo "$MERGE_DAILY" | jq -c '.')
 
 ### Org Merges Raw (for per-repo breakdown)
-$(echo "$ORG_MERGES" | jq -c '[group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
+$(echo "$ORG_MERGES" | jq -c '[sort_by(.repository.name) | group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
 
 ### Personal Merges Raw (for per-repo breakdown)
-$(echo "$PERSONAL_MERGES" | jq -c '[group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
+$(echo "$PERSONAL_MERGES" | jq -c '[sort_by(.repository.name) | group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
 
 ### Open Issues by Repo (each issue has url field)
 $(echo "$ISSUES_BY_REPO" | jq -c '.')
@@ -286,7 +295,7 @@ For each repo with issues, show top 20 rows:
 - Title as markdown link using url field: [title](url)
 If none: _No open discussions found across petry-projects._
 
-### \`## PR Merge Activity — Last 7 Days\`
+### \`## PR Merge Activity — Last 8 Days\`
 Daily table (include zero rows):
 | Date | petry-projects | don-petry |
 Per-org repo breakdown sorted descending:
@@ -304,6 +313,7 @@ OUTPUT CONTRACT
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
-# --dangerously-skip-permissions: required in CI to bypass interactive tool-approval prompts
+# --allowedTools "": disable all tool use so Claude can't act on untrusted PR/issue content
+# Pipe prompt via stdin rather than a shell argument to avoid ARG_MAX (~1MB) with large orgs
 echo "Generating report with Claude..." >&2
-claude -p "$(cat "$DATA_DIR/prompt.txt")" --dangerously-skip-permissions 2>/dev/null
+claude -p --allowedTools "" < "$DATA_DIR/prompt.txt" 2>/dev/null
