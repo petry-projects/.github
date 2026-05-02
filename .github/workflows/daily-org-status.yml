@@ -1,0 +1,56 @@
+name: Daily Org Status
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 6:00 AM CDT (UTC-5) — shifts to 5 AM in winter CST
+  workflow_dispatch:         # allow manual trigger from Actions tab
+
+permissions: {}              # no default permissions; each job grants only what it needs
+
+jobs:
+  report:
+    name: Generate & post org status
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      issues: write          # create issue in this repo
+      contents: read
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        # postinstall (node install.cjs) downloads the claude binary — required for the CLI to function
+        run: npm install -g @anthropic-ai/claude-code@2.1.123  # NOSONAR: postinstall is the Anthropic binary fetcher, not an arbitrary script
+
+      - name: Generate org status report
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          chmod +x scripts/org_status.sh
+          bash scripts/org_status.sh > /tmp/report.md
+          [ -s /tmp/report.md ] || { echo "Report is empty — aborting"; exit 1; }
+
+      - name: Truncate report if near GitHub issue body limit
+        run: |
+          MAX_BYTES=60000
+          if [ "$(wc -c < /tmp/report.md)" -gt "$MAX_BYTES" ]; then
+            truncated=$(head -c "$MAX_BYTES" /tmp/report.md)
+            printf '%s\n\n_Report truncated — exceeded GitHub issue body limit._\n' "$truncated" > /tmp/report.md
+          fi
+
+      - name: Create daily-report issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          gh issue create \
+            --repo petry-projects/.github \
+            --title "Org Status — $DATE" \
+            --body-file /tmp/report.md \
+            --label daily-report
