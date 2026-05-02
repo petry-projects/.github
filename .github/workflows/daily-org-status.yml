@@ -24,7 +24,8 @@ jobs:
           node-version: '20'
 
       - name: Install Claude Code CLI
-        run: npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.123
+        # postinstall (node install.cjs) downloads the claude binary — required for the CLI to function
+        run: npm install -g @anthropic-ai/claude-code@2.1.123  # NOSONAR: postinstall is the Anthropic binary fetcher, not an arbitrary script
 
       - name: Generate org status report
         env:

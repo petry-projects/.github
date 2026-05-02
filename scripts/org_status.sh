@@ -129,7 +129,7 @@ NEEDS_REVIEW_PRS=$(echo "$ALL_PRS" | jq '[.[] | select(.needsHumanReview)]')
 ISSUE_PR_MAP=$(echo "$ALL_PRS" | jq '
   [.[] | . as $pr | ($pr.closingIssues // [])[] |
     {key: ($pr.repo + "#" + (. | tostring)), value: {number: $pr.number, url: $pr.url}}
-  ] | group_by(.key) | map({
+  ] | sort_by(.key) | group_by(.key) | map({
     key:   .[0].key,
     value: [.[] | .value]
   }) | from_entries')
@@ -191,7 +191,7 @@ DISCUSSIONS=$(gh api graphql -f query='
           nodes{
             number title createdAt
             comments{totalCount}
-            labels(first:5){nodes{name}}
+            labels(first:20){nodes{name}}
           }
         }
       }
