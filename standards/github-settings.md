@@ -261,7 +261,7 @@ satisfies the requirement.
 
 ### Standard Template
 
-```
+```gitignore
 # CODEOWNERS
 # Each line is a pattern followed by one or more owners.
 # Owners are matched in order, last matching pattern wins.
