@@ -256,8 +256,11 @@ in the `pr-quality` ruleset:
 | `@dependabot-automerge-petry` | `dependabot-automerge-petry` | Dependabot auto-merge approver |
 
 The `pr-quality` ruleset requires **1 code owner approval**. With all three
-accounts on every pattern, approval from any one of them — human or bot —
-satisfies the requirement.
+accounts on every pattern, an approval from `@don-petry`, `@petry-projects-pr-review-agent`,
+or `@dependabot-automerge-petry` satisfies the requirement — provided the approver
+is not also the author of the last push to that branch (`require_last_push_approval`
+prevents self-approval after one's own push). For Dependabot PRs this is never an
+issue: Dependabot pushes the branch and a separate bot approves it.
 
 ### Standard Template
 
