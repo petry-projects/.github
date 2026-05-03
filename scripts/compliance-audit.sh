@@ -402,17 +402,43 @@ check_codeowners() {
 
   # CODEOWNERS can be in root, .github/, or docs/
   local found=false
+  local codeowners_content=""
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
-    if gh_api "repos/$ORG/$repo/contents/$path" --jq '.name' > /dev/null 2>&1; then
+    # Use || echo "" so a 404 is non-fatal under set -euo pipefail
+    local content
+    content=$(gh_api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null || echo "")
+    if [ -n "$content" ]; then
       found=true
+      codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
       break
     fi
   done
 
   if [ "$found" = false ]; then
-    add_finding "$repo" "settings" "missing-codeowners" "warning" \
-      "No \`CODEOWNERS\` file found — recommended for code owner review enforcement" \
-      "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
+    add_finding "$repo" "settings" "missing-codeowners" "error" \
+      "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
+      "standards/github-settings.md#codeowners-standard"
+    return
+  fi
+
+  # Extract non-comment, non-blank owner lines for accurate matching.
+  # Each such line has the form: <pattern> <owner1> [<owner2> ...]
+  # We check that every owner line includes both required bot accounts.
+  local owner_lines
+  owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
+
+  local missing_bots=()
+  if ! echo "$owner_lines" | grep -qE '@petry-projects-pr-review-agent(\s|$)'; then
+    missing_bots+=("@petry-projects-pr-review-agent")
+  fi
+  if ! echo "$owner_lines" | grep -qE '@dependabot-automerge-petry(\s|$)'; then
+    missing_bots+=("@dependabot-automerge-petry")
+  fi
+
+  if [ "${#missing_bots[@]}" -gt 0 ]; then
+    add_finding "$repo" "settings" "codeowners-missing-bots" "error" \
+      "CODEOWNERS is missing required bot accounts on owner lines: ${missing_bots[*]} — bot approvals will not satisfy require_code_owner_review" \
+      "standards/github-settings.md#codeowners-standard"
   fi
 }
 
