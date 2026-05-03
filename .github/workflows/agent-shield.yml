@@ -32,6 +32,7 @@ jobs:
   agent-shield:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
 =======
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
@@ -39,3 +40,6 @@ jobs:
 =======
     uses: petry-projects/.github/workflows/agent-shield-reusable.yml@v1
 >>>>>>> 956b396 (fix: correct reusable workflow path syntax (remove duplicate .github) (#154))
+=======
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
+>>>>>>> 173a538 (fix: restore double .github path in agent-shield and claude reusable refs)
