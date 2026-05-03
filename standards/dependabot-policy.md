@@ -57,7 +57,7 @@ The following file is conditional:
 
 | File | When required |
 |------|--------------|
-| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) or CODEOWNERS review enforcement (`require_code_owner_review: true`) applies. See [Applying to a Repository](#applying-to-a-repository) for details. |
+| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) applies — without it, Dependabot PRs fall behind after each merge and stall. **Not** required for CODEOWNERS enforcement; bot accounts in `CODEOWNERS` handle that. See [Applying to a Repository](#applying-to-a-repository) for details. |
 
 ## Dependabot Templates
 
