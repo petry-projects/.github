@@ -3,4 +3,4 @@
 # Owners are matched in order, last matching pattern wins.
 
 # Default owner for all files
-* @don-petry
+* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
