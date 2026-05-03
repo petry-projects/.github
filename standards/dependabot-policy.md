@@ -17,6 +17,7 @@ security posture than chasing every minor/patch release.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 4. **Auto-merge** after all CI checks pass, approving and merging eligible PRs.
    Approvals come from members of the `@petry-projects/org-leads` team listed
    in every repo's `CODEOWNERS` file (see
@@ -32,6 +33,13 @@ security posture than chasing every minor/patch release.
 =======
 4. **Auto-merge** after all CI checks pass, using a GitHub App token to satisfy
    branch protection (CODEOWNERS review bypass for bot PRs). Eligible updates:
+=======
+4. **Auto-merge** after all CI checks pass, using a GitHub App token to approve
+   and merge eligible PRs. Both bot accounts (`dependabot-automerge-petry` and
+   `petry-projects-pr-review-agent`) are listed as code owners in every repo's
+   `CODEOWNERS` file so their approvals satisfy `require_code_owner_review`
+   without any bypass. Eligible updates:
+>>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
    - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
    - **App ecosystems**: patch and minor security updates only (major requires human review)
    - **Indirect (transitive) dependencies**: all updates regardless of version bump
@@ -81,7 +89,7 @@ The following file is conditional:
 
 | File | When required |
 |------|--------------|
-| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) or CODEOWNERS review enforcement (`require_code_owner_review: true`) applies. See [Applying to a Repository](#applying-to-a-repository) for details. |
+| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) applies — without it, Dependabot PRs fall behind after each merge and stall. **Not** required for CODEOWNERS enforcement; bot accounts in `CODEOWNERS` handle that. See [Applying to a Repository](#applying-to-a-repository) for details. |
 
 ## Dependabot Templates
 
@@ -463,6 +471,7 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 >>>>>>> ae9709f (docs(dependabot): App secrets at org level + rebase workflow optional for non-strict repos (#97))
 =======
 3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` if the repo
+<<<<<<< HEAD
    enforces **either** of the following:
    - **Strict required-status-checks** (`strict_required_status_checks_policy: true`
      or classic branch protection `required_status_checks.strict: true`) — without
@@ -474,6 +483,20 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
      without a human CODEOWNERS review.
    If neither condition applies, the rebase workflow is unnecessary.
 >>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
+=======
+   enforces **strict required-status-checks** (`strict_required_status_checks_policy: true`
+   or classic branch protection `required_status_checks.strict: true`) — without
+   this workflow, Dependabot PRs fall behind after each merge to `main` and stall.
+   If the repo does not use strict status checks, the rebase workflow is unnecessary.
+
+   > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
+   > The correct solution for CODEOWNERS enforcement is to list the bot accounts
+   > (`@dependabot-automerge-petry`, `@petry-projects-pr-review-agent`) as owners
+   > in every CODEOWNERS pattern — see the
+   > [CODEOWNERS Standard](github-settings.md#codeowners-standard). The earlier
+   > approach of using `gh api .../merge` as a bypass was fragile and has been
+   > superseded.
+>>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
 5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
