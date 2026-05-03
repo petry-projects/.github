@@ -13,5 +13,9 @@
 =======
 
 # Default owner for all files
+<<<<<<< HEAD
 * @don-petry
 >>>>>>> 265f6dc (feat: add CODEOWNERS file for code owner review enforcement)
+=======
+* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)

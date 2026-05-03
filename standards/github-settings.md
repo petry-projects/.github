@@ -213,6 +213,7 @@ done
 | **Allow deletions** | No |
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 > **CODEOWNERS:** All repos MUST have a `CODEOWNERS` file. Without one, the
 > "Require code owner review" setting has no effect. See the
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
@@ -245,6 +246,11 @@ owner approvals.
 **Recovery:** comment `@dependabot rebase` on blocked PRs. This triggers
 Dependabot to push a new commit, which fires the automerge workflow and submits
 a fresh approval under the current CODEOWNERS.
+=======
+> **CODEOWNERS:** All repos MUST have a `CODEOWNERS` file. Without one, the
+> "Require code owner review" setting has no effect. See the
+> [CODEOWNERS Standard](#codeowners-standard) below for the required format.
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
@@ -348,6 +354,7 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 |-----|---------|-----------|
 | **Claude** | AI code review and PR assistance via Claude Code Action | 2026-03-20 |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge | 2026-03-23 |
 | **petry-projects-pr-review-agent** | (deprecated) GitHub App formerly used for PR review — replaced by `donpetry-bot` machine user in `@petry-projects/org-leads` because Apps cannot be CODEOWNERS | 2026-04-01 |
 | **donpetry-bot** | Machine-user account in `@petry-projects/org-leads`; satisfies CODEOWNERS for automated PR review | 2026-05-04 |
@@ -385,6 +392,10 @@ GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
 
 =======
 | **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge (bypasses branch protection) | 2026-03-23 |
+=======
+| **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge; listed in CODEOWNERS so its approvals satisfy `require_code_owner_review` | 2026-03-23 |
+| **petry-projects-pr-review-agent** | General PR review agent; listed in CODEOWNERS as the org-standard automation reviewer | 2026-04-01 |
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 | **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
 
@@ -440,6 +451,7 @@ All repositories MUST have these labels configured:
 All repositories MUST have a `CODEOWNERS` file at `.github/CODEOWNERS`
 (or `CODEOWNERS` at the repo root for repos with no `.github/` directory).
 
+<<<<<<< HEAD
 The full policy lives in [`codeowners-standard.md`](codeowners-standard.md).
 Summary:
 
@@ -449,11 +461,31 @@ Summary:
   **forbidden** — manage membership through the team instead
 - GitHub Apps cannot be code owners (platform limitation); use machine-user
   accounts added to the team
+=======
+### Required Bot Accounts
+
+Every CODEOWNERS file MUST include these two bot accounts alongside `@don-petry`
+so that automated PR approvals satisfy the `require_code_owner_review` setting
+in the `pr-quality` ruleset:
+
+| Account | App | Role |
+|---------|-----|------|
+| `@petry-projects-pr-review-agent` | `petry-projects-pr-review-agent` | General org PR review bot |
+| `@dependabot-automerge-petry` | `dependabot-automerge-petry` | Dependabot auto-merge approver |
+
+The `pr-quality` ruleset requires **1 code owner approval**. With all three
+accounts on every pattern, an approval from `@don-petry`, `@petry-projects-pr-review-agent`,
+or `@dependabot-automerge-petry` satisfies the requirement — provided the approver
+is not also the author of the last push to that branch (`require_last_push_approval`
+prevents self-approval after one's own push). For Dependabot PRs this is never an
+issue: Dependabot pushes the branch and a separate bot approves it.
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 
 ### Standard Template
 
 ```gitignore
 # CODEOWNERS
+<<<<<<< HEAD
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/codeowners-standard.md
 
 * @petry-projects/org-leads
@@ -466,6 +498,18 @@ on every owner line so the team can always satisfy `require_code_owner_review`.
 =======
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
+=======
+# Each line is a pattern followed by one or more owners.
+# Owners are matched in order, last matching pattern wins.
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/github-settings.md#codeowners-standard
+
+# Default owner for all files
+* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
+```
+
+Repos with finer-grained path ownership (e.g., `/apps/api/`, `/infra/`) MUST
+add the two bot accounts to every path-specific line, not just the default `*`.
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 
 ---
 
@@ -484,8 +528,12 @@ When creating a new repository in `petry-projects`:
 =======
 2. **Create the `pr-quality` ruleset** matching the standard configuration above
 3. **Create the `code-quality` ruleset** with required checks for the repo's stack
+<<<<<<< HEAD
 4. **Add a `CODEOWNERS` file** defining ownership for the repo's key paths
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
+>>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 5. **Add Dependabot configuration** — copy the appropriate template from
    [`standards/dependabot/`](dependabot/) and add to `.github/dependabot.yml`
 6. **Add CI workflows** — see [CI Standards](ci-standards.md) for required workflows
