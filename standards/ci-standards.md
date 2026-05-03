@@ -927,10 +927,18 @@ references. Use consistent, descriptive names:
 | Language / tool name | `TypeScript`, `Go`, `SonarCloud` | For multi-language repos |
 | `build-and-test` | `build-and-test` | For single-language repos |
 | `CodeQL` | `CodeQL` | Default-setup CodeQL — single context regardless of language count |
+| `Analyze (actions)` | `Analyze (actions)` | Manual `codeql.yml` with `jobs.analyze.name: Analyze` — the language is appended in parentheses by `codeql-action`. Use `Analyze ({language})` (e.g. `Analyze (javascript-typescript)`) in required-check configs for repos with a per-repo `codeql.yml`. |
 | `claude` | `claude` | Claude Code Action |
 
 These names are referenced in branch protection required status checks.
 Changing a job name requires updating the branch protection configuration.
+
+> **Default vs manual CodeQL check names:** repos using GitHub-managed default
+> setup (the org standard — see [§2](#2-codeql-analysis-github-managed-default-setup))
+> produce a single `CodeQL` check. Repos with a hand-authored `codeql.yml` produce
+> one `Analyze ({language})` check per language. If a ruleset was configured with
+> `Analyze` (no language suffix), it will never be satisfied — use the language-qualified
+> name that actually appears in the PR check list.
 
 ---
 
