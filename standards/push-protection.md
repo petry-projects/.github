@@ -100,14 +100,17 @@ compliance audit checks these flags via `GET /repos/{owner}/{repo}`:
 Apply per repo via:
 
 ```bash
-gh api -X PATCH "repos/petry-projects/<repo>" \
-  -F security_and_analysis='{
+gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
+{
+  "security_and_analysis": {
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
     "secret_scanning_non_provider_patterns": {"status": "enabled"},
     "dependabot_security_updates": {"status": "enabled"}
-  }'
+  }
+}
+JSON
 ```
 
 `scripts/apply-repo-settings.sh` MUST enforce these values alongside the
@@ -124,12 +127,12 @@ weekly audit. See [Application](#application-to-a-repository) below.
 The org MUST configure the following custom patterns in addition to the
 provider-supplied ones:
 
-| Pattern name | Regex (illustrative) | Rationale |
-|--------------|----------------------|-----------|
+| Pattern name | Pattern (illustrative) | Rationale |
+|--------------|------------------------|-----------|
 | `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
 | `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
 | `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
-| `generic-high-entropy` | High-entropy strings assigned to `*_TOKEN`, `*_SECRET`, `*_KEY` env vars | Catches untyped long strings in YAML and `.env` files |
+| `generic-high-entropy` | `(?:_TOKEN\|_SECRET\|_KEY)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{32,}` | Catches untyped long strings in YAML and `.env` files |
 
 Custom patterns are configured at **Org settings → Code security → Secret
 scanning → Custom patterns**. Each new pattern MUST be dry-run against all
@@ -414,7 +417,7 @@ both at once:
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
-| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks` |
+| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 

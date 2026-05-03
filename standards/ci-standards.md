@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the change propagates everywhere on next run. |
+| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -44,9 +44,10 @@ reusable, not a local edit.
 | Template | Tier | Purpose |
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow |
+| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
-| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Rebase Dependabot PRs on demand |
+| [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
+| [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 
@@ -74,7 +75,7 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
@@ -229,19 +230,90 @@ jobs:
 
 Each repo needs a `sonar-project.properties` file at root with project key and org.
 
-### 4. Claude Code (`claude.yml`)
+### 4. Secret Scanning (`ci.yml` — gitleaks job)
+
+Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
+for all organization repositories. The job scans commit history for hardcoded secrets,
+API keys, and other sensitive data.
+
+**Why a separate job?** Gitleaks requires a license key when scanning organization
+repositories (free for open-source). The job is part of the main `ci.yml` pipeline
+but documented separately to clarify the licensing requirement.
+
+**Standard configuration:** See the canonical job specification in
+[`push-protection.md` — Layer 3: CI Secret Scanning](push-protection.md#layer-3--ci-secret-scanning-secondary-defense).
+
+**Organization repos only — GITLEAKS_LICENSE requirement:**
+
+When adding the `secret-scan` job to an organization repository's `ci.yml`, you **must**
+pass the `GITLEAKS_LICENSE` secret to the gitleaks action:
+
+```yaml
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+```
+
+Without this environment variable, gitleaks will fail with "missing gitleaks license"
+when scanning in an organization context.
+
+**Required secrets:** `GITLEAKS_LICENSE` (org-level, organization repositories only)
+
+**License requirement:** Gitleaks is free for open-source, but organization scans
+require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks.io).
+
+**License setup:**
+
+1. Create or log into your account at [gitleaks.io](https://gitleaks.io)
+2. Generate a free license key for your organization
+3. Add the license as the org-level secret `GITLEAKS_LICENSE`:
+
+   ```bash
+   gh secret set GITLEAKS_LICENSE --org petry-projects --body "<license-key>"
+   ```
+
+**For personal/user repos:** The `GITLEAKS_LICENSE` environment variable is optional.
+If omitted, gitleaks runs in open-source mode (free, no license needed).
+
+**CI failure — common causes and fixes:**
+
+| Failure | Root cause | Fix |
+|---------|-----------|-----|
+| `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
+| Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
+
+### 5. Claude Code (`claude.yml`)
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
 
-> **Both jobs require a checkout step.** The `claude` job (PR reviews) and the
-> `claude-issue` job (issue automation) each need `actions/checkout` **before**
-> the `claude-code-action` step. Without it, `claude-code-action` cannot read
-> `CLAUDE.md` or `AGENTS.md` and will error on every trigger. The weekly
-> compliance audit (`check_claude_workflow_checkout`) detects repos missing this
-> step and creates a labeled issue to drive remediation.
+> **OIDC security constraint — `claude.yml` is immutable on PR branches.**
+> Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
+> a PR branch is byte-for-byte identical to the same file on the default branch.
+> Any diff — including SHA-pinning the `uses:` line, adding a trigger, or
+> changing a comment — causes the OIDC token exchange to fail:
+>
+> ```text
+> App token exchange failed: 401 Unauthorized — Workflow validation failed.
+> The workflow file must exist and have identical content to the version
+> on the repository's default branch.
+> ```
+>
+> Claude Code will not run on that PR. Agents must not open PRs that modify
+> `.github/workflows/claude.yml`. The caller stub template now includes a
+> `paths-ignore` guard that prevents this workflow from triggering on PRs that
+> only change this file. See also [Action Pinning Policy](#action-pinning-policy)
+> for the reusable workflow ref exemption.
+>
+> **All three jobs require a checkout step.** The `claude` job (PR reviews), the
+> `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
+> response) each need `actions/checkout` **before** the `claude-code-action` step.
+> Without it, `claude-code-action` cannot read `CLAUDE.md` or `AGENTS.md` and
+> will error on every trigger. The weekly compliance audit
+> (`check_claude_workflow_checkout`) detects repos missing the checkout step or
+> the `check_run` trigger and creates a labeled issue to drive remediation.
 
-The workflow has two jobs:
+The workflow has three jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
   mentions in comments. No `prompt` input; runs in interactive mode.
@@ -249,6 +321,13 @@ The workflow has two jobs:
   applied to an issue. Uses a `prompt` to drive the full lifecycle:
   implement the fix, create a PR, self-review, resolve review comments,
   monitor CI, and tag the maintainer when ready for human review.
+- **`claude-ci-fix`** (CI failure response) — triggered by `check_run:
+  completed` when a non-Claude check fails on an open PR. Looks up the
+  associated PR (falling back to the GitHub API when the webhook payload
+  omits `pull_requests`), checks out the branch, reads the failure logs,
+  applies the minimal fix, pushes, and comments with a summary. Requires
+  the `check_run` trigger in the caller's `on:` block — the compliance audit
+  verifies this is present.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -269,6 +348,8 @@ on:
     types: [created]
   issues:
     types: [labeled]
+  check_run:          # enables claude-ci-fix — do not remove
+    types: [completed]
 
 permissions: {}
 
@@ -394,19 +475,19 @@ are ignored. Apply the `claude` label manually to any issue to trigger Claude.
 runtime to determine who to tag. No per-repo customization is needed as long
 as `CODEOWNERS` is present (checked by the compliance audit).
 
-### 5. Dependabot Auto-Merge (`dependabot-automerge.yml`)
+### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
 Automatically approves and squash-merges eligible Dependabot PRs.
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml)
 and the [Dependabot Policy](dependabot-policy.md) for full details.
 
-### 6. Dependency Audit (`dependency-audit.yml`)
+### 7. Dependency Audit (`dependency-audit.yml`)
 
 Vulnerability scanning for all package ecosystems.
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml)
 and the [Dependabot Policy](dependabot-policy.md).
 
-### 7. AgentShield (`agent-shield.yml`)
+### 8. AgentShield (`agent-shield.yml`)
 
 Agent configuration security validation. Checks that CLAUDE.md and
 AGENTS.md exist and follow standards, scans for secrets in agent config
@@ -414,13 +495,31 @@ files, validates SKILL.md frontmatter, and detects permission bypasses.
 See [`workflows/agent-shield.yml`](workflows/agent-shield.yml) and the
 [Agent Configuration Standards](agent-standards.md) for full details.
 
+### 8. Auto-Rebase (`auto-rebase.yml`)
+
+Keeps open non-Dependabot PRs up-to-date with the base branch.
+A copy-paste ready template is available at [`standards/workflows/auto-rebase.yml`](workflows/auto-rebase.yml).
+
+**Trigger:** every `push` to `main` (i.e., every merged PR) plus manual `workflow_dispatch`.
+
+On each run the workflow:
+
+1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
+2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
+4. On merge conflict (422): posts an idempotent comment (sentinel `<!-- auto-rebase-conflict -->`) asking the author to resolve conflicts.
+
+**No secrets required** — uses `GITHUB_TOKEN` only. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
+
 ---
 
 ## Conditional Workflows
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).
@@ -475,8 +574,21 @@ split into two parts:
    Defines the schedule, the `workflow_dispatch` inputs, and calls the
    reusable workflow with a single required parameter: `project_context`.
 
+3. **Reputable Source List** (repo-local, per-repo):
+   Each adopting repo maintains its own copy at `.github/feature-ideation-sources.md`
+   (or the path passed via the `sources_file` workflow input).
+   Use [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   as a starter template, then customise it for your project. The Phase 2 prompt
+   instructs Mary to read that file as her **starting set** for market research —
+   vendor blogs, RSS feeds, podcasts, and YouTube channels organised by category.
+   If the file is absent Mary falls back to open web search automatically.
+   Each repo owns its own copy; add or remove entries via PR in that repo.
+
 When we tune the prompt, the model, or the gotchas, we change one file in
-this repo and every adopter picks up the change on their next scheduled run.
+this repo. Repos tracking `@main` pick up the change on their next scheduled
+run; repos pinned to `@v1` pick it up only after the `v1` tag is updated and
+then on their next scheduled run. The source list is repo-local and propagates
+only within the repo that owns it.
 
 #### Adopting in a new repo
 
@@ -485,11 +597,15 @@ this repo and every adopter picks up the change on their next scheduled run.
 2. Replace the `project_context` value with a 3-5 sentence description of
    what the project is, who it serves, and the competitive landscape Mary
    should research. This is the **only** required edit.
-3. (Optional) Adjust the cron schedule, focus area choices, or pin to a
+3. (Optional) Copy [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
+   to `.github/feature-ideation-sources.md` in the target repo and customise
+   it for your project. Mary reads YOUR copy — not the central template — so
+   each repo controls its own source list.
+4. (Optional) Adjust the cron schedule, focus area choices, or pin to a
    tag instead of `@main` if you want change isolation.
-4. Ensure GitHub Discussions is enabled with an "Ideas" category — see
+5. Ensure GitHub Discussions is enabled with an "Ideas" category — see
    [Discussions Configuration](github-settings.md#discussions-configuration).
-5. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
+6. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
 
 #### Critical gotchas (baked into the reusable workflow)
 
@@ -691,6 +807,30 @@ incorrect pinned one.
 > example to a repository, always look up the current SHA for each action and
 > pin to it with a version comment.
 
+### Exception: Internal Reusable Workflow References
+
+Calls to `petry-projects/.github` reusable workflows use tag references
+(`@v1`, `@main`) — **not SHA pins** — and are exempt from this policy.
+
+```yaml
+# CORRECT — tag ref for internal reusable workflow
+uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+
+# WRONG — do not SHA-pin internal reusable workflow refs
+uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+```
+
+**Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
+the default branch. Anthropic's OIDC token endpoint validates that
+`.github/workflows/claude.yml` on a PR branch is identical to the default
+branch — any diff causes `401 Workflow validation failed` and Claude Code
+cannot run on that PR.
+
+The `@v1` tag on `petry-projects/.github` is managed deliberately (bumped only
+on backward-compatible releases) and is not subject to tag-force-push risk
+because the org controls the tag. **Do not open compliance PRs to pin these
+references.**
+
 ---
 
 ## Permissions Policy
@@ -748,6 +888,7 @@ All secrets required by the standard CI workflows are configured at the
 |--------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
+| `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
 | `APP_ID` | GitHub App ID for Dependabot auto-merge |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 

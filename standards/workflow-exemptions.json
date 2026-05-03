@@ -1,0 +1,15 @@
+{
+  "immutable_files": [
+    {
+      "path": ".github/workflows/claude.yml",
+      "reason": "OIDC invariant — any diff causes 401 Workflow validation failed",
+      "requires_human_review": true
+    },
+    {
+      "path": ".github/workflows/agent-shield.yml",
+      "reason": "Security boundary — agents cannot weaken security scanning",
+      "requires_human_review": true
+    }
+  ]
+}
+

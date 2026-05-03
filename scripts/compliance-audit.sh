@@ -5,6 +5,7 @@
 #   standards/ci-standards.md
 #   standards/dependabot-policy.md
 #   standards/github-settings.md
+#   standards/push-protection.md
 #
 # Outputs:
 #   $REPORT_DIR/findings.json   — machine-readable findings
@@ -219,6 +220,22 @@ check_action_pinning() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Reusable workflow path syntax
+# ---------------------------------------------------------------------------
+# NOTE: The correct pattern IS petry-projects/.github/.github/workflows/...
+# because the first .github is the repository name, and the second .github
+# is the directory path within that repository. This check is disabled as
+# a known false positive per petry-projects/.github standards.
+#
+# Reference: https://docs.github.com/en/actions/using-workflows/reusing-workflows
+# Example: uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+check_reusable_workflow_paths() {
+  local repo="$1"
+  # This check is intentionally disabled — the double .github/ pattern is correct
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -283,9 +300,10 @@ check_dependabot_config() {
 # ---------------------------------------------------------------------------
 check_repo_settings() {
   local repo="$1"
+  local repo_json="$2"
 
   local settings
-  settings=$(gh_api "repos/$ORG/$repo" --jq '{
+  settings=$(echo "$repo_json" | jq '{
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     has_wiki: .has_wiki,
@@ -538,6 +556,14 @@ check_claude_workflow_checkout() {
         "standards/workflows/claude.yml"
     fi
   done
+
+  # Verify the check_run trigger is present — without it the claude-ci-fix job
+  # in the reusable can never fire to diagnose and fix CI failures on PRs.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]+check_run:"; then
+    add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
+      "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
+      "standards/ci-standards.md#4-claude-code-claudeyml"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -563,6 +589,7 @@ check_centralized_workflow_stubs() {
   # workflow-filename:expected-reusable-basename
   local centralized=(
     "claude.yml:claude-code-reusable"
+    "auto-rebase.yml:auto-rebase-reusable"
     "dependency-audit.yml:dependency-audit-reusable"
     "dependabot-automerge.yml:dependabot-automerge-reusable"
     "dependabot-rebase.yml:dependabot-rebase-reusable"
@@ -968,6 +995,7 @@ create_umbrella_issue() {
   # Each group: category_keys|display_name|remediation_script
   local groups=(
     "settings|Repository Settings|apply-repo-settings.sh"
+    "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
@@ -1156,7 +1184,7 @@ HEREDOC
 
 HEREDOC
 
-  for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
+  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -1218,10 +1246,22 @@ main() {
       info "Detected ecosystems: ${ECOSYSTEMS[*]}"
     fi
 
+    # Fetch full repo JSON once and share with settings/push-protection checks
+    local repo_json
+    repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
+    if [ "$repo_json" = "{}" ]; then
+      add_finding "$repo" "settings" "repo_metadata_unavailable" "error" \
+        "Could not fetch repository metadata; settings and push-protection checks were skipped" \
+        "standards/github-settings.md#repository-settings--standard-defaults"
+      log_end
+      continue
+    fi
+
     check_required_workflows "$repo"
     check_action_pinning "$repo"
+    check_reusable_workflow_paths "$repo"
     check_dependabot_config "$repo"
-    check_repo_settings "$repo"
+    check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"

@@ -131,7 +131,7 @@ rules are deprecated — migrate existing classic rules to rulesets.
 | **Dismiss stale reviews on push** | **Yes** — prevents merging unreviewed code after approval |
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
-| **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
+| **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
@@ -142,9 +142,9 @@ rules are deprecated — migrate existing classic rules to rulesets.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have all five quality checks configured and required.
-The specific check names and ecosystem configurations vary by repo, but the
-categories are universal.
+Every repository MUST have the following quality checks configured and
+required. The specific check names and ecosystem configurations vary by repo,
+but the categories are universal.
 
 #### Required Check Categories
 
@@ -155,6 +155,7 @@ categories are universal.
 | **Claude Code** | All repos | `claude` | AI code review on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
+| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
 
 #### Ecosystem-Specific Configuration
 
