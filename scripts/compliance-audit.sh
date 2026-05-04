@@ -417,28 +417,44 @@ check_codeowners() {
   if [ "$found" = false ]; then
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
-      "standards/github-settings.md#codeowners-standard"
+      "standards/codeowners-standard.md"
     return
   fi
 
   # Extract non-comment, non-blank owner lines for accurate matching.
   # Each such line has the form: <pattern> <owner1> [<owner2> ...]
-  # We check that every owner line includes both required bot accounts.
+  # Standard (codeowners-standard.md): every owner line MUST include
+  # @petry-projects/org-leads, and legacy bot/individual listings are forbidden.
   local owner_lines
   owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
 
-  local missing_bots=()
-  if ! echo "$owner_lines" | grep -qE '@petry-projects-pr-review-agent(\s|$)'; then
-    missing_bots+=("@petry-projects-pr-review-agent")
-  fi
-  if ! echo "$owner_lines" | grep -qE '@dependabot-automerge-petry(\s|$)'; then
-    missing_bots+=("@dependabot-automerge-petry")
+  if [ -z "$owner_lines" ]; then
+    add_finding "$repo" "settings" "codeowners-empty" "error" \
+      "CODEOWNERS file has no owner lines (only comments/blank)" \
+      "standards/codeowners-standard.md"
+    return
   fi
 
-  if [ "${#missing_bots[@]}" -gt 0 ]; then
-    add_finding "$repo" "settings" "codeowners-missing-bots" "error" \
-      "CODEOWNERS is missing required bot accounts on owner lines: ${missing_bots[*]} — bot approvals will not satisfy require_code_owner_review" \
-      "standards/github-settings.md#codeowners-standard"
+  # Required: @petry-projects/org-leads on every owner line
+  local lines_missing_team
+  lines_missing_team=$(echo "$owner_lines" | grep -vE '@petry-projects/org-leads(\s|$)' || true)
+  if [ -n "$lines_missing_team" ]; then
+    add_finding "$repo" "settings" "codeowners-missing-team" "error" \
+      "CODEOWNERS owner lines are missing required \`@petry-projects/org-leads\` team — approvals will not satisfy require_code_owner_review" \
+      "standards/codeowners-standard.md"
+  fi
+
+  # Forbidden: legacy direct listings (individuals or deprecated bot accounts)
+  local forbidden_owners=()
+  for legacy in '@petry-projects-pr-review-agent' '@dependabot-automerge-petry' '@don-petry'; do
+    if echo "$owner_lines" | grep -qE "${legacy}(\s|$)"; then
+      forbidden_owners+=("$legacy")
+    fi
+  done
+  if [ "${#forbidden_owners[@]}" -gt 0 ]; then
+    add_finding "$repo" "settings" "codeowners-legacy-listings" "error" \
+      "CODEOWNERS contains forbidden legacy direct listings: ${forbidden_owners[*]} — manage membership via the @petry-projects/org-leads team instead" \
+      "standards/codeowners-standard.md"
   fi
 }
 
