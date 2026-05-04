@@ -151,6 +151,21 @@ MERGE_DAILY=$(jq -n --arg since "$SINCE" --arg today "$TODAY" \
     org:      ([$org[]      | select(.closedAt[:10] == $date)] | length),
     personal: ([$personal[] | select(.closedAt[:10] == $date)] | length)
   })')
+
+# Per-repo per-day merge counts (for the enhanced merge activity table)
+MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
+  --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
+  def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
+  (($org      | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) +
+   ($personal | map({repo: ("don-petry/"      + .repository.name), date: .closedAt[:10]}))) |
+  group_by(.repo) | map(
+    . as $items |
+    {
+      repo:    $items[0].repo,
+      total:   ($items | length),
+      by_date: (dates | map(. as $d | {key: $d, value: ([$items[] | select(.date == $d)] | length)}) | from_entries)
+    }
+  ) | sort_by(-.total)')
 echo "::endgroup::" >&2
 
 # ── Issues ────────────────────────────────────────────────────────────────────
@@ -213,10 +228,22 @@ DISCUSSIONS=$(gh api graphql -f query='
 echo "::endgroup::" >&2
 
 # ── Build Prompt ──────────────────────────────────────────────────────────────
+# Limit issues to 25 per repo to keep prompt size manageable and ensure Claude
+# has enough output budget to generate all sections (especially the PR tables first).
+ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq '
+  map({
+    repo:      .repo,
+    count:     .count,
+    truncated: (.count > 25),
+    issues:    .issues[:25]
+  })')
+
 cat > "$DATA_DIR/prompt.txt" << PROMPT
 Generate a daily GitHub org status report for $TODAY.
 
 Use ONLY the data below. Output ONLY the markdown report — no preamble, no commentary.
+
+CRITICAL: You MUST output ALL sections listed in REPORT FORMAT, in order. Do NOT skip or abbreviate any section. The PR summary table MUST appear first.
 
 ---
 
@@ -234,14 +261,11 @@ $(echo "$ISSUE_PR_MAP" | jq -c '.')
 ### Merge Activity — Daily Counts (last 8 days, $SINCE to $TODAY)
 $(echo "$MERGE_DAILY" | jq -c '.')
 
-### Org Merges Raw (for per-repo breakdown)
-$(echo "$ORG_MERGES" | jq -c '[sort_by(.repository.name) | group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
+### Merge Activity — Per-Repo Per-Day (repo, total, by_date map keyed by YYYY-MM-DD)
+$(echo "$MERGE_BY_REPO_DAY" | jq -c '.')
 
-### Personal Merges Raw (for per-repo breakdown)
-$(echo "$PERSONAL_MERGES" | jq -c '[sort_by(.repository.name) | group_by(.repository.name) | .[] | {repo: .[0].repository.name, count: length}] | sort_by(-.count)')
-
-### Open Issues by Repo (each issue has url field)
-$(echo "$ISSUES_BY_REPO" | jq -c '.')
+### Open Issues by Repo (each issue has url field; truncated:true means more exist beyond the 25 shown)
+$(echo "$ISSUES_BY_REPO_TRIMMED" | jq -c '.')
 
 ### Open Discussions (each discussion has url field)
 $(echo "$DISCUSSIONS" | jq -c '.')
@@ -281,13 +305,13 @@ Counts only per repo (dep_bumps > 0):
 If none: _none_
 
 ### \`## Open Issues (N total)\`
-For each repo with issues, show top 20 rows:
+For each repo with issues, show all provided rows (up to 25):
 | Repo | # | Opened | Title | Labels | Linked PR |
 - # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
 - Opened = createdAt date only (YYYY-MM-DD)
 - Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
-- If issues count hits 1000, note "(truncated at 1000)" next to the repo name
+- If truncated:true, note "(showing 25 of N)" next to the repo name
 
 ### \`## Open Discussions\`
 | Repo | # | Opened | Title | Replies |
@@ -296,12 +320,16 @@ For each repo with issues, show top 20 rows:
 If none: _No open discussions found across petry-projects._
 
 ### \`## PR Merge Activity — Last 8 Days\`
-Daily table (include zero rows):
-| Date | petry-projects | don-petry |
-Per-org repo breakdown sorted descending:
-| Repo | Merges |
-- Repo as link: [repo](https://github.com/owner/repo)
-Grand total. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
+Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
+| Repo | YYYY-MM-DD | YYYY-MM-DD | … | Total |
+- One column per date in chronological order (all 8 dates, even if 0 across all repos)
+- Date headers: use short format Mon-DD (e.g. Apr-26)
+- Repo as link: [owner/repo](https://github.com/owner/repo)
+- Last column is Total (bold the number)
+- Add a **TOTAL** row summing each date column and grand total
+Daily org-level summary table (include zero rows):
+| Date | petry-projects | don-petry | Grand Total |
+Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
 
 ---
 
