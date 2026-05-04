@@ -341,6 +341,15 @@ that already produce them. See [petry-projects/.github#575](https://github.com/p
 > gh pr checks <PR-number> --repo petry-projects/<repo>
 > ```
 
+> **Check names must match exactly.** GitHub-managed CodeQL produces a check named
+> `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
+> `CodeQL / Analyze (go)`. Requiring a check name that no job produces permanently
+> blocks every PR. Verify check names against actual workflow runs:
+>
+> ```bash
+> gh pr checks <PR-number> --repo petry-projects/<repo>
+> ```
+
 #### Ecosystem-Specific Configuration
 
 The ecosystems scanned by each check depend on which languages/tools the repo
