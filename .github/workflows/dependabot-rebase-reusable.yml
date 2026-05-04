@@ -105,9 +105,10 @@ jobs:
               # branch commit. If one exists, we already requested a rebase and
               # Dependabot hasn't processed it yet — avoid spamming.
               if [[ -n "$BRANCH_HEAD_DATE" ]]; then
-                PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments \
-                  --jq --arg d "$BRANCH_HEAD_DATE" \
+                # SC2016: $d is a jq variable (passed via --arg), not a shell variable.
+                # shellcheck disable=SC2016
+                PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
+                  2>/dev/null | jq --arg d "$BRANCH_HEAD_DATE" \
                   '[.comments[] | select(.body == "@dependabot rebase" and .createdAt > $d)] | length' \
                   2>/dev/null || echo "0")
                 if [[ "$PENDING" -gt 0 ]]; then
