@@ -176,21 +176,32 @@ merges indefinitely.
 This workflow fires on every push to `main` (and can be triggered manually via
 `workflow_dispatch` to flush the queue) and:
 
-1. **Updates behind PRs** — uses the GitHub API `update-branch` endpoint with
-   the **merge** method to bring Dependabot PR branches up to date with `main`.
+1. **Updates behind PRs** — posts `@dependabot rebase` on any Dependabot PR
+   that is behind `main`. Dependabot rebases its own branch, which triggers
+   CI normally. The `pull_request_target/synchronize` event fires and the
+   automerge workflow re-approves.
 2. **Merges ready PRs** — directly merges any Dependabot PR that is up-to-date,
    has auto-merge enabled, and has all CI checks passing.
 
 Using the app token for merges ensures each merge triggers a new push to `main`,
 creating a self-sustaining chain that serializes Dependabot PR merges.
 
-**Important:** always use the **merge** method (not rebase) with `update-branch`.
-The rebase method force-pushes, replacing Dependabot's commit signature, which
-breaks `dependabot/fetch-metadata` verification and causes Dependabot to refuse
-future operations ("edited by someone other than Dependabot"). The merge method
-preserves the original commits. The automerge workflow must use
-`skip-commit-verification: true` in `dependabot/fetch-metadata` since the merge
-commit is authored by GitHub, not Dependabot.
+**Why `@dependabot rebase` instead of the `update-branch` API:** GitHub's
+`GITHUB_TOKEN` is subject to a recursive-trigger guard — events caused by
+`GITHUB_TOKEN` do not create new workflow runs. When `update-branch` is called
+with `GITHUB_TOKEN`, the resulting push to the PR branch never triggers CI. The
+required checks (SonarCloud, build-and-test, etc.) have no results on the new
+commit, so the PR stays `BLOCKED` indefinitely.
+
+Dependabot's own push (via `@dependabot rebase`) bypasses this guard and CI runs
+normally. The `pull_request_target/synchronize` event then fires and the automerge
+workflow re-approves, satisfying `require_last_push_approval` (Dependabot is the
+pusher; the app bot is the approver).
+
+**Note:** `@dependabot rebase` causes Dependabot to rebase its own branch, which
+preserves Dependabot's commit signature. This is different from using the
+`update-branch` API with `update_method=rebase`, which force-pushes with GitHub's
+infrastructure identity and breaks `dependabot/fetch-metadata` verification.
 
 ### Caller Stub Format
 
@@ -201,8 +212,7 @@ The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      pull-requests: write # post @dependabot rebase comments and re-approve PRs
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
@@ -211,8 +221,8 @@ jobs:
 
 > **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
 > permissions than the calling job grants them. A caller with `permissions: read`
-> prevents the reusable from making any write API calls — branch updates and
-> PR approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> prevents the reusable from making any write API calls — PR comments and
+> approvals silently fail. Additionally, `secrets: inherit` with mismatched
 > permission levels can cause `startup_failure` on the reusable job. Always use
 > explicit secrets and grant write permissions.
 
