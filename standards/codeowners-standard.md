@@ -7,7 +7,7 @@
 
 CODEOWNERS files MUST reference the `@petry-projects/org-leads` team rather than individual users or bot accounts.
 
-```
+```text
 # Default
 * @petry-projects/org-leads
 ```
@@ -17,7 +17,9 @@ Path-specific rules MAY use additional teams or individuals when a narrower owne
 ## Why
 
 - **Stable CODEOWNERS files** — adding/removing an owner is a team membership change, not a multi-repo PR
-- **CODEOWNERS support for automation** — GitHub Apps cannot be listed in CODEOWNERS (platform limitation), but a machine user account in the team can satisfy `require_code_owner_review`. See [pr-review-agent issue #27](https://github.com/don-petry/pr-review-agent/issues/27)
+- **CODEOWNERS support for automation** — GitHub Apps cannot be listed in CODEOWNERS
+  (platform limitation), but a machine user in the team can satisfy
+  `require_code_owner_review`. See [pr-review-agent issue #27](https://github.com/don-petry/pr-review-agent/issues/27)
 - **Centralized control** — team membership is managed in one place via the org admin UI
 
 ## Team Composition
