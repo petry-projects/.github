@@ -350,8 +350,7 @@ The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      pull-requests: write # post @dependabot rebase comments and re-approve PRs
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
@@ -360,8 +359,8 @@ jobs:
 
 > **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
 > permissions than the calling job grants them. A caller with `permissions: read`
-> prevents the reusable from making any write API calls — branch updates and
-> PR approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> prevents the reusable from making any write API calls — PR comments and
+> approvals silently fail. Additionally, `secrets: inherit` with mismatched
 > permission levels can cause `startup_failure` on the reusable job. Always use
 > explicit secrets and grant write permissions.
 
