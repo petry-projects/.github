@@ -22,7 +22,7 @@
 # Dependabot update-and-merge — thin caller for the org-level reusable.
 # To adopt: copy this file to .github/workflows/dependabot-rebase.yml in your repo.
 # Required org secrets (passed explicitly):
-#   APP_ID         — GitHub App ID with contents:write and pull-requests:write
+#   APP_ID         — GitHub App ID with pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
 name: Dependabot update and merge
 
