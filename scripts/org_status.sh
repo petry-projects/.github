@@ -158,7 +158,7 @@ MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   (($org      | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) +
    ($personal | map({repo: ("don-petry/"      + .repository.name), date: .closedAt[:10]}))) |
-  group_by(.repo) | map(
+  sort_by(.repo) | group_by(.repo) | map(
     . as $items |
     {
       repo:    $items[0].repo,
@@ -228,14 +228,15 @@ DISCUSSIONS=$(gh api graphql -f query='
 echo "::endgroup::" >&2
 
 # ── Build Prompt ──────────────────────────────────────────────────────────────
-# Limit issues to 25 per repo to keep prompt size manageable and ensure Claude
-# has enough output budget to generate all sections (especially the PR tables first).
-ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq '
+# Limit issues per repo to keep prompt size manageable and ensure Claude has
+# enough output budget to generate all sections (especially the PR tables first).
+ISSUE_LIMIT=25
+ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq --argjson limit "$ISSUE_LIMIT" '
   map({
     repo:      .repo,
     count:     .count,
-    truncated: (.count > 25),
-    issues:    .issues[:25]
+    truncated: (.count > $limit),
+    issues:    .issues[:$limit]
   })')
 
 cat > "$DATA_DIR/prompt.txt" << PROMPT
@@ -305,13 +306,13 @@ Counts only per repo (dep_bumps > 0):
 If none: _none_
 
 ### \`## Open Issues (N total)\`
-For each repo with issues, show all provided rows (up to 25):
+For each repo with issues, show all provided rows (up to $ISSUE_LIMIT):
 | Repo | # | Opened | Title | Labels | Linked PR |
 - # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
 - Opened = createdAt date only (YYYY-MM-DD)
 - Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
-- If truncated:true, note "(showing 25 of N)" next to the repo name
+- If truncated:true, note "(showing $ISSUE_LIMIT of N)" next to the repo name
 
 ### \`## Open Discussions\`
 | Repo | # | Opened | Title | Replies |
@@ -321,9 +322,9 @@ If none: _No open discussions found across petry-projects._
 
 ### \`## PR Merge Activity — Last 8 Days\`
 Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
-| Repo | YYYY-MM-DD | YYYY-MM-DD | … | Total |
+| Repo | Mon-DD | Mon-DD | … | Total |
 - One column per date in chronological order (all 8 dates, even if 0 across all repos)
-- Date headers: use short format Mon-DD (e.g. Apr-26)
+- Date headers: short format Mon-DD (e.g. Apr-26)
 - Repo as link: [owner/repo](https://github.com/owner/repo)
 - Last column is Total (bold the number)
 - Add a **TOTAL** row summing each date column and grand total
