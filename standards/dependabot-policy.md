@@ -53,11 +53,11 @@ each merge to `main` leaves remaining Dependabot PRs behind and they stall
 indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
 not when a branch merely falls behind.
 
-The following file is conditional:
-
-| File | When required |
-|------|--------------|
-| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) applies — without it, Dependabot PRs fall behind after each merge and stall. **Not** required for CODEOWNERS enforcement; bot accounts in `CODEOWNERS` handle that. See [Applying to a Repository](#applying-to-a-repository) for details. |
+The `dependabot-rebase.yml` is required for all repos using the `code-quality`
+ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
+each merge to `main` leaves remaining Dependabot PRs behind and they stall
+indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
+not when a branch merely falls behind.
 
 ## Dependabot Templates
 
@@ -292,6 +292,52 @@ approvals from those accounts on open PRs are not retroactively credited.
 To re-trigger fresh approvals after a CODEOWNERS change, use the manual rebase
 command above — each new Dependabot push causes the automerge workflow to fire
 and submit a fresh approval.
+
+### Caller Stub Format
+
+The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
+**explicit secrets** (not `secrets: inherit`) and **write permissions**:
+
+```yaml
+jobs:
+  dependabot-rebase:
+    permissions:
+      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write  # re-approve PRs after branch update
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+```
+
+> **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
+> permissions than the calling job grants them. A caller with `permissions: read`
+> prevents the reusable from making any write API calls — branch updates and
+> PR approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> permission levels can cause `startup_failure` on the reusable job. Always use
+> explicit secrets and grant write permissions.
+
+To manually flush the Dependabot PR queue after fixing a stalled pipeline:
+
+```bash
+gh workflow run dependabot-rebase.yml --repo petry-projects/<repo>
+```
+
+### CODEOWNERS Approval Timing
+
+GitHub evaluates code owner status **at the time an approval is submitted**, not
+retroactively. If `CODEOWNERS` is updated (e.g., bot accounts are added), existing
+approvals from those accounts on open PRs are not retroactively credited.
+
+To re-trigger fresh approvals after a CODEOWNERS change:
+
+```bash
+# Comment @dependabot rebase on each blocked PR to trigger a new commit,
+# which causes the automerge workflow to fire and re-approve:
+gh pr list --repo petry-projects/<repo> --label dependencies --json number \
+  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
+  --body "@dependabot rebase"
+```
 
 ## Vulnerability Audit CI Check
 
