@@ -29,7 +29,7 @@
 # dependabot-automerge workflow must use skip-commit-verification: true
 # in the dependabot/fetch-metadata step.
 #
-# Required org/repo secrets (passed via `secrets: inherit` from caller):
+# Required org/repo secrets (passed explicitly by caller via secrets: mapping):
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
 name: Dependabot update and merge (Reusable)
