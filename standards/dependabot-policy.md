@@ -75,6 +75,7 @@ Each repository must have the following baseline files:
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
 
 The `dependabot-rebase.yml` is required for all repos using the `code-quality`
@@ -84,12 +85,15 @@ indefinitely — Dependabot only rebases on its weekly schedule or on merge conf
 not when a branch merely falls behind.
 =======
 >>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
+=======
+| `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
-The following file is conditional:
-
-| File | When required |
-|------|--------------|
-| `.github/workflows/dependabot-rebase.yml` | Required when strict required-status-checks (`strict_required_status_checks_policy: true`) applies — without it, Dependabot PRs fall behind after each merge and stall. **Not** required for CODEOWNERS enforcement; bot accounts in `CODEOWNERS` handle that. See [Applying to a Repository](#applying-to-a-repository) for details. |
+The `dependabot-rebase.yml` is required for all repos using the `code-quality`
+ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
+each merge to `main` leaves remaining Dependabot PRs behind and they stall
+indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
+not when a branch merely falls behind.
 
 ## Dependabot Templates
 
@@ -216,6 +220,7 @@ merges indefinitely.
 
 This workflow fires on every push to `main` (and can be triggered manually via
 `workflow_dispatch` to flush the queue) and:
+<<<<<<< HEAD
 
 1. **Updates behind PRs** — calls the GitHub `update-branch` API with the
    **APP_TOKEN** on any Dependabot PR that is behind `main`. This adds a merge
@@ -357,6 +362,8 @@ when all requirements are met. Together, these issues stall Dependabot PR
 merges indefinitely.
 
 This workflow fires on every push to `main` and:
+=======
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 1. **Updates behind PRs** — uses the GitHub API `update-branch` endpoint with
    the **merge** method to bring Dependabot PR branches up to date with `main`.
@@ -374,7 +381,56 @@ preserves the original commits. The automerge workflow must use
 `skip-commit-verification: true` in `dependabot/fetch-metadata` since the merge
 commit is authored by GitHub, not Dependabot.
 
+<<<<<<< HEAD
 >>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
+=======
+### Caller Stub Format
+
+The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
+**explicit secrets** (not `secrets: inherit`) and **write permissions**:
+
+```yaml
+jobs:
+  dependabot-rebase:
+    permissions:
+      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write  # re-approve PRs after branch update
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+```
+
+> **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
+> permissions than the calling job grants them. A caller with `permissions: read`
+> prevents the reusable from making any write API calls — branch updates and
+> PR approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> permission levels can cause `startup_failure` on the reusable job. Always use
+> explicit secrets and grant write permissions.
+
+To manually flush the Dependabot PR queue after fixing a stalled pipeline:
+
+```bash
+gh workflow run dependabot-rebase.yml --repo petry-projects/<repo>
+```
+
+### CODEOWNERS Approval Timing
+
+GitHub evaluates code owner status **at the time an approval is submitted**, not
+retroactively. If `CODEOWNERS` is updated (e.g., bot accounts are added), existing
+approvals from those accounts on open PRs are not retroactively credited.
+
+To re-trigger fresh approvals after a CODEOWNERS change:
+
+```bash
+# Comment @dependabot rebase on each blocked PR to trigger a new commit,
+# which causes the automerge workflow to fire and re-approve:
+gh pr list --repo petry-projects/<repo> --label dependencies --json number \
+  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
+  --body "@dependabot rebase"
+```
+
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 ## Vulnerability Audit CI Check
 
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml).
@@ -401,10 +457,14 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` (required for
    all repos using the `code-quality` ruleset with `require_branches_to_be_up_to_date: true`).
    Copy verbatim from [`standards/workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml)
    — do **not** modify the secrets block or permissions.
+<<<<<<< HEAD
 
    > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
    > The correct solution for CODEOWNERS enforcement is to list the
@@ -488,6 +548,8 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    or classic branch protection `required_status_checks.strict: true`) — without
    this workflow, Dependabot PRs fall behind after each merge to `main` and stall.
    If the repo does not use strict status checks, the rebase workflow is unnecessary.
+=======
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
    > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
    > The correct solution for CODEOWNERS enforcement is to list the bot accounts
@@ -500,9 +562,15 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
 5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
-   not per-repo. Caller stubs use `secrets: inherit` so any repo with at least
-   one centralized dependabot workflow picks them up automatically. Per-repo
-   `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
+   not per-repo. The caller stubs pass these explicitly via:
+
+   ```yaml
+   secrets:
+     APP_ID: ${{ secrets.APP_ID }}
+     APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+   ```
+
+   Per-repo `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
    secrets are confirmed in place, delete any per-repo copies so there's a
    single source of truth and rotations propagate everywhere.
 
@@ -512,14 +580,10 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    gh secret list --org petry-projects | grep -E '^(APP_ID|APP_PRIVATE_KEY)\s'
    ```
 
-   to confirm both org-level secrets exist with `visibility: all`. Then
-   confirm the dependabot caller stubs in the target repo include
-   `secrets: inherit` (they will if copied verbatim from
-   `standards/workflows/dependabot-automerge.yml` and
-   `standards/workflows/dependabot-rebase.yml`). Only after both checks
-   pass should you run `gh secret delete APP_ID --repo <repo>` etc. to
-   clean up the per-repo copies — otherwise the workflow falls back to
-   nothing and `gh pr review` calls fail with `Secret APP_ID is required`.
+   to confirm both org-level secrets exist with `visibility: all`. Only after
+   both secrets are confirmed should you run `gh secret delete APP_ID --repo <repo>`
+   to clean up per-repo copies — otherwise `gh pr review` calls fail with
+   `Secret APP_ID is required`.
 6. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
 <<<<<<< HEAD

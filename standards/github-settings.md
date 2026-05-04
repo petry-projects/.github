@@ -218,6 +218,7 @@ done
 > "Require code owner review" setting has no effect. See the
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
 
+<<<<<<< HEAD
 #### Auto-Merge Configuration
 
 The **Allow auto-merge** setting enables PRs to merge automatically once all status checks pass and review requirements are satisfied. This is required for:
@@ -235,6 +236,25 @@ for more details.
 
 See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
 The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
+=======
+#### Bypass Actors
+
+The `pr-quality` ruleset MUST include the following bypass actors:
+
+| Actor | Type | `bypass_mode` | Reason |
+|-------|------|--------------|--------|
+| `dependabot-automerge-petry` | GitHub App | `always` | Approves and merges Dependabot PRs; must bypass review gate |
+| `OrganizationAdmin` | Role | `always` | Emergency admin override |
+
+> **Critical:** `bypass_mode: pull_request` does **not** work for Dependabot PRs.
+> That mode only bypasses review requirements when the bypass actor *opens* the PR
+> via the PR flow. Since `dependabot[bot]` opens Dependabot PRs, the
+> `dependabot-automerge-petry` app cannot use `pull_request` bypass for them —
+> its merge API calls are rejected with `Required status check` errors.
+> Use `bypass_mode: always` so the app can call `gh api .../merge` directly
+> after manually verifying CI. The rebase workflow verifies CI before merging,
+> so `always` does not bypass safety checks.
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 #### CODEOWNERS Approval Timing
 
@@ -246,11 +266,14 @@ owner approvals.
 **Recovery:** comment `@dependabot rebase` on blocked PRs. This triggers
 Dependabot to push a new commit, which fires the automerge workflow and submits
 a fresh approval under the current CODEOWNERS.
+<<<<<<< HEAD
 =======
 > **CODEOWNERS:** All repos MUST have a `CODEOWNERS` file. Without one, the
 > "Require code owner review" setting has no effect. See the
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
 >>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
+=======
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
@@ -308,6 +331,15 @@ but the categories are universal.
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
 =======
 >>>>>>> eaa792d (Add org-wide push protection standard (#134))
+
+> **Check names must match exactly.** GitHub-managed CodeQL produces a check named
+> `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
+> `CodeQL / Analyze (go)`. Requiring a check name that no job produces permanently
+> blocks every PR. Verify check names against actual workflow runs:
+>
+> ```bash
+> gh pr checks <PR-number> --repo petry-projects/<repo>
+> ```
 
 #### Ecosystem-Specific Configuration
 
@@ -421,10 +453,14 @@ all repos automatically — no per-repo setup needed:
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 Repos may require repo-specific secrets beyond this standard set.
 =======
 Repos's may require repo-specific secrets beyond this standard set.
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+Repos may require repo-specific secrets beyond this standard set.
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 ---
 
@@ -519,6 +555,7 @@ When creating a new repository in `petry-projects`:
 
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
 <<<<<<< HEAD
+<<<<<<< HEAD
 2. **Create the `pr-quality` ruleset** matching the standard configuration above, including:
    - Bypass actors with `bypass_mode: always` for `dependabot-automerge-petry` and `OrganizationAdmin`
    - **Allow auto-merge enabled** — in the ruleset's "Merge settings", check the "Allow auto-merge" option.
@@ -532,6 +569,10 @@ When creating a new repository in `petry-projects`:
 4. **Add a `CODEOWNERS` file** defining ownership for the repo's key paths
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
 =======
+=======
+2. **Create the `pr-quality` ruleset** matching the standard configuration above, including bypass actors with `bypass_mode: always` for `dependabot-automerge-petry`
+3. **Create the `code-quality` ruleset** with required checks for the repo's stack — verify check names against actual workflow runs before requiring them
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
 >>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 5. **Add Dependabot configuration** — copy the appropriate template from
@@ -577,7 +618,7 @@ Settings deviations from the standard documented above:
 (remediated via `scripts/apply-repo-settings.sh --all`).
 >>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 
-**Ruleset status:**
+**Ruleset status (as of 2026-05-04):**
 
 <<<<<<< HEAD
 > **Migration note:** All repos currently use classic branch protection. These
@@ -587,6 +628,7 @@ Settings deviations from the standard documented above:
 =======
 | Repository | `pr-quality` | `code-quality` | Notes |
 |------------|:---:|:---:|-------|
+<<<<<<< HEAD
 | **.github** | — | — | No rulesets yet |
 | **bmad-bgreat-suite** | — | — | No rulesets yet |
 | **ContentTwin** | ✅ | — | |
@@ -599,6 +641,15 @@ Settings deviations from the standard documented above:
 > and `code-quality` rulesets across all repos.
 > Migrate `google-app-scripts` from its legacy `protect-branches` ruleset.
 >>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
+=======
+| **.github** | ✅ | — | `pr-quality` added; `code-quality` not yet configured |
+| **bmad-bgreat-suite** | ✅ | ✅ | Both rulesets present; CodeQL check fixed (`CodeQL` not `Analyze (actions)`) |
+| **ContentTwin** | ✅ | ✅ | `dependabot-automerge-petry` bypass actor added; CodeQL check fixed |
+| **broodly** | ✅ | — | `code-quality` not yet configured |
+| **TalkTerm** | ✅ | ✅ | Both rulesets present; stale CI check names removed |
+| **markets** | ✅ | — | `code-quality` not yet configured |
+| **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
+>>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 ---
 
