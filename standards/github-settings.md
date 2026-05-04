@@ -140,6 +140,35 @@ rules are deprecated — migrate existing classic rules to rulesets.
 > "Require code owner review" setting has no effect. See the
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
 
+#### Bypass Actors
+
+The `pr-quality` ruleset MUST include the following bypass actors:
+
+| Actor | Type | `bypass_mode` | Reason |
+|-------|------|--------------|--------|
+| `dependabot-automerge-petry` | GitHub App | `always` | Approves and merges Dependabot PRs; must bypass review gate |
+| `OrganizationAdmin` | Role | `always` | Emergency admin override |
+
+> **Critical:** `bypass_mode: pull_request` does **not** work for Dependabot PRs.
+> That mode only bypasses review requirements when the bypass actor *opens* the PR
+> via the PR flow. Since `dependabot[bot]` opens Dependabot PRs, the
+> `dependabot-automerge-petry` app cannot use `pull_request` bypass for them —
+> its merge API calls are rejected with `Required status check` errors.
+> Use `bypass_mode: always` so the app can call `gh api .../merge` directly
+> after manually verifying CI. The rebase workflow verifies CI before merging,
+> so `always` does not bypass safety checks.
+
+#### CODEOWNERS Approval Timing
+
+GitHub evaluates code owner status **at the time an approval is submitted**, not
+retroactively. If `CODEOWNERS` is updated (e.g., adding bot accounts), approvals
+already on open PRs from those accounts are not retroactively credited as code
+owner approvals.
+
+**Recovery:** comment `@dependabot rebase` on blocked PRs. This triggers
+Dependabot to push a new commit, which fires the automerge workflow and submits
+a fresh approval under the current CODEOWNERS.
+
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
 Every repository MUST have the following quality checks configured and
@@ -156,6 +185,15 @@ but the categories are universal.
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
 | **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
+
+> **Check names must match exactly.** GitHub-managed CodeQL produces a check named
+> `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
+> `CodeQL / Analyze (go)`. Requiring a check name that no job produces permanently
+> blocks every PR. Verify check names against actual workflow runs:
+>
+> ```bash
+> gh pr checks <PR-number> --repo petry-projects/<repo>
+> ```
 
 #### Ecosystem-Specific Configuration
 
@@ -219,7 +257,7 @@ all repos automatically — no per-repo setup needed:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 
-Repos's may require repo-specific secrets beyond this standard set.
+Repos may require repo-specific secrets beyond this standard set.
 
 ---
 
@@ -284,8 +322,8 @@ add the two bot accounts to every path-specific line, not just the default `*`.
 When creating a new repository in `petry-projects`:
 
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
-2. **Create the `pr-quality` ruleset** matching the standard configuration above
-3. **Create the `code-quality` ruleset** with required checks for the repo's stack
+2. **Create the `pr-quality` ruleset** matching the standard configuration above, including bypass actors with `bypass_mode: always` for `dependabot-automerge-petry`
+3. **Create the `code-quality` ruleset** with required checks for the repo's stack — verify check names against actual workflow runs before requiring them
 4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
 5. **Add Dependabot configuration** — copy the appropriate template from
    [`standards/dependabot/`](dependabot/) and add to `.github/dependabot.yml`
@@ -305,21 +343,17 @@ When creating a new repository in `petry-projects`:
 **Repository settings:** All 7 repos are fully compliant as of 2026-04-05
 (remediated via `scripts/apply-repo-settings.sh --all`).
 
-**Ruleset status:**
+**Ruleset status (as of 2026-05-04):**
 
 | Repository | `pr-quality` | `code-quality` | Notes |
 |------------|:---:|:---:|-------|
-| **.github** | — | — | No rulesets yet |
-| **bmad-bgreat-suite** | — | — | No rulesets yet |
-| **ContentTwin** | ✅ | — | |
-| **broodly** | ✅ | — | |
-| **TalkTerm** | ✅ | — | |
-| **markets** | ✅ | — | |
-| **google-app-scripts** | — | — | Has non-standard `protect-branches` ruleset — migrate to `pr-quality` |
-
-> **Next steps:** Run `scripts/apply-rulesets.sh --all` to create both `pr-quality`
-> and `code-quality` rulesets across all repos.
-> Migrate `google-app-scripts` from its legacy `protect-branches` ruleset.
+| **.github** | ✅ | — | `pr-quality` added; `code-quality` not yet configured |
+| **bmad-bgreat-suite** | ✅ | ✅ | Both rulesets present; CodeQL check fixed (`CodeQL` not `Analyze (actions)`) |
+| **ContentTwin** | ✅ | ✅ | `dependabot-automerge-petry` bypass actor added; CodeQL check fixed |
+| **broodly** | ✅ | — | `code-quality` not yet configured |
+| **TalkTerm** | ✅ | ✅ | Both rulesets present; stale CI check names removed |
+| **markets** | ✅ | — | `code-quality` not yet configured |
+| **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
 
 ---
 
