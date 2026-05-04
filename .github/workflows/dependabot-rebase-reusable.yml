@@ -115,8 +115,7 @@ jobs:
                   # GITHUB_TOKEN (used above for update-branch) is the pusher, so the
                   # approver (app) satisfies require_last_push_approval.
                   if GH_TOKEN="$APP_TOKEN" gh pr review "$PR_NUMBER" --repo "$REPO" --approve \
-                    --body "Re-approved after branch update to keep up-to-date with main." \
-                    --silent; then
+                    --body "Re-approved after branch update to keep up-to-date with main."; then
                     echo "  Re-approved PR #$PR_NUMBER"
                   else
                     echo "  Warning: failed to re-approve PR #$PR_NUMBER — PR will remain blocked until manually re-approved"
