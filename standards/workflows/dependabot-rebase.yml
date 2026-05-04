@@ -11,7 +11,7 @@
 #   • You MUST NOT change: the concurrency group name, the explicit secrets
 #     block, or the job-level `permissions:` block — reusable workflows can be
 #     granted no more permissions than the calling job has, so removing the
-#     stanza breaks the reusable’s gh API calls. Do not remove either trigger
+#     stanza breaks the reusable's gh API calls. Do not remove either trigger
 #     (`push` keeps the self-sustaining chain; `workflow_dispatch` allows
 #     manual queue flushes).
 #   • If you need different behaviour, open a PR against the reusable in the
@@ -40,8 +40,8 @@ permissions: {}
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      contents: write # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
+      pull-requests: write # re-approve PRs after branch update
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
