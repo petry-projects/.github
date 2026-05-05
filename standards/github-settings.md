@@ -194,6 +194,7 @@ always` to both required actors, and flags the `Repository admin` role
 | **Required review thread resolution** | **Yes** — all threads must be Resolved before merge |
 | **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
 | **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
+| **Allow auto-merge** | **Yes** — enables automatic merge when all status checks pass and requirements are satisfied |
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
@@ -201,6 +202,19 @@ always` to both required actors, and flags the `Repository admin` role
 > **CODEOWNERS:** All repos MUST have a `CODEOWNERS` file. Without one, the
 > "Require code owner review" setting has no effect. See the
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
+
+#### Auto-Merge Configuration
+
+The **Allow auto-merge** setting enables PRs to merge automatically once all status checks pass and review requirements are satisfied. This is required for:
+
+- **Dependabot auto-merge workflows** — enables `gh pr merge --auto` API calls
+- **Agentic PR automation** — CI/CD agents can queue PRs for automatic merge after approval and check passage
+- **Efficient CI workflows** — avoids manual merge steps when all quality gates have passed
+
+Auto-merge is a **safe setting** because the ruleset still enforces all approval and review requirements before
+the merge occurs — the automation only handles the final merge step after human review and all CI checks pass.
+See [GitHub's auto-merge documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
+for more details.
 
 #### Bypass Actors
 
@@ -384,14 +398,17 @@ add the two bot accounts to every path-specific line, not just the default `*`.
 When creating a new repository in `petry-projects`:
 
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
-2. **Create the `pr-quality` ruleset** matching the standard configuration above, including bypass actors with `bypass_mode: always` for `dependabot-automerge-petry`
+2. **Create the `pr-quality` ruleset** matching the standard configuration above, including:
+   - Bypass actors with `bypass_mode: always` for `dependabot-automerge-petry` and `OrganizationAdmin`
+   - **Allow auto-merge enabled** — in the ruleset's "Merge settings", check the "Allow auto-merge" option.
+     Required for seamless PR automation and CI-dependent merges
 3. **Create the `code-quality` ruleset** with required checks for the repo's stack — verify check names against actual workflow runs before requiring them
 4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
 5. **Add Dependabot configuration** — copy the appropriate template from
    [`standards/dependabot/`](dependabot/) and add to `.github/dependabot.yml`
 6. **Add CI workflows** — see [CI Standards](ci-standards.md) for required workflows
 7. **Create standard labels** — all labels from the [Standard Set](#labels--standard-set) above, plus any project-specific labels
-8. **Enable auto-delete head branches** and **auto-merge** in repo settings
+8. **Enable auto-delete head branches** in repo settings
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
 
 > **Note:** All standard CI secrets are configured at the org level and inherited
