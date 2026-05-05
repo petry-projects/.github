@@ -33,6 +33,7 @@ DRY_RUN="${DRY_RUN:-false}"
 
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
+warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
@@ -246,7 +247,7 @@ apply_check_suite_prefs() {
   prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
   if [ -z "$prefs" ]; then
     warn "  Could not read check-suite preferences for $repo — skipping"
-    return 0
+    return 1
   fi
 
   local all_disabled=true
@@ -254,7 +255,8 @@ apply_check_suite_prefs() {
     local setting
     setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
       '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
-    if [ "$setting" != "false" ]; then
+    # "missing" means the app has never run in this repo — no orphaned suite possible, skip
+    if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
       all_disabled=false
     fi
   done
