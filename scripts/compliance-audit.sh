@@ -423,8 +423,10 @@ check_codeowners() {
 
   # Extract non-comment, non-blank owner lines for accurate matching.
   # Each such line has the form: <pattern> <owner1> [<owner2> ...]
-  # Standard (codeowners-standard.md): every owner line MUST include
-  # @petry-projects/org-leads, and legacy bot/individual listings are forbidden.
+  # Standard (codeowners-standard.md):
+  #   1. @petry-projects/org-leads MUST be the FIRST owner on every line.
+  #   2. Additional teams (@petry-projects/<slug>) are allowed.
+  #   3. Individual users (@username without "/") are forbidden.
   local owner_lines
   owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
 
@@ -435,25 +437,38 @@ check_codeowners() {
     return
   fi
 
-  # Required: @petry-projects/org-leads on every owner line
-  local lines_missing_team
-  lines_missing_team=$(echo "$owner_lines" | grep -vE '@petry-projects/org-leads(\s|$)' || true)
-  if [ -n "$lines_missing_team" ]; then
-    add_finding "$repo" "settings" "codeowners-missing-team" "error" \
-      "CODEOWNERS owner lines are missing required \`@petry-projects/org-leads\` team — approvals will not satisfy require_code_owner_review" \
+  # Rule 1: @petry-projects/org-leads MUST be the first owner on every line
+  # (the first whitespace-separated token after the pattern).
+  local bad_first_owner=""
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # awk $2 = first owner token after the pattern
+    local first_owner
+    first_owner=$(echo "$line" | awk '{print $2}')
+    if [ "$first_owner" != "@petry-projects/org-leads" ]; then
+      bad_first_owner="$line"
+      break
+    fi
+  done <<< "$owner_lines"
+  if [ -n "$bad_first_owner" ]; then
+    add_finding "$repo" "settings" "codeowners-org-leads-not-first" "error" \
+      "CODEOWNERS owner lines must list \`@petry-projects/org-leads\` as the FIRST owner. Offending line: \`$bad_first_owner\`" \
       "standards/codeowners-standard.md"
   fi
 
-  # Forbidden: legacy direct listings (individuals or deprecated bot accounts)
-  local forbidden_owners=()
-  for legacy in '@petry-projects-pr-review-agent' '@dependabot-automerge-petry' '@don-petry'; do
-    if echo "$owner_lines" | grep -qE "${legacy}(\s|$)"; then
-      forbidden_owners+=("$legacy")
-    fi
-  done
-  if [ "${#forbidden_owners[@]}" -gt 0 ]; then
-    add_finding "$repo" "settings" "codeowners-legacy-listings" "error" \
-      "CODEOWNERS contains forbidden legacy direct listings: ${forbidden_owners[*]} — manage membership via the @petry-projects/org-leads team instead" \
+  # Rule 3: no individual users — every owner token must be a team (contain "/").
+  # Collect owner tokens from all lines (everything starting with @).
+  local individual_owners
+  individual_owners=$(echo "$owner_lines" \
+    | tr ' \t' '\n' \
+    | grep -E '^@' \
+    | grep -vE '^@[^/]+/' \
+    | sort -u)
+  if [ -n "$individual_owners" ]; then
+    local joined
+    joined=$(echo "$individual_owners" | tr '\n' ' ')
+    add_finding "$repo" "settings" "codeowners-individual-users" "error" \
+      "CODEOWNERS contains forbidden individual user owners: ${joined% } — only teams (@petry-projects/<slug>) are allowed; manage membership via teams" \
       "standards/codeowners-standard.md"
   fi
 }

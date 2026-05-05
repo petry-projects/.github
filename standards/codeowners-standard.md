@@ -7,24 +7,31 @@
 
 ## Rule
 
-CODEOWNERS files MUST reference the `@petry-projects/org-leads` team rather
-than individual users or bot accounts. The default `*` pattern MUST list
-exactly `@petry-projects/org-leads` and no individuals.
+Every owner line in a CODEOWNERS file MUST follow these rules:
+
+1. **`@petry-projects/org-leads` MUST be the FIRST owner** on every owner line
+   (so it always satisfies `require_code_owner_review`, regardless of
+   path-specific overrides).
+2. **Additional teams are allowed** as subsequent owners when finer-grained
+   ownership is desired (e.g., `@petry-projects/security-leads` for
+   `/SECURITY.md`).
+3. **Individual named users are forbidden** as owners. All owners MUST be
+   teams in the form `@petry-projects/<team-slug>`. Manage individual
+   membership through team membership instead.
 
 ```text
-# Default
+# Default — only org-leads
 * @petry-projects/org-leads
-```
 
-Path-specific rules MAY use additional teams or individuals when a narrower
-owner is appropriate, but every owner line MUST include
-`@petry-projects/org-leads` (so the team can always satisfy
-`require_code_owner_review`).
+# Path-specific — org-leads first, then additional team(s)
+/security/      @petry-projects/org-leads @petry-projects/security-leads
+/.github/       @petry-projects/org-leads @petry-projects/platform-leads
+```
 
 The legacy direct-listing pattern is **forbidden**:
 
 ```text
-# DO NOT USE
+# DO NOT USE — individuals and bot accounts as owners
 * @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
 ```
 
