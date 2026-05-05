@@ -365,32 +365,39 @@ This workflow fires on every push to `main` and:
 =======
 >>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
-1. **Updates behind PRs** — posts `@dependabot rebase` on any Dependabot PR
-   that is behind `main`. Dependabot rebases its own branch, which triggers
-   CI normally. The `pull_request_target/synchronize` event fires and the
-   automerge workflow re-approves.
+1. **Updates behind PRs** — calls the GitHub `update-branch` API with the
+   **APP_TOKEN** on any Dependabot PR that is behind `main`. This adds a merge
+   commit from `main` onto the PR branch. CI triggers normally because the
+   APP_TOKEN is a GitHub App installation token, not `GITHUB_TOKEN`.
 2. **Merges ready PRs** — directly merges any Dependabot PR that is up-to-date,
-   has auto-merge enabled, and has all CI checks passing.
+   has auto-merge enabled, and is `MERGEABLE` with no pending checks.
 
 Using the app token for merges ensures each merge triggers a new push to `main`,
 creating a self-sustaining chain that serializes Dependabot PR merges.
 
-**Why `@dependabot rebase` instead of the `update-branch` API:** GitHub's
-`GITHUB_TOKEN` is subject to a recursive-trigger guard — events caused by
-`GITHUB_TOKEN` do not create new workflow runs. When `update-branch` is called
-with `GITHUB_TOKEN`, the resulting push to the PR branch never triggers CI. The
-required checks (SonarCloud, build-and-test, etc.) have no results on the new
-commit, so the PR stays `BLOCKED` indefinitely.
+**Why `update-branch` with APP_TOKEN (not `GITHUB_TOKEN` or `@dependabot rebase`):**
 
-Dependabot's own push (via `@dependabot rebase`) bypasses this guard and CI runs
-normally. The `pull_request_target/synchronize` event then fires and the automerge
-workflow re-approves, satisfying `require_last_push_approval` (Dependabot is the
-pusher; the app bot is the approver).
+- **`GITHUB_TOKEN`** is subject to GitHub's recursive-trigger guard — events it
+  causes do not create new workflow runs. Calling `update-branch` with
+  `GITHUB_TOKEN` pushes to the PR branch but CI never runs, so the PR stays
+  blocked indefinitely.
 
-**Note:** `@dependabot rebase` causes Dependabot to rebase its own branch, which
-preserves Dependabot's commit signature. This is different from using the
-`update-branch` API with `update_method=rebase`, which force-pushes with GitHub's
-infrastructure identity and breaks `dependabot/fetch-metadata` verification.
+- **`@dependabot rebase`** only works when posted by a *user account* with push
+  access. GitHub App bots are rejected even if their installation has
+  `contents: write` — Dependabot replies "Sorry, only users with push access can
+  use that command." This makes bot-posted `@dependabot rebase` unusable for
+  automation.
+
+- **APP_TOKEN** (a GitHub App installation token) is treated as a distinct
+  identity and is **not** subject to the `GITHUB_TOKEN` recursive-trigger guard.
+  Pushes via APP_TOKEN trigger CI workflow runs normally.
+
+**Merge-readiness check:** The workflow checks GitHub's native `mergeable` state
+(`MERGEABLE`) rather than inspecting every individual check conclusion. This is
+correct because `mergeable` already accounts for all *required* status checks —
+non-required checks that happen to fail (e.g. a gitleaks false positive) do not
+block the merge. An additional guard ensures no checks are still `IN_PROGRESS`
+before merging.
 
 <<<<<<< HEAD
 >>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
@@ -404,8 +411,8 @@ The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
 jobs:
   dependabot-rebase:
     permissions:
-      pull-requests: write # post @dependabot rebase comments and re-approve PRs
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
+      pull-requests: write # call update-branch API on behind PRs and merge when ready
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@b51e2edf830ea085be0277bcf3174c7b3ec8f958 # v1
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
@@ -413,8 +420,8 @@ jobs:
 
 > **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
 > permissions than the calling job grants them. A caller with `permissions: read`
-> prevents the reusable from making any write API calls — PR comments and
-> approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> prevents the reusable from making any write API calls — branch updates and
+> merges silently fail. Additionally, `secrets: inherit` with mismatched
 > permission levels can cause `startup_failure` on the reusable job. Always use
 > explicit secrets and grant write permissions.
 
@@ -424,21 +431,30 @@ To manually flush the Dependabot PR queue after fixing a stalled pipeline:
 gh workflow run dependabot-rebase.yml --repo petry-projects/<repo>
 ```
 
+### Manual Rebase (Break-Glass)
+
+If the automated chain stalls and a Dependabot PR is stuck behind `main`, any
+user with push access can unblock it by posting `@dependabot rebase` directly:
+
+```bash
+# Post @dependabot rebase as a user with push access (not a bot):
+gh pr list --repo petry-projects/<repo> --label dependencies --json number \
+  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
+  --body "@dependabot rebase"
+```
+
+This must be run as a human user (e.g. `gh auth status` should show your account,
+not a bot). Dependabot ignores the command from GitHub App bot accounts.
+
 ### CODEOWNERS Approval Timing
 
 GitHub evaluates code owner status **at the time an approval is submitted**, not
 retroactively. If `CODEOWNERS` is updated (e.g., bot accounts are added), existing
 approvals from those accounts on open PRs are not retroactively credited.
 
-To re-trigger fresh approvals after a CODEOWNERS change:
-
-```bash
-# Comment @dependabot rebase on each blocked PR to trigger a new commit,
-# which causes the automerge workflow to fire and re-approve:
-gh pr list --repo petry-projects/<repo> --label dependencies --json number \
-  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
-  --body "@dependabot rebase"
-```
+To re-trigger fresh approvals after a CODEOWNERS change, use the manual rebase
+command above — each new Dependabot push causes the automerge workflow to fire
+and submit a fresh approval.
 
 >>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 ## Vulnerability Audit CI Check
