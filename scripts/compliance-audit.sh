@@ -463,7 +463,7 @@ check_codeowners() {
     | tr ' \t' '\n' \
     | grep -E '^@' \
     | grep -vE '^@[^/]+/' \
-    | sort -u)
+    | sort -u || true)
   if [ -n "$individual_owners" ]; then
     local joined
     joined=$(echo "$individual_owners" | tr '\n' ' ')
