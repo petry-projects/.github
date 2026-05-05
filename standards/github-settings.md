@@ -202,12 +202,15 @@ done
 <<<<<<< HEAD
 | **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
 | **Allow auto-merge** | **Yes** — enables automatic merge when all status checks pass and requirements are satisfied |
+<<<<<<< HEAD
 =======
 | **Require last push approval** | **Yes** — the person who pushed last cannot be the sole approver |
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
 =======
 | **Require last push approval** | **Yes** — ensures different people review substantive code changes; Dependabot rebase workflow re-approves after branch updates to maintain approval validity |
 >>>>>>> 35e0e20 (fix(dependabot-rebase): re-approve PRs after branch updates to unblock auto-merge)
+=======
+>>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 | **Allowed merge methods** | **Squash only** |
 | **Allow force pushes** | No |
 | **Allow deletions** | No |
@@ -219,6 +222,9 @@ done
 > [CODEOWNERS Standard](#codeowners-standard) below for the required format.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 #### Auto-Merge Configuration
 
 The **Allow auto-merge** setting enables PRs to merge automatically once all status checks pass and review requirements are satisfied. This is required for:
@@ -232,11 +238,14 @@ the merge occurs — the automation only handles the final merge step after huma
 See [GitHub's auto-merge documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
 for more details.
 
+<<<<<<< HEAD
 #### Bypass Actors
 
 See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
 The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
 =======
+=======
+>>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 #### Bypass Actors
 
 The `pr-quality` ruleset MUST include the following bypass actors:
@@ -556,6 +565,9 @@ When creating a new repository in `petry-projects`:
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 2. **Create the `pr-quality` ruleset** matching the standard configuration above, including:
    - Bypass actors with `bypass_mode: always` for `dependabot-automerge-petry` and `OrganizationAdmin`
    - **Allow auto-merge enabled** — in the ruleset's "Merge settings", check the "Allow auto-merge" option.
@@ -580,10 +592,14 @@ When creating a new repository in `petry-projects`:
 6. **Add CI workflows** — see [CI Standards](ci-standards.md) for required workflows
 7. **Create standard labels** — all labels from the [Standard Set](#labels--standard-set) above, plus any project-specific labels
 <<<<<<< HEAD
+<<<<<<< HEAD
 8. **Enable auto-delete head branches** in repo settings
 =======
 8. **Enable auto-delete head branches** and **auto-merge** in repo settings
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+8. **Enable auto-delete head branches** in repo settings
+>>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 9. **Connect integrations** — ensure CodeRabbit and SonarCloud (if applicable) are enabled
 
 > **Note:** All standard CI secrets are configured at the org level and inherited
