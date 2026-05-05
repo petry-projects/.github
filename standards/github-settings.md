@@ -149,7 +149,10 @@ The **Allow auto-merge** setting enables PRs to merge automatically once all sta
 - **Agentic PR automation** — CI/CD agents can queue PRs for automatic merge after approval and check passage
 - **Efficient CI workflows** — avoids manual merge steps when all quality gates have passed
 
-Auto-merge is a **safe setting** because the ruleset still enforces all approval and review requirements before the merge occurs — the automation only handles the final merge step after human review and all CI checks pass.
+Auto-merge is a **safe setting** because the ruleset still enforces all approval and review requirements before
+the merge occurs — the automation only handles the final merge step after human review and all CI checks pass.
+See [GitHub's auto-merge documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
+for more details.
 
 #### Bypass Actors
 
@@ -335,7 +338,8 @@ When creating a new repository in `petry-projects`:
 1. **Create the repo** with standard settings (public, `main` branch, wiki disabled, discussions enabled)
 2. **Create the `pr-quality` ruleset** matching the standard configuration above, including:
    - Bypass actors with `bypass_mode: always` for `dependabot-automerge-petry` and `OrganizationAdmin`
-   - **Allow auto-merge enabled** — required for seamless PR automation and CI-dependent merges
+   - **Allow auto-merge enabled** — in the ruleset's "Merge settings", check the "Allow auto-merge" option.
+     Required for seamless PR automation and CI-dependent merges
 3. **Create the `code-quality` ruleset** with required checks for the repo's stack — verify check names against actual workflow runs before requiring them
 4. **Add a `CODEOWNERS` file** using the [CODEOWNERS Standard](#codeowners-standard) template, extended with any repo-specific path patterns
 5. **Add Dependabot configuration** — copy the appropriate template from
