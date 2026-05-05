@@ -471,6 +471,14 @@ check_codeowners() {
       "CODEOWNERS contains forbidden individual user owners: ${joined% } — only teams (@petry-projects/<slug>) are allowed; manage membership via teams" \
       "standards/codeowners-standard.md"
   fi
+
+  # Advisory: a catch-all `*` pattern should exist so files unmatched by any
+  # path-specific rule still have an owner.
+  if ! echo "$owner_lines" | awk '{print $1}' | grep -qxF '*'; then
+    add_finding "$repo" "settings" "codeowners-no-catchall" "warning" \
+      "CODEOWNERS has no default \`*\` catch-all pattern — files not matched by a path rule will have no owner and \`require_code_owner_review\` will not apply to them" \
+      "standards/codeowners-standard.md"
+  fi
 }
 
 # ---------------------------------------------------------------------------
