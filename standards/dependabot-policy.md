@@ -350,8 +350,8 @@ The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
 jobs:
   dependabot-rebase:
     permissions:
-      pull-requests: write # post @dependabot rebase comments and re-approve PRs
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@2f6d246fd7cc8740f5d7e2e4d12f087889c58365 # v1
+      pull-requests: write # call update-branch API on behind PRs and merge when ready
+    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@b51e2edf830ea085be0277bcf3174c7b3ec8f958 # v1
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
@@ -359,8 +359,8 @@ jobs:
 
 > **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
 > permissions than the calling job grants them. A caller with `permissions: read`
-> prevents the reusable from making any write API calls — PR comments and
-> approvals silently fail. Additionally, `secrets: inherit` with mismatched
+> prevents the reusable from making any write API calls — branch updates and
+> merges silently fail. Additionally, `secrets: inherit` with mismatched
 > permission levels can cause `startup_failure` on the reusable job. Always use
 > explicit secrets and grant write permissions.
 
@@ -370,21 +370,30 @@ To manually flush the Dependabot PR queue after fixing a stalled pipeline:
 gh workflow run dependabot-rebase.yml --repo petry-projects/<repo>
 ```
 
+### Manual Rebase (Break-Glass)
+
+If the automated chain stalls and a Dependabot PR is stuck behind `main`, any
+user with push access can unblock it by posting `@dependabot rebase` directly:
+
+```bash
+# Post @dependabot rebase as a user with push access (not a bot):
+gh pr list --repo petry-projects/<repo> --label dependencies --json number \
+  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
+  --body "@dependabot rebase"
+```
+
+This must be run as a human user (e.g. `gh auth status` should show your account,
+not a bot). Dependabot ignores the command from GitHub App bot accounts.
+
 ### CODEOWNERS Approval Timing
 
 GitHub evaluates code owner status **at the time an approval is submitted**, not
 retroactively. If `CODEOWNERS` is updated (e.g., bot accounts are added), existing
 approvals from those accounts on open PRs are not retroactively credited.
 
-To re-trigger fresh approvals after a CODEOWNERS change:
-
-```bash
-# Comment @dependabot rebase on each blocked PR to trigger a new commit,
-# which causes the automerge workflow to fire and re-approve:
-gh pr list --repo petry-projects/<repo> --label dependencies --json number \
-  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
-  --body "@dependabot rebase"
-```
+To re-trigger fresh approvals after a CODEOWNERS change, use the manual rebase
+command above — each new Dependabot push causes the automerge workflow to fire
+and submit a fresh approval.
 
 ## Vulnerability Audit CI Check
 
