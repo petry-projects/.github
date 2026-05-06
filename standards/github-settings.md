@@ -573,38 +573,27 @@ on every owner line so the team can always satisfy `require_code_owner_review`.
 All repositories MUST have a `CODEOWNERS` file at `.github/CODEOWNERS`
 (or `CODEOWNERS` at the repo root for repos with no `.github/` directory).
 
-### Required Bot Accounts
+The full policy lives in [`codeowners-standard.md`](codeowners-standard.md).
+Summary:
 
-Every CODEOWNERS file MUST include these two bot accounts alongside `@don-petry`
-so that automated PR approvals satisfy the `require_code_owner_review` setting
-in the `pr-quality` ruleset:
-
-| Account | App | Role |
-|---------|-----|------|
-| `@petry-projects-pr-review-agent` | `petry-projects-pr-review-agent` | General org PR review bot |
-| `@dependabot-automerge-petry` | `dependabot-automerge-petry` | Dependabot auto-merge approver |
-
-The `pr-quality` ruleset requires **1 code owner approval**. With all three
-accounts on every pattern, an approval from `@don-petry`, `@petry-projects-pr-review-agent`,
-or `@dependabot-automerge-petry` satisfies the requirement — provided the approver
-is not also the author of the last push to that branch (`require_last_push_approval`
-prevents self-approval after one's own push). For Dependabot PRs this is never an
-issue: Dependabot pushes the branch and a separate bot approves it.
+- The default owner line MUST be `* @petry-projects/org-leads`
+- Direct listings of users or bot accounts (e.g.,
+  `@petry-projects-pr-review-agent`, `@dependabot-automerge-petry`) are
+  **forbidden** — manage membership through the team instead
+- GitHub Apps cannot be code owners (platform limitation); use machine-user
+  accounts added to the team
 
 ### Standard Template
 
 ```gitignore
 # CODEOWNERS
-# Each line is a pattern followed by one or more owners.
-# Owners are matched in order, last matching pattern wins.
-# Standard: https://github.com/petry-projects/.github/blob/main/standards/github-settings.md#codeowners-standard
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/codeowners-standard.md
 
-# Default owner for all files
-* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
+* @petry-projects/org-leads
 ```
 
-Repos with finer-grained path ownership (e.g., `/apps/api/`, `/infra/`) MUST
-add the two bot accounts to every path-specific line, not just the default `*`.
+Repos with finer-grained path ownership MUST include `@petry-projects/org-leads`
+on every owner line so the team can always satisfy `require_code_owner_review`.
 
 ---
 
