@@ -453,6 +453,7 @@ Per-repo breakdown table (omit repos with 0 total PRs):
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:
 | Repo | PR # | Opened | Title | CI | Approvals |
+|---|---|---|---|---|---|
 - PR # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
 - CI: PASS (SUCCESS) / FAIL (FAILURE or ERROR) / PENDING / N/A (null)
@@ -461,12 +462,14 @@ If none: _none_
 ### \`## Open PRs — Automation (Dependency Bumps)\`
 Counts only per repo (dep_bumps > 0):
 | Repo | # Dep PRs |
+|---|---|
 - Repo as link: [owner/repo](https://github.com/owner/repo)
 If none: _none_
 
 ### \`## Open Issues (N total)\`
 For each repo with issues, show all provided rows (up to $ISSUE_LIMIT):
 | Repo | # | Opened | Title | Labels | Linked PR |
+|---|---|---|---|---|---|
 - # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
 - Opened = createdAt date only (YYYY-MM-DD)
@@ -475,6 +478,7 @@ For each repo with issues, show all provided rows (up to $ISSUE_LIMIT):
 
 ### \`## Open Discussions\`
 | Repo | # | Opened | Title | Replies |
+|---|---|---|---|---|
 - # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
 If none: _No open discussions found across petry-projects._
