@@ -2281,6 +2281,40 @@ check_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: check-suite auto-trigger disabled for Claude and CodeRabbit
+# ---------------------------------------------------------------------------
+check_check_suite_prefs() {
+  local repo="$1"
+
+  local prefs
+  prefs=$(gh_api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
+  if [ -z "$prefs" ]; then
+    add_finding "$repo" "settings" "check-suite-prefs-unreadable" "warning" \
+      "Could not read check-suite preferences — verify GH_TOKEN has repo scope and the repo is accessible. Check-suite auto-trigger compliance was not evaluated." \
+      "standards/github-settings.md"
+    return
+  fi
+
+  for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
+    local setting
+    setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
+      '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
+
+    # "missing" means the app has never run in this repo — no orphaned suite possible
+    [ "$setting" = "missing" ] && continue
+    [ "$setting" = "false"   ] && continue
+
+    local app_label="app_id=$app_id"
+    [ "$app_id" = "1236702" ] && app_label="Claude (1236702)"
+    [ "$app_id" = "347564"  ] && app_label="CodeRabbit (347564)"
+
+    add_finding "$repo" "settings" "check-suite-auto-trigger-${app_id}" "error" \
+      "$app_label auto-trigger is enabled: GitHub creates a queued check suite on every push that is never completed, permanently blocking auto-merge. Run: \`bash scripts/apply-repo-settings.sh $repo\`" \
+      "standards/github-settings.md"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
