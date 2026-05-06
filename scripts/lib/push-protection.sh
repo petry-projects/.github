@@ -230,12 +230,15 @@ pp_check_secret_scan_ci_job() {
     return
   fi
 
-  # Accept either the gitleaks action or the gitleaks CLI (inline or block run:).
-  # The action requires a paid org license (gitleaks.io); the CLI installed via
-  # binary download is a license-free alternative.
-  if ! echo "$ci_content" | grep -qE '(^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@|gitleaks[[:space:]]+detect([[:space:]]|$))'; then
+  # Accept either the legacy action pattern or the canonical binary-install pattern
+  # (gitleaks detect --config .gitleaks.toml). Both satisfy the standard.
+  local has_action has_binary
+  has_action=$(echo "$ci_content" | grep -cE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@' || true)
+  has_binary=$(echo "$ci_content" | grep -cE 'gitleaks[[:space:]]+detect[[:space:]].*--config[[:space:]].*\.gitleaks\.toml' || true)
+
+  if [ "${has_action:-0}" -eq 0 ] && [ "${has_binary:-0}" -eq 0 ]; then
     add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
-      "\`ci.yml\` does not contain a job using \`gitleaks\` — add the secret-scan job from the standard" \
+      "\`ci.yml\` does not contain a \`secret-scan\` gitleaks job (neither \`gitleaks/gitleaks-action\` nor the canonical \`gitleaks detect --config .gitleaks.toml\` binary-install pattern) — add the secret-scan job from the standard" \
       "$PP_STANDARD_REF#required-ci-job"
   fi
 }

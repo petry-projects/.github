@@ -233,9 +233,13 @@ secret-scan:
       run: |
         tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
         url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+        install_dir="${RUNNER_TEMP}/gitleaks-bin"
+        mkdir -p "${install_dir}"
         wget -q "${url}" -O /tmp/gitleaks.tar.gz
         echo "${GITLEAKS_CHECKSUM}  /tmp/gitleaks.tar.gz" | sha256sum -c
-        tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+        tar -xzf /tmp/gitleaks.tar.gz -C "${install_dir}" gitleaks
+        chmod +x "${install_dir}/gitleaks"
+        echo "${install_dir}" >> "${GITHUB_PATH}"
 
     - name: Run gitleaks
       run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
@@ -351,8 +355,8 @@ org baseline verbatim satisfy this automatically.
   created RSA keypair inside a `beforeAll` hook) rather than committing a
   fixed test key.
 - If a fixture MUST contain a realistic-looking value, prefix the filename
-  with `fixture-` and add a `.gitleaksignore` entry documenting the
-  justification.
+  with `fixture-` and add an `allowlist.paths` entry to `.gitleaks.toml`
+  documenting the justification.
 
 ### Working in a branch that may contain a leaked secret
 
@@ -388,9 +392,9 @@ pointing to the blocked secret. The correct response is:
      above), rotate the credential, and force-push the rewritten branch. Open
      an incident issue per the [Incident Response](#incident-response)
      procedure.
-   - **False positive:** confirm with the org security owner, then add a
-     `.gitleaksignore` entry (for CI) and request a push protection bypass
-     with a `used_in_tests` or `false_positive` reason.
+   - **False positive:** confirm with the org security owner, then add the
+     path to `.gitleaks.toml` `allowlist.paths` (for CI) and request a push
+     protection bypass with a `used_in_tests` or `false_positive` reason.
 3. **Never** commit a modified version of the secret (e.g., adding a space,
    splitting across lines, base64-encoding) to work around detection. This
    is treated as the same severity as committing the original value.
@@ -460,7 +464,7 @@ both at once:
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
-| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
+| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a `secret-scan` job using either `gitleaks/gitleaks-action` or the canonical `gitleaks detect --config .gitleaks.toml` binary-install pattern |
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 
