@@ -244,9 +244,8 @@ apply_check_suite_prefs() {
   info "Configuring check-suite auto-trigger preferences for $ORG/$repo ..."
 
   local prefs
-  prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
-  if [ -z "$prefs" ]; then
-    warn "  Could not read check-suite preferences for $repo — skipping"
+  if ! prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
+    err "  Could not read check-suite preferences for $repo. API response: $prefs"
     return 1
   fi
 
@@ -276,11 +275,12 @@ apply_check_suite_prefs() {
     jq -Rs 'split("\n") | map(select(. != "")) | map(tonumber) |
              {"auto_trigger_checks": map({"app_id": ., "setting": false})}')
 
-  if gh api -X PATCH "repos/$ORG/$repo/check-suites/preferences" \
-       --input - <<< "$payload" > /dev/null; then
+  local api_err
+  if api_err=$(gh api -X PATCH "repos/$ORG/$repo/check-suites/preferences" \
+       --input - <<< "$payload" 2>&1 >/dev/null); then
     ok "  auto-trigger disabled for app_ids: ${CHECK_SUITE_APP_IDS[*]}"
   else
-    warn "  PATCH failed for $repo — manual fix required"
+    err "  PATCH failed for $repo. API response: $api_err"
     return 1
   fi
 }

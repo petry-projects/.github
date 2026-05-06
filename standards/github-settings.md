@@ -264,6 +264,8 @@ GitHub automatically creates a check suite for any app that has previously creat
 
 Disabling auto-trigger stops GitHub from creating suites on every push. The apps still create suites explicitly when they have work to report.
 
+If an app has never created a check run in a repository, GitHub omits that app from `auto_trigger_checks` entirely. Both `scripts/apply-repo-settings.sh` and `scripts/compliance-audit.sh` treat this `missing` state as compliant — no PATCH is needed and no finding is raised until the app is first seen in the repo.
+
 **Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
 
 ```bash
