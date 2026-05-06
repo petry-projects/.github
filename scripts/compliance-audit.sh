@@ -866,7 +866,12 @@ check_check_suite_prefs() {
 
   local prefs
   prefs=$(gh_api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
-  [ -z "$prefs" ] && return  # non-fatal if API unavailable
+  if [ -z "$prefs" ]; then
+    add_finding "$repo" "settings" "check-suite-prefs-unreadable" "warning" \
+      "Could not read check-suite preferences — verify GH_TOKEN has repo scope and the repo is accessible. Check-suite auto-trigger compliance was not evaluated." \
+      "standards/github-settings.md"
+    return
+  fi
 
   for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
     local setting
