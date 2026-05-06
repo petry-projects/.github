@@ -313,6 +313,35 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 | **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
 
+### Check-Suite Auto-Trigger Preferences
+
+GitHub automatically creates a check suite for any app that has previously created check runs in a repo, on every push.
+Some apps (Claude, CodeRabbit) create these suites proactively but only complete them when they have real work to do.
+When they have nothing to do, the suite stays in `queued` state indefinitely —
+**GitHub auto-merge waits for all check suites to reach a terminal state before merging**,
+so these orphaned suites permanently block auto-merge.
+
+**Required configuration** (enforced by `scripts/apply-repo-settings.sh` and detected by `scripts/compliance-audit.sh`):
+
+| App | app_id | Setting |
+|-----|--------|---------|
+| Claude (`anthropics/claude-code-action`) | `1236702` | `auto_trigger_checks: false` |
+| CodeRabbit | `347564` | `auto_trigger_checks: false` |
+
+Disabling auto-trigger stops GitHub from creating suites on every push. The apps still create suites explicitly when they have work to report.
+
+If an app has never created a check run in a repository, GitHub omits that app from `auto_trigger_checks` entirely.
+Both `scripts/apply-repo-settings.sh` and `scripts/compliance-audit.sh` treat this `missing` state as compliant —
+no PATCH is needed and no finding is raised until the app is first seen in the repo.
+
+**Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
+
+```bash
+GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh <repo-name>
+# or for all org repos:
+GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
+```
+
 ### Other Integrations
 
 | Integration | Purpose | Scope |
