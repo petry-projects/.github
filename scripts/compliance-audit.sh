@@ -422,28 +422,67 @@ check_codeowners() {
   if [ "$found" = false ]; then
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
-      "standards/github-settings.md#codeowners-standard"
+      "standards/codeowners-standard.md"
     return
   fi
 
   # Extract non-comment, non-blank owner lines for accurate matching.
   # Each such line has the form: <pattern> <owner1> [<owner2> ...]
-  # We check that every owner line includes both required bot accounts.
+  # Standard (codeowners-standard.md):
+  #   1. @petry-projects/org-leads MUST be the FIRST owner on every line.
+  #   2. Additional teams (@petry-projects/<slug>) are allowed.
+  #   3. Individual users (@username without "/") are forbidden.
   local owner_lines
   owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
 
-  local missing_bots=()
-  if ! echo "$owner_lines" | grep -qE '@petry-projects-pr-review-agent(\s|$)'; then
-    missing_bots+=("@petry-projects-pr-review-agent")
-  fi
-  if ! echo "$owner_lines" | grep -qE '@dependabot-automerge-petry(\s|$)'; then
-    missing_bots+=("@dependabot-automerge-petry")
+  if [ -z "$owner_lines" ]; then
+    add_finding "$repo" "settings" "codeowners-empty" "error" \
+      "CODEOWNERS file has no owner lines (only comments/blank)" \
+      "standards/codeowners-standard.md"
+    return
   fi
 
-  if [ "${#missing_bots[@]}" -gt 0 ]; then
-    add_finding "$repo" "settings" "codeowners-missing-bots" "error" \
-      "CODEOWNERS is missing required bot accounts on owner lines: ${missing_bots[*]} — bot approvals will not satisfy require_code_owner_review" \
-      "standards/github-settings.md#codeowners-standard"
+  # Rule 1: @petry-projects/org-leads MUST be the first owner on every line
+  # (the first whitespace-separated token after the pattern).
+  local bad_first_owner=""
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # awk $2 = first owner token after the pattern
+    local first_owner
+    first_owner=$(echo "$line" | awk '{print $2}')
+    if [ "$first_owner" != "@petry-projects/org-leads" ]; then
+      bad_first_owner="$line"
+      break
+    fi
+  done <<< "$owner_lines"
+  if [ -n "$bad_first_owner" ]; then
+    add_finding "$repo" "settings" "codeowners-org-leads-not-first" "error" \
+      "CODEOWNERS owner lines must list \`@petry-projects/org-leads\` as the FIRST owner. Offending line: \`$bad_first_owner\`" \
+      "standards/codeowners-standard.md"
+  fi
+
+  # Rule 3: no individual users — every owner token must be a team (contain "/").
+  # Collect owner tokens from all lines (everything starting with @).
+  local individual_owners
+  individual_owners=$(echo "$owner_lines" \
+    | tr ' \t' '\n' \
+    | grep -E '^@' \
+    | grep -vE '^@[^/]+/' \
+    | sort -u || true)
+  if [ -n "$individual_owners" ]; then
+    local joined
+    joined=$(echo "$individual_owners" | tr '\n' ' ')
+    add_finding "$repo" "settings" "codeowners-individual-users" "error" \
+      "CODEOWNERS contains forbidden individual user owners: ${joined% } — only teams (@petry-projects/<slug>) are allowed; manage membership via teams" \
+      "standards/codeowners-standard.md"
+  fi
+
+  # Advisory: a catch-all `*` pattern should exist so files unmatched by any
+  # path-specific rule still have an owner.
+  if ! echo "$owner_lines" | awk '{print $1}' | grep -qxF '*'; then
+    add_finding "$repo" "settings" "codeowners-no-catchall" "warning" \
+      "CODEOWNERS has no default \`*\` catch-all pattern — files not matched by a path rule will have no owner and \`require_code_owner_review\` will not apply to them" \
+      "standards/codeowners-standard.md"
   fi
 }
 
