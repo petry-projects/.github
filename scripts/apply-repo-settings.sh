@@ -57,11 +57,17 @@ DRY_RUN="${DRY_RUN:-false}"
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # App IDs whose auto_trigger_checks must be disabled — these apps create
 # orphaned "queued" suites on every push that are never completed, permanently
 # blocking GitHub auto-merge.
@@ -69,8 +75,11 @@ skip()  { echo "[SKIP]  $*"; }
 # 347564  = CodeRabbit
 CHECK_SUITE_APP_IDS=(1236702 347564)
 
+<<<<<<< HEAD
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Source the shared push-protection library — provides
 # pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -349,6 +358,9 @@ apply_codeql_default_setup() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # apply_check_suite_prefs — disable auto-trigger check suites for Claude and
 # CodeRabbit. Without this, GitHub auto-creates "queued" suites on every push
 # that are never completed, permanently blocking auto-merge.
@@ -357,6 +369,7 @@ apply_check_suite_prefs() {
   local repo="$1"
   info "Configuring check-suite auto-trigger preferences for $ORG/$repo ..."
 
+<<<<<<< HEAD
   # GET 404s when prefs have never been set — treat as needing PATCH, don't bail.
   local prefs all_disabled=true
   if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
@@ -374,6 +387,25 @@ apply_check_suite_prefs() {
     all_disabled=false
   fi
 
+=======
+  local prefs
+  if ! prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
+    err "  Could not read check-suite preferences for $repo. API response: $prefs"
+    return 1
+  fi
+
+  local all_disabled=true
+  for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
+    local setting
+    setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
+      '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
+    # "missing" means the app has never run in this repo — no orphaned suite possible, skip
+    if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
+      all_disabled=false
+    fi
+  done
+
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
   if [ "$all_disabled" = true ]; then
     ok "$ORG/$repo check-suite prefs already correct"
     return 0
@@ -400,10 +432,13 @@ apply_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 =======
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
 =======
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -447,6 +482,7 @@ if [ "$1" = "--all" ]; then
 <<<<<<< HEAD
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
+<<<<<<< HEAD
 =======
     apply_settings "$repo" || failed=$((failed + 1))
 <<<<<<< HEAD
@@ -459,6 +495,8 @@ if [ "$1" = "--all" ]; then
 =======
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -485,6 +523,7 @@ else
 <<<<<<< HEAD
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
+<<<<<<< HEAD
 =======
   apply_settings "$1"
 <<<<<<< HEAD
@@ -497,4 +536,6 @@ else
 =======
   apply_codeql_default_setup "$1"
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 fi

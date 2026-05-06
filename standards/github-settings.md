@@ -431,6 +431,7 @@ GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh <repo-name>
 GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
 ```
 
+<<<<<<< HEAD
 =======
 | **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge (bypasses branch protection) | 2026-03-23 |
 =======
@@ -441,6 +442,8 @@ GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
 
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 ### Other Integrations
 
 | Integration | Purpose | Scope |

@@ -100,6 +100,11 @@ REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation i
 =======
 >>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
 
+# App IDs whose auto_trigger_checks must be disabled org-wide.
+# 1236702 = Claude (anthropics/claude-code-action)
+# 347564  = CodeRabbit
+CHECK_SUITE_APP_IDS=(1236702 347564)
+
 REQUIRED_SETTINGS_BOOL=(
   "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
   "delete_branch_on_merge:true:warning:Automatically delete head branches must be enabled"
@@ -1489,6 +1494,7 @@ check_agents_md() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Check: copilot-setup-steps.yml exists
 # ---------------------------------------------------------------------------
 # Every repo should have a copilot-setup-steps.yml to pre-install tools and
@@ -1625,6 +1631,8 @@ check_copilot_instructions() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -1659,10 +1667,13 @@ check_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 =======
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
 =======
 >>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
@@ -2561,8 +2572,11 @@ main() {
     check_claude_md "$repo"
     check_agents_md "$repo"
 <<<<<<< HEAD
+<<<<<<< HEAD
     check_copilot_setup_steps "$repo"
     check_copilot_instructions "$repo"
+=======
+>>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 =======
