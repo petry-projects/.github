@@ -15,11 +15,11 @@ security posture than chasing every minor/patch release.
 2. **Version updates weekly** for GitHub Actions, since pinned action versions do not
    affect application stability and staying current reduces CI attack surface.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
-4. **Auto-merge** after all CI checks pass, using a GitHub App token to approve
-   and merge eligible PRs. Both bot accounts (`dependabot-automerge-petry` and
-   `petry-projects-pr-review-agent`) are listed as code owners in every repo's
-   `CODEOWNERS` file so their approvals satisfy `require_code_owner_review`
-   without any bypass. Eligible updates:
+4. **Auto-merge** after all CI checks pass, approving and merging eligible PRs.
+   Approvals come from members of the `@petry-projects/org-leads` team listed
+   in every repo's `CODEOWNERS` file (see
+   [codeowners-standard.md](codeowners-standard.md)), so they satisfy
+   `require_code_owner_review` without any bypass. Eligible updates:
    - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
    - **App ecosystems**: patch and minor security updates only (major requires human review)
    - **Indirect (transitive) dependencies**: all updates regardless of version bump
@@ -292,12 +292,10 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    — do **not** modify the secrets block or permissions.
 
    > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
-   > The correct solution for CODEOWNERS enforcement is to list the bot accounts
-   > (`@dependabot-automerge-petry`, `@petry-projects-pr-review-agent`) as owners
-   > in every CODEOWNERS pattern — see the
-   > [CODEOWNERS Standard](github-settings.md#codeowners-standard). The earlier
-   > approach of using `gh api .../merge` as a bypass was fragile and has been
-   > superseded.
+   > The correct solution for CODEOWNERS enforcement is to list the
+   > `@petry-projects/org-leads` team in every CODEOWNERS pattern — see the
+   > [CODEOWNERS Standard](codeowners-standard.md). The earlier approach of
+   > using `gh api .../merge` as a bypass was fragile and has been superseded.
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
 5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
