@@ -276,18 +276,20 @@ $(echo "$DISCUSSIONS" | jq -c '.')
 ## REPORT FORMAT
 
 Begin the report with this exact line (replace nothing):
-@don-petry
+@org-leads
 
-Then produce these sections in order:
+Then produce these sections in order. IMPORTANT: output each \`##\` section header before its table content — do NOT skip any section header or table header row.
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
-Org-wide blocker summary table (sum all repos):
+(Replace N with the actual total count.)
+Org-wide blocker summary table (sum all repos). You MUST include the header row and separator row:
 | Category | Count | % of Total |
 |---|---|---|
 Rows in this order: Awaiting Review, CI Failing, CI Pending, Changes Requested, Approved, Draft, No CI / No Policy, **TOTAL**
 
-Per-repo breakdown table (omit repos with 0 total PRs):
+Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the header row and separator row:
 | Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft |
+|---|---|---|---|---|---|---|---|---|
 - Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
 - Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
 
@@ -317,13 +319,6 @@ For each repo with issues, show all provided rows (up to $ISSUE_LIMIT):
 - Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
 - If truncated:true, note "(showing $ISSUE_LIMIT of N)" next to the repo name
 
-### \`## Open Discussions\`
-| Repo | # | Opened | Title | Replies |
-|---|---|---|---|---|
-- # as markdown link using url field: [#N](url)
-- Title as markdown link using url field: [title](url)
-If none: _No open discussions found across petry-projects._
-
 ### \`## PR Merge Activity — Last 8 Days\`
 Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
 | Repo | Mon-DD | Mon-DD | … | Total |
@@ -335,6 +330,13 @@ Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit 
 Daily org-level summary table (include zero rows):
 | Date | petry-projects | don-petry | Grand Total |
 Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
+
+### \`## Open Discussions\`
+| Repo | # | Opened | Title | Replies |
+|---|---|---|---|---|
+- # as markdown link using url field: [#N](url)
+- Title as markdown link using url field: [title](url)
+If none: _none_
 
 ---
 
