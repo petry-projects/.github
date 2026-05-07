@@ -336,7 +336,7 @@ Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(firs
 |---|---|---|---|---|
 - # as markdown link using url field: [#N](url)
 - Title as markdown link using url field: [title](url)
-If none: _No open discussions found across petry-projects._
+If none: _none_
 
 ---
 
