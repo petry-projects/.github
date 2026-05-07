@@ -10,11 +10,13 @@
 #     a LOCAL ref (`./`) instead of a pinned SHA — this repo IS the source of
 #     truth, so a local ref is always current. Other repos use pinned SHAs
 #     (see standards/workflows/dependabot-rebase.yml).
-#   • You MUST NOT change: trigger event, the concurrency group name,
-#     the explicit secrets block, or the job-level `permissions:` block —
-#     reusable workflows can be granted no more permissions than the calling
-#     job has, so removing the stanza breaks
-#     the reusable's gh API calls.
+#   • You MUST NOT change: the concurrency group name, the explicit secrets
+#     block, or the job-level `permissions:` block — reusable workflows can
+#     be granted no more permissions than the calling job has, so removing
+#     the stanza breaks the reusable's gh API calls. Do not remove any
+#     trigger (`push` keeps the self-sustaining chain; `schedule` is the
+#     safety net when no PR merges have occurred recently; `workflow_dispatch`
+#     allows manual queue flushes).
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,6 +32,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 */4 * * *' # every 4 hours — safety net when no pushes to main trigger the chain
   workflow_dispatch: # allow manual trigger to flush Dependabot PR queue
 
 concurrency:
