@@ -275,16 +275,13 @@ $(echo "$DISCUSSIONS" | jq -c '.')
 
 ## REPORT FORMAT
 
-Your output MUST begin with these exact two lines before any table or section:
-@don-petry
+Begin the report with this exact line (replace nothing):
+@org-leads
 
-## Open PRs — Why They're Unmerged (N total)
-
-(Replace N with the actual total count. Do NOT skip this header or the @mention.)
-
-Then produce these sections in order:
+Then produce these sections in order. IMPORTANT: output each \`##\` section header before its table content — do NOT skip any section header or table header row.
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
+(Replace N with the actual total count.)
 Org-wide blocker summary table (sum all repos). You MUST include the header row and separator row:
 | Category | Count | % of Total |
 |---|---|---|
