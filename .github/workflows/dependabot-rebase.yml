@@ -30,6 +30,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 */4 * * *' # every 4 hours — safety net when no pushes to main trigger the chain
   workflow_dispatch: # allow manual trigger to flush Dependabot PR queue
 
 concurrency:
