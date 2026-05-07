@@ -186,6 +186,29 @@ This workflow fires on every push to `main` (and can be triggered manually via
 Using the app token for merges ensures each merge triggers a new push to `main`,
 creating a self-sustaining chain that serializes Dependabot PR merges.
 
+**GitHub App permission requirement:** The `dependabot-automerge-petry` GitHub App
+must have the `workflows` permission granted. Without it, the `update-branch` API
+call fails with *"refusing to allow a GitHub App to create or update workflow"*
+whenever `main` contains workflow file changes (`.github/workflows/*.yml`) that
+would be merged into the PR branch. Grant the permission in the GitHub App settings:
+Settings → GitHub Apps → dependabot-automerge-petry → Permissions → Workflows → Read & Write.
+
+**Chain-stall safety net:** The rebase workflow also runs on a 4-hour schedule
+(`cron: '0 */4 * * *'`) in addition to `push: main` and `workflow_dispatch`.
+This prevents the serialization chain from stalling in repos where no PR merges
+to `main` occur for extended periods, without relying solely on external pushes.
+
+**Fallback merge when `update-branch` fails:** If `update-branch` fails (e.g., the
+GitHub App lacks the `workflows` permission or there are merge conflicts), the
+workflow falls through to the direct merge attempt instead of skipping the PR
+permanently. The bypass actor (`bypass_mode: always`) can call `gh api .../merge`
+directly when the branch is behind `main`, provided the PR's own CI has passed
+and `strict_required_status_checks_policy` is `false` for the repo. If a repo
+enforces `strict_required_status_checks_policy: true` (branches must be up to
+date before merge), the fallback direct merge will also fail — granting the
+`dependabot-automerge-petry` App the `workflows` permission so that
+`update-branch` succeeds is the correct resolution in that case.
+
 **Why `update-branch` with APP_TOKEN (not `GITHUB_TOKEN` or `@dependabot rebase`):**
 
 - **`GITHUB_TOKEN`** is subject to GitHub's recursive-trigger guard — events it
@@ -297,7 +320,14 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    > [CODEOWNERS Standard](codeowners-standard.md). The earlier approach of
    > using `gh api .../merge` as a bypass was fragile and has been superseded.
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
+5. **GitHub App permissions** — the `dependabot-automerge-petry` GitHub App requires
+   the `workflows` permission in addition to `contents: write` and `pull_requests: write`.
+   Without it, the rebase workflow cannot call `update-branch` when `main` contains
+   workflow file changes. Grant: GitHub App settings → Permissions → Repository →
+   Workflows → Read & Write, then accept the updated permission in each repo's
+   installed-app settings.
+
+6. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
    not per-repo. The caller stubs pass these explicitly via:
 
@@ -321,9 +351,9 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    both secrets are confirmed should you run `gh secret delete APP_ID --repo <repo>`
    to clean up per-repo copies — otherwise `gh pr review` calls fail with
    `Secret APP_ID is required`.
-6. Create the `security` and `dependencies` labels in the repository if they
+7. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
-7. Add `dependency-audit / Detect ecosystems` as a required status check in
+8. Add `dependency-audit / Detect ecosystems` as a required status check in
    branch protection rules. Do **not** require the per-ecosystem audit jobs
    (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
    they're conditional on lockfile presence and report `SKIPPED` when absent,
