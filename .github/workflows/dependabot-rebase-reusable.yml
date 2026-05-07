@@ -108,13 +108,23 @@ jobs:
               if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
                 -X PUT 2>/dev/null; then
                 echo "  Updated branch for PR #$PR_NUMBER"
-              else
-                echo "  Warning: could not update branch for PR #$PR_NUMBER (may have conflicts)"
+                continue  # wait for CI on updated branch before merging
               fi
-              continue
-            fi
 
-            echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — checking if merge-ready"
+              # update-branch failed (e.g. App lacks 'workflows' permission when
+              # main contains workflow file changes, or there is a merge conflict).
+              # Fall through to the direct merge attempt. The bypass actor
+              # (bypass_mode: always) can call the merge API directly when the
+              # branch is behind, provided:
+              #   - The PR's own CI has already passed, AND
+              #   - strict_required_status_checks_policy is false for this repo.
+              # If strict up-to-date checking IS enforced (strict: true), this
+              # fallback will also fail — granting the App the 'workflows'
+              # permission so update-branch succeeds is the correct fix.
+              echo "  Warning: could not update branch for PR #$PR_NUMBER — will attempt direct merge"
+            else
+              echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — checking if merge-ready"
+            fi
 
             # Skip if we already merged one (strict mode means others are now behind)
             if [[ "$MERGED" == "true" ]]; then
