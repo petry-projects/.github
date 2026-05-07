@@ -512,6 +512,7 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    installed-app settings.
 
 6. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
+<<<<<<< HEAD
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
    not per-repo. The caller stubs pass these explicitly via:
 
@@ -600,6 +601,8 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 >>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
 4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
 5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
    not per-repo. The caller stubs pass these explicitly via:
 
@@ -623,13 +626,17 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    both secrets are confirmed should you run `gh secret delete APP_ID --repo <repo>`
    to clean up per-repo copies — otherwise `gh pr review` calls fail with
    `Secret APP_ID is required`.
-6. Create the `security` and `dependencies` labels in the repository if they
+7. Create the `security` and `dependencies` labels in the repository if they
    don't already exist.
+<<<<<<< HEAD
 <<<<<<< HEAD
 7. Add `dependency-audit` as a required status check in branch protection rules.
 >>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
 =======
 7. Add `dependency-audit / Detect ecosystems` as a required status check in
+=======
+8. Add `dependency-audit / Detect ecosystems` as a required status check in
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
    branch protection rules. Do **not** require the per-ecosystem audit jobs
    (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
    they're conditional on lockfile presence and report `SKIPPED` when absent,

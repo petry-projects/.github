@@ -142,6 +142,9 @@ repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 ### Bypass Actors — Required on Every Ruleset Targeting `main`
 
 **The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
@@ -186,8 +189,11 @@ for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 10
 done
 ```
 
+<<<<<<< HEAD
 =======
 >>>>>>> ed24e34 (docs: add GitHub repository settings standards (#10))
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 ### `pr-quality` — Standard Ruleset (All Repositories)
 
 | Setting | Value |
@@ -248,6 +254,7 @@ The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST a
 >>>>>>> 12858a4 (docs: require auto-merge in ruleset standards (#194))
 #### Bypass Actors
 
+<<<<<<< HEAD
 The `pr-quality` ruleset MUST include the following bypass actors:
 
 | Actor | Type | `bypass_mode` | Reason |
@@ -264,6 +271,10 @@ The `pr-quality` ruleset MUST include the following bypass actors:
 > after manually verifying CI. The rebase workflow verifies CI before merging,
 > so `always` does not bypass safety checks.
 >>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
+=======
+See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
+The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 
 #### CODEOWNERS Approval Timing
 

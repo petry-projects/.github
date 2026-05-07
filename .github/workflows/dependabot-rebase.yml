@@ -16,6 +16,9 @@
 #     truth, so a local ref is always current. Other repos use pinned SHAs
 #     (see standards/workflows/dependabot-rebase.yml).
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 #   • You MUST NOT change: the concurrency group name, the explicit secrets
 #     block, or the job-level `permissions:` block — reusable workflows can
 #     be granted no more permissions than the calling job has, so removing
@@ -23,6 +26,7 @@
 #     trigger (`push` keeps the self-sustaining chain; `schedule` is the
 #     safety net when no PR merges have occurred recently; `workflow_dispatch`
 #     allows manual queue flushes).
+<<<<<<< HEAD
 =======
 #   • You MAY change: nothing in this file in normal use. Adopt verbatim.
 =======
@@ -37,6 +41,8 @@
 #     job has, so removing the stanza breaks
 #     the reusable's gh API calls.
 >>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,6 +60,9 @@ on:
       - main
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
   schedule:
     - cron: '0 */4 * * *' # every 4 hours — safety net when no pushes to main trigger the chain
   workflow_dispatch: # allow manual trigger to flush Dependabot PR queue
