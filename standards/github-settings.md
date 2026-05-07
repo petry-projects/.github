@@ -218,21 +218,8 @@ for more details.
 
 #### Bypass Actors
 
-The `pr-quality` ruleset MUST include the following bypass actors:
-
-| Actor | Type | `bypass_mode` | Reason |
-|-------|------|--------------|--------|
-| `dependabot-automerge-petry` | GitHub App | `always` | Approves and merges Dependabot PRs; must bypass review gate |
-| `OrganizationAdmin` | Role | `always` | Emergency admin override |
-
-> **Critical:** `bypass_mode: pull_request` does **not** work for Dependabot PRs.
-> That mode only bypasses review requirements when the bypass actor *opens* the PR
-> via the PR flow. Since `dependabot[bot]` opens Dependabot PRs, the
-> `dependabot-automerge-petry` app cannot use `pull_request` bypass for them —
-> its merge API calls are rejected with `Required status check` errors.
-> Use `bypass_mode: always` so the app can call `gh api .../merge` directly
-> after manually verifying CI. The rebase workflow verifies CI before merging,
-> so `always` does not bypass safety checks.
+See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
+The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
 
 #### CODEOWNERS Approval Timing
 
