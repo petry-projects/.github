@@ -163,6 +163,8 @@ The `pr-quality` ruleset MUST include the following bypass actors:
 | `dependabot-automerge-petry` | GitHub App | `always` | Approves and merges Dependabot PRs; must bypass review gate |
 | `OrganizationAdmin` | Role | `always` | Emergency admin override |
 
+> **Critical — ALL rulesets that include a `pull_request` or `required_status_checks` rule MUST include the `dependabot-automerge-petry` bypass actor.** GitHub evaluates bypass eligibility per-ruleset: a bypass actor in `pr-quality` does NOT carry over to `protect-branches` or any other ruleset on the same branch. If a repo has multiple rulesets targeting `main` (e.g., `pr-quality` + `protect-branches` + `main`), ALL of them must include `dependabot-automerge-petry` with `bypass_mode: always` — otherwise the merge API calls are rejected even though the actor has bypass in `pr-quality`.
+
 > **Critical:** `bypass_mode: pull_request` does **not** work for Dependabot PRs.
 > That mode only bypasses review requirements when the bypass actor *opens* the PR
 > via the PR flow. Since `dependabot[bot]` opens Dependabot PRs, the
