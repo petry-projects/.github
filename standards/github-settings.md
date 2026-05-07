@@ -156,10 +156,10 @@ gh api repos/petry-projects/<repo>/rulesets/<ruleset-id> \
 **Compliance check:** verify all rulesets on all repos have the bypass actor:
 
 ```bash
-for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 50); do
+for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 1000); do
   for rs_id in $(gh api "repos/petry-projects/$repo/rulesets" --jq '.[].id' 2>/dev/null); do
     rs=$(gh api "repos/petry-projects/$repo/rulesets/$rs_id" 2>/dev/null)
-    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0 and ([.rules[]? | select(.type == "pull_request" or .type == "required_status_checks")] | length > 0)')
+    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0')
     [[ "$missing" == "true" ]] && echo "MISSING: $repo / $(echo "$rs" | jq -r '.name')"
   done
 done

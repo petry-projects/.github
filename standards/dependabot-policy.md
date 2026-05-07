@@ -202,8 +202,12 @@ to `main` occur for extended periods, without relying solely on external pushes.
 GitHub App lacks the `workflows` permission or there are merge conflicts), the
 workflow falls through to the direct merge attempt instead of skipping the PR
 permanently. The bypass actor (`bypass_mode: always`) can call `gh api .../merge`
-directly even when the branch is behind `main`, as long as the PR's own CI has
-passed and `strict_required_status_checks_policy` is `false`.
+directly when the branch is behind `main`, provided the PR's own CI has passed
+and `strict_required_status_checks_policy` is `false` for the repo. If a repo
+enforces `strict_required_status_checks_policy: true` (branches must be up to
+date before merge), the fallback direct merge will also fail — granting the
+`dependabot-automerge-petry` App the `workflows` permission so that
+`update-branch` succeeds is the correct resolution in that case.
 
 **Why `update-branch` with APP_TOKEN (not `GITHUB_TOKEN` or `@dependabot rebase`):**
 
