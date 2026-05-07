@@ -26,7 +26,8 @@
 #   .github/workflows/pr-review-mention.yml
 #
 # Purpose: Trigger the pr-review-agent whenever @petry-review-bot is mentioned
-#          in a PR comment or review comment within the petry-projects org.
+#          in a PR comment or review comment, OR when donpetry-bot is assigned
+#          as a reviewer on a PR within the petry-projects org.
 #
 # Prerequisites:
 #   Uses GH_PAT_WORKFLOWS (org secret, classic PAT with repo scope) — already
@@ -41,6 +42,7 @@ on:
   pull_request_review_comment:
     types: [created]
 <<<<<<< HEAD
+<<<<<<< HEAD
   pull_request:
     types: [review_requested]
 
@@ -53,6 +55,10 @@ jobs:
     uses: ./.github/workflows/pr-review-mention-reusable.yml  # local ref — always current
     secrets: inherit
 =======
+=======
+  pull_request:
+    types: [review_requested]
+>>>>>>> 544b926 (feat: trigger review agent when donpetry-bot is assigned as reviewer (#201))
 
 permissions:
   pull-requests: write
@@ -60,33 +66,64 @@ permissions:
 jobs:
   handle-mention:
     runs-on: ubuntu-latest
-    # Only fire when @petry-review-bot appears in the comment body.
-    # For issue_comment events, also require that the comment is on a PR (not a plain issue).
+    # Fire when:
+    #   (a) donpetry-bot is added as a reviewer on a same-repo PR (fork PRs
+    #       don't receive org secrets so we exclude them), OR
+    #   (b) @petry-review-bot is mentioned in a PR comment / review comment.
+    #
+    # Guard each branch against missing fields: requested_reviewer is null for
+    # team review requests; comment fields don't exist on pull_request events.
     if: |
-      contains(github.event.comment.body, '@petry-review-bot') &&
-      (github.event_name == 'pull_request_review_comment' ||
-       github.event.issue.pull_request != null)
+      (github.event_name == 'pull_request' &&
+       github.event.requested_reviewer != null &&
+       github.event.requested_reviewer.login == 'donpetry-bot' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' &&
+       contains(github.event.comment.body, '@petry-review-bot') &&
+       (github.event_name == 'pull_request_review_comment' ||
+        github.event.issue.pull_request != null))
 
     steps:
       - name: Check commenter trust level
         id: trust
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
-          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
-          COMMENTER: ${{ github.event.comment.user.login }}
         run: |
           # Only OWNER, MEMBER, and COLLABORATOR can trigger reviews.
           # This prevents external contributors or bots from burning review quota.
-          case "$AUTHOR_ASSOCIATION" in
-            OWNER|MEMBER|COLLABORATOR)
-              echo "trusted=true" >> "$GITHUB_OUTPUT"
-              echo "Commenter @$COMMENTER has association $AUTHOR_ASSOCIATION — trusted"
-              ;;
-            *)
-              echo "trusted=false" >> "$GITHUB_OUTPUT"
-              echo "Commenter @$COMMENTER has association $AUTHOR_ASSOCIATION — not trusted, skipping"
-              ;;
-          esac
+          #
+          # For review_requested events author_association is absent from the
+          # sender payload, so query the collaborator permission API instead.
+          # The endpoint returns a top-level .permission string:
+          #   "admin" | "write" | "read" | "none"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ACTOR="${{ github.event.sender.login }}"
+            PERM=$(gh api /repos/${{ github.repository }}/collaborators/${{ github.event.sender.login }}/permission \
+              --jq '.permission' 2>/dev/null || echo "none")
+            case "$PERM" in
+              admin|write)
+                echo "trusted=true" >> "$GITHUB_OUTPUT"
+                echo "Actor @$ACTOR has permission $PERM — trusted"
+                ;;
+              *)
+                echo "trusted=false" >> "$GITHUB_OUTPUT"
+                echo "Actor @$ACTOR has permission $PERM — not trusted, skipping"
+                ;;
+            esac
+          else
+            ACTOR="${{ github.event.comment.user.login }}"
+            ASSOC="${{ github.event.comment.author_association }}"
+            case "$ASSOC" in
+              OWNER|MEMBER|COLLABORATOR)
+                echo "trusted=true" >> "$GITHUB_OUTPUT"
+                echo "Actor @$ACTOR has association $ASSOC — trusted"
+                ;;
+              *)
+                echo "trusted=false" >> "$GITHUB_OUTPUT"
+                echo "Actor @$ACTOR has association $ASSOC — not trusted, skipping"
+                ;;
+            esac
+          fi
 
       - name: Resolve PR URL
         id: pr
@@ -94,7 +131,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_URL="${{ github.event.pull_request.html_url }}"
+          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
             PR_URL="${{ github.event.pull_request.html_url }}"
           else
             # issue_comment: resolve the PR URL from the issue's pull_request link
@@ -108,13 +147,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
-          COMMENTER: ${{ github.event.comment.user.login }}
         run: |
-          gh pr comment "$PR_URL" --body "$(cat <<'EOF'
-          <!-- pr-review-agent mention-ack -->
-          @'"$COMMENTER"' I'm on it — starting a fresh review now. Results will appear in a few minutes.
-          EOF
-          )"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ACTOR="${{ github.event.sender.login }}"
+            MSG="@${ACTOR} assigned me as reviewer — starting a fresh review now. Results will appear in a few minutes."
+          else
+            ACTOR="${{ github.event.comment.user.login }}"
+            MSG="@${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
+          fi
+          gh pr comment "$PR_URL" --body "$(printf '<!-- pr-review-agent mention-ack -->\n%s' "${MSG}")"
 
       - name: Trigger review agent
         if: steps.trust.outputs.trusted == 'true'
