@@ -121,6 +121,50 @@ Rulesets are the primary enforcement mechanism for branch policies. All
 repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
+### Bypass Actors — Required on Every Ruleset Targeting `main`
+
+**The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
+ruleset that targets the default branch**, not only on `pr-quality`. GitHub
+evaluates bypass eligibility independently per ruleset — having bypass in
+`pr-quality` does NOT grant bypass in `protect-branches`, `main`, or any other
+ruleset applied to the same branch. Every such ruleset must include:
+
+| Actor | Type | `bypass_mode` | Reason |
+|-------|------|--------------|--------|
+| `dependabot-automerge-petry` | GitHub App | `always` | Merges Dependabot PRs via API; rejected without bypass in every active ruleset |
+| `OrganizationAdmin` | Role | `always` | Emergency admin override |
+
+**Why `bypass_mode: always`:** `pull_request` bypass mode only works when the
+bypass actor *opens* the PR. Dependabot opens its own PRs, so the
+`dependabot-automerge-petry` app cannot use that mode — its merge API calls are
+rejected. `always` mode is safe here because the rebase workflow explicitly
+verifies CI pass and `MERGEABLE` state before calling the merge API.
+
+**API snippet to add the bypass actor to an existing ruleset:**
+
+```bash
+# Get current ruleset (capture bypass_actors and rules arrays)
+gh api repos/petry-projects/<repo>/rulesets/<ruleset-id>
+
+# PUT the full ruleset back, adding actor_id 3167543 to bypass_actors
+gh api repos/petry-projects/<repo>/rulesets/<ruleset-id> \
+  -X PUT --input ruleset.json
+# where ruleset.json adds {"actor_id": 3167543, "actor_type": "Integration", "bypass_mode": "always"}
+# to the existing bypass_actors array alongside all existing rules and conditions.
+```
+
+**Compliance check:** verify all rulesets on all repos have the bypass actor:
+
+```bash
+for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 50); do
+  for rs_id in $(gh api "repos/petry-projects/$repo/rulesets" --jq '.[].id' 2>/dev/null); do
+    rs=$(gh api "repos/petry-projects/$repo/rulesets/$rs_id" 2>/dev/null)
+    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0 and ([.rules[]? | select(.type == "pull_request" or .type == "required_status_checks")] | length > 0)')
+    [[ "$missing" == "true" ]] && echo "MISSING: $repo / $(echo "$rs" | jq -r '.name')"
+  done
+done
+```
+
 ### `pr-quality` — Standard Ruleset (All Repositories)
 
 | Setting | Value |
@@ -156,23 +200,8 @@ for more details.
 
 #### Bypass Actors
 
-The `pr-quality` ruleset MUST include the following bypass actors:
-
-| Actor | Type | `bypass_mode` | Reason |
-|-------|------|--------------|--------|
-| `dependabot-automerge-petry` | GitHub App | `always` | Approves and merges Dependabot PRs; must bypass review gate |
-| `OrganizationAdmin` | Role | `always` | Emergency admin override |
-
-> **Critical — ALL rulesets that include a `pull_request` or `required_status_checks` rule MUST include the `dependabot-automerge-petry` bypass actor.** GitHub evaluates bypass eligibility per-ruleset: a bypass actor in `pr-quality` does NOT carry over to `protect-branches` or any other ruleset on the same branch. If a repo has multiple rulesets targeting `main` (e.g., `pr-quality` + `protect-branches` + `main`), ALL of them must include `dependabot-automerge-petry` with `bypass_mode: always` — otherwise the merge API calls are rejected even though the actor has bypass in `pr-quality`.
-
-> **Critical:** `bypass_mode: pull_request` does **not** work for Dependabot PRs.
-> That mode only bypasses review requirements when the bypass actor *opens* the PR
-> via the PR flow. Since `dependabot[bot]` opens Dependabot PRs, the
-> `dependabot-automerge-petry` app cannot use `pull_request` bypass for them —
-> its merge API calls are rejected with `Required status check` errors.
-> Use `bypass_mode: always` so the app can call `gh api .../merge` directly
-> after manually verifying CI. The rebase workflow verifies CI before merging,
-> so `always` does not bypass safety checks.
+See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
+The same `dependabot-automerge-petry` + `OrganizationAdmin` bypass actors MUST appear in `pr-quality` and in every other ruleset that targets `main`.
 
 #### CODEOWNERS Approval Timing
 
