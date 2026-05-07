@@ -505,8 +505,14 @@ OUTPUT CONTRACT
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
-# --allowedTools "": disable all tool use so Claude can't act on untrusted PR/issue content
+# --disallowedTools: block all action tools so Claude cannot act on untrusted PR/issue content
 # Pipe prompt via stdin rather than a shell argument to avoid ARG_MAX (~1MB) with large orgs
 echo "Generating report with Claude..." >&2
+<<<<<<< HEAD
 claude -p --allowedTools "" < "$DATA_DIR/prompt.txt" 2>/dev/null
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+claude -p \
+  --disallowedTools "Bash,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit" \
+  < "$DATA_DIR/prompt.txt"
+>>>>>>> 46e3440 (fix(org-status): use --disallowedTools instead of empty --allowedTools; remove stderr suppression)
