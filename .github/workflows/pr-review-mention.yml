@@ -114,11 +114,7 @@ jobs:
             ACTOR="${{ github.event.comment.user.login }}"
             MSG="@${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
           fi
-          gh pr comment "$PR_URL" --body "$(cat <<EOF
-<!-- pr-review-agent mention-ack -->
-${MSG}
-EOF
-)"
+          gh pr comment "$PR_URL" --body "$(printf '<!-- pr-review-agent mention-ack -->\n%s' "${MSG}")"
 
       - name: Trigger review agent
         if: steps.trust.outputs.trusted == 'true'
