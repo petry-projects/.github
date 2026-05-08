@@ -96,8 +96,12 @@ warn() { echo "::warning::$*" >&2; }
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
+  local output rc
   for i in $(seq 1 $retries); do
-    if gh api "$@" 2>/dev/null; then
+    output=$(gh api "$@" 2>/dev/null)
+    rc=$?
+    if [ $rc -eq 0 ]; then
+      echo "$output"
       return 0
     fi
     if [ "$i" -lt "$retries" ]; then
