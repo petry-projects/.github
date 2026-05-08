@@ -424,6 +424,25 @@ both at once:
 Findings are reported as GitHub Issues labeled `security` + `compliance-audit`
 per the existing audit flow.
 
+### Token scope requirement
+
+The `security_and_analysis` field in `GET /repos/{owner}/{repo}` is only
+populated when the requesting token has **admin access** to the repository or
+the **`security_events` OAuth scope**. When the audit token (`ORG_SCORECARD_TOKEN`)
+lacks these, the check falls back to a proxy verification:
+
+1. If `GET /repos/{owner}/{repo}/secret-scanning/alerts` returns a valid array,
+   secret scanning is confirmed active and the finding is downgraded to
+   `security_and_analysis_unverifiable` (warning) — the specific settings
+   (push protection, AI detection, etc.) cannot be individually confirmed.
+2. If the alerts endpoint also fails, `security_and_analysis_unavailable`
+   (warning) is reported.
+
+**To enable full verification:** add the `security_events` OAuth scope to
+`ORG_SCORECARD_TOKEN` in org Settings → Secrets, or run
+`scripts/apply-repo-settings.sh <repo>` with an admin token to configure all
+required settings and grant the audit token visibility.
+
 ---
 
 ## Related Standards

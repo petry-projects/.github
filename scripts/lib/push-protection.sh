@@ -75,8 +75,11 @@ pp_apply_security_and_analysis() {
   current=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$current" = "{}" ] || [ -z "$current" ]; then
-    err "Could not fetch security_and_analysis for $ORG/$repo — check token has admin scope"
-    return 1
+    # Cannot read the current security_and_analysis state — the token may lack
+    # admin or security_events scope, or the settings have not yet been
+    # configured.  Apply all required settings unconditionally: every required
+    # value is "enabled", so this is idempotent and safe.
+    info "  security_and_analysis is currently unreadable — applying all required settings"
   fi
 
   local needs_patch=false
@@ -114,7 +117,7 @@ pp_apply_security_and_analysis() {
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
     ok "$ORG/$repo security_and_analysis updated successfully"
   else
-    err "Failed to PATCH security_and_analysis for $ORG/$repo — check admin scope and that the org plan supports these features"
+    err "Failed to PATCH security_and_analysis for $ORG/$repo — token requires admin or \`security_events\` OAuth scope, and the org plan must support these features"
     return 1
   fi
 }
@@ -131,9 +134,32 @@ pp_check_security_and_analysis() {
   sa=$(gh_api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$sa" = "{}" ] || [ -z "$sa" ]; then
-    add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
-      "Could not fetch security_and_analysis — token may lack admin scope, or the repo's plan does not expose these settings" \
-      "$PP_STANDARD_REF#required-repo-level-settings"
+    # security_and_analysis is not readable via the current token (requires
+    # admin or security_events OAuth scope).  Use the secret-scanning alerts
+    # endpoint as a proxy: it is accessible without admin scope on public
+    # repositories.  A valid array response confirms scanning is active; a
+    # non-array response (404/error) suggests it may be disabled.
+    local alerts_response
+    alerts_response=$(gh_api \
+      "repos/$ORG/$repo/secret-scanning/alerts?state=open&per_page=1" \
+      2>/dev/null || echo "null")
+
+    if echo "$alerts_response" | jq -e 'type == "array"' > /dev/null 2>&1; then
+      # Alerts API returned a valid array — secret scanning is active.
+      # Remaining settings (push_protection, ai_detection, non_provider_patterns,
+      # dependabot_security_updates) cannot be individually verified without
+      # admin / security_events scope; report as partially unverifiable so the
+      # finding reflects the actual state of knowledge.
+      add_finding "$repo" "push-protection" "security_and_analysis_unverifiable" "warning" \
+        "Secret scanning is active but push_protection, ai_detection, non_provider_patterns, and dependabot_security_updates cannot be individually verified — the audit token lacks admin or \`security_events\` OAuth scope. To fully verify or enforce all settings: (1) add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\`, or (2) run \`scripts/apply-repo-settings.sh $repo\` with an admin token." \
+        "$PP_STANDARD_REF#required-repo-level-settings"
+    else
+      # Both the primary API field and the proxy check indicate that scanning
+      # may be disabled or the token cannot reach the API at all.
+      add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
+        "Could not fetch security_and_analysis and the secret-scanning alerts proxy check also returned a non-array response — token may lack admin or \`security_events\` OAuth scope, or secret scanning may be disabled. Run \`scripts/apply-repo-settings.sh $repo\` with an admin token to enable all required settings, then add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\` to allow the audit to verify them." \
+        "$PP_STANDARD_REF#required-repo-level-settings"
+    fi
     return
   fi
 
