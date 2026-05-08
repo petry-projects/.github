@@ -62,9 +62,6 @@ declare -A LABEL_DESCS=(
   [in-progress]="An agent is actively working this issue"
 )
 
-# App IDs whose check-suite auto-trigger must be disabled (matches compliance-audit.sh)
-CHECK_SUITE_APP_IDS=(1236702 347564)
-
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
@@ -247,7 +244,8 @@ remediate_codeowners() {
     fi
   done
 
-  local branch_name="fix/compliance-codeowners-$(date +%Y%m%d)"
+  local branch_name
+  branch_name="fix/compliance-codeowners-$(date +%Y%m%d)"
   if gh api "repos/$ORG/$repo/git/refs/heads/$branch_name" > /dev/null 2>&1; then
     branch_name="fix/compliance-codeowners-$(date +%Y%m%d-%H%M%S)"
   fi
@@ -460,7 +458,8 @@ remediate_unpinned_actions() {
 
   local wf_slug
   wf_slug=$(echo "$workflow_file" | sed 's/\.[^.]*$//')
-  local branch_name="fix/compliance-pin-actions-${wf_slug}-$(date +%Y%m%d)"
+  local branch_name
+  branch_name="fix/compliance-pin-actions-${wf_slug}-$(date +%Y%m%d)"
   if gh api "repos/$ORG/$repo/git/refs/heads/$branch_name" > /dev/null 2>&1; then
     branch_name="${branch_name}-$(date +%H%M%S)"
   fi
@@ -594,6 +593,11 @@ remediate_finding() {
       ;;
 
     # ----- Skipped: require workflows token scope or complex human judgment -----
+    # Note: more-specific ci-workflows/* patterns must come before ci-workflows/missing-*
+    ci-workflows/missing-permissions-*)
+      report_skip "$repo" "$check" \
+        "Permissions declarations require per-workflow review — fix manually per standards/ci-standards.md#permissions-policy"
+      ;;
     ci-workflows/missing-*)
       report_skip "$repo" "$check" \
         "Creating/updating workflow files requires \`workflow\` token scope — use a PAT or push manually from standards/workflows/"
@@ -609,10 +613,6 @@ remediate_finding() {
     ci-workflows/stray-codeql-workflow)
       report_skip "$repo" "$check" \
         "Deleting workflow files requires \`workflow\` token scope — remove .github/workflows/codeql.yml using a PAT"
-      ;;
-    ci-workflows/missing-permissions-*)
-      report_skip "$repo" "$check" \
-        "Permissions declarations require per-workflow review — fix manually per standards/ci-standards.md#permissions-policy"
       ;;
     ci-workflows/*)
       report_skip "$repo" "$check" \
