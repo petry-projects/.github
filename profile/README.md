@@ -1,15 +1,20 @@
 # Petry Projects
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, beekeeping tech, and agent orchestration.
 =======
 A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, and agent orchestration.
 >>>>>>> c4f8d86 (feat: add org profile README (#61))
+=======
+A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, beekeeping tech, and agent orchestration.
+>>>>>>> fc73ff1 (docs: update org landing page with full repo list)
 
 ---
 
 ## Projects
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 | Repository | Description | Language |
 | --- | --- | --- |
@@ -30,6 +35,18 @@ A collection of open-source tools and experiments spanning terminal UX, market d
 | [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMAD agent workflow suite | agents, automation |
 | [.github](https://github.com/petry-projects/.github) | Org-wide standards, CI templates, and compliance tooling | standards, devops |
 >>>>>>> c4f8d86 (feat: add org profile README (#61))
+=======
+| Repository | Description | Language |
+| --- | --- | --- |
+| [TalkTerm](https://github.com/petry-projects/TalkTerm) | Terminal-based communication tool | HTML |
+| [markets](https://github.com/petry-projects/markets) | Market data and analysis tooling (dual-licensed AGPL / Commercial) | HTML |
+| [broodly](https://github.com/petry-projects/broodly) | Field-first beekeeping decision-support app — mobile-first (iOS, Android, web) via Expo + React Native with a Go GraphQL API on GCP | HTML |
+| [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered Social Media Agent for small organizations — enterprise-quality social presence at non-profit pricing | Shell |
+| [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMad Operations Suite — SRE and DevOps agents and workflows for the BMad Method ecosystem | Shell |
+| [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A collection of Google Apps Scripts for personal productivity automation | JavaScript |
+| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, Claude Code skills, and agentic workflow infrastructure | JavaScript |
+| [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
+>>>>>>> fc73ff1 (docs: update org landing page with full repo list)
 
 ---
 
