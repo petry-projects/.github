@@ -56,6 +56,7 @@ jobs:
       - name: Truncate report if near GitHub issue body limit
         run: |
 <<<<<<< HEAD
+<<<<<<< HEAD
           MAX_BYTES=64000
           REPORT_SIZE=$(wc -c < /tmp/report.md)
           echo "Report size: ${REPORT_SIZE} bytes (limit: ${MAX_BYTES})"
@@ -71,6 +72,9 @@ jobs:
             echo "Final size: $(wc -c < /tmp/report.md) bytes"
 =======
           MAX_BYTES=60000
+=======
+          MAX_BYTES=64000
+>>>>>>> 71f532b (perf(org-status): reduce report size to fit GitHub issue body limit (#234))
           if [ "$(wc -c < /tmp/report.md)" -gt "$MAX_BYTES" ]; then
             truncated=$(head -c "$MAX_BYTES" /tmp/report.md)
             printf '%s\n\n_Report truncated — exceeded GitHub issue body limit._\n' "$truncated" > /tmp/report.md
