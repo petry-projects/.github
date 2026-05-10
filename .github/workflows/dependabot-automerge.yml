@@ -1,8 +1,12 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 59592bb (fix(ci): enable allow_auto_merge and convert dependabot-automerge to thin-caller stub (#223))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/dependabot-automerge.yml
 # Standard:        petry-projects/.github/standards/dependabot-policy.md
 # Reusable:        petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml
+<<<<<<< HEAD
 #
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All eligibility logic and the GitHub
@@ -26,10 +30,28 @@
 # Dependabot auto-merge workflow.
 # Auto-approves and merges eligible patch/minor Dependabot PRs after CI passes.
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md#auto-merge-workflow
+=======
+>>>>>>> 59592bb (fix(ci): enable allow_auto_merge and convert dependabot-automerge to thin-caller stub (#223))
 #
-# Requires repository secrets:
+# AGENTS — READ BEFORE EDITING:
+#   • This file is a THIN CALLER STUB. All eligibility logic and the GitHub
+#     App token dance live in the reusable workflow above.
+#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
+#   • You MUST NOT change: trigger event (must be `pull_request_target`),
+#     the `uses:` line, `secrets: inherit`, or the job-level `permissions:`
+#     block — reusable workflows can be granted no more permissions than the
+#     calling job has, so removing the stanza breaks the reusable's gh API
+#     calls.
+#   • If you need different behaviour, open a PR against the reusable in the
+#     central repo.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Dependabot auto-merge — thin caller for the org-level reusable.
+# To adopt: copy this file to .github/workflows/dependabot-automerge.yml in your repo.
+# Required org/repo secrets (inherited):
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
+<<<<<<< HEAD
 #
 # Auto-approves and enables auto-merge for Dependabot PRs that are:
 #   - GitHub Actions updates (any version bump, including major)
@@ -43,6 +65,8 @@
 # security updates. This workflow adds defense-in-depth by also checking
 # the package ecosystem.
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+>>>>>>> 59592bb (fix(ci): enable allow_auto_merge and convert dependabot-automerge to thin-caller stub (#223))
 name: Dependabot auto-merge
 
 on:
@@ -53,6 +77,7 @@ on:
 permissions: {}
 
 jobs:
+<<<<<<< HEAD
 <<<<<<< HEAD
   dependabot-automerge:
     permissions:
@@ -114,3 +139,11 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+  dependabot-automerge:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml@v1
+    secrets: inherit
+>>>>>>> 59592bb (fix(ci): enable allow_auto_merge and convert dependabot-automerge to thin-caller stub (#223))
