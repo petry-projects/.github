@@ -61,9 +61,13 @@ collect_classify_prs() {
             nodes{
               number title createdAt isDraft
 <<<<<<< HEAD
+<<<<<<< HEAD
               headRefName baseRefName
 =======
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+              headRefName baseRefName
+>>>>>>> 8c23b18 (feat(org-status): add Needs Rebase column to daily PR table (#231))
               labels(first:20){nodes{name}}
               reviewDecision
               statusCheckRollup{state}
@@ -107,10 +111,15 @@ collect_classify_prs() {
       opened: (.createdAt | split("T")[0]),
       url:    ("https://github.com/" + $owner + "/" + $repo + "/pull/" + (.number|tostring)),
 <<<<<<< HEAD
+<<<<<<< HEAD
       headRefName: .headRefName,
       baseRefName: .baseRefName,
 =======
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+      headRefName: .headRefName,
+      baseRefName: .baseRefName,
+>>>>>>> 8c23b18 (feat(org-status): add Needs Rebase column to daily PR table (#231))
       labels: [.labels.nodes[].name],
       isDraft: .isDraft,
       ci:     (.statusCheckRollup.state // null),
@@ -199,7 +208,38 @@ done
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
 echo "::endgroup::" >&2
 
+<<<<<<< HEAD
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+# ── Behind-Base Detection ─────────────────────────────────────────────────────
+# For each PR, compute behind_by via the REST compare API. PRs with behind_by > 0
+# need to be rebased/merged with their base branch before they can land.
+# (GraphQL has no equivalent field; mergeable only reports CONFLICTING.)
+echo "::group::Computing behind_by per PR" >&2
+# Accumulate one augmented PR per line of NDJSON, then slurp into a single
+# array at the end — avoids O(n²) reparse of a growing array each iteration.
+AUGMENTED_NDJSON=""
+while IFS= read -r pr; do
+  [ -z "$pr" ] && continue
+  pr_repo=$(echo "$pr" | jq -r '.repo')
+  pr_head=$(echo "$pr" | jq -r '.headRefName')
+  pr_base=$(echo "$pr" | jq -r '.baseRefName')
+  if compare_response=$(gh api "repos/${pr_repo}/compare/${pr_base}...${pr_head}" --jq '.behind_by' 2>&1); then
+    behind="$compare_response"
+  else
+    echo "  WARN: compare ${pr_repo} ${pr_base}...${pr_head} failed — treating as up to date: $compare_response" >&2
+    behind=0
+  fi
+  [[ "$behind" =~ ^[0-9]+$ ]] || behind=0
+  AUGMENTED_NDJSON+=$(echo "$pr" | jq -c --argjson b "$behind" '. + {behindBy: $b, needsRebase: ($b > 0)}')
+  AUGMENTED_NDJSON+=$'\n'
+done <<< "$(echo "$ALL_PRS" | jq -c '.[]')"
+ALL_PRS=$(echo "$AUGMENTED_NDJSON" | jq -cs '.')
+NEEDS_REBASE_COUNT=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase)] | length')
+echo "PRs needing rebase: $NEEDS_REBASE_COUNT" >&2
+echo "::endgroup::" >&2
+
+>>>>>>> 8c23b18 (feat(org-status): add Needs Rebase column to daily PR table (#231))
 # Pre-aggregate PR counts by category per repo (keeps prompt size manageable)
 PR_BY_REPO=$(echo "$ALL_PRS" | jq '
   sort_by(.repo) | group_by(.repo) | map({
@@ -213,11 +253,16 @@ PR_BY_REPO=$(echo "$ALL_PRS" | jq '
     awaiting_review:   ([.[] | select(.category=="Awaiting Review")] | length),
     no_ci_policy:      ([.[] | select(.category=="No CI / No Policy")] | length),
 <<<<<<< HEAD
+<<<<<<< HEAD
     dep_bumps:         ([.[] | select(.isDepBump)] | length),
     needs_rebase:      ([.[] | select(.needsRebase)] | length)
 =======
     dep_bumps:         ([.[] | select(.isDepBump)] | length)
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+    dep_bumps:         ([.[] | select(.isDepBump)] | length),
+    needs_rebase:      ([.[] | select(.needsRebase)] | length)
+>>>>>>> 8c23b18 (feat(org-status): add Needs Rebase column to daily PR table (#231))
   }) | sort_by(-.total)')
 
 NEEDS_REVIEW_PRS=$(echo "$ALL_PRS" | jq '[.[] | select(.needsHumanReview)]')
@@ -447,10 +492,11 @@ Org-wide blocker summary table (sum all repos). You MUST include the header row 
 Rows in this order: Awaiting Review, CI Failing, CI Pending, Changes Requested, Approved, Draft, No CI / No Policy, **TOTAL**
 
 Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the header row and separator row:
-| Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft |
-|---|---|---|---|---|---|---|---|---|
+| Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft | Needs Rebase |
+|---|---|---|---|---|---|---|---|---|---|
 - Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
 - Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
+- Needs Rebase column: render the \`needs_rebase\` count from the data. If the count is 0 render —. If > 0 render the number followed by 🔄 (e.g. \`3 🔄\`).
 
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:
