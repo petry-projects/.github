@@ -59,9 +59,9 @@ ignition to a full MSD setup, plus a full firewall bulkhead connector replacemen
 
 - [ ] 1966 GTO chassis service manual wiring diagram (or NPD reproduction laminated diagram) — printed and on hand
 - [ ] Bulkhead connector pin/terminal kit. Options, in order of fidelity:
-    - American Autowire **GM bulkhead terminal kit** (matches GM Packard 56-series female terminals on the dash side and male terminals on the engine side)
-    - Painless Performance terminal kit
-    - Lectric Limited replacement terminals (correct repro for 1964–67 GTO if originality matters)
+  - American Autowire **GM bulkhead terminal kit** (matches GM Packard 56-series female terminals on the dash side and male terminals on the engine side)
+  - Painless Performance terminal kit
+  - Lectric Limited replacement terminals (correct repro for 1964–67 GTO if originality matters)
 - [ ] Replacement bulkhead **connector shells** (only if the plastic shells are cracked — most installs reuse them)
 - [ ] Pin-release tool sized for GM Packard 56 (a thin flat-blade often works, but the proper tool prevents tang damage)
 - [ ] Dielectric grease for the reassembled bulkhead
@@ -74,14 +74,20 @@ ignition to a full MSD setup, plus a full firewall bulkhead connector replacemen
 ## 5. Pre-flight: take notes before disturbing anything
 
 1. [ ] **Disconnect the battery negative cable first.** Tape the terminal so it can't fall back on the post.
-2. [ ] Photograph the engine bay from multiple angles in good light. Specifically capture the coil bracket, the existing Pertronix wiring at the coil, the bulkhead engine-side, and the ignition switch wiring.
-3. [ ] With a label maker or masking tape + Sharpie, label every wire at the existing coil, every wire at the bulkhead engine-side, and every wire at the bulkhead interior-side **before** disassembly.
-4. [ ] Note the current static timing: rotate the engine to TDC #1 compression and mark the rotor position on the distributor housing with a paint pen. (You have a new MSD distributor, so this is for reference only — but if anything goes sideways during the bulkhead work you have a known-good reference.)
+2. [ ] Photograph the engine bay from multiple angles in good light.
+   Specifically capture the coil bracket, the existing Pertronix wiring at the coil, the bulkhead engine-side, and the ignition switch wiring.
+3. [ ] With a label maker or masking tape + Sharpie, label every wire at the existing coil,
+   every wire at the bulkhead engine-side, and every wire at the bulkhead interior-side **before** disassembly.
+4. [ ] Note the current static timing: rotate the engine to TDC #1 compression and mark the rotor position on the distributor housing with a paint pen.
+   (You have a new MSD distributor, so this is for reference only — but if anything goes sideways during the bulkhead work you have a known-good reference.)
 5. [ ] Save the box and instruction sheet from the 6AL Ultra and the Blaster SS — refer to them for warranty and the wire color sheet.
 
 ## 6. Diagnose the existing ignition feed (resistor wire test)
 
-The 1966 GTO uses a factory **pink resistor wire** from the ignition switch to the coil "+" terminal. With the key in **RUN**, this wire drops voltage from ~12 V down to ~6–9 V to protect the original points coil. The MSD 6AL **must see a full switched 12 V** on its small red wire — a resistor wire will cause hard starting, weak spark, or trigger a "low voltage" fault on the Ultra.
+The 1966 GTO uses a factory **pink resistor wire** from the ignition switch to the coil "+" terminal.
+With the key in **RUN**, this wire drops voltage from ~12 V down to ~6–9 V to protect the original points coil.
+The MSD 6AL **must see a full switched 12 V** on its small red wire — a resistor wire will cause hard starting,
+weak spark, or trigger a "low voltage" fault on the Ultra.
 
 Do this test **before** running any new wires:
 
@@ -97,7 +103,7 @@ Do this test **before** running any new wires:
 
 Record the result here:
 
-```
+```text
 Coil-feed voltage at RUN: ______ V
 Coil-feed voltage at CRANK: ______ V
 Conclusion (circle one):  RESISTOR WIRE IN CIRCUIT  /  ALREADY BYPASSED
@@ -123,7 +129,9 @@ Steps:
 
 ## 8. Wire the coil
 
-Critical rule: when an MSD 6AL is installed, the coil is driven by the 6AL **only**. The original ignition feed wire (resistor wire or otherwise) must **not** terminate at the coil — that wire now goes to the 6AL's small red wire instead.
+Critical rule: when an MSD 6AL is installed, the coil is driven by the 6AL **only**.
+The original ignition feed wire (resistor wire or otherwise) must **not** terminate at the coil —
+that wire now goes to the 6AL's small red wire instead.
 
 Blaster SS wiring with the 6AL:
 
@@ -144,24 +152,30 @@ Steps:
 ### 9.1 Heavy battery leads
 
 1. [ ] Heavy **red** lead from the 6AL → **battery positive post**, with an **inline fuse** (20 A ATC, mounted within 12" of the battery).
-2. [ ] Heavy **black** lead from the 6AL → **battery negative post** (preferred) or to a clean, paint-free chassis ground bolt that itself has a heavy strap to the battery negative.
-3. [ ] Verify a separate **engine-to-chassis** ground strap exists and is clean. The MSD instructions are explicit about this — without it, ignition noise on the tach signal and intermittent triggering are common.
+2. [ ] Heavy **black** lead from the 6AL → **battery negative post** (preferred), or to a clean,
+   paint-free chassis ground bolt that itself has a heavy strap to the battery negative.
+3. [ ] Verify a separate **engine-to-chassis** ground strap exists and is clean.
+   The MSD instructions are explicit about this — without it, ignition noise on the tach signal and intermittent triggering are common.
 
 ### 9.2 Switched 12 V feed (small red wire)
 
 If Section 6 showed the resistor wire was still in circuit, run a new feed:
 
 1. [ ] Pick a switched 12 V source. Best options, in order:
-    - A spare fused circuit on the fuse block that is hot in **RUN** and **START** (not just RUN).
-    - A new relay, coil energized by the original ignition-switch feed, with the relay's load contact fed from the battery through a fuse. This is the cleanest solution and isolates the 6AL from voltage drop in the old harness.
-2. [ ] Run 12 AWG red wire from that source, through the firewall via an existing grommet, to the small red wire on the 6AL. Inline fuse near the source, **20 A**.
+   - A spare fused circuit on the fuse block that is hot in **RUN** and **START** (not just RUN).
+   - A new relay, coil energized by the original ignition-switch feed, with the relay's load contact fed from the battery through a fuse.
+     This is the cleanest solution and isolates the 6AL from voltage drop in the old harness.
+2. [ ] Run 12 AWG red wire from that source, through the firewall via an existing grommet, to the small red wire on the 6AL.
+   Inline fuse near the source, **20 A**.
 3. [ ] Connect via crimp + heat shrink, or solder + heat shrink. Avoid scotch-locks and twist caps.
 
-If Section 6 showed full 12 V already at the old coil feed, you may reuse that wire — extend it cleanly to the 6AL location with 12 AWG, retain the same circuit protection.
+If Section 6 showed full 12 V already at the old coil feed, you may reuse that wire —
+extend it cleanly to the 6AL location with 12 AWG, retain the same circuit protection.
 
 ### 9.3 Small black wire (signal ground)
 
-1. [ ] Connect the small black wire to a clean, paint-free chassis ground point local to the 6AL mounting location. This is the signal ground for internal logic — it must be solid, but the heavy black lead in 9.1 carries the actual ignition current.
+1. [ ] Connect the small black wire to a clean, paint-free chassis ground point local to the 6AL mounting location.
+   This is the signal ground for internal logic — it must be solid, but the heavy black lead in 9.1 carries the actual ignition current.
 
 ### 9.4 Magnetic pickup from the distributor
 
@@ -172,14 +186,19 @@ The MSD Pro-Billet for Pontiac uses a 2-pin pigtail. Standard MSD convention:
 
 Steps:
 
-1. [ ] Mate the distributor's 2-pin connector to the 6AL's matching 2-pin trigger plug. This is keyed — it only goes one way. **Do not** cut and splice unless absolutely necessary; if you must extend, use a twisted pair (and shield the extension if you have noise issues).
-2. [ ] Route the pickup wires **away from** spark plug wires, the coil, and the heavy 6AL battery leads. Route along the firewall or down the driver-side valve cover edge, not across the intake.
-3. [ ] If polarity is reversed (engine starts but timing wanders or backfires under load), swap violet ↔ green and re-test. The Pro-Billet will run either polarity but timing is only correct in one orientation.
+1. [ ] Mate the distributor's 2-pin connector to the 6AL's matching 2-pin trigger plug. This is keyed — it only goes one way.
+   **Do not** cut and splice unless absolutely necessary; if you must extend, use a twisted pair (and shield the extension if you have noise issues).
+2. [ ] Route the pickup wires **away from** spark plug wires, the coil, and the heavy 6AL battery leads.
+   Route along the firewall or down the driver-side valve cover edge, not across the intake.
+3. [ ] If polarity is reversed (engine starts but timing wanders or backfires under load), swap violet ↔ green and re-test.
+   The Pro-Billet will run either polarity but timing is only correct in one orientation.
 
 ### 9.5 Tach output (gray wire)
 
-1. [ ] Route the **gray** wire to the aftermarket tach's signal input. Confirm the tach is a 12 V negative-trigger style — most modern aftermarket tachs are; some early-2000s units need a tach adapter.
-2. [ ] If the tach is mounted in the cabin, route the gray wire through an existing firewall grommet, **not** the same path as the pickup wires (keep tach signal away from the magnetic pickup pair).
+1. [ ] Route the **gray** wire to the aftermarket tach's signal input.
+   Confirm the tach is a 12 V negative-trigger style — most modern aftermarket tachs are; some early-2000s units need a tach adapter.
+2. [ ] If the tach is mounted in the cabin, route the gray wire through an existing firewall grommet,
+   **not** the same path as the pickup wires (keep tach signal away from the magnetic pickup pair).
 
 ### 9.6 Unused wires
 
@@ -188,7 +207,10 @@ Steps:
 
 ## 10. Replace the firewall bulkhead connector
 
-The 1966 GTO uses GM's pre-1968 bulkhead arrangement (often called "first design"), which is **physically different** from the 1968+ "second design" connector that most aftermarket harness kits standardize on. Confirm which design your car has before ordering terminals — original 1966 should be first design, but a previous owner may have swapped to a later harness.
+The 1966 GTO uses GM's pre-1968 bulkhead arrangement (often called "first design"),
+which is **physically different** from the 1968+ "second design" connector that most aftermarket harness kits standardize on.
+Confirm which design your car has before ordering terminals — original 1966 should be first design,
+but a previous owner may have swapped to a later harness.
 
 ### 10.1 Plan and document
 
@@ -224,7 +246,9 @@ Repeat for every wire. Do interior-side and engine-side as separate sessions if 
 
 ### 10.5 Special note: the ignition feed
 
-If you ran a **new** 12 AWG switched feed in Section 9.2 directly from a relay or fuse block, that wire does **not** go through the bulkhead — it's a standalone circuit. The original pink resistor wire that used to feed the coil through the bulkhead can be capped and abandoned at both ends, or removed entirely.
+If you ran a **new** 12 AWG switched feed in Section 9.2 directly from a relay or fuse block,
+that wire does **not** go through the bulkhead — it's a standalone circuit.
+The original pink resistor wire that used to feed the coil through the bulkhead can be capped and abandoned at both ends, or removed entirely.
 
 If you reused the original ignition feed (because Section 6 showed it was already 12 V), then it still passes through the bulkhead and gets a new terminal like any other wire.
 
@@ -243,8 +267,10 @@ The MSD setup will be more aggressive than the Pertronix because spark energy is
 
 1. [ ] Warm engine to operating temp.
 2. [ ] **Disconnect and plug** the vacuum advance line at the distributor.
-3. [ ] With timing light on #1, set initial timing to **~12° BTDC** as a starting point for a 1967 Pontiac 400 with iron heads and pump gas. Adjust by ear and detonation behavior — most 400s like 10–14° initial.
-4. [ ] Bring engine to ~3000 rpm steady, verify total mechanical advance is **~34–36° BTDC** all-in. If it overshoots, the MSD distributor's mechanical advance bushings/springs need swapping (kit comes with the distributor).
+3. [ ] With timing light on #1, set initial timing to **~12° BTDC** as a starting point for a 1967 Pontiac 400 with iron heads and pump gas.
+   Adjust by ear and detonation behavior — most 400s like 10–14° initial.
+4. [ ] Bring engine to ~3000 rpm steady, verify total mechanical advance is **~34–36° BTDC** all-in.
+   If it overshoots, the MSD distributor's mechanical advance bushings/springs need swapping (kit comes with the distributor).
 5. [ ] Reconnect vacuum advance. Cruise vacuum advance should add ~10–15° on top of mechanical at light load — verify no part-throttle ping on a road test.
 6. [ ] Lock the distributor hold-down. Recheck initial timing one last time.
 
