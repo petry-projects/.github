@@ -52,7 +52,7 @@ jobs:
             checks: read
           # yamllint disable rule:line-length
           claude_args: |
-            --allowedTools "Bash(git fetch:*),Bash(git pull:*),Bash(git rebase:*),Bash(git merge:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checkout:*),Bash(gh api:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Edit,Write,Read"
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(grep:*),Bash(find:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(test:*),Edit,Write,Read,Grep,Glob,LS,MultiEdit,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillBash"
           # yamllint enable rule:line-length
 
   # Automation mode: CI failure response — diagnose and fix failing checks on PRs
