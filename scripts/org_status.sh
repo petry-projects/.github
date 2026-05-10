@@ -328,10 +328,9 @@ Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the hea
 
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:
-| Repo | PR # | Opened | Title | CI | Approvals |
-|---|---|---|---|---|---|
-- PR # as markdown link using url field: [#N](url)
-- Title as markdown link using url field: [title](url)
+| Repo | PR | Opened | CI | Approvals |
+|---|---|---|---|---|
+- PR cell: single markdown link combining number and title, e.g. \`[#42 — Fix the thing](url)\`
 - CI: PASS (SUCCESS) / FAIL (FAILURE or ERROR) / PENDING / N/A (null)
 If none: _none_
 
@@ -343,14 +342,17 @@ Counts only per repo (dep_bumps > 0):
 If none: _none_
 
 ### \`## Open Issues (N total)\`
-For each repo with issues, show all provided rows (up to $ISSUE_LIMIT):
-| Repo | # | Opened | Title | Labels | Linked PR |
-|---|---|---|---|---|---|
-- # as markdown link using url field: [#N](url)
-- Title as markdown link using url field: [title](url)
+Render as a per-repo subsection list (NOT a single flat table). For each repo with issues, in the order provided:
+
+\`### [owner/repo](https://github.com/owner/repo) (N issues)\`
+- If truncated:true, replace the suffix with " (showing $ISSUE_LIMIT of N issues)".
+
+Then a small table (Repo column omitted — it's in the heading):
+| Issue | Opened | Labels | Linked PR |
+|---|---|---|---|
+- Issue cell: single markdown link combining number and title, e.g. \`[#123 — Compliance: foo](url)\`
 - Opened = createdAt date only (YYYY-MM-DD)
 - Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
-- If truncated:true, note "(showing $ISSUE_LIMIT of N)" next to the repo name
 
 ### \`## PR Merge Activity — Last 8 Days\`
 Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
@@ -365,10 +367,9 @@ Daily org-level summary table (include zero rows):
 Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
 
 ### \`## Open Discussions\`
-| Repo | # | Opened | Title | Replies |
-|---|---|---|---|---|
-- # as markdown link using url field: [#N](url)
-- Title as markdown link using url field: [title](url)
+| Repo | Discussion | Opened | Replies |
+|---|---|---|---|
+- Discussion cell: single markdown link combining number and title, e.g. \`[#7 — Feature idea](url)\`
 If none: _none_
 
 ---
