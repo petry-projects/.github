@@ -418,7 +418,7 @@ jobs:
           fetch-depth: 0
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
@@ -453,7 +453,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           label_trigger: "claude"
