@@ -116,18 +116,25 @@ echo "::endgroup::" >&2
 # need to be rebased/merged with their base branch before they can land.
 # (GraphQL has no equivalent field; mergeable only reports CONFLICTING.)
 echo "::group::Computing behind_by per PR" >&2
-AUGMENTED='[]'
+# Accumulate one augmented PR per line of NDJSON, then slurp into a single
+# array at the end — avoids O(n²) reparse of a growing array each iteration.
+AUGMENTED_NDJSON=""
 while IFS= read -r pr; do
   [ -z "$pr" ] && continue
   pr_repo=$(echo "$pr" | jq -r '.repo')
   pr_head=$(echo "$pr" | jq -r '.headRefName')
   pr_base=$(echo "$pr" | jq -r '.baseRefName')
-  behind=$(gh api "repos/${pr_repo}/compare/${pr_base}...${pr_head}" --jq '.behind_by' 2>/dev/null || echo 0)
+  if compare_response=$(gh api "repos/${pr_repo}/compare/${pr_base}...${pr_head}" --jq '.behind_by' 2>&1); then
+    behind="$compare_response"
+  else
+    echo "  WARN: compare ${pr_repo} ${pr_base}...${pr_head} failed — treating as up to date: $compare_response" >&2
+    behind=0
+  fi
   [[ "$behind" =~ ^[0-9]+$ ]] || behind=0
-  augmented_pr=$(echo "$pr" | jq --argjson b "$behind" '. + {behindBy: $b, needsRebase: ($b > 0)}')
-  AUGMENTED=$(jq -n --argjson a "$AUGMENTED" --argjson p "$augmented_pr" '$a + [$p]')
+  AUGMENTED_NDJSON+=$(echo "$pr" | jq -c --argjson b "$behind" '. + {behindBy: $b, needsRebase: ($b > 0)}')
+  AUGMENTED_NDJSON+=$'\n'
 done <<< "$(echo "$ALL_PRS" | jq -c '.[]')"
-ALL_PRS="$AUGMENTED"
+ALL_PRS=$(echo "$AUGMENTED_NDJSON" | jq -cs '.')
 NEEDS_REBASE_COUNT=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase)] | length')
 echo "PRs needing rebase: $NEEDS_REBASE_COUNT" >&2
 echo "::endgroup::" >&2
