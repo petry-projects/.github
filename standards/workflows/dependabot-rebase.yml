@@ -12,11 +12,13 @@
 #     this internal reusable workflow. Downstream repos pin to a specific
 #     commit SHA and bump deliberately. To look up the current SHA:
 #     gh api repos/petry-projects/.github/branches/main --jq '.commit.sha'
-#   • You MUST NOT change: trigger event, the concurrency group name,
-#     the explicit secrets block, or the job-level `permissions:` block —
-#     reusable workflows can be granted no more permissions than the calling
-#     job has, so removing the stanza breaks
-#     the reusable's gh API calls.
+#   • You MUST NOT change: the concurrency group name, the explicit secrets
+#     block, or the job-level `permissions:` block — reusable workflows can be
+#     granted no more permissions than the calling job has, so removing the
+#     stanza breaks the reusable's gh API calls. Do not remove any trigger
+#     (`push` keeps the self-sustaining chain; `schedule` is the safety net
+#     when no PR merges have occurred recently; `workflow_dispatch` allows
+#     manual queue flushes).
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 # ─────────────────────────────────────────────────────────────────────────────
