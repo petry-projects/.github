@@ -40,7 +40,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
+          # Full history so Claude can rebase / pull / resolve conflicts against main.
+          fetch-depth: 0
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
       - name: Run Claude Code
         uses: anthropics/claude-code-action@9db782c3a17ef2bfc274cd17411bc3e0a5ba1345 # v1.0.115
@@ -49,6 +50,10 @@ jobs:
           additional_permissions: |
             actions: read
             checks: read
+          # yamllint disable rule:line-length
+          claude_args: |
+            --allowedTools "Bash(git fetch:*),Bash(git pull:*),Bash(git rebase:*),Bash(git merge:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checkout:*),Bash(gh api:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Edit,Write,Read"
+          # yamllint enable rule:line-length
 
   # Automation mode: CI failure response — diagnose and fix failing checks on PRs
   claude-ci-fix:
