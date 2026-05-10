@@ -15,6 +15,7 @@ jobs:
     permissions:
       issues: write          # create issue in this repo
       contents: read
+      pull-requests: write   # post @claude rebase requests on stale PRs
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -31,6 +32,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REBASE_LIST_FILE: /tmp/needs-rebase.json
         run: |
           chmod +x scripts/org_status.sh
           bash scripts/org_status.sh > /tmp/report.md
@@ -54,3 +56,41 @@ jobs:
             --title "Org Status — $DATE" \
             --body-file /tmp/report.md \
             --label daily-report
+
+      - name: Request @claude rebase on stale PRs
+        # Posts an idempotent @claude comment on each PR flagged as needing
+        # rebase by org_status.sh (sentinel: <!-- claude-rebase-request -->).
+        # Uses GH_PAT_WORKFLOWS so the comment author_association is OWNER —
+        # the Claude reusable workflow only fires for OWNER/MEMBER/COLLABORATOR.
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          REBASE_LIST_FILE: /tmp/needs-rebase.json
+        run: |
+          [ -s "$REBASE_LIST_FILE" ] || { echo "No rebase list file — skipping"; exit 0; }
+          COUNT=$(jq 'length' "$REBASE_LIST_FILE")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No PRs need rebase"
+            exit 0
+          fi
+          echo "Requesting @claude rebase on $COUNT PR(s)"
+          SENTINEL="<!-- claude-rebase-request -->"
+          jq -c '.[]' "$REBASE_LIST_FILE" | while IFS= read -r pr; do
+            REPO=$(echo "$pr" | jq -r '.repo')
+            NUMBER=$(echo "$pr" | jq -r '.number')
+            BASE=$(echo "$pr" | jq -r '.baseRefName')
+            BEHIND=$(echo "$pr" | jq -r '.behindBy')
+            ALREADY=$(gh pr view "$NUMBER" --repo "$REPO" \
+              --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+            if [ "$ALREADY" -gt 0 ]; then
+              echo "  $REPO#$NUMBER — request already posted, skipping"
+              continue
+            fi
+            BODY="$SENTINEL"
+            BODY+=$'\n'"@claude this branch is **$BEHIND commit(s) behind \`$BASE\`** and needs to be brought up to date before it can land."
+            BODY+=$'\n\n'"Please rebase (or merge) \`origin/$BASE\` into this branch, resolve any conflicts, and push the result. If the rebase reveals issues that require code changes, address them in the same push and leave a brief note explaining what changed."
+            BODY+=$'\n\n'"\`\`\`"$'\n'"git fetch origin"
+            BODY+=$'\n'"git rebase origin/$BASE"
+            BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
+            gh pr comment "$NUMBER" --repo "$REPO" --body "$BODY"
+            echo "  $REPO#$NUMBER — comment posted"
+          done

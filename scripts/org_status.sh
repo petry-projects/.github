@@ -41,6 +41,7 @@ collect_classify_prs() {
             pageInfo{hasNextPage endCursor}
             nodes{
               number title createdAt isDraft
+              headRefName baseRefName
               labels(first:20){nodes{name}}
               reviewDecision
               statusCheckRollup{state}
@@ -70,6 +71,8 @@ collect_classify_prs() {
       title:  .title,
       opened: (.createdAt | split("T")[0]),
       url:    ("https://github.com/" + $owner + "/" + $repo + "/pull/" + (.number|tostring)),
+      headRefName: .headRefName,
+      baseRefName: .baseRefName,
       labels: [.labels.nodes[].name],
       isDraft: .isDraft,
       ci:     (.statusCheckRollup.state // null),
@@ -108,6 +111,32 @@ done
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
 echo "::endgroup::" >&2
 
+# ── Behind-Base Detection ─────────────────────────────────────────────────────
+# For each PR, compute behind_by via the REST compare API. PRs with behind_by > 0
+# need to be rebased/merged with their base branch before they can land.
+# (GraphQL has no equivalent field; mergeable only reports CONFLICTING.)
+echo "::group::Computing behind_by per PR" >&2
+AUGMENTED='[]'
+while IFS= read -r pr; do
+  [ -z "$pr" ] && continue
+  pr_repo=$(echo "$pr" | jq -r '.repo')
+  pr_head=$(echo "$pr" | jq -r '.headRefName')
+  pr_base=$(echo "$pr" | jq -r '.baseRefName')
+  behind=$(gh api "repos/${pr_repo}/compare/${pr_base}...${pr_head}" --jq '.behind_by' 2>/dev/null || echo 0)
+  [[ "$behind" =~ ^[0-9]+$ ]] || behind=0
+  augmented_pr=$(echo "$pr" | jq --argjson b "$behind" '. + {behindBy: $b, needsRebase: ($b > 0)}')
+  AUGMENTED=$(jq -n --argjson a "$AUGMENTED" --argjson p "$augmented_pr" '$a + [$p]')
+done <<< "$(echo "$ALL_PRS" | jq -c '.[]')"
+ALL_PRS="$AUGMENTED"
+NEEDS_REBASE_COUNT=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase)] | length')
+echo "PRs needing rebase: $NEEDS_REBASE_COUNT" >&2
+echo "::endgroup::" >&2
+
+# Emit machine-readable list for the workflow's follow-up @claude commenter.
+NEEDS_REBASE_LIST=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase) |
+  {repo, number, headRefName, baseRefName, behindBy, url}]')
+echo "$NEEDS_REBASE_LIST" > "${REBASE_LIST_FILE:-/tmp/needs-rebase.json}"
+
 # Pre-aggregate PR counts by category per repo (keeps prompt size manageable)
 PR_BY_REPO=$(echo "$ALL_PRS" | jq '
   sort_by(.repo) | group_by(.repo) | map({
@@ -120,7 +149,8 @@ PR_BY_REPO=$(echo "$ALL_PRS" | jq '
     approved:          ([.[] | select(.category=="Approved")] | length),
     awaiting_review:   ([.[] | select(.category=="Awaiting Review")] | length),
     no_ci_policy:      ([.[] | select(.category=="No CI / No Policy")] | length),
-    dep_bumps:         ([.[] | select(.isDepBump)] | length)
+    dep_bumps:         ([.[] | select(.isDepBump)] | length),
+    needs_rebase:      ([.[] | select(.needsRebase)] | length)
   }) | sort_by(-.total)')
 
 NEEDS_REVIEW_PRS=$(echo "$ALL_PRS" | jq '[.[] | select(.needsHumanReview)]')
@@ -288,10 +318,11 @@ Org-wide blocker summary table (sum all repos). You MUST include the header row 
 Rows in this order: Awaiting Review, CI Failing, CI Pending, Changes Requested, Approved, Draft, No CI / No Policy, **TOTAL**
 
 Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the header row and separator row:
-| Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft |
-|---|---|---|---|---|---|---|---|---|
+| Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft | Needs Rebase |
+|---|---|---|---|---|---|---|---|---|---|
 - Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
 - Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
+- Needs Rebase column: render the \`needs_rebase\` count from the data. If the count is 0 render —. If > 0 render the number followed by 🔄 (e.g. \`3 🔄\`).
 
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:

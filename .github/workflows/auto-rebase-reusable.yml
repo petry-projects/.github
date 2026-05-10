@@ -20,12 +20,19 @@
 # The merge method preserves the original commits.
 #
 # Failure modes handled gracefully:
-#   - without `workflows` permission (403): posts an idempotent comment asking
-#     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
+#   - without `workflows` permission (403): posts an idempotent @claude comment
+#     asking Claude to perform an agentic rebase
+#     (sentinel: <!-- auto-rebase-claude-request -->). Requires GH_PAT_WORKFLOWS
+#     so the comment's author_association is OWNER — the Claude reusable
+#     workflow only fires on @claude mentions from OWNER/MEMBER/COLLABORATOR.
+#     Falls back to a manual-rebase request via github.token if the PAT is
+#     not configured (sentinel: <!-- auto-rebase-blocked -->).
 #   - merge conflict (422): posts an idempotent comment asking the author to
 #     resolve conflicts (sentinel: <!-- auto-rebase-conflict -->)
 #
-# No secrets required — uses github.token only. No auto-merge logic.
+# Optional secret: GH_PAT_WORKFLOWS (classic PAT or fine-grained with
+#   pull_requests: write) — needed for the @claude fallback. Inherited via
+#   `secrets: inherit` from the calling thin-stub workflow.
 name: Auto-rebase non-Dependabot PRs (Reusable)
 
 on:
@@ -41,6 +48,7 @@ jobs:
       - name: Update behind non-Dependabot PRs
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_WORKFLOWS }}
           REPO: ${{ github.repository }}
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
@@ -78,25 +86,48 @@ jobs:
               if echo "$UPDATE_OUTPUT" | grep -qF "without \`workflows\` permission"; then
                 # GitHub blocks update-branch when merging the base would add
                 # .github/workflows/ changes and the token lacks the 'workflows'
-                # permission. Ask the author to rebase manually.
+                # permission. Preferred fallback: ask Claude to rebase via an
+                # @claude mention. The mention only triggers Claude if the
+                # comment author has author_association OWNER/MEMBER/COLLABORATOR,
+                # so we must post via GH_PAT_WORKFLOWS (a human-owned PAT) and
+                # NOT the github-actions[bot] github.token.
                 #
-                # Idempotent: skip if sentinel comment already exists.
-                SENTINEL="<!-- auto-rebase-blocked -->"
-                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
-                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
-                  echo "  Skipping — blocked comment already posted"
+                # If GH_PAT_WORKFLOWS is not configured, fall back to the
+                # original manual-rebase comment (no @claude mention).
+                if [[ -n "${GH_PAT_WORKFLOWS:-}" ]]; then
+                  SENTINEL="<!-- auto-rebase-claude-request -->"
+                  ALREADY_POSTED=$(GH_TOKEN="$GH_PAT_WORKFLOWS" gh pr view "$PR_NUMBER" --repo "$REPO" \
+                    --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                  if [[ "$ALREADY_POSTED" -gt 0 ]]; then
+                    echo "  Skipping — Claude rebase request already posted"
+                  else
+                    echo "  Posting @claude rebase request (workflows permission missing)"
+                    CLAUDE_BODY="$SENTINEL"
+                    CLAUDE_BODY+=$'\n'"@claude **Auto-rebase blocked** — the base branch (\`$BASE_BRANCH\`) contains \`.github/workflows/\` changes that require the \`workflows\` permission to merge into this branch, and the auto-rebase workflow's \`GITHUB_TOKEN\` does not have that scope."
+                    CLAUDE_BODY+=$'\n\n'"Please rebase this branch onto \`origin/$BASE_BRANCH\`, resolve any conflicts, and force-push the result. If the rebase produces test or CI failures, fix them in the same push and leave a brief note explaining what changed."
+                    CLAUDE_BODY+=$'\n\n'"\`\`\`"$'\n'"git fetch origin"
+                    CLAUDE_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
+                    CLAUDE_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
+                    GH_TOKEN="$GH_PAT_WORKFLOWS" gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CLAUDE_BODY"
+                  fi
                 else
-                  echo "  Posting manual-rebase request (workflows permission missing)"
-                  BLOCKED_BODY="<!-- auto-rebase-blocked -->"
-                  BLOCKED_BODY+=$'\n'"**Auto-rebase blocked** — the base branch contains \`.github/workflows/\` changes"
-                  BLOCKED_BODY+=" that require the \`workflows\` permission to merge into this branch,"
-                  BLOCKED_BODY+=" but the auto-rebase workflow's token does not have that permission."
-                  BLOCKED_BODY+=$'\n\n'"Please rebase this branch manually:"
-                  BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
-                  BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
-                  BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
+                  SENTINEL="<!-- auto-rebase-blocked -->"
+                  ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                    --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
+                  if [[ "$ALREADY_POSTED" -gt 0 ]]; then
+                    echo "  Skipping — blocked comment already posted"
+                  else
+                    echo "  Posting manual-rebase request (workflows permission missing; GH_PAT_WORKFLOWS unset)"
+                    BLOCKED_BODY="<!-- auto-rebase-blocked -->"
+                    BLOCKED_BODY+=$'\n'"**Auto-rebase blocked** — the base branch contains \`.github/workflows/\` changes"
+                    BLOCKED_BODY+=" that require the \`workflows\` permission to merge into this branch,"
+                    BLOCKED_BODY+=" but the auto-rebase workflow's token does not have that permission."
+                    BLOCKED_BODY+=$'\n\n'"Please rebase this branch manually:"
+                    BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
+                    BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
+                    BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
+                    gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
+                  fi
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
                 # Merge conflict — ask the author to resolve it.
