@@ -132,11 +132,6 @@ NEEDS_REBASE_COUNT=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase)] | length
 echo "PRs needing rebase: $NEEDS_REBASE_COUNT" >&2
 echo "::endgroup::" >&2
 
-# Emit machine-readable list for the workflow's follow-up @claude commenter.
-NEEDS_REBASE_LIST=$(echo "$ALL_PRS" | jq '[.[] | select(.needsRebase) |
-  {repo, number, headRefName, baseRefName, behindBy, url}]')
-echo "$NEEDS_REBASE_LIST" > "${REBASE_LIST_FILE:-/tmp/needs-rebase.json}"
-
 # Pre-aggregate PR counts by category per repo (keeps prompt size manageable)
 PR_BY_REPO=$(echo "$ALL_PRS" | jq '
   sort_by(.repo) | group_by(.repo) | map({

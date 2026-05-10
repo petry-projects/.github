@@ -18,11 +18,7 @@
 #
 # Auto-rebase non-Dependabot PRs — thin caller for the org-level reusable.
 # To adopt: copy this file to .github/workflows/auto-rebase.yml in your repo.
-# Required secret: none (uses GITHUB_TOKEN for branch updates).
-# Optional secret: GH_PAT_WORKFLOWS — if set, the reusable falls back to an
-#   @claude rebase request when update-branch is blocked by the missing
-#   `workflows` permission. Without it, the workflow only posts a manual
-#   rebase request to the PR author.
+# No secrets required — uses GITHUB_TOKEN only.
 name: Auto-rebase non-Dependabot PRs
 
 on:
