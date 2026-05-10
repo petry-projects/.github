@@ -87,7 +87,8 @@ jobs:
             fi
             BODY="$SENTINEL"
             BODY+=$'\n'"@claude this branch is **$BEHIND commit(s) behind \`$BASE\`** and needs to be brought up to date before it can land."
-            BODY+=$'\n\n'"Please rebase (or merge) \`origin/$BASE\` into this branch, resolve any conflicts, and push the result. If the rebase reveals issues that require code changes, address them in the same push and leave a brief note explaining what changed."
+            BODY+=$'\n\n'"Please rebase (or merge) \`origin/$BASE\` into this branch, resolve any conflicts, and push the result."
+            BODY+=" If the rebase reveals issues that require code changes, address them in the same push and leave a brief note explaining what changed."
             BODY+=$'\n\n'"\`\`\`"$'\n'"git fetch origin"
             BODY+=$'\n'"git rebase origin/$BASE"
             BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"

@@ -103,8 +103,10 @@ jobs:
                   else
                     echo "  Posting @claude rebase request (workflows permission missing)"
                     CLAUDE_BODY="$SENTINEL"
-                    CLAUDE_BODY+=$'\n'"@claude **Auto-rebase blocked** — the base branch (\`$BASE_BRANCH\`) contains \`.github/workflows/\` changes that require the \`workflows\` permission to merge into this branch, and the auto-rebase workflow's \`GITHUB_TOKEN\` does not have that scope."
-                    CLAUDE_BODY+=$'\n\n'"Please rebase this branch onto \`origin/$BASE_BRANCH\`, resolve any conflicts, and force-push the result. If the rebase produces test or CI failures, fix them in the same push and leave a brief note explaining what changed."
+                    CLAUDE_BODY+=$'\n'"@claude **Auto-rebase blocked** — the base branch (\`$BASE_BRANCH\`) contains \`.github/workflows/\` changes that require the"
+                    CLAUDE_BODY+=" \`workflows\` permission to merge into this branch, and the auto-rebase workflow's \`GITHUB_TOKEN\` does not have that scope."
+                    CLAUDE_BODY+=$'\n\n'"Please rebase this branch onto \`origin/$BASE_BRANCH\`, resolve any conflicts, and force-push the result."
+                    CLAUDE_BODY+=" If the rebase produces test or CI failures, fix them in the same push and leave a brief note explaining what changed."
                     CLAUDE_BODY+=$'\n\n'"\`\`\`"$'\n'"git fetch origin"
                     CLAUDE_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
                     CLAUDE_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
