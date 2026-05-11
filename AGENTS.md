@@ -286,6 +286,38 @@ Repository-level AGENTS.md or CLAUDE.md files may specify how each principle map
 - **Trust internal code.** Once data has crossed a validated boundary, do not re-validate at every function call. Excessive internal checks add noise without value.
 - **Fail fast.** When an invariant is violated, fail immediately with a clear error rather than propagating bad state.
 
+### Fail Loud, Never Fake
+
+Prefer a visible failure over a silent fallback. A crashed system with a stack trace is a 5-minute fix; a system silently
+returning fake data is a full day lost — and only discovered after the wrong data has caused downstream problems.
+
+**Priority order when something can fail:**
+
+1. **Works correctly** with real data.
+2. **Falls back visibly** — degraded mode is signaled by a banner, log warning, metadata flag, or response field. The caller can tell.
+3. **Fails with a clear error** — exception, non-zero exit, error response. The failure is observable.
+4. **Silently degrades to look "fine"** — never acceptable.
+
+**Forbidden patterns:**
+
+- Bare `except:` / `catch (e) {}` blocks that swallow errors and return empty or default values with no logging.
+- Generating plausible-looking sample, mock, or placeholder data when a real fetch, query, or computation fails.
+- Returning hardcoded "success" responses from a function whose real work errored.
+- Reporting "I've set up X" or "X is working" when X actually failed and a fallback was substituted.
+- Disabling, skipping, or weakening tests to make a failing run look green.
+
+**Disclosed fallbacks are fine.** A local model stepping in when a cloud API is down is good engineering — *as long as the
+caller can tell.* Examples of acceptable disclosure: a `degraded: true` field on the response, a `WARN` log line with the
+reason, a UI banner ("Showing cached data from 2h ago"), a metric increment on a `fallback_used` counter.
+
+**Agentic directives:**
+
+1. NEVER swallow an exception to keep output looking successful. Surface it, log it, or propagate it.
+2. NEVER substitute synthetic, sample, or placeholder data for a failed real fetch without an explicit, disclosed fallback path.
+3. NEVER report a task as complete if any step errored. Report the actual state — including what failed and why — even when the failure is inconvenient.
+4. When adding a fallback, ALWAYS make it observable: log line, response flag, metric, or user-visible indicator.
+5. When a test fails, fix the underlying cause. Do not delete, skip, or relax the assertion to make it pass.
+
 ### Separation of Concerns
 
 - **Layered architecture.** Maintain clear boundaries between domain logic, application/use-case orchestration, and infrastructure (I/O, persistence, external services).
