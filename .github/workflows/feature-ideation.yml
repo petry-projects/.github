@@ -63,7 +63,7 @@ jobs:
       discussions: write
       actions: read
       id-token: write
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@208ec2d69b75227d375edf8745d84fbac05a76b2 # v1 — bump SHA after tag update
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d # v1
     with:
       project_context: |
         petry-projects/.github is the org-level standards and tooling repository
