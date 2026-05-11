@@ -117,12 +117,12 @@ upsert_file() {
   local commit_msg="chore: sync org-standard ${path##*/} stub from petry-projects/.github"
 
   local extra_args=()
-  [[ -n "$sha" ]] && extra_args+=(--field "sha=$sha")
+  [[ -n "$sha" ]] && extra_args+=(--raw-field "sha=$sha")
 
   gh api "repos/$ORG/$repo/contents/$path" \
     --method PUT \
-    --field message="$commit_msg" \
-    --field "content=$encoded" \
+    --raw-field message="$commit_msg" \
+    --raw-field "content=$encoded" \
     "${extra_args[@]}" \
     --silent
 }
@@ -180,7 +180,7 @@ declare -a REPOS
 if [[ -n "$TARGET_REPO" ]]; then
   REPOS=("$TARGET_REPO")
 else
-  mapfile -t REPOS < <(gh repo list "$ORG" --limit 500 --json name -q '.[].name')
+  mapfile -t REPOS < <(gh repo list "$ORG" --limit 500 --no-archived --json name -q '.[].name')
 fi
 
 # Resolve target workflows

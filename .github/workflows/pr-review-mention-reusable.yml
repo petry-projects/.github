@@ -13,6 +13,10 @@ name: PR Review — Mention Trigger (Reusable)
 
 on:
   workflow_call:
+    secrets:
+      GH_PAT_WORKFLOWS:
+        description: "Classic PAT with repo scope used to post comments and dispatch the review agent"
+        required: true
 
 jobs:
   handle-mention:

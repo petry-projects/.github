@@ -525,7 +525,9 @@ A copy-paste ready template is available at [`standards/workflows/pr-review-ment
 
 On each trigger the workflow:
 
-1. Guards against non-PR issue comments and fork PRs (which cannot receive org secrets).
+1. Guards against non-PR issue comments. For the `review_requested` trigger, also guards
+   against fork PRs (which cannot receive org secrets); comment-based triggers fire only
+   in the base repo's context and are protected by the trust check below.
 2. Verifies the actor is an OWNER, MEMBER, or COLLABORATOR — prevents external contributors
    from consuming review quota.
 3. Posts an acknowledgement comment so the requester knows the agent is starting.
