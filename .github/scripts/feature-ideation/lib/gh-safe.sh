@@ -139,13 +139,11 @@ gh_safe_graphql() {
   fi
 
   # Reject error envelopes — GraphQL returns 200 OK even on partial errors.
-  if printf '%s' "$raw" | jq -e '.errors // empty | if . then true else false end' >/dev/null 2>&1; then
-    if printf '%s' "$raw" | jq -e '(.errors | type) == "array" and (.errors | length > 0)' >/dev/null 2>&1; then
-      local errs
-      errs=$(printf '%s' "$raw" | jq -c '.errors')
-      _gh_safe_err "graphql-errors" "$errs"
-      return 66  # EX_NOINPUT — repurposed: "GraphQL refused our request"
-    fi
+  if printf '%s' "$raw" | jq -e '(.errors // empty | type) == "array" and (.errors | length > 0)' >/dev/null 2>&1; then
+    local errs
+    errs=$(printf '%s' "$raw" | jq -c '.errors')
+    _gh_safe_err "graphql-errors" "$errs"
+    return 66  # EX_NOINPUT — repurposed: "GraphQL refused our request"
   fi
 
   # Reject `data: null` — usually means the path didn't resolve (permissions,

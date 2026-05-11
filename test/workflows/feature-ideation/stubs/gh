@@ -34,6 +34,10 @@ fi
 # NOTE: TT_TMP (or BATS_TEST_TMPDIR as fallback) must be set so the counter
 # file is isolated per test. Without it the fallback /tmp path can collide
 # across parallel test suites. Caught by CodeRabbit review on PR #85.
+if [ -n "${GH_STUB_SCRIPT:-}" ] && [ ! -f "${GH_STUB_SCRIPT}" ]; then
+  printf '[gh-stub] GH_STUB_SCRIPT is set but file not found: %s\n' "$GH_STUB_SCRIPT" >&2
+  exit 1
+fi
 if [ -n "${GH_STUB_SCRIPT:-}" ] && [ -f "${GH_STUB_SCRIPT}" ]; then
   counter_file="${TT_TMP:-${BATS_TEST_TMPDIR:-/tmp}}/.gh-stub-counter"
   count=0
