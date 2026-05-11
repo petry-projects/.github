@@ -1322,7 +1322,7 @@ All repos MUST align to the latest version of each action:
 | Action | Target Version | Repos Needing Update |
 |--------|---------------|---------------------|
 | **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
-| **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
+| **Claude Code Action** | v1.0.119 (`476e359e`) | All repos should use the same pinned SHA |
 
 > **`github/codeql-action` is no longer pinned per repo** because the
 > standard no longer ships a `codeql.yml` workflow. GitHub manages the
