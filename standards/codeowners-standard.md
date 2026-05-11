@@ -106,6 +106,7 @@ team membership.
 | Date | Change |
 |------|--------|
 | 2026-05-04 | Initial team-based standard adopted; all 6 child repos migrated (ContentTwin#128, TalkTerm#160, broodly#172, google-app-scripts#252, markets#153, bmad-bgreat-suite#133) |
+<<<<<<< HEAD
 =======
 **Status:** Active
 =======
@@ -224,3 +225,5 @@ team membership.
 =======
 | 2026-05-04 | Initial team-based standard adopted; all 6 child repos migrated (ContentTwin#128, TalkTerm#160, broodly#172, google-app-scripts#252, markets#153, bmad-bgreat-suite#133) |
 >>>>>>> 1153dec (chore: deprecate pr-review-agent — remove all traces)
+=======
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))

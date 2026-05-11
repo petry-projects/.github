@@ -37,7 +37,10 @@ SKIP_REPOS=(".github" ".github-private")
 # feature-ideation.yml (requires repo-specific project_context input).
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
+<<<<<<< HEAD
   dev-lead.yml
+=======
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
   agent-shield.yml
   auto-rebase.yml
   claude.yml

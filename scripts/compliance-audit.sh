@@ -53,6 +53,7 @@ ISSUES_FILE="$REPORT_DIR/issues.json"
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
 ISSUES_EXISTING=0
@@ -60,6 +61,9 @@ ISSUES_REMOVED=0
 ISSUES_RETRIGGERED=0
 =======
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+=======
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
 # Code scanning), not a per-repo workflow file. The check_codeql_default_setup
@@ -1197,7 +1201,11 @@ check_centralized_workflow_stubs() {
     "dependabot-rebase.yml:dependabot-rebase-reusable"
     "agent-shield.yml:agent-shield-reusable"
     "feature-ideation.yml:feature-ideation-reusable"
+<<<<<<< HEAD
 >>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
+=======
+    "pr-review-mention.yml:pr-review-mention-reusable"
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
   )
 
   # List the repo's workflow directory once instead of probing each file.

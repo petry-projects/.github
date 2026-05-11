@@ -205,7 +205,11 @@ reusable, not a local edit.
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
+<<<<<<< HEAD
 >>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
+=======
+| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@petry-review-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -223,7 +227,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
 
 ## Required Workflows
 
-Every repository MUST have these 6 workflows. Reusable templates for Dependabot
+Every repository MUST have these 7 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
 <<<<<<< HEAD
 SonarCloud, and Dev-Lead Agent workflows are documented as patterns
@@ -1290,7 +1294,38 @@ customisation.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
 
+<<<<<<< HEAD
 >>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
+=======
+### 10. PR Review Mention (`pr-review-mention.yml`)
+
+Triggers the pr-review agent whenever `@petry-review-bot` is mentioned in a PR
+comment or review comment, or when `donpetry-bot` is assigned as a reviewer.
+A copy-paste ready template is available at [`standards/workflows/pr-review-mention.yml`](workflows/pr-review-mention.yml).
+
+**Trigger:** `issue_comment` (created), `pull_request_review_comment` (created),
+`pull_request` (review_requested).
+
+On each trigger the workflow:
+
+1. Guards against non-PR issue comments. For the `review_requested` trigger, also guards
+   against fork PRs (which cannot receive org secrets); comment-based triggers fire only
+   in the base repo's context and are protected by the trust check below.
+2. Verifies the actor is an OWNER, MEMBER, or COLLABORATOR — prevents external contributors
+   from consuming review quota.
+3. Posts an acknowledgement comment so the requester knows the agent is starting.
+4. Fires a `repository_dispatch` event to `petry-projects/.github-private` with
+   `event_type=pr-review-mention` and `client_payload.pr_url`, which triggers the
+   review cascade.
+
+**Required secrets:** `GH_PAT_WORKFLOWS` (classic PAT with `repo` scope) — already
+present as an org-level secret; no per-repo setup needed.
+
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that
+repos have `pr-review-mention.yml` as a thin caller stub delegating to
+`petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v1`.
+
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 ---
 
 ## Conditional Workflows

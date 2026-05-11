@@ -3,24 +3,36 @@
 # Repo-level pr-review-mention.yml files are thin caller stubs.
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md
 #
+<<<<<<< HEAD
 # Fires when @donpetry-bot is mentioned in a PR comment / review comment,
+=======
+# Fires when @petry-review-bot is mentioned in a PR comment / review comment,
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 # or when donpetry-bot is assigned as a reviewer on a PR. Dispatches a
 # repository_dispatch event to petry-projects/.github-private to trigger the
 # pr-review agent cascade.
 #
+<<<<<<< HEAD
 # Requires:
 #   GH_PAT_WORKFLOWS     — org secret, classic PAT (repo scope) for API calls and dispatch
 #   DON_PETRY_BOT_GH_PAT — org secret, classic PAT owned by donpetry-bot (repo scope) for posting comments
+=======
+# Requires: GH_PAT_WORKFLOWS org secret (classic PAT with repo scope).
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 name: PR Review — Mention Trigger (Reusable)
 
 on:
   workflow_call:
     secrets:
       GH_PAT_WORKFLOWS:
+<<<<<<< HEAD
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true
       DON_PETRY_BOT_GH_PAT:
         description: "Classic PAT owned by donpetry-bot, used to post acknowledgement comments as the bot"
+=======
+        description: "Classic PAT with repo scope used to post comments and dispatch the review agent"
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
         required: true
 
 jobs:
@@ -31,20 +43,31 @@ jobs:
     # Fire when:
     #   (a) donpetry-bot is added as a reviewer on a same-repo PR (fork PRs
     #       don't receive org secrets so we exclude them), OR
+<<<<<<< HEAD
     #   (b) @donpetry-bot is mentioned in a PR comment / review comment.
     #
     # Guard each branch against missing fields: requested_reviewer is null for
     # team review requests; comment fields don't exist on pull_request events.
     # For comment events we also gate at the job level on author_association so
     # that the job (and its secrets) never start for external/untrusted actors.
+=======
+    #   (b) @petry-review-bot is mentioned in a PR comment / review comment.
+    #
+    # Guard each branch against missing fields: requested_reviewer is null for
+    # team review requests; comment fields don't exist on pull_request events.
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
     if: |
       (github.event_name == 'pull_request' &&
        github.event.requested_reviewer != null &&
        github.event.requested_reviewer.login == 'donpetry-bot' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' &&
+<<<<<<< HEAD
        contains(github.event.comment.body, '@donpetry-bot') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+=======
+       contains(github.event.comment.body, '@petry-review-bot') &&
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
        (github.event_name == 'pull_request_review_comment' ||
         github.event.issue.pull_request != null))
 
@@ -110,7 +133,11 @@ jobs:
       - name: Post acknowledgement comment
         if: steps.trust.outputs.trusted == 'true'
         env:
+<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
+=======
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
           PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then

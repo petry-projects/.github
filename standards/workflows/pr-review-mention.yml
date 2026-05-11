@@ -13,8 +13,11 @@
 #     so removing the stanza breaks the reusable's gh API calls.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
+<<<<<<< HEAD
 #   • When publishing a new version of this reusable, also update this template and
 #     open a fanout PR across all caller repos.
+=======
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # PR Review Mention — thin caller for the org-level reusable.
@@ -36,5 +39,9 @@ jobs:
   pr-review-mention:
     permissions:
       pull-requests: write
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
+=======
+    uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v1
+>>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
     secrets: inherit
