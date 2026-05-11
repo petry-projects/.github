@@ -199,8 +199,6 @@ fi
 
 log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
 
-UPDATED=0 CREATED=0 SKIPPED=0 ERRORS=0
-
 for repo in "${REPOS[@]}"; do
   if is_skipped_repo "$repo"; then
     skip "$repo (exempt)"
