@@ -71,64 +71,60 @@ done
 # Helpers
 # ---------------------------------------------------------------------------
 log()  { echo "[deploy] $*"; }
-info() { echo "[deploy] INFO  $*"; }
 skip() { echo "[deploy] SKIP  $*"; }
 dry()  { echo "[deploy] DRY   $*"; }
 ok()   { echo "[deploy] OK    $*"; }
 err()  { echo "[deploy] ERROR $*" >&2; }
 
 is_skipped_repo() {
-  local repo="$1"
-  local s
+  local repo="$1" s
   for s in "${SKIP_REPOS[@]}"; do
     [[ "$repo" == "$s" ]] && return 0
   done
   return 1
 }
 
-# Returns the file's current SHA from the API, or empty string if absent.
-get_file_sha() {
+# Fetch a file from the repo API in one call; outputs "sha<TAB>decoded-content".
+# Returns empty string on 404.
+fetch_existing() {
   local repo="$1" path="$2"
-  gh api "repos/$ORG/$repo/contents/$path" --jq '.sha' 2>/dev/null || echo ""
+  local raw
+  raw=$(gh api "repos/$ORG/$repo/contents/$path" 2>/dev/null) || { echo ""; return; }
+  local sha encoded decoded
+  sha=$(echo "$raw" | jq -r '.sha // empty')
+  encoded=$(echo "$raw" | jq -r '.content // empty')
+  decoded=$(echo "$encoded" | base64 -d 2>/dev/null || echo "")
+  printf '%s\t%s' "$sha" "$decoded"
 }
 
-# Returns the decoded content of a file from the API, or empty string if absent.
-get_file_content() {
-  local repo="$1" path="$2"
-  gh api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null \
-    | base64 -d 2>/dev/null || echo ""
-}
-
-# True if the file already contains the expected @v1 reusable reference.
+# True if the existing decoded content already has the canonical uses: reference
+# for this workflow (extracted from the template itself, so it tracks version bumps).
 is_already_compliant() {
-  local content="$1" workflow="$2"
-  local reusable="${workflow%.yml}-reusable"
-  local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@v1"
-  echo "$content" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"
+  local existing_content="$1" template="$2"
+  local expected_uses
+  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | tr -d '\r')
+  [[ -z "$expected_uses" ]] && return 1
+  echo "$existing_content" | grep -qF "$expected_uses"
 }
 
-# Upsert a file via the GitHub Contents API.
+# Upsert a file via the GitHub Contents API. Handles both create and update.
 upsert_file() {
   local repo="$1" path="$2" template_path="$3" sha="$4"
+  # Use base64 with line-wrap disabled; -w 0 (GNU) falls back to -b 0 (BSD/macOS).
   local encoded
-  encoded=$(base64 -w 0 "$template_path")
+  encoded=$(base64 -w 0 "$template_path" 2>/dev/null || base64 -b 0 "$template_path")
 
   local commit_msg="chore: sync org-standard ${path##*/} stub from petry-projects/.github"
 
-  if [[ -n "$sha" ]]; then
-    gh api "repos/$ORG/$repo/contents/$path" \
-      --method PUT \
-      --field message="$commit_msg" \
-      --field "content=$encoded" \
-      --field "sha=$sha" \
-      --silent
-  else
-    gh api "repos/$ORG/$repo/contents/$path" \
-      --method PUT \
-      --field message="$commit_msg" \
-      --field "content=$encoded" \
-      --silent
-  fi
+  local extra_args=()
+  [[ -n "$sha" ]] && extra_args+=(--field "sha=$sha")
+
+  gh api "repos/$ORG/$repo/contents/$path" \
+    --method PUT \
+    --field message="$commit_msg" \
+    --field "content=$encoded" \
+    "${extra_args[@]}" \
+    --silent
 }
 
 # ---------------------------------------------------------------------------
@@ -140,25 +136,23 @@ deploy_workflow_to_repo() {
   local target_path=".github/workflows/$workflow"
 
   if [[ ! -f "$template" ]]; then
-    err "No template found at $template — skipping $workflow for $repo"
+    err "No template at $template — skipping $workflow for $repo"
     return
   fi
 
-  local existing_content existing_sha
-  existing_sha=$(get_file_sha "$repo" "$target_path")
-  existing_content=""
-  if [[ -n "$existing_sha" ]]; then
-    existing_content=$(get_file_content "$repo" "$target_path")
-  fi
+  local raw existing_sha existing_content
+  raw=$(fetch_existing "$repo" "$target_path")
+  existing_sha="${raw%%$'\t'*}"
+  existing_content="${raw#*$'\t'}"
 
-  if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$workflow"; then
+  if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template"; then
     skip "$repo/$target_path already compliant"
     return
   fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
     if [[ -n "$existing_sha" ]]; then
-      dry "Would update $repo/$target_path (non-compliant stub → @v1)"
+      dry "Would update $repo/$target_path (non-compliant stub)"
     else
       dry "Would create $repo/$target_path"
     fi
@@ -181,12 +175,12 @@ deploy_workflow_to_repo() {
 # ---------------------------------------------------------------------------
 [[ "$DRY_RUN" == "true" ]] && log "DRY RUN — no files will be written"
 
-# Resolve target repos
+# Resolve target repos using pagination (handles orgs with >100 repos).
 declare -a REPOS
 if [[ -n "$TARGET_REPO" ]]; then
   REPOS=("$TARGET_REPO")
 else
-  mapfile -t REPOS < <(gh repo list "$ORG" --limit 200 --json name -q '.[].name')
+  mapfile -t REPOS < <(gh repo list "$ORG" --limit 500 --json name -q '.[].name')
 fi
 
 # Resolve target workflows
