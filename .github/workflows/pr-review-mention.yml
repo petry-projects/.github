@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/pr-review-mention.yml
 # Standard:        petry-projects/.github/standards/ci-standards.md
@@ -22,6 +23,8 @@
 # To adopt: copy standards/workflows/pr-review-mention.yml to your repo.
 # Requires: GH_PAT_WORKFLOWS org secret (already present in petry-projects org).
 =======
+=======
+>>>>>>> d3ad991 (revert: restore .github/workflows/pr-review-mention.yml (#236))
 # Deploy this file to petry-projects/.github as:
 #   .github/workflows/pr-review-mention.yml
 #
@@ -33,7 +36,10 @@
 #   Uses GH_PAT_WORKFLOWS (org secret, classic PAT with repo scope) — already
 #   present in petry-projects org. No additional secret setup required.
 
+<<<<<<< HEAD
 >>>>>>> fd1e8df (feat: add @petry-review-bot mention trigger for on-demand PR reviews)
+=======
+>>>>>>> d3ad991 (revert: restore .github/workflows/pr-review-mention.yml (#236))
 name: PR Review — Mention Trigger
 
 on:
@@ -41,6 +47,7 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
   pull_request:
@@ -60,6 +67,11 @@ jobs:
     types: [review_requested]
 >>>>>>> 544b926 (feat: trigger review agent when donpetry-bot is assigned as reviewer (#201))
 
+=======
+  pull_request:
+    types: [review_requested]
+
+>>>>>>> d3ad991 (revert: restore .github/workflows/pr-review-mention.yml (#236))
 permissions:
   pull-requests: write
 
@@ -173,4 +185,7 @@ jobs:
             --field event_type=pr-review-mention \
             --field "client_payload[pr_url]=$PR_URL"
           echo "Dispatch sent for $PR_URL"
+<<<<<<< HEAD
 >>>>>>> fd1e8df (feat: add @petry-review-bot mention trigger for on-demand PR reviews)
+=======
+>>>>>>> d3ad991 (revert: restore .github/workflows/pr-review-mention.yml (#236))
