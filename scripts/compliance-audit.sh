@@ -1241,6 +1241,7 @@ check_centralized_workflow_stubs() {
     "dependabot-rebase.yml:dependabot-rebase-reusable"
     "agent-shield.yml:agent-shield-reusable"
     "feature-ideation.yml:feature-ideation-reusable"
+    "pr-review-mention.yml:pr-review-mention-reusable"
   )
 
   # List the repo's workflow directory once instead of probing each file.
