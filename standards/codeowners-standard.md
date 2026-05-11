@@ -32,7 +32,7 @@ The legacy direct-listing pattern is **forbidden**:
 
 ```text
 # DO NOT USE — individuals and bot accounts as owners
-* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
+* @don-petry @dependabot-automerge-petry
 ```
 
 ## Why
@@ -42,8 +42,7 @@ The legacy direct-listing pattern is **forbidden**:
 - **CODEOWNERS support for automation** — GitHub Apps **cannot** be listed in
   CODEOWNERS (platform limitation,
   [community discussion #23064](https://github.com/orgs/community/discussions/23064)).
-  A machine user in the team **can** satisfy `require_code_owner_review`. See
-  [pr-review-agent issue #27](https://github.com/don-petry/pr-review-agent/issues/27)
+  A machine user in the team **can** satisfy `require_code_owner_review`.
 - **Centralized control** — team membership is managed in one place via the
   org admin UI; no PR churn when membership changes
 
@@ -53,8 +52,7 @@ The [`@petry-projects/org-leads`](https://github.com/orgs/petry-projects/teams/o
 team contains:
 
 - `@don-petry` — primary maintainer (team maintainer)
-- `@donpetry-bot` — automation machine user (used by pr-review-agent and
-  similar tooling)
+- `@donpetry-bot` — automation machine user
 
 Add additional human maintainers as needed. Bots/apps that need code-owner
 standing MUST be machine-user accounts added to this team, not GitHub Apps.
@@ -96,7 +94,7 @@ in a repo with `require_code_owner_review: true`. After:
 2. Issuing the bot a `petry-projects`-scoped fine-grained PAT
 3. Adding `@donpetry-bot` to the team
 
-`pr-review-agent` posted an approval that flipped `reviewDecision` from
+`@donpetry-bot` posted an approval that flipped `reviewDecision` from
 `REVIEW_REQUIRED` to `APPROVED`, confirming code-owner satisfaction via
 team membership.
 
