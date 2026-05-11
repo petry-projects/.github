@@ -34,7 +34,7 @@ FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 
-REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
 # Code scanning), not a per-repo workflow file. The check_codeql_default_setup
@@ -665,6 +665,7 @@ check_centralized_workflow_stubs() {
     "dependabot-rebase.yml:dependabot-rebase-reusable"
     "agent-shield.yml:agent-shield-reusable"
     "feature-ideation.yml:feature-ideation-reusable"
+    "pr-review-mention.yml:pr-review-mention-reusable"
   )
 
   # List the repo's workflow directory once instead of probing each file.
