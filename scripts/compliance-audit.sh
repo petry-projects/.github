@@ -150,7 +150,7 @@ detect_ecosystems() {
   if grep -qE '\.tf$' <<< "$tree"; then
     ECOSYSTEMS+=("terraform")
   fi
-  if grep -qE '\.github/workflows/.*\.yml$' <<< "$tree"; then
+  if grep -qE '\.github/workflows/.*\.ya?ml$' <<< "$tree"; then
     ECOSYSTEMS+=("github-actions")
   fi
   # BMAD Method: detected via either the active install dir (`_bmad/`) or
