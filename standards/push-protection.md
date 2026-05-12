@@ -234,7 +234,15 @@ secret-scan:
         args: detect --source . --redact --verbose --exit-code 1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
+
+> **Organization license requirement:** `gitleaks/gitleaks-action` v2 requires a
+> paid license key for GitHub organization repos. Store the key as an org secret
+> named `GITLEAKS_LICENSE` (Settings → Secrets and variables → Actions → New
+> organization secret). Without it the job will fail with:
+> `🛑 missing gitleaks license`. See [gitleaks.io](https://gitleaks.io) to
+> obtain a license.
 
 The job MUST:
 
