@@ -18,17 +18,16 @@
 #   $7  bug_reports
 #   $8  repo (string, e.g. "petry-projects/talkterm")
 #   $9  scan_date (ISO-8601 string)
-#  $10  last_successful_run (ISO-8601 string; feed checkpoint)
-#  $11  schema_version (string)
-#  $12  truncation_warnings (JSON array, may be [])
+#  $10  schema_version (string)
+#  $11  truncation_warnings (JSON array, may be [])
 #
 # Output: signals.json document on stdout.
 
 set -euo pipefail
 
 compose_signals() {
-  if [ "$#" -ne 12 ]; then
-    printf '[compose-signals] expected 12 args, got %d\n' "$#" >&2
+  if [ "$#" -ne 11 ]; then
+    printf '[compose-signals] expected 11 args, got %d\n' "$#" >&2
     return 64  # EX_USAGE
   fi
 
@@ -41,9 +40,8 @@ compose_signals() {
   local bug_reports="$7"
   local repo="$8"
   local scan_date="$9"
-  local last_successful_run="${10}"
-  local schema_version="${11}"
-  local truncation_warnings="${12}"
+  local schema_version="${10}"
+  local truncation_warnings="${11}"
 
   # Validate every JSON input before composition. Better to fail loudly here
   # than to let `jq --argjson` produce a cryptic parse error.
@@ -62,7 +60,6 @@ compose_signals() {
 
   jq -n \
     --arg scan_date "$scan_date" \
-    --arg last_successful_run "$last_successful_run" \
     --arg repo "$repo" \
     --arg schema_version "$schema_version" \
     --argjson open_issues "$open_issues" \
@@ -76,7 +73,6 @@ compose_signals() {
     '{
       schema_version: $schema_version,
       scan_date: $scan_date,
-      last_successful_run: $last_successful_run,
       repo: $repo,
       open_issues: { count: ($open_issues | length), items: $open_issues },
       closed_issues_30d: { count: ($closed_issues | length), items: $closed_issues },
