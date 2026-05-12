@@ -95,19 +95,28 @@ collect_classify_prs() {
 }
 
 echo "::group::Collecting PR data" >&2
-ALL_PRS='[]'
+# Accumulate as NDJSON then slurp — avoids passing a growing $ALL_PRS as a
+# shell argument to jq, which hits ARG_MAX once the org accumulates ~200+ PRs.
+ALL_PR_NDJSON=""
 for repo in $ORG_REPOS; do
   prs=$(collect_classify_prs "petry-projects" "$repo")
   count=$(echo "$prs" | jq 'length')
   [ "$count" -gt 0 ] && echo "  petry-projects/$repo: $count open PRs" >&2
-  ALL_PRS=$(jq -n --argjson a "$ALL_PRS" --argjson b "$prs" '$a + $b')
+  if [ "$count" -gt 0 ]; then
+    ALL_PR_NDJSON+=$(echo "$prs" | jq -c '.[]')
+    ALL_PR_NDJSON+=$'\n'
+  fi
 done
 for repo in $PERSONAL_REPOS; do
   prs=$(collect_classify_prs "don-petry" "$repo")
   count=$(echo "$prs" | jq 'length')
   [ "$count" -gt 0 ] && echo "  don-petry/$repo: $count open PRs" >&2
-  ALL_PRS=$(jq -n --argjson a "$ALL_PRS" --argjson b "$prs" '$a + $b')
+  if [ "$count" -gt 0 ]; then
+    ALL_PR_NDJSON+=$(echo "$prs" | jq -c '.[]')
+    ALL_PR_NDJSON+=$'\n'
+  fi
 done
+ALL_PRS=$(printf '%s\n' "$ALL_PR_NDJSON" | jq -cs '.')
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
 echo "::endgroup::" >&2
 
@@ -202,15 +211,15 @@ echo "::endgroup::" >&2
 
 # ── Issues ────────────────────────────────────────────────────────────────────
 echo "::group::Collecting issues" >&2
-ISSUES_BY_REPO='[]'
+ISSUES_NDJSON=""
 for repo in $ORG_REPOS; do
   issues=$(gh issue list --repo "petry-projects/$repo" --state open \
     --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -gt 0 ]; then
     echo "  petry-projects/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(echo "$issues" | jq -c --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}')
+    ISSUES_NDJSON+=$'\n'
   fi
 done
 for repo in $PERSONAL_REPOS; do
@@ -219,10 +228,11 @@ for repo in $PERSONAL_REPOS; do
   count=$(echo "$issues" | jq 'length')
   if [ "$count" -gt 0 ]; then
     echo "  don-petry/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(echo "$issues" | jq -c --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}')
+    ISSUES_NDJSON+=$'\n'
   fi
 done
+ISSUES_BY_REPO=$(printf '%s\n' "$ISSUES_NDJSON" | jq -cs '.')
 echo "::endgroup::" >&2
 
 # ── Discussions ───────────────────────────────────────────────────────────────
