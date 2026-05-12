@@ -131,10 +131,10 @@ detect_ecosystems() {
   local tree
   tree=$(gh_api "repos/$ORG/$repo/git/trees/HEAD?recursive=1" --jq '.tree[].path' 2>/dev/null || echo "")
 
-  if echo "$tree" | grep -qE '(^|/)package\.json$'; then
+  if grep -qE '(^|/)package\.json$' <<< "$tree"; then
     ECOSYSTEMS+=("npm")
   fi
-  if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
+  if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
     # Override npm with pnpm if lock file present, or add pnpm directly
     if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
       ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
@@ -142,25 +142,25 @@ detect_ecosystems() {
       ECOSYSTEMS+=("pnpm")
     fi
   fi
-  if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
+  if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
     ECOSYSTEMS+=("go")
   fi
-  if echo "$tree" | grep -qE '(^|/)Cargo\.toml$'; then
+  if grep -qE '(^|/)Cargo\.toml$' <<< "$tree"; then
     ECOSYSTEMS+=("rust")
   fi
-  if echo "$tree" | grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$'; then
+  if grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$' <<< "$tree"; then
     ECOSYSTEMS+=("python")
   fi
-  if echo "$tree" | grep -qE '\.tf$'; then
+  if grep -qE '\.tf$' <<< "$tree"; then
     ECOSYSTEMS+=("terraform")
   fi
-  if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
+  if grep -qE '\.github/workflows/.*\.ya?ml$' <<< "$tree"; then
     ECOSYSTEMS+=("github-actions")
   fi
   # BMAD Method: detected via either the active install dir (`_bmad/`) or
   # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
   # the other, or both depending on the BMAD workflow stage.
-  if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
+  if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
     ECOSYSTEMS+=("bmad-method")
   fi
 }
