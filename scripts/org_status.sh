@@ -21,7 +21,7 @@ echo "::endgroup::" >&2
 # ── PR Collection + Classification ───────────────────────────────────────────
 collect_classify_prs() {
   local owner=$1 repo=$2
-  local cursor="" all_nodes='[]'
+  local cursor="" all_nodes_ndjson=""
   # cursor="" = first page (pass JSON null); cursor=VALUE = subsequent pages (pass as string)
 
   while true; do
@@ -55,16 +55,17 @@ collect_classify_prs() {
       || result='{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}'
 
     local nodes has_next end_cursor
-    nodes=$(echo "$result" | jq '.data.repository.pullRequests.nodes // []')
-    has_next=$(echo "$result" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false')
-    end_cursor=$(echo "$result" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // ""')
+    nodes=$(jq '.data.repository.pullRequests.nodes // []' <<< "$result")
+    has_next=$(jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false' <<< "$result")
+    end_cursor=$(jq -r '.data.repository.pullRequests.pageInfo.endCursor // ""' <<< "$result")
 
-    all_nodes=$(jq -n --argjson a "$all_nodes" --argjson b "$nodes" '$a + $b')
+    all_nodes_ndjson+=$(jq -c '.[]' <<< "$nodes")
+    all_nodes_ndjson+=$'\n'
     [ "$has_next" = "true" ] && [ -n "$end_cursor" ] || break
     cursor="$end_cursor"
   done
 
-  echo "$all_nodes" | jq --arg owner "$owner" --arg repo "$repo" '
+  jq -cs --arg owner "$owner" --arg repo "$repo" '
     map({
       repo:   ($owner + "/" + $repo),
       number: .number,
@@ -91,23 +92,32 @@ collect_classify_prs() {
         else "No CI / No Policy"
         end
       )
-    })'
+    })' <<< "$all_nodes_ndjson"
 }
 
 echo "::group::Collecting PR data" >&2
-ALL_PRS='[]'
+# Accumulate as NDJSON then slurp — avoids passing a growing $ALL_PRS as a
+# shell argument to jq, which hits ARG_MAX once the org accumulates ~200+ PRs.
+ALL_PR_NDJSON=""
 for repo in $ORG_REPOS; do
   prs=$(collect_classify_prs "petry-projects" "$repo")
-  count=$(echo "$prs" | jq 'length')
+  count=$(jq 'length' <<< "$prs")
   [ "$count" -gt 0 ] && echo "  petry-projects/$repo: $count open PRs" >&2
-  ALL_PRS=$(jq -n --argjson a "$ALL_PRS" --argjson b "$prs" '$a + $b')
+  if [ "$count" -gt 0 ]; then
+    ALL_PR_NDJSON+=$(jq -c '.[]' <<< "$prs")
+    ALL_PR_NDJSON+=$'\n'
+  fi
 done
 for repo in $PERSONAL_REPOS; do
   prs=$(collect_classify_prs "don-petry" "$repo")
-  count=$(echo "$prs" | jq 'length')
+  count=$(jq 'length' <<< "$prs")
   [ "$count" -gt 0 ] && echo "  don-petry/$repo: $count open PRs" >&2
-  ALL_PRS=$(jq -n --argjson a "$ALL_PRS" --argjson b "$prs" '$a + $b')
+  if [ "$count" -gt 0 ]; then
+    ALL_PR_NDJSON+=$(jq -c '.[]' <<< "$prs")
+    ALL_PR_NDJSON+=$'\n'
+  fi
 done
+ALL_PRS=$(jq -cs '.' <<< "$ALL_PR_NDJSON")
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
 echo "::endgroup::" >&2
 
@@ -173,8 +183,12 @@ ORG_MERGES=$(gh search prs --owner=petry-projects --merged --merged-at=">=$SINCE
 PERSONAL_MERGES=$(gh search prs --owner=don-petry --merged --merged-at=">=$SINCE" \
   --json number,repository,closedAt --limit 1000 2>/dev/null || echo '[]')
 
-MERGE_DAILY=$(jq -n --arg since "$SINCE" --arg today "$TODAY" \
-  --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
+# Write merges to a temp file so subsequent jq calls read from a file descriptor
+# rather than shell arguments — avoids the same ARG_MAX risk at high merge volumes.
+printf '{"org":%s,"personal":%s}\n' "$ORG_MERGES" "$PERSONAL_MERGES" > "$DATA_DIR/merges.json"
+
+MERGE_DAILY=$(jq --arg since "$SINCE" --arg today "$TODAY" '
+  .org as $org | .personal as $personal |
   # Build 8-day date list (since through today inclusive)
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   # Capture $date before entering the generator so . refers to the right scope
@@ -182,11 +196,11 @@ MERGE_DAILY=$(jq -n --arg since "$SINCE" --arg today "$TODAY" \
     date: $date,
     org:      ([$org[]      | select(.closedAt[:10] == $date)] | length),
     personal: ([$personal[] | select(.closedAt[:10] == $date)] | length)
-  })')
+  })' "$DATA_DIR/merges.json")
 
 # Per-repo per-day merge counts (for the enhanced merge activity table)
-MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
-  --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
+MERGE_BY_REPO_DAY=$(jq --arg since "$SINCE" '
+  .org as $org | .personal as $personal |
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   (($org      | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) +
    ($personal | map({repo: ("don-petry/"      + .repository.name), date: .closedAt[:10]}))) |
@@ -197,32 +211,33 @@ MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
       total:   ($items | length),
       by_date: (dates | map(. as $d | {key: $d, value: ([$items[] | select(.date == $d)] | length)}) | from_entries)
     }
-  ) | sort_by(-.total)')
+  ) | sort_by(-.total)' "$DATA_DIR/merges.json")
 echo "::endgroup::" >&2
 
 # ── Issues ────────────────────────────────────────────────────────────────────
 echo "::group::Collecting issues" >&2
-ISSUES_BY_REPO='[]'
+ISSUES_NDJSON=""
 for repo in $ORG_REPOS; do
   issues=$(gh issue list --repo "petry-projects/$repo" --state open \
     --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
-  count=$(echo "$issues" | jq 'length')
+  count=$(jq 'length' <<< "$issues")
   if [ "$count" -gt 0 ]; then
     echo "  petry-projects/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(jq -c --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
+    ISSUES_NDJSON+=$'\n'
   fi
 done
 for repo in $PERSONAL_REPOS; do
   issues=$(gh issue list --repo "don-petry/$repo" --state open \
     --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
-  count=$(echo "$issues" | jq 'length')
+  count=$(jq 'length' <<< "$issues")
   if [ "$count" -gt 0 ]; then
     echo "  don-petry/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(jq -c --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
+    ISSUES_NDJSON+=$'\n'
   fi
 done
+ISSUES_BY_REPO=$(jq -cs '.' <<< "$ISSUES_NDJSON")
 echo "::endgroup::" >&2
 
 # ── Discussions ───────────────────────────────────────────────────────────────
