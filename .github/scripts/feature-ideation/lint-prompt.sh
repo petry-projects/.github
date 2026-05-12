@@ -31,6 +31,34 @@ scan_file() {
 import re
 import sys
 
+
+def _strip_github_expressions(s: str) -> str:
+    """Remove ${{ ... }} GitHub Actions expressions from s.
+
+    Uses a stateful scanner instead of `[^}]*` regex so that expressions
+    containing `}` inside string literals (e.g. format() calls) are fully
+    consumed rather than prematurely terminated. This prevents false-positive
+    shell-expansion matches on content that is actually inside a GH expression.
+    Caught by CodeRabbit review on PR petry-projects/.github#85.
+    """
+    result: list[str] = []
+    i = 0
+    while i < len(s):
+        if s[i : i + 3] == "${{":
+            # Consume until we find the matching "}}"
+            j = i + 3
+            while j < len(s):
+                if s[j : j + 2] == "}}":
+                    j += 2
+                    break
+                j += 1
+            i = j  # skip the whole ${{ ... }} expression
+        else:
+            result.append(s[i])
+            i += 1
+    return "".join(result)
+
+
 path = sys.argv[1]
 try:
     with open(path, "r", encoding="utf-8") as f:
@@ -55,8 +83,10 @@ findings = []
 shell_expansion = re.compile(r'(?<![\\$])\$\([^)]*\)|(?<![\\$])\$\{[A-Za-z_][A-Za-z0-9_]*\}')
 
 # Recognise both `direct_prompt:` (v0) and `prompt:` (v1) markers, with
-# optional `|` or `>` block scalar indicators.
-prompt_marker = re.compile(r'(?:direct_prompt|prompt):\s*[|>]?\s*$')
+# optional `|` or `>` block scalar indicators plus YAML chomping modifiers
+# (`-` or `+`) so `prompt: |-`, `prompt: |+`, `prompt: >-`, `prompt: >+`
+# are all recognised. Caught by CodeRabbit review on PR petry-projects/.github#85.
+prompt_marker = re.compile(r'(?:direct_prompt|prompt):\s*[|>]?[-+]?\s*$')
 
 for lineno, raw in enumerate(lines, start=1):
     stripped = raw.lstrip(" ")
@@ -78,8 +108,13 @@ for lineno, raw in enumerate(lines, start=1):
             continue
 
         # We're inside the prompt body. Scan for shell expansions.
-        # First, strip out any GitHub Actions expressions so they don't trip us.
-        no_gh = re.sub(r'\$\{\{[^}]*\}\}', '', raw)
+        # First, strip out GitHub Actions ${{ ... }} expressions.
+        # The naive `[^}]*` regex stops at the first `}`, so expressions that
+        # contain `}` internally (e.g. format() calls or string literals) are
+        # not fully removed and leave false-positive shell expansion matches.
+        # Use a small stateful scanner instead.
+        # Caught by CodeRabbit review on PR petry-projects/.github#85.
+        no_gh = _strip_github_expressions(raw)
         for match in shell_expansion.finditer(no_gh):
             findings.append((lineno, match.group(0), raw.rstrip()))
 
@@ -107,15 +142,27 @@ main() {
   fi
 
   local exit=0
+  local file_rc=0
   for file in "$@"; do
     if [ ! -f "$file" ]; then
       printf '[lint-prompt] not found: %s\n' "$file" >&2
       exit=2
       continue
     fi
-    if ! scan_file "$file"; then
-      exit=1
+    # Capture the actual exit code so we preserve exit-2 (file error) over
+    # exit-1 (lint finding). A later lint failure must not overwrite an earlier
+    # file error. Caught by CodeRabbit review on PR petry-projects/.github#85.
+    if scan_file "$file"; then
+      file_rc=0
+    else
+      file_rc=$?
     fi
+    case "$file_rc" in
+      0) ;;
+      1) if [ "$exit" -eq 0 ]; then exit=1; fi ;;
+      2) exit=2 ;;
+      *) return "$file_rc" ;;
+    esac
   done
   return "$exit"
 }
