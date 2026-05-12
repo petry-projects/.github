@@ -97,49 +97,91 @@ def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
-with open(signals_path) as f:
-    signals = json.load(f)
-with open(proposals_path) as f:
-    proposals = json.load(f)
+def _load_json(path: str, label: str):
+    """Load JSON from path, exiting with code 2 on any read or parse error."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except OSError as exc:
+        sys.stderr.write(f"[match-discussions] cannot read {label}: {exc}\n")
+        sys.exit(2)
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"[match-discussions] invalid JSON in {label}: {exc}\n")
+        sys.exit(2)
+
+
+signals = _load_json(signals_path, "signals")
+proposals = _load_json(proposals_path, "proposals")
 
 if not isinstance(proposals, list):
     sys.stderr.write("[match-discussions] proposals must be a JSON array\n")
     sys.exit(65)
 
 discussions = signals.get("ideas_discussions", {}).get("items", []) or []
-disc_norm = [(d, normalize(d.get("title", ""))) for d in discussions]
+# Skip discussions without an id to avoid all id-less entries collapsing into
+# a single `None` key in seen_disc_ids. Caught by CodeRabbit on PR #85.
+disc_norm = [
+    (d, normalize(d.get("title", "")))
+    for d in discussions
+    if d.get("id") is not None
+]
 
-matched = []
-new_candidates = []
-seen_disc_ids = set()
+# --- Optimal (similarity-sorted) matching ------------------------------------
+# The original greedy per-proposal loop consumed discussions in proposal order,
+# so an early lower-value match could block a later higher-value match.
+# Instead we enumerate all (proposal, discussion) pairs, sort by similarity
+# descending (ties broken by original proposal index for stability), then
+# assign greedily. This guarantees globally higher-value matches are honoured
+# first. Caught by CodeRabbit review on PR petry-projects/.github#85.
 
-for proposal in proposals:
+# Collect valid proposals with their original index (for tie-breaking + new_candidates).
+proposals_indexed: list[tuple[int, dict]] = []
+for p_idx, proposal in enumerate(proposals):
     if not isinstance(proposal, dict) or "title" not in proposal:
         sys.stderr.write(f"[match-discussions] skipping malformed proposal: {proposal!r}\n")
         continue
+    proposals_indexed.append((p_idx, proposal))
+
+# Build all (similarity, proposal_idx, disc_id, proposal, disc) tuples.
+all_pairs: list[tuple[float, int, str, dict, dict]] = []
+for p_idx, proposal in proposals_indexed:
     p_norm = normalize(proposal["title"])
-
-    best = None
-    best_sim = 0.0
     for disc, d_norm in disc_norm:
-        if disc.get("id") in seen_disc_ids:
-            continue
         sim = jaccard(p_norm, d_norm)
-        if sim > best_sim:
-            best_sim = sim
-            best = disc
+        all_pairs.append((sim, p_idx, disc["id"], proposal, disc))
 
-    if best is not None and best_sim >= threshold:
+# Sort descending by similarity; stable tie-break by proposal index ascending.
+all_pairs.sort(key=lambda x: (-x[0], x[1]))
+
+matched = []
+seen_disc_ids: set[str] = set()
+seen_proposal_idxs: set[int] = set()
+
+for sim, p_idx, disc_id, proposal, disc in all_pairs:
+    if p_idx in seen_proposal_idxs or disc_id in seen_disc_ids:
+        continue
+    if sim >= threshold:
         matched.append(
             {
                 "proposal": proposal,
-                "discussion": best,
-                "similarity": round(best_sim, 4),
+                "discussion": disc,
+                "similarity": round(sim, 4),
             }
         )
-        seen_disc_ids.add(best.get("id"))
-    else:
-        new_candidates.append({"proposal": proposal, "best_similarity": round(best_sim, 4)})
+        seen_disc_ids.add(disc_id)
+        seen_proposal_idxs.add(p_idx)
+
+# Unmatched proposals become new candidates.
+new_candidates = []
+for p_idx, proposal in proposals_indexed:
+    if p_idx in seen_proposal_idxs:
+        continue
+    p_norm = normalize(proposal["title"])
+    best_sim = max(
+        (jaccard(p_norm, d_norm) for _, d_norm in disc_norm),
+        default=0.0,
+    )
+    new_candidates.append({"proposal": proposal, "best_similarity": round(best_sim, 4)})
 
 result = {
     "matched": matched,
