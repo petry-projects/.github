@@ -52,10 +52,14 @@ bats test/workflows/feature-ideation/gh-safe.bats
                  discussion-mutations.sh lib/*.sh)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Lint workflow prompt blocks (direct_prompt: and prompt:)
 =======
 # Lint the workflow's direct_prompt block
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+# Lint workflow prompt blocks (direct_prompt: and prompt:)
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 bash .github/scripts/feature-ideation/lint-prompt.sh
 ```
 
@@ -81,10 +85,14 @@ signals.json is a breaking change and must:
 1. Bump `SCHEMA_VERSION` in `collect-signals.sh`.
 2. Update fixtures under `test/workflows/feature-ideation/fixtures/expected/`.
 <<<<<<< HEAD
+<<<<<<< HEAD
 3. Update Mary's prompt in `.github/workflows/feature-ideation-reusable.yml` if any field references move.
 =======
 3. Update Mary's prompt in `feature-ideation.yml` if any field references move.
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+3. Update Mary's prompt in `.github/workflows/feature-ideation-reusable.yml` if any field references move.
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 
 CI validates every fixture against the schema, and the workflow validates
 the runtime output before handing it to Mary.

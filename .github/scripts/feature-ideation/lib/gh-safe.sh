@@ -94,6 +94,9 @@ gh_safe_graphql() {
   while [ "$i" -lt "${#args[@]}" ]; do
     if [ "${args[$i]}" = "--jq" ]; then
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
       # Guard bounds before dereferencing args[i+1]: under set -u an out-of-
       # bounds access aborts the shell. Caught by CodeRabbit review on PR
       # petry-projects/.github#85.
@@ -101,8 +104,11 @@ gh_safe_graphql() {
         _gh_safe_err "graphql-bad-args" "--jq requires a jq filter argument"
         return 64
       fi
+<<<<<<< HEAD
 =======
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
       has_jq=1
       jq_filter="${args[$((i + 1))]}"
       break
@@ -143,11 +149,15 @@ gh_safe_graphql() {
 
   # Reject error envelopes — GraphQL returns 200 OK even on partial errors.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   if printf '%s' "$raw" | jq -e '(.errors // empty | type) == "array" and (.errors | length > 0)' >/dev/null 2>&1; then
     local errs
     errs=$(printf '%s' "$raw" | jq -c '.errors')
     _gh_safe_err "graphql-errors" "$errs"
     return 66  # EX_NOINPUT — repurposed: "GraphQL refused our request"
+<<<<<<< HEAD
 =======
   if printf '%s' "$raw" | jq -e '.errors // empty | if . then true else false end' >/dev/null 2>&1; then
     if printf '%s' "$raw" | jq -e '(.errors | type) == "array" and (.errors | length > 0)' >/dev/null 2>&1; then
@@ -157,6 +167,8 @@ gh_safe_graphql() {
       return 66  # EX_NOINPUT — repurposed: "GraphQL refused our request"
     fi
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   fi
 
   # Reject `data: null` — usually means the path didn't resolve (permissions,
@@ -206,6 +218,9 @@ gh_safe_graphql() {
 # failure exits non-zero with a structured stderr message.
 gh_safe_graphql_input() {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   # Guard arg count before reading $1: under set -u a zero-arg call aborts the
   # shell instead of reaching the JSON validation. Caught by CodeRabbit review
   # on PR petry-projects/.github#85.
@@ -213,8 +228,11 @@ gh_safe_graphql_input() {
     _gh_safe_err "graphql-bad-input" "expected 1 arg: JSON request body, got $#"
     return 64
   fi
+<<<<<<< HEAD
 =======
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   local body="$1"
   if ! gh_safe_is_json "$body"; then
     _gh_safe_err "graphql-bad-input" "request body is not valid JSON"

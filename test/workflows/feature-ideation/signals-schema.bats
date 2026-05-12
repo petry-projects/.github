@@ -70,6 +70,9 @@ FIX="${TT_FIXTURES_DIR}/expected"
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 @test "schema: malformed JSON signals file FAILS with exit code 2" {
   # Validates that the OSError/JSONDecodeError path returns 2 (file/data error)
   # not 1 (schema validation error). Caught by CodeRabbit review on PR #85.
@@ -79,8 +82,11 @@ FIX="${TT_FIXTURES_DIR}/expected"
   [ "$status" -eq 2 ]
 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 @test "schema: SCHEMA_VERSION constant matches schema file version comment" {
   # CodeRabbit on PR petry-projects/.github#85: enforce that the
   # SCHEMA_VERSION constant in collect-signals.sh stays in lockstep with

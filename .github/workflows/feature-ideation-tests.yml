@@ -113,6 +113,7 @@ jobs:
         if: failure()
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
 =======
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -120,6 +121,9 @@ jobs:
 =======
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
 >>>>>>> 9a694e5 (chore(deps): Bump actions/upload-artifact from 4.6.2 to 7.0.1 (#125))
+=======
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+>>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
         with:
           name: bats-output
           path: |
