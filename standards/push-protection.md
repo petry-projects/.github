@@ -225,24 +225,27 @@ secret-scan:
       with:
         fetch-depth: 0
 
-    - name: Run gitleaks
-      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
-      # then dereference if it points at an annotated tag.
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-      with:
-        args: detect --source . --redact --verbose --exit-code 1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      - name: Install gitleaks
+        # go install verifies the module checksum via sum.golang.org — no
+        # separate SHA verification needed. The go module path is under
+        # zricethezav/ (legacy) even though the GitHub repo moved to gitleaks/.
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Run gitleaks
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          gitleaks detect --source . --redact --verbose --exit-code 1
 ```
 
-> **Organization license requirement:** `gitleaks/gitleaks-action` v2 requires a
-> paid license key for GitHub organization repos. Store the key as an org secret
-> named `GITLEAKS_LICENSE` (Settings → Secrets and variables → Actions → New
-> organization secret). Without it the job will fail with:
-> `🛑 missing gitleaks license`. See [gitleaks.io](https://gitleaks.io) to
-> obtain a license.
+> **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
+> requires a paid license for GitHub organization repos. The CLI (installed via
+> `go install`) is free, uses Go's secure checksum database for integrity
+> verification, and runs the same scan. If you have a license, you can use the
+> action instead — add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to
+> the `env:` block alongside `GITHUB_TOKEN`.
 
 The job MUST:
 
