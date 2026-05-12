@@ -1344,14 +1344,14 @@ append_issue_pr_links() {
   echo '[]' > "$pr_data_file"
 
   local repos_in_issues
-  repos_in_issues=$(jq -r '[.[].repo] | unique[]' "$ISSUES_FILE" 2>/dev/null || echo "")
+  repos_in_issues=$(jq -rn '[inputs | .repo] | unique[]' "$ISSUES_FILE" 2>/dev/null || echo "")
 
   for repo in $repos_in_issues; do
     local repo_prs
     repo_prs=$(gh api graphql \
-      -f owner="$ORG" -f repo="$repo" \
-      -f query='query($owner:String!,$repo:String!){
-        repository(owner:$owner,name:$repo){
+      -f owner="$ORG" -f name="$repo" \
+      -f query='query($owner:String!,$name:String!){
+        repository(owner:$owner,name:$name){
           pullRequests(states:OPEN,first:100){
             nodes{
               number url
@@ -1359,13 +1359,15 @@ append_issue_pr_links() {
             }
           }
         }
-      }' \
-      --jq '[.data.repository.pullRequests.nodes[] | {
-        repo:      $repo,
-        pr_number: .number,
-        pr_url:    .url,
-        closes:    [.closingIssuesReferences.nodes[].number]
-      }]' 2>/dev/null || echo '[]')
+      }' 2>/dev/null \
+      | jq --arg repo "$repo" '[
+          .data.repository.pullRequests.nodes[] | {
+            repo:      $repo,
+            pr_number: .number,
+            pr_url:    .url,
+            closes:    [.closingIssuesReferences.nodes[].number]
+          }
+        ]' 2>/dev/null || echo '[]')
 
     jq -n \
       --argjson existing "$(cat "$pr_data_file")" \
