@@ -3,7 +3,7 @@
 # Repo-level pr-review-mention.yml files are thin caller stubs.
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md
 #
-# Fires when @petry-review-bot is mentioned in a PR comment / review comment,
+# Fires when @donpetry-bot is mentioned in a PR comment / review comment,
 # or when donpetry-bot is assigned as a reviewer on a PR. Dispatches a
 # repository_dispatch event to petry-projects/.github-private to trigger the
 # pr-review agent cascade.
@@ -26,7 +26,7 @@ jobs:
     # Fire when:
     #   (a) donpetry-bot is added as a reviewer on a same-repo PR (fork PRs
     #       don't receive org secrets so we exclude them), OR
-    #   (b) @petry-review-bot is mentioned in a PR comment / review comment.
+    #   (b) @donpetry-bot is mentioned in a PR comment / review comment.
     #
     # Guard each branch against missing fields: requested_reviewer is null for
     # team review requests; comment fields don't exist on pull_request events.
@@ -36,7 +36,7 @@ jobs:
        github.event.requested_reviewer.login == 'donpetry-bot' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' &&
-       contains(github.event.comment.body, '@petry-review-bot') &&
+       contains(github.event.comment.body, '@donpetry-bot') &&
        (github.event_name == 'pull_request_review_comment' ||
         github.event.issue.pull_request != null))
 
