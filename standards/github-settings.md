@@ -425,8 +425,9 @@ When creating a new repository in `petry-projects`:
 
 ## Current Compliance Status
 
-**Repository settings:** All 7 repos are fully compliant as of 2026-04-05
-(remediated via `scripts/apply-repo-settings.sh --all`).
+**Repository settings:** All 7 repos are fully compliant as of 2026-05-08
+(check-suite auto-trigger preferences re-applied for `.github` via API;
+last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 
 **Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
 sweep (now enforced by `check_ruleset_bypass_actors()` and
