@@ -88,10 +88,14 @@ jobs:
 
             ## Cycle
 
-            ### 1. Check out the PR branch
+            ### 1. Check out the PR branch and rebase onto latest main
             ```
             gh pr checkout ${{ github.event.pull_request.number }}
+            git fetch origin ${{ github.event.pull_request.base.ref }}
+            git rebase origin/${{ github.event.pull_request.base.ref }}
+            git push --force-with-lease
             ```
+            If the rebase has conflicts, resolve them, then `git rebase --continue` before pushing.
 
             ### 2. Fetch all open review threads (collect node IDs — you need them to resolve threads later)
             ```
