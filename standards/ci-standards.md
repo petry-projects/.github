@@ -974,6 +974,7 @@ org-level workflows that run across all repositories:
 
 - **Schedule:** Weekly (Monday 9:00 UTC)
 - **Purpose:** Security posture scoring for all public repos
+- **Token Requirements (`ORG_SCORECARD_TOKEN`):** Must be a Fine-Grained Personal Access Token with **Repository access** set to "All repositories" (or specific audit targets). It requires **Administration: Read-only** (to read repository settings like `delete_branch_on_merge`), as well as standard read access to contents, metadata, and issues.
 - **Behavior:** Creates/updates GitHub Issues with findings, auto-closes resolved findings
 - **Skip list:** CII-Best-Practices, Contributors, Fuzzing, Maintained, Packaging, Signed-Releases
 
