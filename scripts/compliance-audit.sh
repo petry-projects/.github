@@ -1015,9 +1015,10 @@ This finding is still open.
       --arg repo "$repo" \
       --arg category "$category" \
       --arg check "$check" \
+      --arg severity "$severity" \
       --arg number "$existing" \
       --arg url "https://github.com/$ORG/$repo/issues/$existing" \
-      '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+      '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
       >> "$ISSUES_FILE"
     return
   fi
@@ -1066,9 +1067,10 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
         --arg repo "$repo" \
         --arg category "$category" \
         --arg check "$check" \
+        --arg severity "$severity" \
         --arg number "$new_issue" \
         --arg url "$issue_url" \
-        '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+        '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
         >> "$ISSUES_FILE"
     fi
   else
@@ -1384,8 +1386,8 @@ HEREDOC
 
   # Iterate checks in severity then alphabetical order
   local checks_ordered
-  checks_ordered=$(jq -r '
-    group_by(.check)
+  checks_ordered=$(jq -rn '[inputs]
+    | group_by(.check)
     | map({check: .[0].check, severity: .[0].severity})
     | sort_by([(if .severity == "error" then 0 else 1 end), .check])
     | .[].check
@@ -1395,7 +1397,7 @@ HEREDOC
     [ -z "$check" ] && continue
 
     local check_issues severity category issue_count
-    check_issues=$(jq -c --arg c "$check" '[.[] | select(.check == $c)] | sort_by(.repo)' "$ISSUES_FILE")
+    check_issues=$(jq -cn --arg c "$check" '[inputs | select(.check == $c)] | sort_by(.repo)' "$ISSUES_FILE")
     severity=$(jq -r '.[0].severity' <<< "$check_issues")
     category=$(jq -r '.[0].category' <<< "$check_issues")
     issue_count=$(jq 'length' <<< "$check_issues")
