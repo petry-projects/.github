@@ -51,7 +51,7 @@ bats test/workflows/feature-ideation/gh-safe.bats
   shellcheck -x collect-signals.sh lint-prompt.sh match-discussions.sh \
                  discussion-mutations.sh lib/*.sh)
 
-# Lint the workflow's direct_prompt block
+# Lint workflow prompt blocks (direct_prompt: and prompt:)
 bash .github/scripts/feature-ideation/lint-prompt.sh
 ```
 
@@ -76,7 +76,7 @@ signals.json is a breaking change and must:
 
 1. Bump `SCHEMA_VERSION` in `collect-signals.sh`.
 2. Update fixtures under `test/workflows/feature-ideation/fixtures/expected/`.
-3. Update Mary's prompt in `feature-ideation.yml` if any field references move.
+3. Update Mary's prompt in `.github/workflows/feature-ideation-reusable.yml` if any field references move.
 
 CI validates every fixture against the schema, and the workflow validates
 the runtime output before handing it to Mary.
