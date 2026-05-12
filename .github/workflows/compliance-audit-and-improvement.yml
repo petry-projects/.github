@@ -7,7 +7,7 @@
 #   Phase 5: Create actionable issues per repo (claude label for agent pickup).
 #   Phase 6: Summary report.
 # Standard: https://github.com/${{ github.repository_owner }}/.github/tree/main/standards
-name: Weekly Compliance & Health Audit
+name: Org Standards Compliance Audit
 
 on:
   schedule:
