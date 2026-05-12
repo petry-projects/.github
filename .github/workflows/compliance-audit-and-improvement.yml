@@ -507,11 +507,24 @@ jobs:
 
             **Deduplication:**
             - Check existing open issues before creating
+            - **Group findings of the same type across repos into a single issue.** For example,
+              if the same compliance check is failing in 5 repos, create ONE issue listing all
+              affected repos — not 5 separate issues. The compliance audit script already creates
+              per-repo issues; your job is to identify systemic patterns and create higher-level
+              issues for them.
             - If a similar issue exists, add a comment with latest findings instead
             - When commenting on existing issues, also ensure the `claude` label is present:
               ```bash
               gh issue edit <number> --repo ${{ github.repository_owner }}/<repo> --add-label claude
               ```
+
+            **Before writing the Phase 6 summary**, gather linked PR data for all issues you
+            created or updated this run, and for all compliance issues from the audit:
+            ```bash
+            gh search prs --owner ${{ github.repository_owner }} --state open \
+              --json number,repository,url,closingIssuesReferences --limit 300
+            ```
+            Store this PR data to populate the "Related PRs" column in the summary.
 
             ## Phase 6: Summary Report
 
@@ -545,9 +558,24 @@ jobs:
             | Existing (updated) | ${{ needs.audit.outputs.issues_existing }} |
             | Removed (resolved) | ${{ needs.audit.outputs.issues_removed }} |
 
-            | Repo | Issue | Severity | Title |
-            |------|-------|----------|-------|
-            | ... | #N | ... | ... |
+            Group by compliance issue type — one subsection per distinct check/finding type,
+            listing every affected repo with a linked issue number and any related open PRs.
+            Render each issue and PR as a markdown hyperlink. For example:
+
+            #### `<check-type>` (`<severity>`)
+            _N repos affected_
+
+            | Repo | Issue | Related PRs |
+            |------|-------|-------------|
+            | [repo-name](https://github.com/owner/repo) | [#42 — Compliance: check-type](issue-url) | [#7](pr-url) |
+            | [other-repo](https://github.com/owner/repo) | [#18 — Compliance: check-type](issue-url) | — |
+
+            Repeat for each distinct check type, errors before warnings, sorted alphabetically
+            within each severity group.
+
+            For issues you created in Phase 5 (health/automation/best-practice issues):
+            list them after compliance issues under a sub-heading "#### Phase 5 Issues".
+            Format: `[#N — Title](url)` grouped by repo, with Related PRs where found.
 
             ### Per-Repo Scorecard
             | Repo | Compliance | CI | Security | PRs | Protection | Score |
