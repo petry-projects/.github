@@ -81,6 +81,10 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
           # yamllint disable rule:line-length
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          # yamllint enable rule:line-length
+          # yamllint disable rule:line-length
           prompt: |
             A reviewer has left a comment on PR #${{ github.event.pull_request.number }} (${{ github.event.pull_request.html_url }}).
 
@@ -99,7 +103,7 @@ jobs:
 
             ### 2. Fetch all open review threads (collect node IDs — you need them to resolve threads later)
             ```
-            gh api graphql -f query='query { repository(owner:"${{ github.repository_owner }}", name:"${{ github.event.repository.name }}") { pullRequest(number:${{ github.event.pull_request.number }}) { reviewThreads(first:100) { nodes { id isResolved comments(first:10) { nodes { path line body author { login } } } } } } } }'
+            gh api graphql -f query='query { repository(owner:"${{ github.repository_owner }}", name:"${{ github.event.repository.name }}") { pullRequest(number:${{ github.event.pull_request.number }}) { reviewThreads(first:250) { nodes { id isResolved comments(first:10) { nodes { path line body author { login } } } } } } } }'
             ```
 
             ### 3. Address each unresolved thread
@@ -110,10 +114,13 @@ jobs:
 
             ### 4. Commit and push all fixes in one commit
             ```
+            git config user.name "claude[bot]"
+            git config user.email "claude[bot]@users.noreply.github.com"
             git add -A
-            git commit -m "fix: address review comments"
+            git diff --cached --quiet || git commit -m "fix: address review comments"
             git push
             ```
+            If there are no staged changes (all open threads needed human input), skip the commit and push.
 
             ### 5. Resolve each thread you addressed via GraphQL (use the node IDs from step 2)
             ```
