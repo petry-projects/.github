@@ -33,6 +33,12 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
+ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
+
+# Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
+ISSUES_ADDED=0
+ISSUES_EXISTING=0
+ISSUES_REMOVED=0
 
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
@@ -1003,6 +1009,7 @@ This finding is still open.
     # Ensure claude label is present on pre-existing issues
     gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
     info "Updated existing issue #$existing in $repo for: $check"
+    ISSUES_EXISTING=$((ISSUES_EXISTING + 1))
     # Record existing issue for umbrella
     jq --null-input \
       --arg repo "$repo" \
@@ -1051,6 +1058,7 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
     local new_issue
     new_issue=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
     info "Created issue #$new_issue in $repo for: $check ($issue_url)"
+    ISSUES_ADDED=$((ISSUES_ADDED + 1))
 
     # Record created issue for umbrella
     if [ -n "$new_issue" ]; then
@@ -1222,6 +1230,7 @@ close_resolved_issues() {
         --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
         2>/dev/null || true
       info "Closed resolved issue #$issue_num in $repo: $issue_title"
+      ISSUES_REMOVED=$((ISSUES_REMOVED + 1))
     fi
   done <<< "$open_issues"
 }
@@ -1420,6 +1429,22 @@ main() {
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi
+
+  # Write issue-management counts
+  printf '{"added":%d,"existing":%d,"removed":%d}\n' \
+    "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" > "$ISSUE_COUNTS_FILE"
+
+  # Append issue-management summary to the human-readable report
+  cat >> "$SUMMARY_FILE" <<HEREDOC
+
+## Issue Management
+
+| Action | Count |
+|--------|-------|
+| Added (new) | $ISSUES_ADDED |
+| Existing (updated) | $ISSUES_EXISTING |
+| Removed (resolved) | $ISSUES_REMOVED |
+HEREDOC
 
   # Output report paths
   echo "findings=$FINDINGS_FILE"
