@@ -30,6 +30,8 @@ jobs:
     #
     # Guard each branch against missing fields: requested_reviewer is null for
     # team review requests; comment fields don't exist on pull_request events.
+    # For comment events we also gate at the job level on author_association so
+    # that the job (and its secrets) never start for external/untrusted actors.
     if: |
       (github.event_name == 'pull_request' &&
        github.event.requested_reviewer != null &&
@@ -37,6 +39,7 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' &&
        contains(github.event.comment.body, '@donpetry-bot') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
        (github.event_name == 'pull_request_review_comment' ||
         github.event.issue.pull_request != null))
 
