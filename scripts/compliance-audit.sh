@@ -224,6 +224,7 @@ detect_ecosystems() {
   tree=$(gh_api "repos/$ORG/$repo/git/trees/HEAD?recursive=1" --jq '.tree[].path' 2>/dev/null || echo "")
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   if grep -qE '(^|/)package\.json$' <<< "$tree"; then
     ECOSYSTEMS+=("npm")
   fi
@@ -234,6 +235,12 @@ detect_ecosystems() {
   fi
   if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  if grep -qE '(^|/)package\.json$' <<< "$tree"; then
+    ECOSYSTEMS+=("npm")
+  fi
+  if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
+>>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
     # Override npm with pnpm if lock file present, or add pnpm directly
     if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
       ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
@@ -241,6 +248,7 @@ detect_ecosystems() {
       ECOSYSTEMS+=("pnpm")
     fi
   fi
+<<<<<<< HEAD
 <<<<<<< HEAD
   if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
     ECOSYSTEMS+=("go")
@@ -265,18 +273,21 @@ detect_ecosystems() {
   fi
 =======
   if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
+=======
+  if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
+>>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
     ECOSYSTEMS+=("go")
   fi
-  if echo "$tree" | grep -qE '(^|/)Cargo\.toml$'; then
+  if grep -qE '(^|/)Cargo\.toml$' <<< "$tree"; then
     ECOSYSTEMS+=("rust")
   fi
-  if echo "$tree" | grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$'; then
+  if grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$' <<< "$tree"; then
     ECOSYSTEMS+=("python")
   fi
-  if echo "$tree" | grep -qE '\.tf$'; then
+  if grep -qE '\.tf$' <<< "$tree"; then
     ECOSYSTEMS+=("terraform")
   fi
-  if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
+  if grep -qE '\.github/workflows/.*\.ya?ml$' <<< "$tree"; then
     ECOSYSTEMS+=("github-actions")
   fi
 <<<<<<< HEAD
@@ -288,8 +299,12 @@ detect_ecosystems() {
   # BMAD Method: detected via either the active install dir (`_bmad/`) or
   # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
   # the other, or both depending on the BMAD workflow stage.
+<<<<<<< HEAD
   if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
 >>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
+=======
+  if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
+>>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
     ECOSYSTEMS+=("bmad-method")
   fi
 >>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
