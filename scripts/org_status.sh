@@ -37,10 +37,14 @@ echo "::endgroup::" >&2
 collect_classify_prs() {
   local owner=$1 repo=$2
 <<<<<<< HEAD
+<<<<<<< HEAD
   local cursor="" all_nodes_ndjson=""
 =======
   local cursor="" all_nodes='[]'
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+  local cursor="" all_nodes_ndjson=""
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
   # cursor="" = first page (pass JSON null); cursor=VALUE = subsequent pages (pass as string)
 
   while true; do
@@ -82,6 +86,7 @@ collect_classify_prs() {
 
     local nodes has_next end_cursor
 <<<<<<< HEAD
+<<<<<<< HEAD
     nodes=$(jq '.data.repository.pullRequests.nodes // []' <<< "$result")
     has_next=$(jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false' <<< "$result")
     end_cursor=$(jq -r '.data.repository.pullRequests.pageInfo.endCursor // ""' <<< "$result")
@@ -95,15 +100,27 @@ collect_classify_prs() {
 
     all_nodes=$(jq -n --argjson a "$all_nodes" --argjson b "$nodes" '$a + $b')
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+    nodes=$(jq '.data.repository.pullRequests.nodes // []' <<< "$result")
+    has_next=$(jq -r '.data.repository.pullRequests.pageInfo.hasNextPage // false' <<< "$result")
+    end_cursor=$(jq -r '.data.repository.pullRequests.pageInfo.endCursor // ""' <<< "$result")
+
+    all_nodes_ndjson+=$(jq -c '.[]' <<< "$nodes")
+    all_nodes_ndjson+=$'\n'
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
     [ "$has_next" = "true" ] && [ -n "$end_cursor" ] || break
     cursor="$end_cursor"
   done
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   jq -cs --arg owner "$owner" --arg repo "$repo" '
 =======
   echo "$all_nodes" | jq --arg owner "$owner" --arg repo "$repo" '
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+  jq -cs --arg owner "$owner" --arg repo "$repo" '
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
     map({
       repo:   ($owner + "/" + $repo),
       number: .number,
@@ -139,6 +156,9 @@ collect_classify_prs() {
         end
       )
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
     })' <<< "$all_nodes_ndjson"
 }
 
@@ -154,6 +174,18 @@ for repo in $ORG_REPOS; do
     ALL_PR_NDJSON+=$(jq -c '.[]' <<< "$prs")
     ALL_PR_NDJSON+=$'\n'
   fi
+<<<<<<< HEAD
+=======
+done
+for repo in $PERSONAL_REPOS; do
+  prs=$(collect_classify_prs "don-petry" "$repo")
+  count=$(jq 'length' <<< "$prs")
+  [ "$count" -gt 0 ] && echo "  don-petry/$repo: $count open PRs" >&2
+  if [ "$count" -gt 0 ]; then
+    ALL_PR_NDJSON+=$(jq -c '.[]' <<< "$prs")
+    ALL_PR_NDJSON+=$'\n'
+  fi
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
 done
 ALL_PRS=$(jq -cs '.' <<< "$ALL_PR_NDJSON")
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
@@ -292,9 +324,18 @@ MERGE_DAILY=$(jq --arg since "$SINCE" --arg today "$TODAY" '
 PERSONAL_MERGES=$(gh search prs --owner=don-petry --merged --merged-at=">=$SINCE" \
   --json number,repository,closedAt --limit 1000 2>/dev/null || echo '[]')
 
+<<<<<<< HEAD
 MERGE_DAILY=$(jq -n --arg since "$SINCE" --arg today "$TODAY" \
   --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+# Write merges to a temp file so subsequent jq calls read from a file descriptor
+# rather than shell arguments — avoids the same ARG_MAX risk at high merge volumes.
+printf '{"org":%s,"personal":%s}\n' "$ORG_MERGES" "$PERSONAL_MERGES" > "$DATA_DIR/merges.json"
+
+MERGE_DAILY=$(jq --arg since "$SINCE" --arg today "$TODAY" '
+  .org as $org | .personal as $personal |
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
   # Build 8-day date list (since through today inclusive)
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   # Capture $date before entering the generator so . refers to the right scope
@@ -320,14 +361,18 @@ MERGE_BY_REPO_DAY=$(jq --arg since "$SINCE" '
 =======
     org:      ([$org[]      | select(.closedAt[:10] == $date)] | length),
     personal: ([$personal[] | select(.closedAt[:10] == $date)] | length)
+<<<<<<< HEAD
   })')
 <<<<<<< HEAD
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
 =======
+=======
+  })' "$DATA_DIR/merges.json")
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
 
 # Per-repo per-day merge counts (for the enhanced merge activity table)
-MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
-  --argjson org "$ORG_MERGES" --argjson personal "$PERSONAL_MERGES" '
+MERGE_BY_REPO_DAY=$(jq --arg since "$SINCE" '
+  .org as $org | .personal as $personal |
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   (($org      | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) +
    ($personal | map({repo: ("don-petry/"      + .repository.name), date: .closedAt[:10]}))) |
@@ -338,12 +383,17 @@ MERGE_BY_REPO_DAY=$(jq -n --arg since "$SINCE" \
       total:   ($items | length),
       by_date: (dates | map(. as $d | {key: $d, value: ([$items[] | select(.date == $d)] | length)}) | from_entries)
     }
+<<<<<<< HEAD
   ) | sort_by(-.total)')
 >>>>>>> d0738f9 (fix(org-status): fix first-table truncation + add per-repo merge activity by day (#184))
+=======
+  ) | sort_by(-.total)' "$DATA_DIR/merges.json")
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
 echo "::endgroup::" >&2
 
 # ── Issues ────────────────────────────────────────────────────────────────────
 echo "::group::Collecting issues" >&2
+<<<<<<< HEAD
 <<<<<<< HEAD
 ISSUES_NDJSON=""
 for repo in $ORG_REPOS; do
@@ -359,27 +409,34 @@ done
 ISSUES_BY_REPO=$(jq -cs '.' <<< "$ISSUES_NDJSON")
 =======
 ISSUES_BY_REPO='[]'
+=======
+ISSUES_NDJSON=""
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
 for repo in $ORG_REPOS; do
   issues=$(gh issue list --repo "petry-projects/$repo" --state open \
     --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
-  count=$(echo "$issues" | jq 'length')
+  count=$(jq 'length' <<< "$issues")
   if [ "$count" -gt 0 ]; then
     echo "  petry-projects/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(jq -c --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
+    ISSUES_NDJSON+=$'\n'
   fi
 done
 for repo in $PERSONAL_REPOS; do
   issues=$(gh issue list --repo "don-petry/$repo" --state open \
     --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
-  count=$(echo "$issues" | jq 'length')
+  count=$(jq 'length' <<< "$issues")
   if [ "$count" -gt 0 ]; then
     echo "  don-petry/$repo: $count open issues" >&2
-    entry=$(echo "$issues" | jq --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}')
-    ISSUES_BY_REPO=$(jq -n --argjson a "$ISSUES_BY_REPO" --argjson b "$entry" '$a + [$b]')
+    ISSUES_NDJSON+=$(jq -c --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
+    ISSUES_NDJSON+=$'\n'
   fi
 done
+<<<<<<< HEAD
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+ISSUES_BY_REPO=$(jq -cs '.' <<< "$ISSUES_NDJSON")
+>>>>>>> 8558fa5 (fix(org-status): avoid ARG_MAX crash with 200+ open PRs (#258))
 echo "::endgroup::" >&2
 
 # ── Discussions ───────────────────────────────────────────────────────────────
