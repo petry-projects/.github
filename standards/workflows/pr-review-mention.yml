@@ -14,10 +14,15 @@
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo.
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   • When publishing a new version of this reusable, also update this template and
 #     open a fanout PR across all caller repos.
 =======
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+#   • When publishing a new version of this reusable, also update this template and
+#     open a fanout PR across all caller repos.
+>>>>>>> 575df99 (fix: pin pr-review-mention reusable to d3d768d SHA (#268))
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # PR Review Mention — thin caller for the org-level reusable.
@@ -40,8 +45,12 @@ jobs:
     permissions:
       pull-requests: write
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
 =======
     uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v1
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+    uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
+>>>>>>> 575df99 (fix: pin pr-review-mention reusable to d3d768d SHA (#268))
     secrets: inherit
