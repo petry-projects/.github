@@ -58,7 +58,21 @@ handle_conflict() {
     return 0
   fi
 
-  echo "  Posting conflict comment and dispatching claude-rebase for $base_branch@$base_sha"
+  echo "  Dispatching claude-rebase for $base_branch@$base_sha and posting conflict comment"
+
+  # Dispatch FIRST: if this fails the sentinel comment is never posted,
+  # so the next auto-rebase run for this base SHA can retry.
+  # repository_dispatch is one of two event types GITHUB_TOKEN IS allowed to
+  # trigger new workflow runs for (the other being workflow_dispatch).
+  gh api "repos/$REPO/dispatches" \
+    -X POST \
+    -f event_type=claude-rebase \
+    -F "client_payload[pr_number]=$pr_number" \
+    -F "client_payload[head_ref]=$head_ref" \
+    -F "client_payload[base_branch]=$base_branch"
+
+  # Post sentinel only after successful dispatch so the idempotency guard
+  # never permanently blocks retries when a prior dispatch failed.
   local body="$sentinel"
   body+=$'\n'"**Auto-rebase failed — merge conflict** — this branch conflicts"
   body+=" with \`$base_branch\` and cannot be updated via the merge strategy."
@@ -69,13 +83,4 @@ handle_conflict() {
   body+=$'\n'"# resolve conflicts per file, then for each commit:"
   body+=$'\n'"git add <resolved-files>"$'\n'"git rebase --continue"$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
   gh pr comment "$pr_number" --repo "$REPO" --body "$body"
-
-  # repository_dispatch is one of two event types that GITHUB_TOKEN IS allowed
-  # to trigger new workflow runs for (the other being workflow_dispatch).
-  gh api "repos/$REPO/dispatches" \
-    -X POST \
-    -f event_type=claude-rebase \
-    -F "client_payload[pr_number]=$pr_number" \
-    -F "client_payload[head_ref]=$head_ref" \
-    -F "client_payload[base_branch]=$base_branch"
 }

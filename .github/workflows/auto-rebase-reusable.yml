@@ -43,15 +43,17 @@ jobs:
       contents: write      # needed for update-branch and repository_dispatch
       pull-requests: write # needed to post comments on PRs
     steps:
-      - name: Checkout repository
+      - name: Checkout petry-projects/.github (for scripts)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: petry-projects/.github
           fetch-depth: 1
       - name: Update behind non-Dependabot PRs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # Always sourced from petry-projects/.github regardless of caller repo.
           # shellcheck source=scripts/auto-rebase.sh
           source scripts/auto-rebase.sh
 
