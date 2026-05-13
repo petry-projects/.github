@@ -42,10 +42,14 @@ permissions:
 
 concurrency:
 <<<<<<< HEAD
+<<<<<<< HEAD
   group: feature-ideation-tests-${{ github.ref }}-${{ github.sha }}
 =======
   group: feature-ideation-tests-${{ github.ref }}
 >>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
+=======
+  group: feature-ideation-tests-${{ github.ref }}-${{ github.sha }}
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
   cancel-in-progress: true
 
 jobs:

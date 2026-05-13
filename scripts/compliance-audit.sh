@@ -1124,6 +1124,9 @@ check_claude_workflow_checkout() {
 
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
 # Check: ci.yml uses SHA-scoped concurrency group
 #
 # Per-ref concurrency groups (`ci-${{ github.ref }}`) with cancel-in-progress
@@ -1157,6 +1160,7 @@ check_ci_concurrency() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Check: Tier 1 centralized workflows must be thin caller stubs pinned to the
 # canonical version tag for their reusable.
 #
@@ -1172,6 +1176,8 @@ check_ci_concurrency() {
 #
 # Array format: "workflow-filename:expected-reusable-basename:version-tag"
 =======
+=======
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
 # Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
 #
 # For each workflow that the org has centralized into a reusable workflow,
@@ -2629,7 +2635,11 @@ main() {
     check_workflow_permissions "$repo"
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
+=======
+    check_claude_workflow_checkout "$repo"
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
 <<<<<<< HEAD

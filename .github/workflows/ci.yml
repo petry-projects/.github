@@ -13,10 +13,14 @@ permissions: {}
 
 concurrency:
 <<<<<<< HEAD
+<<<<<<< HEAD
   group: ci-${{ github.ref }}-${{ github.sha }}
 =======
   group: ci-${{ github.ref }}
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+  group: ci-${{ github.ref }}-${{ github.sha }}
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
   cancel-in-progress: true
 
 jobs:

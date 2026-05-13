@@ -302,6 +302,9 @@ permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
   group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 ```
