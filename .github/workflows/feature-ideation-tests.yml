@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: feature-ideation-tests-${{ github.ref }}
+  group: feature-ideation-tests-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
