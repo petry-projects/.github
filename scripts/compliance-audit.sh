@@ -127,10 +127,10 @@ detect_ecosystems() {
   local tree
   tree=$(gh_api "repos/$ORG/$repo/git/trees/HEAD?recursive=1" --jq '.tree[].path' 2>/dev/null || echo "")
 
-  if echo "$tree" | grep -qE '(^|/)package\.json$'; then
+  if grep -qE '(^|/)package\.json$' <<< "$tree"; then
     ECOSYSTEMS+=("npm")
   fi
-  if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
+  if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
     # Override npm with pnpm if lock file present, or add pnpm directly
     if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
       ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
@@ -138,25 +138,25 @@ detect_ecosystems() {
       ECOSYSTEMS+=("pnpm")
     fi
   fi
-  if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
+  if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
     ECOSYSTEMS+=("go")
   fi
-  if echo "$tree" | grep -qE '(^|/)Cargo\.toml$'; then
+  if grep -qE '(^|/)Cargo\.toml$' <<< "$tree"; then
     ECOSYSTEMS+=("rust")
   fi
-  if echo "$tree" | grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$'; then
+  if grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$' <<< "$tree"; then
     ECOSYSTEMS+=("python")
   fi
-  if echo "$tree" | grep -qE '\.tf$'; then
+  if grep -qE '\.tf$' <<< "$tree"; then
     ECOSYSTEMS+=("terraform")
   fi
-  if echo "$tree" | grep -qE '\.github/workflows/.*\.yml$'; then
+  if grep -qE '\.github/workflows/.*\.ya?ml$' <<< "$tree"; then
     ECOSYSTEMS+=("github-actions")
   fi
   # BMAD Method: detected via either the active install dir (`_bmad/`) or
   # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
   # the other, or both depending on the BMAD workflow stage.
-  if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
+  if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
     ECOSYSTEMS+=("bmad-method")
   fi
 }
@@ -633,6 +633,39 @@ check_claude_workflow_checkout() {
     add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
       "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
       "standards/ci-standards.md#4-claude-code-claudeyml"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: ci.yml uses SHA-scoped concurrency group
+#
+# Per-ref concurrency groups (`ci-${{ github.ref }}`) with cancel-in-progress
+# can leave the HEAD commit without CI results when a rapid push arrives while
+# the previous cancellation is in flight. The standard requires the group to
+# include github.sha so every commit gets its own slot.
+#
+# See standards/ci-standards.md#1-ci-pipeline-ciyml for the rationale.
+# ---------------------------------------------------------------------------
+check_ci_concurrency() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # missing ci.yml is caught by check_required_workflows
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # Only flag workflows that have a concurrency block but are missing github.sha.
+  # Workflows with no concurrency block at all are not flagged here (they may be
+  # intentionally unbounded for reasons outside this check's scope).
+  if echo "$decoded" | grep -qE '^concurrency:'; then
+    if ! echo "$decoded" | grep -qE 'group:.*github\.sha'; then
+      add_finding "$repo" "ci-workflows" "ci-concurrency-missing-sha" "warning" \
+        "The \`ci.yml\` concurrency group does not include \`github.sha\`. A per-ref group with \`cancel-in-progress: true\` can leave the HEAD commit with no CI results when pushes arrive in quick succession. Update to: \`group: ci-\${{ github.ref }}-\${{ github.sha }}\`." \
+        "standards/ci-standards.md#1-ci-pipeline-ciyml"
+    fi
   fi
 }
 
@@ -1374,6 +1407,7 @@ main() {
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
+    check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
