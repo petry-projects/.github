@@ -22,13 +22,15 @@
 # Failure modes handled gracefully:
 #   - without `workflows` permission (403): posts an idempotent comment asking
 #     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
-#   - merge conflict (422): posts an idempotent comment with sentinel
-#     <!-- auto-rebase-conflict -->, which triggers the claude-rebase job in
-#     claude-code-reusable.yml to attempt an agentic rebase with conflict
-#     resolution. If Claude's rebase also fails, it posts a summary and a
-#     human must intervene.
+#   - merge conflict (422): posts a SHA-keyed sentinel comment and fires a
+#     repository_dispatch event (type: claude-rebase). The sentinel is keyed to
+#     the base-branch HEAD SHA, so each new merge to the base branch resets the
+#     gate and allows Claude another attempt on the next auto-rebase run.
+#     Note: repository_dispatch is one of only two event types that GITHUB_TOKEN
+#     is permitted to trigger workflow runs for (the other being workflow_dispatch).
 #
 # No secrets required — uses github.token only. No auto-merge logic.
+# Conflict-handling logic lives in scripts/auto-rebase.sh for testability.
 name: Auto-rebase non-Dependabot PRs (Reusable)
 
 on:
@@ -38,14 +40,21 @@ jobs:
   auto-rebase:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # needed for update-branch (may touch .github/workflows/)
+      contents: write      # needed for update-branch and repository_dispatch
       pull-requests: write # needed to post comments on PRs
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
       - name: Update behind non-Dependabot PRs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # shellcheck source=scripts/auto-rebase.sh
+          source scripts/auto-rebase.sh
+
           # Find open non-Dependabot PRs from the same repo (exclude forks)
           PRS=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
             --jq '.[] | select(.user.login != "dependabot[bot]") | select(.head.repo != null) | select(.head.repo.full_name == .base.repo.full_name) | "\(.number) \(.head.ref)"')
@@ -79,53 +88,9 @@ jobs:
               echo "  Update failed: $UPDATE_OUTPUT"
 
               if echo "$UPDATE_OUTPUT" | grep -qF "without \`workflows\` permission"; then
-                # GitHub blocks update-branch when merging the base would add
-                # .github/workflows/ changes and the token lacks the 'workflows'
-                # permission. Ask the author to rebase manually.
-                #
-                # Idempotent: skip if sentinel comment already exists.
-                SENTINEL="<!-- auto-rebase-blocked -->"
-                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
-                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
-                  echo "  Skipping — blocked comment already posted"
-                else
-                  echo "  Posting manual-rebase request (workflows permission missing)"
-                  BLOCKED_BODY="<!-- auto-rebase-blocked -->"
-                  BLOCKED_BODY+=$'\n'"**Auto-rebase blocked** — the base branch contains \`.github/workflows/\` changes"
-                  BLOCKED_BODY+=" that require the \`workflows\` permission to merge into this branch,"
-                  BLOCKED_BODY+=" but the auto-rebase workflow's token does not have that permission."
-                  BLOCKED_BODY+=$'\n\n'"Please rebase this branch manually:"
-                  BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
-                  BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
-                  BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
-                fi
+                handle_permissions_block "$PR_NUMBER" "$BASE_BRANCH"
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
-                # Merge conflict — the merge strategy can't resolve it automatically.
-                # Post an idempotent sentinel comment that triggers the claude-rebase
-                # job in claude-code-reusable.yml to attempt an agentic rebase.
-                #
-                # Idempotent: skip if sentinel comment already exists (prevents
-                # re-triggering Claude on every subsequent auto-rebase run).
-                SENTINEL="<!-- auto-rebase-conflict -->"
-                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
-                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
-                  echo "  Skipping — conflict comment already posted"
-                else
-                  echo "  Posting conflict comment (triggers claude-rebase job)"
-                  CONFLICT_BODY="<!-- auto-rebase-conflict -->"
-                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch conflicts"
-                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` and cannot be updated via the merge strategy."
-                  CONFLICT_BODY+=$'\n\n'"Claude will attempt an agentic rebase with conflict resolution."
-                  CONFLICT_BODY+=" If that also fails, manual intervention is needed:"
-                  CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
-                  CONFLICT_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
-                  CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
-                  CONFLICT_BODY+=$'\n'"git add ."$'\n'"git rebase --continue"$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
-                fi
+                handle_conflict "$PR_NUMBER" "$HEAD_REF" "$BASE_BRANCH"
               else
                 echo "  Warning: failed to update PR #$PR_NUMBER — $UPDATE_OUTPUT"
               fi

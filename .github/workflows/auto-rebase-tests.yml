@@ -1,0 +1,55 @@
+# Quality gates for the auto-rebase workflow and its supporting scripts.
+#
+# Triggered on any PR that touches:
+#   - .github/workflows/auto-rebase*.yml
+#   - scripts/auto-rebase.sh
+#   - test/workflows/auto-rebase/**
+#
+# Gates (all must pass before merge):
+#   1. shellcheck — static analysis of scripts/auto-rebase.sh
+#   2. bats       — unit test suite for conflict-handling logic
+
+name: Auto-Rebase Tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/auto-rebase*.yml'
+      - 'scripts/auto-rebase.sh'
+      - 'test/workflows/auto-rebase/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/auto-rebase*.yml'
+      - 'scripts/auto-rebase.sh'
+      - 'test/workflows/auto-rebase/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-rebase-tests-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ShellCheck and bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Install bats and shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats shellcheck
+
+      - name: ShellCheck
+        run: shellcheck --severity=warning scripts/auto-rebase.sh
+
+      - name: Run bats suite
+        run: bats --print-output-on-failure test/workflows/auto-rebase/

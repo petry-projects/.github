@@ -347,18 +347,22 @@ jobs:
             4. Check CI status. If CI fails, read the logs, fix the issues, and push again. Repeat until CI passes.
             5. When CI is green, all actionable review comments are resolved, and the PR is ready, read the CODEOWNERS file and leave a comment tagging the relevant code owners to review and merge.
 
-  # Automation mode: agentic rebase — triggered when auto-rebase-reusable.yml posts
-  # a conflict sentinel comment (<!-- auto-rebase-conflict -->) on a PR.
+  # Automation mode: agentic rebase — triggered by a repository_dispatch event
+  # (type: claude-rebase) fired by auto-rebase-reusable.yml when a conflict
+  # cannot be resolved via the merge strategy.
   # Checks out the branch, rebases onto the base branch, resolves conflicts using
   # best-effort judgment, and pushes. Posts a summary comment on completion.
+  #
+  # Note: repository_dispatch is one of only two event types that GITHUB_TOKEN
+  # is permitted to trigger new workflow runs for. The caller (auto-rebase.yml
+  # in each repo) must include `repository_dispatch: types: [claude-rebase]`
+  # in its `on:` block for this job to receive the event.
   claude-rebase:
     if: >-
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request != null &&
-      github.event.comment.user.login == 'github-actions[bot]' &&
-      contains(github.event.comment.body, '<!-- auto-rebase-conflict -->')
+      github.event_name == 'repository_dispatch' &&
+      github.event.action == 'claude-rebase'
     concurrency:
-      group: claude-rebase-${{ github.event.issue.number }}
+      group: claude-rebase-${{ github.event.client_payload.pr_number }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -386,35 +390,46 @@ jobs:
           # yamllint enable rule:line-length
           # yamllint disable rule:line-length
           prompt: |
-            PR #${{ github.event.issue.number }} has a merge conflict that the auto-rebase workflow could not resolve using the fast-forward merge strategy. You've been assigned to resolve it via a rebase.
+            PR #${{ github.event.client_payload.pr_number }} has a merge conflict that the auto-rebase workflow could not resolve using the fast-forward merge strategy. You've been assigned to resolve it via a rebase.
 
             ## Your task
 
-            ### 1. Check out the PR branch
+            ### 1. Configure git identity and check out the PR branch
             ```
-            gh pr checkout ${{ github.event.issue.number }}
+            git config user.name "claude[bot]"
+            git config user.email "claude[bot]@users.noreply.github.com"
+            gh pr checkout ${{ github.event.client_payload.pr_number }}
             ```
 
             ### 2. Rebase onto the base branch
             ```
             git fetch origin
-            BASE=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
+            BASE=$(gh pr view ${{ github.event.client_payload.pr_number }} --json baseRefName -q .baseRefName)
             git rebase origin/$BASE
             ```
 
             ### 3. Resolve conflicts intelligently
-            For each conflicted file, use judgment:
-            - **Workflow YAML / action pins**: if main already pins the same action to a newer SHA, accept main's version (`git checkout --ours <file>` — during a rebase, `--ours` is main's side). If the PR's pin is the newer or correct one, keep it (`git checkout --theirs <file>`).
-            - **`.gitignore`, config files**: merge both sides — preserve all unique entries from both.
-            - **Application code**: carefully merge both sides. If the conflict is too complex to resolve safely, abort (see below).
-            - After resolving each file: `git add <file>`, then `git rebase --continue`.
+            During a rebase, conflicts are resolved commit-by-commit. For each stopped commit:
+
+            a. For every conflicted file in this commit, resolve it using judgment:
+               - **Workflow YAML / action pins**: if main already pins the same action to a newer SHA, accept main's version (`git checkout --ours <file>` — during a rebase, `--ours` is the target branch i.e. main). If the PR's pin is newer or correct, keep it (`git checkout --theirs <file>`).
+               - **`.gitignore`, config files**: merge both sides — preserve all unique entries from both.
+               - **Application code**: carefully merge both sides. If too complex to resolve safely, abort (see below).
+
+            b. After **all** conflicted files for this commit are resolved, stage them all at once, then continue:
+               ```
+               git add <file1> <file2> ...   # stage every resolved file for this commit
+               git rebase --continue          # move to the next commit (run once per commit, not per file)
+               ```
+
+            c. Repeat steps a–b for each subsequent commit that has conflicts.
 
             ### 4. Push on success
             ```
             git push --force-with-lease
             ```
 
-            ### 5. Post a summary comment on PR #${{ github.event.issue.number }}
+            ### 5. Post a summary comment on PR #${{ github.event.client_payload.pr_number }}
             Summarize:
             - Which files had conflicts and how each was resolved
             - The rebase outcome (success or failure)
@@ -423,7 +438,7 @@ jobs:
             ## If rebase cannot be completed safely
             If conflicts involve complex application code that requires human judgment:
             1. `git rebase --abort`
-            2. Post a comment on PR #${{ github.event.issue.number }} explaining:
+            2. Post a comment on PR #${{ github.event.client_payload.pr_number }} explaining:
                - Which specific files conflict
                - Why the conflict needs human resolution
                - The exact conflict markers so the author can find them quickly

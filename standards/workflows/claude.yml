@@ -52,6 +52,8 @@ on:
     types: [labeled]
   check_run:
     types: [completed]
+  repository_dispatch:
+    types: [claude-rebase]
 
 permissions: {}
 
