@@ -206,10 +206,14 @@ reusable, not a local edit.
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
 =======
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@petry-review-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+>>>>>>> d3d768d (fix: rename @petry-review-bot mention trigger to @donpetry-bot (#266))
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -1299,7 +1303,7 @@ customisation.
 =======
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
-Triggers the pr-review agent whenever `@petry-review-bot` is mentioned in a PR
+Triggers the pr-review agent whenever `@donpetry-bot` is mentioned in a PR
 comment or review comment, or when `donpetry-bot` is assigned as a reviewer.
 A copy-paste ready template is available at [`standards/workflows/pr-review-mention.yml`](workflows/pr-review-mention.yml).
 
