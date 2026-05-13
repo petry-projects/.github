@@ -422,8 +422,21 @@ PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
 # --disallowedTools: block all action tools so Claude cannot act on untrusted PR/issue content
+# --output-format json: capture the full final result as JSON and extract the text with jq.
+#   In text mode, output preceding disallowed tool call attempts is silently dropped; json
+#   mode always includes the complete response in .result regardless of tool call filtering.
+# Write to a temp file to avoid large bash variable assignments.
 # Pipe prompt via stdin rather than a shell argument to avoid ARG_MAX (~1MB) with large orgs
+REPORT_JSON="$DATA_DIR/report.json"
 echo "Generating report with Claude..." >&2
 claude -p \
+  --output-format json \
   --disallowedTools "Bash,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit" \
-  < "$DATA_DIR/prompt.txt"
+  < "$DATA_DIR/prompt.txt" > "$REPORT_JSON"
+if ! jq -e '.result' "$REPORT_JSON" > /dev/null 2>&1; then
+  echo "ERROR: claude returned no .result field — raw output:" >&2
+  cat "$REPORT_JSON" >&2
+  exit 1
+fi
+echo "Claude response: $(jq -r '.stop_reason // "unknown"') stop, cost \$$(jq -r '.cost_usd // "?"' "$REPORT_JSON")" >&2
+jq -r '.result' "$REPORT_JSON"
