@@ -227,8 +227,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
 >>>>>>> b7c5bc6 (chore(deps): Bump actions/checkout from 4.2.2 to 6.0.2 (#21))
 
+<<<<<<< HEAD
       - uses: dtolnay/rust-toolchain@stable
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+>>>>>>> 6f46503 (fix(ci): secret-scan job + dtolnay SHA pin (.github repo — compliance #276) (#277))
 
       - name: Install cargo-audit
         run: cargo install cargo-audit@0.22.1 --locked
