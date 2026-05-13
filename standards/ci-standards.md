@@ -50,7 +50,7 @@ reusable, not a local edit.
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
-| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@petry-review-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -516,7 +516,7 @@ On each run the workflow:
 
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
-Triggers the pr-review agent whenever `@petry-review-bot` is mentioned in a PR
+Triggers the pr-review agent whenever `@donpetry-bot` is mentioned in a PR
 comment or review comment, or when `donpetry-bot` is assigned as a reviewer.
 A copy-paste ready template is available at [`standards/workflows/pr-review-mention.yml`](workflows/pr-review-mention.yml).
 
