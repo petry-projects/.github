@@ -364,9 +364,7 @@ Per-repo-per-day table using Merge Activity — Per-Repo Per-Day data (omit repo
 - Repo as link: [owner/repo](https://github.com/owner/repo)
 - Last column is Total (bold the number)
 - Add a **TOTAL** row summing each date column and grand total
-Daily org-level summary table (include zero rows):
-| Date | petry-projects | Grand Total |
-Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
+Grand total and trend sentence (immediately after the per-repo table). Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
 
 ---
 
@@ -433,13 +431,10 @@ claude -p \
   --output-format json \
   --disallowedTools "Bash,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit" \
   < "$DATA_DIR/prompt.txt" > "$REPORT_JSON"
-echo "=== RAW JSON first 800 chars ===" >&2
-head -c 800 "$REPORT_JSON" >&2
-echo "" >&2
-echo "=== Lines in JSON file: $(wc -l < "$REPORT_JSON") ===" >&2
-jq '{type,subtype,is_error,stop_reason,terminal_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),permission_denials_len:((.permission_denials//[])|length)}' "$REPORT_JSON" >&2 2>&1 || echo "jq parse error on JSON file" >&2
+echo "Claude: stop=$(jq -r '.stop_reason // "?"' "$REPORT_JSON"), turns=$(jq -r '.num_turns // "?"' "$REPORT_JSON"), cost=\$$(jq -r '.total_cost_usd // "?"' "$REPORT_JSON"), result_len=$(jq -r '(.result//"") | length' "$REPORT_JSON")" >&2
 if ! jq -e '.result' "$REPORT_JSON" > /dev/null 2>&1; then
-  echo "ERROR: claude returned no .result field" >&2
+  echo "ERROR: claude returned no .result field — raw output:" >&2
+  cat "$REPORT_JSON" >&2
   exit 1
 fi
 jq -r '.result' "$REPORT_JSON"
