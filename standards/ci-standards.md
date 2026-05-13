@@ -111,9 +111,22 @@ on:
 permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 ```
+
+> **Why SHA-scoped concurrency?** Per-ref groups (`ci-${{ github.ref }}`) with
+> `cancel-in-progress: true` create a race: if the final push arrives while the
+> previous cancellation is in flight, GitHub may not fire a new
+> `pull_request: synchronize` event, leaving the HEAD commit with no CI results
+> and blocking the PR indefinitely. Scoping the group to the commit SHA gives
+> every commit its own concurrency slot so CI always runs to completion.
+>
+> **Why keep `cancel-in-progress: true`?** With SHA-scoped groups, no two
+> pushes share a slot, so the setting is a no-op in practice. It is kept
+> explicitly to signal intent — if someone later changes the group formula back
+> to a per-ref pattern, the cancellation behaviour they expect is already
+> declared and will take effect immediately without a separate edit.
 
 ### 2. CodeQL Analysis (GitHub-managed default setup)
 
