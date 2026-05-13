@@ -14,8 +14,7 @@ trap 'rm -rf "$DATA_DIR"' EXIT
 # ── Repo Discovery ────────────────────────────────────────────────────────────
 echo "::group::Discovering repos" >&2
 ORG_REPOS=$(gh repo list petry-projects --json name --limit 1000 | jq -r '.[].name' | sort)
-PERSONAL_REPOS=$(gh repo list don-petry --json name --limit 1000 | jq -r '.[].name' | sort)
-echo "petry-projects: $(echo "$ORG_REPOS" | wc -l | tr -d ' ') repos  |  don-petry: $(echo "$PERSONAL_REPOS" | wc -l | tr -d ' ') repos" >&2
+echo "petry-projects: $(echo "$ORG_REPOS" | wc -l | tr -d ' ') repos" >&2
 echo "::endgroup::" >&2
 
 # ── PR Collection + Classification ───────────────────────────────────────────
@@ -108,15 +107,6 @@ for repo in $ORG_REPOS; do
     ALL_PR_NDJSON+=$'\n'
   fi
 done
-for repo in $PERSONAL_REPOS; do
-  prs=$(collect_classify_prs "don-petry" "$repo")
-  count=$(jq 'length' <<< "$prs")
-  [ "$count" -gt 0 ] && echo "  don-petry/$repo: $count open PRs" >&2
-  if [ "$count" -gt 0 ]; then
-    ALL_PR_NDJSON+=$(jq -c '.[]' <<< "$prs")
-    ALL_PR_NDJSON+=$'\n'
-  fi
-done
 ALL_PRS=$(jq -cs '.' <<< "$ALL_PR_NDJSON")
 echo "Total open PRs: $(echo "$ALL_PRS" | jq 'length')" >&2
 echo "::endgroup::" >&2
@@ -180,30 +170,26 @@ ISSUE_PR_MAP=$(echo "$ALL_PRS" | jq '
 echo "::group::Collecting merge activity" >&2
 ORG_MERGES=$(gh search prs --owner=petry-projects --merged --merged-at=">=$SINCE" \
   --json number,repository,closedAt --limit 1000 2>/dev/null || echo '[]')
-PERSONAL_MERGES=$(gh search prs --owner=don-petry --merged --merged-at=">=$SINCE" \
-  --json number,repository,closedAt --limit 1000 2>/dev/null || echo '[]')
 
 # Write merges to a temp file so subsequent jq calls read from a file descriptor
 # rather than shell arguments — avoids the same ARG_MAX risk at high merge volumes.
-printf '{"org":%s,"personal":%s}\n' "$ORG_MERGES" "$PERSONAL_MERGES" > "$DATA_DIR/merges.json"
+printf '{"org":%s}\n' "$ORG_MERGES" > "$DATA_DIR/merges.json"
 
 MERGE_DAILY=$(jq --arg since "$SINCE" --arg today "$TODAY" '
-  .org as $org | .personal as $personal |
+  .org as $org |
   # Build 8-day date list (since through today inclusive)
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
   # Capture $date before entering the generator so . refers to the right scope
   dates | map(. as $date | {
     date: $date,
-    org:      ([$org[]      | select(.closedAt[:10] == $date)] | length),
-    personal: ([$personal[] | select(.closedAt[:10] == $date)] | length)
+    org: ([$org[] | select(.closedAt[:10] == $date)] | length)
   })' "$DATA_DIR/merges.json")
 
 # Per-repo per-day merge counts (for the enhanced merge activity table)
 MERGE_BY_REPO_DAY=$(jq --arg since "$SINCE" '
-  .org as $org | .personal as $personal |
+  .org as $org |
   def dates: [range(8) | ($since | strptime("%Y-%m-%d") | mktime) + (. * 86400) | strftime("%Y-%m-%d")];
-  (($org      | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) +
-   ($personal | map({repo: ("don-petry/"      + .repository.name), date: .closedAt[:10]}))) |
+  ($org | map({repo: ("petry-projects/" + .repository.name), date: .closedAt[:10]})) |
   sort_by(.repo) | group_by(.repo) | map(
     . as $items |
     {
@@ -224,16 +210,6 @@ for repo in $ORG_REPOS; do
   if [ "$count" -gt 0 ]; then
     echo "  petry-projects/$repo: $count open issues" >&2
     ISSUES_NDJSON+=$(jq -c --arg repo "petry-projects/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
-    ISSUES_NDJSON+=$'\n'
-  fi
-done
-for repo in $PERSONAL_REPOS; do
-  issues=$(gh issue list --repo "don-petry/$repo" --state open \
-    --json number,title,createdAt,labels,url --limit 1000 2>/dev/null || echo '[]')
-  count=$(jq 'length' <<< "$issues")
-  if [ "$count" -gt 0 ]; then
-    echo "  don-petry/$repo: $count open issues" >&2
-    ISSUES_NDJSON+=$(jq -c --arg repo "don-petry/$repo" '{repo: $repo, count: length, issues: .}' <<< "$issues")
     ISSUES_NDJSON+=$'\n'
   fi
 done
@@ -287,11 +263,11 @@ ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq --argjson limit "$ISSUE_LIM
   })')
 
 cat > "$DATA_DIR/prompt.txt" << PROMPT
-Generate a daily GitHub org status report for $TODAY.
+Generate a daily GitHub org status report for petry-projects on $TODAY.
 
 Use ONLY the data below. Output ONLY the markdown report — no preamble, no commentary.
 
-CRITICAL: You MUST output ALL sections listed in REPORT FORMAT, in order. Do NOT skip or abbreviate any section. The PR summary table MUST appear first.
+CRITICAL: You MUST output ALL sections listed in REPORT FORMAT, in order. Do NOT skip or abbreviate any section.
 
 ---
 
@@ -312,7 +288,7 @@ $(echo "$MERGE_DAILY" | jq -c '.')
 ### Merge Activity — Per-Repo Per-Day (repo, total, by_date map keyed by YYYY-MM-DD)
 $(echo "$MERGE_BY_REPO_DAY" | jq -c '.')
 
-### Open Issues by Repo (each issue has url field; truncated:true means more exist beyond the 25 shown)
+### Open Issues by Repo (each issue has url field; truncated:true means more exist beyond the $ISSUE_LIMIT shown)
 $(echo "$ISSUES_BY_REPO_TRIMMED" | jq -c '.')
 
 ### Open Discussions (each discussion has url field)
@@ -325,7 +301,35 @@ $(echo "$DISCUSSIONS" | jq -c '.')
 Begin the report with this exact line (replace nothing):
 @org-leads
 
-Then produce these sections in order. IMPORTANT: output each \`##\` section header before its table content — do NOT skip any section header or table header row.
+Then produce ALL of these sections in EXACTLY this order. Output each \`##\` section header before its content — do NOT skip any header, table header row, or section.
+
+---
+
+### \`## Org Summary — $TODAY\`
+
+A single compact table with one row per metric:
+| Metric | Value |
+|---|---|
+- Total open PRs — sum all repos
+- PRs needing rebase — sum needs_rebase across all repos
+- Total open issues — sum all repos
+- PR merges (last 8 days) — sum .org across all dates in Merge Activity — Daily Counts
+- Open discussions — count all discussions
+
+Then immediately after the table, a mermaid pie chart of open PRs by category (use the org-wide totals):
+\`\`\`mermaid
+pie title Open PRs by Status
+    "Awaiting Review" : <N>
+    "CI Failing" : <N>
+    "CI Pending" : <N>
+    "Changes Requested" : <N>
+    "Approved" : <N>
+    "Draft" : <N>
+    "No CI / No Policy" : <N>
+\`\`\`
+Replace each <N> with the actual org-wide count for that category. Omit zero-count categories from the pie chart.
+
+---
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
 (Replace N with the actual total count.)
@@ -339,7 +343,32 @@ Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the hea
 |---|---|---|---|---|---|---|---|---|---|
 - Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
 - Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
-- Needs Rebase column: render the \`needs_rebase\` count from the data. If the count is 0 render —. If > 0 render the number followed by 🔄 (e.g. \`3 🔄\`).
+- Needs Rebase column: render the \`needs_rebase\` count. If 0 render —. If > 0 render the number followed by 🔄 (e.g. \`3 🔄\`).
+
+---
+
+### \`## PR Merge Activity — Last 8 Days\`
+A mermaid bar chart of daily org merge counts (use Merge Activity — Daily Counts):
+\`\`\`mermaid
+xychart-beta
+    title "petry-projects Merges — Last 8 Days"
+    x-axis [<comma-separated Mon-DD date labels>]
+    y-axis "Merges"
+    bar [<comma-separated daily org counts>]
+\`\`\`
+
+Per-repo-per-day table using Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
+| Repo | Mon-DD | … | Total |
+- One column per date in chronological order (all 8 dates)
+- Date headers: short format Mon-DD (e.g. Apr-26)
+- Repo as link: [owner/repo](https://github.com/owner/repo)
+- Last column is Total (bold the number)
+- Add a **TOTAL** row summing each date column and grand total
+Daily org-level summary table (include zero rows):
+| Date | petry-projects | Grand Total |
+Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
+
+---
 
 ### \`## Open PRs — Needs Human Review\`
 Full table for PRs with needsHumanReview == true:
@@ -349,6 +378,8 @@ Full table for PRs with needsHumanReview == true:
 - CI: PASS (SUCCESS) / FAIL (FAILURE or ERROR) / PENDING / N/A (null)
 If none: _none_
 
+---
+
 ### \`## Open PRs — Automation (Dependency Bumps)\`
 Counts only per repo (dep_bumps > 0):
 | Repo | # Dep PRs |
@@ -356,30 +387,22 @@ Counts only per repo (dep_bumps > 0):
 - Repo as link: [owner/repo](https://github.com/owner/repo)
 If none: _none_
 
+---
+
 ### \`## Open Issues (N total)\`
 Render as a per-repo subsection list (NOT a single flat table). For each repo with issues, in the order provided:
 
 \`### [owner/repo](https://github.com/owner/repo) (N issues)\`
 - If truncated:true, replace the suffix with " (showing $ISSUE_LIMIT of N issues)".
 
-Then a small table (Repo column omitted — it's in the heading):
+Then a table (Repo column omitted — it's in the heading):
 | Issue | Opened | Labels | Linked PR |
 |---|---|---|---|
 - Issue cell: single markdown link combining number and title, e.g. \`[#123 — Compliance: foo](url)\`
 - Opened = createdAt date only (YYYY-MM-DD)
 - Linked PR: look up "owner/repo#N" in the Issue→Linked PR Map; if found render as [#M](pr_url); if multiple, comma-separate; if none render —
 
-### \`## PR Merge Activity — Last 8 Days\`
-Per-repo-per-day table using the Merge Activity — Per-Repo Per-Day data (omit repos with 0 total):
-| Repo | Mon-DD | Mon-DD | … | Total |
-- One column per date in chronological order (all 8 dates, even if 0 across all repos)
-- Date headers: short format Mon-DD (e.g. Apr-26)
-- Repo as link: [owner/repo](https://github.com/owner/repo)
-- Last column is Total (bold the number)
-- Add a **TOTAL** row summing each date column and grand total
-Daily org-level summary table (include zero rows):
-| Date | petry-projects | don-petry | Grand Total |
-Grand total and trend sentence. Trend: Increasing if avg(last 3 days) > avg(first 3 days), Decreasing if opposite, Flat otherwise.
+---
 
 ### \`## Open Discussions\`
 | Repo | Discussion | Opened | Replies |
@@ -394,6 +417,7 @@ OUTPUT CONTRACT
 - Section headers include total counts: \`## Open Issues (47 total)\`
 - Empty sections show _none_, never omit them
 - Every item with a url must be rendered as a markdown hyperlink
+- Output sections in EXACTLY the order listed above — do not reorder them
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
