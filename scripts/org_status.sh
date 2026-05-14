@@ -374,7 +374,7 @@ Grand total and trend sentence (immediately after the per-repo table). Trend: In
 ---
 
 ### \`## Open PRs — Needs Human Review\`
-Full table for PRs with needsHumanReview == true:
+Full table for PRs with needsHumanReview == true, sorted by Opened ascending (oldest first):
 | Repo | PR | Opened | CI | Approvals |
 |---|---|---|---|---|
 - PR cell: single markdown link combining number and title, e.g. \`[#42 — Fix the thing](url)\`
