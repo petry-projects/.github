@@ -50,6 +50,7 @@ jobs:
       - name: Update behind non-Dependabot PRs
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          HAS_PAT: ${{ secrets.GH_PAT_WORKFLOWS != '' }}
           REPO: ${{ github.repository }}
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
@@ -126,9 +127,14 @@ jobs:
                 CONFLICT_BODY="<!-- auto-rebase-conflict -->"
                 CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
                 CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
-                CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
-                CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
-                CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
+                if [[ "$HAS_PAT" == "true" ]]; then
+                  CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
+                  CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
+                  CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
+                else
+                  CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
+                  CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
+                fi
                 CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                 CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
                 CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"

@@ -349,10 +349,12 @@ jobs:
 
   # Automation mode: agentic rebase — resolve conflicts when auto-rebase fails with a merge conflict (422)
   claude-rebase:
+    # Trigger on the sentinel comment text alone; the login check is omitted
+    # because when GH_PAT_WORKFLOWS is used the comment author is the PAT
+    # owner, not 'github-actions[bot]'.
     if: >-
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
-      github.event.comment.user.login == 'github-actions[bot]' &&
       contains(github.event.comment.body, '<!-- auto-rebase-conflict -->')
     concurrency:
       group: claude-rebase-${{ github.event.issue.number }}
@@ -372,7 +374,7 @@ jobs:
           TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
         run: |
           if [[ -z "$TOKEN" ]]; then
-            echo "::error::GH_PAT_WORKFLOWS is required for claude-rebase. Pushes made with GITHUB_TOKEN do not trigger CI workflow runs (GitHub limitation), which would leave the PR without checks after rebase. Configure this secret to enable agentic rebase."
+            echo "::error::GH_PAT_WORKFLOWS is required — GITHUB_TOKEN pushes skip CI. Set this secret to enable agentic rebase."
             exit 1
           fi
       - name: Checkout repository
@@ -425,9 +427,16 @@ jobs:
 
             **Workflow YAML files (`.github/workflows/*.yml`) — action pin conflicts:**
             - Read both versions (ours = base branch, theirs = PR branch).
-            - If the conflict is a pinned SHA/tag for a `uses:` line, compare versions and accept the newer pin.
+            - If the conflict is a pinned SHA/tag for a `uses:` line, you MUST determine
+              which side is newer via the GitHub API before choosing a side:
+              ```
+              gh api repos/{owner}/{repo}/git/refs/tags/{tag}   # resolve tag → SHA
+              gh api repos/{owner}/{repo}/git/ref/heads/{branch} # resolve branch → SHA
+              ```
+              Compare the resolved SHAs and accept the newer pin.
             - When the base branch has a newer or equal version, prefer the base branch (`git checkout --ours -- <file>`).
             - When the PR branch has a provably newer pin, keep it (`git checkout --theirs -- <file>`).
+            - If the version cannot be determined via the API, treat it as ambiguous and abort (step 7b).
             - After resolving each file: `git add <file>`, then `git rebase --continue`.
 
             **All other files:**
