@@ -643,6 +643,39 @@ check_claude_workflow_checkout() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: ci.yml uses SHA-scoped concurrency group
+#
+# Per-ref concurrency groups (`ci-${{ github.ref }}`) with cancel-in-progress
+# can leave the HEAD commit without CI results when a rapid push arrives while
+# the previous cancellation is in flight. The standard requires the group to
+# include github.sha so every commit gets its own slot.
+#
+# See standards/ci-standards.md#1-ci-pipeline-ciyml for the rationale.
+# ---------------------------------------------------------------------------
+check_ci_concurrency() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # missing ci.yml is caught by check_required_workflows
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # Only flag workflows that have a concurrency block but are missing github.sha.
+  # Workflows with no concurrency block at all are not flagged here (they may be
+  # intentionally unbounded for reasons outside this check's scope).
+  if echo "$decoded" | grep -qE '^concurrency:'; then
+    if ! echo "$decoded" | grep -qE 'group:.*github\.sha'; then
+      add_finding "$repo" "ci-workflows" "ci-concurrency-missing-sha" "warning" \
+        "The \`ci.yml\` concurrency group does not include \`github.sha\`. A per-ref group with \`cancel-in-progress: true\` can leave the HEAD commit with no CI results when pushes arrive in quick succession. Update to: \`group: ci-\${{ github.ref }}-\${{ github.sha }}\`." \
+        "standards/ci-standards.md#1-ci-pipeline-ciyml"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
 #
 # For each workflow that the org has centralized into a reusable workflow,
@@ -1503,6 +1536,7 @@ main() {
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     check_claude_workflow_checkout "$repo"
+    check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"

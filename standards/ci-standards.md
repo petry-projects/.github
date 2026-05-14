@@ -50,7 +50,7 @@ reusable, not a local edit.
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
-| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@petry-review-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -111,9 +111,22 @@ on:
 permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 ```
+
+> **Why SHA-scoped concurrency?** Per-ref groups (`ci-${{ github.ref }}`) with
+> `cancel-in-progress: true` create a race: if the final push arrives while the
+> previous cancellation is in flight, GitHub may not fire a new
+> `pull_request: synchronize` event, leaving the HEAD commit with no CI results
+> and blocking the PR indefinitely. Scoping the group to the commit SHA gives
+> every commit its own concurrency slot so CI always runs to completion.
+>
+> **Why keep `cancel-in-progress: true`?** With SHA-scoped groups, no two
+> pushes share a slot, so the setting is a no-op in practice. It is kept
+> explicitly to signal intent — if someone later changes the group formula back
+> to a per-ref pattern, the cancellation behaviour they expect is already
+> declared and will take effect immediately without a separate edit.
 
 ### 2. CodeQL Analysis (GitHub-managed default setup)
 
@@ -516,7 +529,7 @@ On each run the workflow:
 
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
-Triggers the pr-review agent whenever `@petry-review-bot` is mentioned in a PR
+Triggers the pr-review agent whenever `@donpetry-bot` is mentioned in a PR
 comment or review comment, or when `donpetry-bot` is assigned as a reviewer.
 A copy-paste ready template is available at [`standards/workflows/pr-review-mention.yml`](workflows/pr-review-mention.yml).
 
