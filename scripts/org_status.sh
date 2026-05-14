@@ -320,27 +320,22 @@ Then immediately after the table, a mermaid pie chart of open PRs by category (u
 \`\`\`mermaid
 pie title Open PRs by Status
     "Awaiting Review" : <N>
-    "CI Failing" : <N>
-    "CI Pending" : <N>
-    "Changes Requested" : <N>
-    "Approved" : <N>
-    "Draft" : <N>
-    "No CI / No Policy" : <N>
+    ...
 \`\`\`
-Replace each <N> with the actual org-wide count for that category. Omit zero-count categories from the pie chart.
+Replace each <N> with the actual org-wide count. Omit zero-count categories. Sort slices from largest to smallest count.
 
 ---
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
 (Replace N with the actual total count.)
 
-First, an xychart-beta bar chart of org-wide PR counts by blocker category (omit zero-count categories from the chart):
+First, an xychart-beta bar chart of org-wide PR counts by blocker category. Omit zero-count categories. Sort x-axis from highest to lowest count:
 \`\`\`mermaid
 xychart-beta
     title "Open PRs by Blocker Category"
-    x-axis ["Awaiting Review", "CI Failing", "CI Pending", "Changes Req", "Approved", "Draft", "No CI/Policy"]
+    x-axis [<category labels sorted highest to lowest count>]
     y-axis "Count"
-    bar [<org-wide counts in same order, 0 for absent categories>]
+    bar [<counts in matching sorted order>]
 \`\`\`
 
 Then, a combined xychart-beta chart for per-repo breakdown (omit repos with 0 total PRs). Use short repo names on the x-axis (e.g. "broodly" not the full URL). Bars = Total PRs, Line = CI Failing count:
