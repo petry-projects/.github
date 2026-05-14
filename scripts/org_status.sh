@@ -338,22 +338,17 @@ xychart-beta
     bar [<counts in matching sorted order>]
 \`\`\`
 
-Then, a combined xychart-beta chart for per-repo breakdown (omit repos with 0 total PRs). Use short repo names on the x-axis (e.g. "broodly" not the full URL). Bars = Total PRs, Line = CI Failing count:
+Then, a grouped bar chart for per-repo breakdown using multiple bar series (one per key category). Omit repos with 0 total PRs. Sort repos by total PRs descending. Use short repo names (e.g. "broodly"). Include only the 4 most actionable categories as separate bar series: No CI/Policy, Awaiting Review, CI Failing, Approved. Note: xychart-beta does not support stacked bars — multiple bar lines render as grouped/overlapping series:
 \`\`\`mermaid
 xychart-beta
-    title "Open PRs per Repo (bars=Total, line=CI Failing)"
-    x-axis [<short repo names, sorted by total descending>]
+    title "Open PRs per Repo by Category"
+    x-axis [<short repo names sorted by total desc>]
     y-axis "PRs"
-    bar [<total PRs per repo>]
-    line [<ci_failing per repo, matching x-axis order>]
+    bar [<No CI/Policy counts per repo>]
+    bar [<Awaiting Review counts per repo>]
+    bar [<CI Failing counts per repo>]
+    bar [<Approved counts per repo>]
 \`\`\`
-
-Then the per-repo detail table for exact numbers (omit repos with 0 total PRs). You MUST include the header row and separator row:
-| Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft | Needs Rebase |
-|---|---|---|---|---|---|---|---|---|---|
-- Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
-- Add ⚠ next to repo name if CI Failing > 5 or Awaiting Review > 10
-- Needs Rebase column: render the \`needs_rebase\` count. If 0 render —. If > 0 render the number followed by 🔄 (e.g. \`3 🔄\`).
 
 ---
 
