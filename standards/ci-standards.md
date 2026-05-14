@@ -1023,6 +1023,9 @@ On each run the workflow:
 2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
 4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
    (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
    job in `claude-code-reusable.yml` to automatically resolve the conflict.
