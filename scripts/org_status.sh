@@ -436,7 +436,11 @@ claude -p \
   --output-format json \
   --disallowedTools "Bash,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit" \
   < "$DATA_DIR/prompt.txt" > "$REPORT_JSON"
-echo "Claude: stop=$(jq -r '.stop_reason // "?"' "$REPORT_JSON"), turns=$(jq -r '.num_turns // "?"' "$REPORT_JSON"), cost=\$$(jq -r '.total_cost_usd // "?"' "$REPORT_JSON"), result_len=$(jq -r '(.result//"") | length' "$REPORT_JSON")" >&2
+echo "JSON lines: $(wc -l < "$REPORT_JSON")" >&2
+echo "JSON first 600 chars:" >&2
+head -c 600 "$REPORT_JSON" >&2
+echo "" >&2
+jq '{stop_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),result_start:((.result//"")|.[0:120])}' "$REPORT_JSON" >&2 || echo "jq parse failed" >&2
 if ! jq -e '.result' "$REPORT_JSON" > /dev/null 2>&1; then
   echo "ERROR: claude returned no .result field — raw output:" >&2
   cat "$REPORT_JSON" >&2
