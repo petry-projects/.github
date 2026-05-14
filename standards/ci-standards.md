@@ -521,9 +521,15 @@ On each run the workflow:
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
 2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
-4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase` job in `claude-code-reusable.yml` to automatically resolve the conflict. If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
+4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
+   (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
+   job in `claude-code-reusable.yml` to automatically resolve the conflict.
+   If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
 
-**Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** — comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation). Without it the sentinel comment still appears but no automatic resolution will run. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+**Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** —
+comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation).
+Without it the sentinel comment still appears but no automatic resolution will run.
+Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
 
