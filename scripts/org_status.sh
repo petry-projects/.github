@@ -333,12 +333,27 @@ Replace each <N> with the actual org-wide count for that category. Omit zero-cou
 
 ### \`## Open PRs — Why They're Unmerged (N total)\`
 (Replace N with the actual total count.)
-Org-wide blocker summary table (sum all repos). You MUST include the header row and separator row:
-| Category | Count | % of Total |
-|---|---|---|
-Rows in this order: Awaiting Review, CI Failing, CI Pending, Changes Requested, Approved, Draft, No CI / No Policy, **TOTAL**
 
-Per-repo breakdown table (omit repos with 0 total PRs). You MUST include the header row and separator row:
+First, an xychart-beta bar chart of org-wide PR counts by blocker category (omit zero-count categories from the chart):
+\`\`\`mermaid
+xychart-beta
+    title "Open PRs by Blocker Category"
+    x-axis ["Awaiting Review", "CI Failing", "CI Pending", "Changes Req", "Approved", "Draft", "No CI/Policy"]
+    y-axis "Count"
+    bar [<org-wide counts in same order, 0 for absent categories>]
+\`\`\`
+
+Then, a combined xychart-beta chart for per-repo breakdown (omit repos with 0 total PRs). Use short repo names on the x-axis (e.g. "broodly" not the full URL). Bars = Total PRs, Line = CI Failing count:
+\`\`\`mermaid
+xychart-beta
+    title "Open PRs per Repo (bars=Total, line=CI Failing)"
+    x-axis [<short repo names, sorted by total descending>]
+    y-axis "PRs"
+    bar [<total PRs per repo>]
+    line [<ci_failing per repo, matching x-axis order>]
+\`\`\`
+
+Then the per-repo detail table for exact numbers (omit repos with 0 total PRs). You MUST include the header row and separator row:
 | Repo | Total | Awaiting Review | CI Failing | CI Pending | Changes Req | Approved | No CI/Policy | Draft | Needs Rebase |
 |---|---|---|---|---|---|---|---|---|---|
 - Repo name as a link to the repo: [owner/repo](https://github.com/owner/repo)
