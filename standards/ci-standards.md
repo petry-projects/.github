@@ -50,7 +50,7 @@ reusable, not a local edit.
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
-| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@petry-review-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+| [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -111,9 +111,22 @@ on:
 permissions: {}   # Reset top-level; set per-job (see Permissions Policy below)
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 ```
+
+> **Why SHA-scoped concurrency?** Per-ref groups (`ci-${{ github.ref }}`) with
+> `cancel-in-progress: true` create a race: if the final push arrives while the
+> previous cancellation is in flight, GitHub may not fire a new
+> `pull_request: synchronize` event, leaving the HEAD commit with no CI results
+> and blocking the PR indefinitely. Scoping the group to the commit SHA gives
+> every commit its own concurrency slot so CI always runs to completion.
+>
+> **Why keep `cancel-in-progress: true`?** With SHA-scoped groups, no two
+> pushes share a slot, so the setting is a no-op in practice. It is kept
+> explicitly to signal intent — if someone later changes the group formula back
+> to a per-ref pattern, the cancellation behaviour they expect is already
+> declared and will take effect immediately without a separate edit.
 
 ### 2. CodeQL Analysis (GitHub-managed default setup)
 
@@ -508,15 +521,21 @@ On each run the workflow:
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
 2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
-4. On merge conflict (422): posts an idempotent comment (sentinel `<!-- auto-rebase-conflict -->`) asking the author to resolve conflicts.
+4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
+   (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
+   job in `claude-code-reusable.yml` to automatically resolve the conflict.
+   If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
 
-**No secrets required** — uses `GITHUB_TOKEN` only. Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
+**Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** —
+comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation).
+Without it the sentinel comment still appears but no automatic resolution will run.
+Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
 
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
-Triggers the pr-review agent whenever `@petry-review-bot` is mentioned in a PR
+Triggers the pr-review agent whenever `@donpetry-bot` is mentioned in a PR
 comment or review comment, or when `donpetry-bot` is assigned as a reviewer.
 A copy-paste ready template is available at [`standards/workflows/pr-review-mention.yml`](workflows/pr-review-mention.yml).
 
