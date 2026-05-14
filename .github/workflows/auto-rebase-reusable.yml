@@ -112,34 +112,43 @@ jobs:
                 # Merge conflict — post the sentinel to trigger claude-rebase.
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
-                # Re-trigger strategy: if a prior sentinel exists (e.g. Claude
-                # previously aborted and main was pushed again), delete it and
-                # re-post so a new issue_comment event fires and claude-rebase
-                # is scheduled for this fresh conflict.
-                SENTINEL="<!-- auto-rebase-conflict -->"
-                OLD_COMMENT_IDS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\")) | .databaseId] | .[]")
-                for OLD_ID in $OLD_COMMENT_IDS; do
-                  echo "  Deleting stale sentinel comment $OLD_ID"
-                  gh api "repos/$REPO/issues/comments/$OLD_ID" -X DELETE || true
-                done
-                echo "  Posting conflict resolution request"
-                CONFLICT_BODY="<!-- auto-rebase-conflict -->"
-                CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
-                CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
-                if [[ "$HAS_PAT" == "true" ]]; then
-                  CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
-                  CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
-                  CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
+                # Re-trigger strategy: embed the current BASE_BRANCH HEAD SHA in
+                # the sentinel so we can detect whether the base has moved. If an
+                # existing sentinel already carries the same SHA, skip delete+repost
+                # (avoiding cancellation of an in-flight claude-rebase run). Only
+                # delete and re-post when the base HEAD has changed (new conflict).
+                BASE_SHA=$(gh api "repos/$REPO/git/ref/heads/$BASE_BRANCH" --jq '.object.sha')
+                SENTINEL_PREFIX="<!-- auto-rebase-conflict:"
+                SENTINEL="${SENTINEL_PREFIX}${BASE_SHA} -->"
+                SAME_SHA_COUNT=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\")) | .databaseId] | length")
+                if [[ "$SAME_SHA_COUNT" -gt 0 ]]; then
+                  echo "  Sentinel already posted for base SHA $BASE_SHA, skipping to avoid cancelling active rebase"
                 else
-                  CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
-                  CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
+                  OLD_COMMENT_IDS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                    --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL_PREFIX\")) | .databaseId] | .[]")
+                  for OLD_ID in $OLD_COMMENT_IDS; do
+                    echo "  Deleting stale sentinel comment $OLD_ID"
+                    gh api "repos/$REPO/issues/comments/$OLD_ID" -X DELETE || true
+                  done
+                  echo "  Posting conflict resolution request"
+                  CONFLICT_BODY="$SENTINEL"
+                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
+                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
+                  if [[ "$HAS_PAT" == "true" ]]; then
+                    CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
+                    CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
+                    CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
+                  else
+                    CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
+                    CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
+                  fi
+                  CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
+                  CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
+                  CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
+                  CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
+                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
                 fi
-                CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
-                CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
-                CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
-                CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
-                gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
               else
                 echo "  Warning: failed to update PR #$PR_NUMBER — $UPDATE_OUTPUT"
               fi
