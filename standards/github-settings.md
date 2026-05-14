@@ -650,12 +650,17 @@ When creating a new repository in `petry-projects`:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 **Repository settings:** All 7 repos are fully compliant as of 2026-05-13
 (check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
 =======
 **Repository settings:** All 7 repos are fully compliant as of 2026-05-08
 (check-suite auto-trigger preferences re-applied for `.github` via API;
 >>>>>>> 76ae18c (fix(settings): disable check-suite auto-trigger for .github repo (#213))
+=======
+**Repository settings:** All 7 repos are fully compliant as of 2026-05-13
+(check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
+>>>>>>> 761dd4a (fix: disable check-suite auto-trigger for Claude and CodeRabbit on .github (#275))
 last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 
 **Ruleset status (as of 2026-05-04):**
