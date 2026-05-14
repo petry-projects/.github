@@ -367,16 +367,24 @@ jobs:
       actions: read
       checks: read
     steps:
+      - name: Verify GH_PAT_WORKFLOWS is configured
+        env:
+          TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+        run: |
+          if [[ -z "$TOKEN" ]]; then
+            echo "::error::GH_PAT_WORKFLOWS is required for claude-rebase. Pushes made with GITHUB_TOKEN do not trigger CI workflow runs (GitHub limitation), which would leave the PR without checks after rebase. Configure this secret to enable agentic rebase."
+            exit 1
+          fi
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
-          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT_WORKFLOWS }}
       - name: Run Claude Code
         uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS }}
           # yamllint disable rule:line-length
           claude_args: |
             --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
@@ -407,18 +415,19 @@ jobs:
 
             ### 4. Rebase onto the base branch
             ```
-            git fetch origin
+            git fetch origin <baseRefName>
             git rebase origin/<baseRefName>
             ```
-            (Use the actual `baseRefName` from step 2.)
+            (Use the actual `baseRefName` from step 2. Fetching the specific ref ensures
+            `origin/<baseRefName>` is up to date even in non-default-branch scenarios.)
 
             ### 5. For each conflict, apply the appropriate resolution strategy
 
             **Workflow YAML files (`.github/workflows/*.yml`) — action pin conflicts:**
-            - Read both versions (ours = PR branch, theirs = base branch).
+            - Read both versions (ours = base branch, theirs = PR branch).
             - If the conflict is a pinned SHA/tag for a `uses:` line, compare versions and accept the newer pin.
-            - When the base branch has a newer or equal version, prefer the base branch (`git checkout --theirs -- <file>`).
-            - When the PR branch has a provably newer pin, keep it (`git checkout --ours -- <file>`).
+            - When the base branch has a newer or equal version, prefer the base branch (`git checkout --ours -- <file>`).
+            - When the PR branch has a provably newer pin, keep it (`git checkout --theirs -- <file>`).
             - After resolving each file: `git add <file>`, then `git rebase --continue`.
 
             **All other files:**

@@ -26,11 +26,19 @@
 #     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
 #     triggers the claude-rebase job in claude-code-reusable.yml
 #
-# No secrets required — uses github.token only. No auto-merge logic.
+# Secrets: GH_PAT_WORKFLOWS is optional but required for the claude-rebase
+# trigger to work. Sentinel comments posted with GITHUB_TOKEN do not fire
+# issue_comment workflow runs (GitHub limitation). When the PAT is absent the
+# sentinel is still posted but claude-rebase will not be scheduled.
+# No auto-merge logic.
 name: Auto-rebase non-Dependabot PRs (Reusable)
 
 on:
   workflow_call:
+    secrets:
+      GH_PAT_WORKFLOWS:
+        description: "PAT with workflows scope — required for sentinel comment to trigger claude-rebase"
+        required: false
 
 jobs:
   auto-rebase:
@@ -41,7 +49,7 @@ jobs:
     steps:
       - name: Update behind non-Dependabot PRs
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
           REPO: ${{ github.repository }}
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
@@ -100,29 +108,32 @@ jobs:
                   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
-                # Merge conflict — ask the author to resolve it.
+                # Merge conflict — post the sentinel to trigger claude-rebase.
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
-                # Idempotent: skip if sentinel comment already exists.
+                # Re-trigger strategy: if a prior sentinel exists (e.g. Claude
+                # previously aborted and main was pushed again), delete it and
+                # re-post so a new issue_comment event fires and claude-rebase
+                # is scheduled for this fresh conflict.
                 SENTINEL="<!-- auto-rebase-conflict -->"
-                ALREADY_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\"))] | length")
-                if [[ "$ALREADY_POSTED" -gt 0 ]]; then
-                  echo "  Skipping — conflict comment already posted"
-                else
-                  echo "  Posting conflict resolution request"
-                  CONFLICT_BODY="<!-- auto-rebase-conflict -->"
-                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
-                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
-                  CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
-                  CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
-                  CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
-                  CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
-                  CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
-                  CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
-                  CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
-                fi
+                OLD_COMMENT_IDS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\")) | .databaseId] | .[]")
+                for OLD_ID in $OLD_COMMENT_IDS; do
+                  echo "  Deleting stale sentinel comment $OLD_ID"
+                  gh api "repos/$REPO/issues/comments/$OLD_ID" -X DELETE || true
+                done
+                echo "  Posting conflict resolution request"
+                CONFLICT_BODY="<!-- auto-rebase-conflict -->"
+                CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
+                CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
+                CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
+                CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
+                CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
+                CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
+                CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
+                CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
+                CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
+                gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
               else
                 echo "  Warning: failed to update PR #$PR_NUMBER — $UPDATE_OUTPUT"
               fi
