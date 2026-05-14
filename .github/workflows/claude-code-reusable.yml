@@ -351,3 +351,128 @@ jobs:
                - If the comment requires human judgment, leave a reply explaining what you need.
             4. Check CI status. If CI fails, read the logs, fix the issues, and push again. Repeat until CI passes.
             5. When CI is green, all actionable review comments are resolved, and the PR is ready, read the CODEOWNERS file and leave a comment tagging the relevant code owners to review and merge.
+
+  # Automation mode: agentic rebase — resolve conflicts when auto-rebase fails with a merge conflict (422)
+  claude-rebase:
+    # Trigger on the sentinel comment text alone; the login check is omitted
+    # because when GH_PAT_WORKFLOWS is used the comment author is the PAT
+    # owner, not 'github-actions[bot]'.
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '<!-- auto-rebase-conflict:') &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    concurrency:
+      group: claude-rebase-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Verify GH_PAT_WORKFLOWS is configured
+        env:
+          TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+        run: |
+          if [[ -z "$TOKEN" ]]; then
+            echo "::error::GH_PAT_WORKFLOWS is required — GITHUB_TOKEN pushes skip CI. Set this secret to enable agentic rebase."
+            exit 1
+          fi
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT_WORKFLOWS }}
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS }}
+          # yamllint disable rule:line-length
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          # yamllint enable rule:line-length
+          # yamllint disable rule:line-length
+          prompt: |
+            The auto-rebase workflow detected a merge conflict on PR #${{ github.event.issue.number }}.
+
+            Your job: check out the PR branch, rebase it onto the base branch, resolve all conflicts using best-effort judgement, push, and post a summary comment. If conflicts cannot be resolved safely, abort cleanly and post a clear failure comment with manual instructions.
+
+            ## Steps
+
+            ### 1. Configure git identity
+            ```
+            git config user.name "claude[bot]"
+            git config user.email "claude[bot]@users.noreply.github.com"
+            ```
+
+            ### 2. Get PR details
+            ```
+            gh pr view ${{ github.event.issue.number }} --json number,headRefName,baseRefName,title
+            ```
+
+            ### 3. Check out the PR branch
+            ```
+            gh pr checkout ${{ github.event.issue.number }}
+            ```
+
+            ### 4. Rebase onto the base branch
+            ```
+            git fetch origin <baseRefName>
+            git rebase origin/<baseRefName>
+            ```
+            (Use the actual `baseRefName` from step 2. Fetching the specific ref ensures
+            `origin/<baseRefName>` is up to date even in non-default-branch scenarios.)
+
+            ### 5. For each conflict, apply the appropriate resolution strategy
+
+            **Workflow YAML files (`.github/workflows/*.yml`) — action pin conflicts:**
+            - Read both versions (ours = base branch, theirs = PR branch).
+            - If the conflict is a pinned SHA/tag for a `uses:` line, you MUST determine
+              which side is newer before choosing a side:
+              - For **tag pins** (e.g. `v3.1.2`), compare the tag names as semver — prefer the higher version.
+              - For **SHA pins**, resolve each SHA to a commit date via the API:
+                ```
+                gh api repos/{owner}/{repo}/git/ref/tags/{tag} --jq '.object.sha'   # tag → SHA
+                gh api repos/{owner}/{repo}/branches/{branch} --jq '.commit.sha'     # branch → SHA
+                gh api repos/{owner}/{repo}/git/commits/{sha} --jq '.committer.date' # SHA → date
+                ```
+                Accept the side with the more recent commit date.
+            - When the base branch has a newer or equal version, prefer the base branch (`git checkout --ours -- <file>`).
+            - When the PR branch is provably newer, keep it (`git checkout --theirs -- <file>`).
+            - If the version cannot be determined, treat it as ambiguous and abort (step 7b).
+            - After resolving each file: `git add <file>`, then `git rebase --continue`.
+
+            **All other files:**
+            - Do not attempt to merge application-code conflicts.
+            - Run `git rebase --abort` immediately and go to step 7b.
+            - Application logic must be resolved by a human.
+
+            ### 6. Push the rebased branch
+            ```
+            git push --force-with-lease
+            ```
+
+            ### 7a. On success — post a summary comment on PR #${{ github.event.issue.number }}
+            Include:
+            - Which files had conflicts and how each was resolved.
+            - The new HEAD commit after rebase.
+
+            ### 7b. On failure (rebase aborted) — post a failure comment on PR #${{ github.event.issue.number }}
+            Include:
+            - Which file(s) could not be resolved automatically and why.
+            - Manual resolution steps:
+              ```
+              git fetch origin
+              git rebase origin/<baseRefName>
+              # resolve conflicts in <file(s)>
+              git add <resolved-file(s)>
+              git rebase --continue
+              git push --force-with-lease
+              ```
+          # yamllint enable rule:line-length
