@@ -1093,3 +1093,49 @@ All repos MUST align to the latest version of each action:
 > **`github/codeql-action` is no longer pinned per repo** because the
 > standard no longer ships a `codeql.yml` workflow. GitHub manages the
 > analyzer version internally for default-setup repos.
+
+---
+
+## Dev-Lead Agent
+
+The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state. It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
+
+### Adopting the Dev-Lead Agent
+
+1. Copy `standards/workflows/dev-lead.yml` verbatim to `.github/workflows/dev-lead.yml` in your repo.
+2. Set `CLAUDE_CODE_OAUTH_TOKEN` as an org or repo secret (required).
+3. Set `GH_PAT_WORKFLOWS` — a PAT with read access to `petry-projects/.github-private` — as an org or repo secret (required for cross-repo script access).
+4. Optionally set `vars.DEV_LEAD_ENGINE` to `claude` (default), `gemini`, or `copilot`.
+5. Optionally set `vars.DEV_LEAD_DRY_RUN=true` during the initial rollout period.
+
+### Required secrets
+
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | Primary LLM engine |
+| `GH_PAT_WORKFLOWS` | Yes (cross-repo) | Read access to `.github-private` scripts; push workflow files |
+| `GOOGLE_API_KEY` | No | Gemini engine fallback |
+| `GH_PAT` | No | Copilot engine |
+
+### Migration from `claude.yml`
+
+The dev-lead agent supersedes `claude.yml`. Migration steps:
+
+1. Add `dev-lead.yml` (from this standard).
+2. Run both in parallel for at least 2 weeks (shadow period).
+3. Confirm no regressions via the Actions run history.
+4. Delete `claude.yml`.
+
+See tracking issue petry-projects/.github-private#180 for the shadow period status of `.github-private` itself.
+
+### Key differences from `claude.yml`
+
+| Feature | `claude.yml` | `dev-lead.yml` |
+|---------|-------------|----------------|
+| OIDC byte-for-byte constraint | Yes | No |
+| Engine-agnostic | No (Claude only) | Yes (claude/gemini/copilot) |
+| Dry-run mode | No | Yes (`vars.DEV_LEAD_DRY_RUN`) |
+| Anti-loop guard | No | Yes |
+| Idempotency markers | No | Yes (SHA-based) |
+| CI relay deduplication | No | Yes |
+
