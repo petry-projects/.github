@@ -22,12 +22,13 @@
 #   refs are exempt from the Action Pinning Policy (ci-standards.md
 #   §Action Pinning Policy). The @v1 tag is the correct, stable reference.
 #
-#   NARROW GUARD: The paths-ignore setting (lines 38-39) under pull_request
-#   prevents the workflow from triggering only when the PR's entire changeset
-#   is limited to claude.yml alone. PRs that modify claude.yml *plus other
-#   files* will still trigger the workflow and hit the 401 error at token
-#   exchange. Other triggers (issue_comment, pull_request_review_comment,
-#   issues, check_run) are unaffected by paths-ignore and run as configured.
+#   NARROW GUARD: The paths-ignore setting under pull_request prevents the
+#   workflow from triggering only when the PR's entire changeset is limited
+#   to claude.yml alone. PRs that modify claude.yml *plus other files* will
+#   still trigger the workflow and hit the 401 error at token exchange.
+#   Other triggers (issue_comment, pull_request_review,
+#   pull_request_review_comment, issues, workflow_run) are unaffected by
+#   paths-ignore and run as configured.
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Claude Code — thin caller that delegates to the org-level reusable workflow.
@@ -46,11 +47,20 @@ on:
       - '.github/workflows/claude.yml'  # OIDC invariant — see header above
   issue_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted]
   pull_request_review_comment:
     types: [created]
   issues:
     types: [labeled]
-  check_run:
+  workflow_run:
+    # List the GitHub Actions workflow names in this repo that Claude should
+    # monitor for CI failures on PRs. Replace or extend this list with the
+    # actual workflow names (the `name:` field) used in your repo.
+    # The reusable workflow's claude-ci-fix job only acts on failures that
+    # are associated with an open same-repo PR — push-to-main runs are
+    # ignored automatically.
+    workflows: ["CI", "SonarCloud Analysis", "build-and-test"]
     types: [completed]
 
 permissions: {}

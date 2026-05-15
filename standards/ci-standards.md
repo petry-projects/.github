@@ -445,15 +445,15 @@ The template has been removed; see [Migration from `claude.yml`](#migration-from
 > only change this file. See also [Action Pinning Policy](#action-pinning-policy)
 > for the reusable workflow ref exemption.
 >
-> **All three jobs require a checkout step.** The `claude` job (PR reviews), the
-> `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
-> response) each need `actions/checkout` **before** the `claude-code-action` step.
+> **All jobs require a checkout step.** The `claude`, `claude-issue`,
+> `claude-ci-fix`, `claude-fix-pr-reviews`, and `claude-fix-bot-comments`
+> jobs each need `actions/checkout` **before** the `claude-code-action` step.
 > Without it, `claude-code-action` cannot read `CLAUDE.md` or `AGENTS.md` and
 > will error on every trigger. The weekly compliance audit
 > (`check_claude_workflow_checkout`) detects repos missing the checkout step or
-> the `check_run` trigger and creates a labeled issue to drive remediation.
+> the `workflow_run` trigger and creates a labeled issue to drive remediation.
 
-The workflow has three jobs:
+The workflow has five jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
   mentions in comments. No `prompt` input; runs in interactive mode.
@@ -461,13 +461,21 @@ The workflow has three jobs:
   applied to an issue. Uses a `prompt` to drive the full lifecycle:
   implement the fix, create a PR, self-review, resolve review comments,
   monitor CI, and tag the maintainer when ready for human review.
-- **`claude-ci-fix`** (CI failure response) — triggered by `check_run:
-  completed` when a non-Claude check fails on an open PR. Looks up the
-  associated PR (falling back to the GitHub API when the webhook payload
-  omits `pull_requests`), checks out the branch, reads the failure logs,
-  applies the minimal fix, pushes, and comments with a summary. Requires
-  the `check_run` trigger in the caller's `on:` block — the compliance audit
-  verifies this is present.
+- **`claude-ci-fix`** (CI failure response) — triggered by `workflow_run:
+  completed` (failure) for named GitHub Actions workflows on open same-repo
+  PRs. Checks out the branch, reads the failure logs via `gh run view
+  --log-failed`, applies the minimal fix, pushes, and comments with a
+  summary. Requires the `workflow_run` trigger in the caller's `on:` block
+  with the repo-specific list of monitored workflow names.
+- **`claude-fix-pr-reviews`** (bot review handler) — triggered by
+  `pull_request_review: submitted` from trusted AI reviewer bots (Copilot,
+  Gemini, CodeRabbit) with state `COMMENTED` or `CHANGES_REQUESTED`. Follows
+  the same fix-threads cycle as `claude-fix-review-comments`.
+- **`claude-fix-bot-comments`** (bot comment handler) — triggered by
+  `issue_comment: created` on PRs from trusted external CI tools
+  (SonarCloud, CodeRabbit). These bots have `author_association: NONE`, so
+  the `claude` job's guard skips them; `allowed_bots` bypasses that check
+  for the named bots only.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -486,11 +494,14 @@ on:
     types: [opened, reopened, synchronize]
   issue_comment:
     types: [created]
+  pull_request_review:    # enables claude-fix-pr-reviews — do not remove
+    types: [submitted]
   pull_request_review_comment:
     types: [created]
   issues:
     types: [labeled]
-  check_run:          # enables claude-ci-fix — do not remove
+  workflow_run:           # enables claude-ci-fix — do not remove
+    workflows: [...]      # list CI workflow names this repo monitors (repo-specific)
     types: [completed]
 
 permissions: {}
