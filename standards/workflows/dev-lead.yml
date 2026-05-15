@@ -37,10 +37,6 @@ on:
 
 permissions: {}
 
-# Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
-# per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
-# traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
-
 jobs:
   dev-lead:
     # Pinned to the moving dev-lead/stable channel tag, not @main, so a broken
@@ -58,4 +54,3 @@ jobs:
       issues: write
       actions: read
       checks: read
-      statuses: read
