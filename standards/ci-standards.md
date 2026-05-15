@@ -2086,11 +2086,15 @@ All repos MUST align to the latest version of each action:
 > standard no longer ships a `codeql.yml` workflow. GitHub manages the
 > analyzer version internally for default-setup repos.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
 
 ---
 
 ## Dev-Lead Agent
 
+<<<<<<< HEAD
 The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
 It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 
@@ -2138,6 +2142,9 @@ To exclude a specific PR or issue from the agent — e.g. a PR that edits the
 dev-lead workflow itself, so the agent doesn't pile commits onto its own infra
 change — add the **`dev-lead:hands-off`** label; the classifier then skips every
 event on it.
+=======
+The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state. It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
+>>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
 
 ### Adopting the Dev-Lead Agent
 
@@ -2154,6 +2161,7 @@ event on it.
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes | Primary LLM engine |
 | `GH_PAT_WORKFLOWS` | Yes (cross-repo) | Read access to `.github-private` scripts; push workflow files |
 | `GOOGLE_API_KEY` | No | Gemini engine fallback |
+<<<<<<< HEAD
 | `GH_PAT` | No | Copilot engine — **must be a fine-grained PAT.** Classic tokens (`ghp_…`) are rejected at runtime |
 
 ### Failure-mode runbook
@@ -2178,6 +2186,9 @@ register as cancelled runs in the metrics window.
 When triage points at the reusable or an external secret, **close the Fleet
 Monitor issue with a comment linking to the upstream fix** rather than editing
 the stub — local edits to a Tier-1 stub are drift.
+=======
+| `GH_PAT` | No | Copilot engine |
+>>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
 
 ### Migration from `claude.yml`
 
@@ -2200,6 +2211,7 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 | Anti-loop guard | No | Yes |
 | Idempotency markers | No | Yes (SHA-based) |
 | CI relay deduplication | No | Yes |
+<<<<<<< HEAD
 =======
 | **CodeQL action** | v4 | markets (currently v3) |
 <<<<<<< HEAD
@@ -2210,3 +2222,6 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 >>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
 =======
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
+=======
+
+>>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
