@@ -37,10 +37,13 @@ on:
 
 permissions: {}
 
+<<<<<<< HEAD
 # Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
 # per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
 # traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
 
+=======
+>>>>>>> e6d47e0 (feat(dev-lead): adopt dev-lead agent (Phase 8 cross-repo rollout))
 jobs:
   dev-lead:
     uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
@@ -51,4 +54,7 @@ jobs:
       issues: write
       actions: read
       checks: read
+<<<<<<< HEAD
       statuses: read   # required by dev-lead-reusable.yml since #435
+=======
+>>>>>>> e6d47e0 (feat(dev-lead): adopt dev-lead agent (Phase 8 cross-repo rollout))
