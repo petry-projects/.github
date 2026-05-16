@@ -8,8 +8,9 @@
 #   standards/push-protection.md
 #
 # Outputs:
-#   $REPORT_DIR/findings.json   — machine-readable findings
-#   $REPORT_DIR/summary.md      — human-readable report
+#   $REPORT_DIR/findings.json      — machine-readable findings
+#   $REPORT_DIR/summary.md         — human-readable report
+#   $REPORT_DIR/issue-counts.json  — issue management counts (added/existing/removed)
 #
 # Environment variables:
 #   GH_TOKEN        — GitHub token with repo/org scope (required)
@@ -33,6 +34,12 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
+ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
+
+# Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
+ISSUES_ADDED=0
+ISSUES_EXISTING=0
+ISSUES_REMOVED=0
 
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
@@ -1044,7 +1051,8 @@ create_issue_for_finding() {
     2>/dev/null | head -1 || echo "")
 
   if [ -n "$existing" ]; then
-    # Update existing issue with a comment
+    # Update existing issue with a comment; only count as existing if the update succeeds
+    local update_ok=true
     gh issue comment "$existing" --repo "$ORG/$repo" \
       --body "**Weekly Compliance Audit** ($(date -u +%Y-%m-%d))
 
@@ -1052,18 +1060,24 @@ This finding is still open.
 
 **Detail:** $detail
 
-**Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
-    # Ensure claude label is present on pre-existing issues
+**Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || update_ok=false
+    # Ensure claude label is present on pre-existing issues regardless
     gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
-    info "Updated existing issue #$existing in $repo for: $check"
+    if [ "$update_ok" = "true" ]; then
+      info "Updated existing issue #$existing in $repo for: $check"
+      ISSUES_EXISTING=$((ISSUES_EXISTING + 1))
+    else
+      warn "Failed to update existing issue #$existing in $repo for: $check"
+    fi
     # Record existing issue for umbrella
     jq --null-input \
       --arg repo "$repo" \
       --arg category "$category" \
       --arg check "$check" \
+      --arg severity "$severity" \
       --arg number "$existing" \
       --arg url "https://github.com/$ORG/$repo/issues/$existing" \
-      '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+      '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
       >> "$ISSUES_FILE"
     return
   fi
@@ -1104,6 +1118,7 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
     local new_issue
     new_issue=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
     info "Created issue #$new_issue in $repo for: $check ($issue_url)"
+    ISSUES_ADDED=$((ISSUES_ADDED + 1))
 
     # Record created issue for umbrella
     if [ -n "$new_issue" ]; then
@@ -1111,9 +1126,10 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
         --arg repo "$repo" \
         --arg category "$category" \
         --arg check "$check" \
+        --arg severity "$severity" \
         --arg number "$new_issue" \
         --arg url "$issue_url" \
-        '{repo:$repo,category:$category,check:$check,number:$number,url:$url}' \
+        '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
         >> "$ISSUES_FILE"
     fi
   else
@@ -1271,10 +1287,14 @@ close_resolved_issues() {
 
     # If this check is no longer in findings, close the issue
     if ! echo "$current_checks" | grep -qx "$check_name"; then
-      gh issue close "$issue_num" --repo "$ORG/$repo" \
-        --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
-        2>/dev/null || true
-      info "Closed resolved issue #$issue_num in $repo: $issue_title"
+      if gh issue close "$issue_num" --repo "$ORG/$repo" \
+          --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
+          2>/dev/null; then
+        info "Closed resolved issue #$issue_num in $repo: $issue_title"
+        ISSUES_REMOVED=$((ISSUES_REMOVED + 1))
+      else
+        warn "Failed to close resolved issue #$issue_num in $repo: $issue_title"
+      fi
     fi
   done <<< "$open_issues"
 }
@@ -1304,40 +1324,61 @@ generate_summary() {
 | Errors (must fix) | $error_count |
 | Warnings (should fix) | $warning_count |
 
-## Findings by Repository
-
 HEREDOC
 
-  # Group findings by repo
-  local repos_with_findings
-  repos_with_findings=$(jq -r '[.[].repo] | unique[]' "$FINDINGS_FILE")
-
-  if [ -z "$repos_with_findings" ]; then
+  if [ "$total_findings" -eq 0 ]; then
     echo "All repositories are fully compliant! No findings." >> "$SUMMARY_FILE"
     return
   fi
 
-  for repo in $repos_with_findings; do
-    local repo_findings
-    repo_findings=$(jq -r --arg repo "$repo" \
-      '.[] | select(.repo == $repo) | "| `\(.severity)` | \(.category) | \(.check) | \(.detail) |"' \
-      "$FINDINGS_FILE")
+  # ── Findings by Check Type ──────────────────────────────────────────────────
+  # Group by check name (not repo) to surface cross-repo patterns at a glance.
+  # Errors first, then warnings; within each severity sorted by category then check.
+  cat >> "$SUMMARY_FILE" <<'HEREDOC'
+## Findings by Check Type
 
-    local repo_count
-    repo_count=$(jq --arg repo "$repo" '[.[] | select(.repo == $repo)] | length' "$FINDINGS_FILE")
-
-    cat >> "$SUMMARY_FILE" <<HEREDOC
-### [$repo](https://github.com/$ORG/$repo) — $repo_count finding(s)
-
-| Severity | Category | Check | Detail |
-|----------|----------|-------|--------|
-$repo_findings
-
+| Check | Severity | Category | Repos Affected |
+|-------|----------|----------|----------------|
 HEREDOC
-  done
 
-  # Category breakdown
-  cat >> "$SUMMARY_FILE" <<HEREDOC
+  jq -r --arg org "$ORG" '
+    group_by(.check)
+    | map({
+        check:      .[0].check,
+        category:   .[0].category,
+        severity:   .[0].severity,
+        repos:      [.[].repo]
+      })
+    | sort_by([(if .severity == "error" then 0 else 1 end), .category, .check])
+    | .[]
+    | "| `\(.check)` | `\(.severity)` | \(.category) | \(.repos | map("[`" + . + "`](https://github.com/" + $org + "/" + . + ")") | join(", ")) |"
+  ' "$FINDINGS_FILE" >> "$SUMMARY_FILE"
+
+  # ── Per-Repo Scorecard ───────────────────────────────────────────────────────
+  cat >> "$SUMMARY_FILE" <<'HEREDOC'
+
+## Per-Repo Scorecard
+
+| Repo | Errors | Warnings | Total |
+|------|--------|----------|-------|
+HEREDOC
+
+  jq -r --arg org "$ORG" '
+    group_by(.repo)
+    | map({
+        repo:     .[0].repo,
+        errors:   ([.[] | select(.severity == "error")]   | length),
+        warnings: ([.[] | select(.severity == "warning")] | length),
+        total:    length
+      })
+    | sort_by(-.total)
+    | .[]
+    | "| [**\(.repo)**](https://github.com/" + $org + "/" + .repo + ") | \(.errors) | \(.warnings) | **\(.total)** |"
+  ' "$FINDINGS_FILE" >> "$SUMMARY_FILE"
+
+  # ── Category breakdown ───────────────────────────────────────────────────────
+  cat >> "$SUMMARY_FILE" <<'HEREDOC'
+
 ## Findings by Category
 
 HEREDOC
@@ -1349,12 +1390,109 @@ HEREDOC
       echo "- **$category:** $cat_count finding(s)" >> "$SUMMARY_FILE"
     fi
   done
+  # Footer appended by main() after issue links are added
+}
 
-  cat >> "$SUMMARY_FILE" <<HEREDOC
+# ---------------------------------------------------------------------------
+# Issue & PR link summary (appended after issue creation)
+# ---------------------------------------------------------------------------
+append_issue_pr_links() {
+  [ -s "$ISSUES_FILE" ] || return
 
----
-*Generated by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
+  # Collect open PRs per affected repo (one GraphQL call per repo) to find
+  # those whose closingIssuesReferences include one of our compliance issues.
+  local pr_data_file
+  pr_data_file=$(mktemp)
+  echo '[]' > "$pr_data_file"
+
+  local repos_in_issues
+  repos_in_issues=$(jq -rn '[inputs | .repo] | unique[]' "$ISSUES_FILE" 2>/dev/null || echo "")
+
+  for repo in $repos_in_issues; do
+    local repo_prs
+    repo_prs=$(gh api graphql \
+      -f owner="$ORG" -f name="$repo" \
+      -f query='query($owner:String!,$name:String!){
+        repository(owner:$owner,name:$name){
+          pullRequests(states:OPEN,first:100){
+            nodes{
+              number url
+              closingIssuesReferences(first:10){nodes{number}}
+            }
+          }
+        }
+      }' 2>/dev/null \
+      | jq --arg repo "$repo" '[
+          .data.repository.pullRequests.nodes[] | {
+            repo:      $repo,
+            pr_number: .number,
+            pr_url:    .url,
+            closes:    [.closingIssuesReferences.nodes[].number]
+          }
+        ]' 2>/dev/null || echo '[]')
+
+    jq -n \
+      --argjson existing "$(cat "$pr_data_file")" \
+      --argjson new_prs "$repo_prs" \
+      '$existing + $new_prs' > "$pr_data_file.tmp" \
+      && mv "$pr_data_file.tmp" "$pr_data_file"
+  done
+
+  cat >> "$SUMMARY_FILE" <<'HEREDOC'
+
+## Issues & Related PRs
+
+Grouped by compliance check type. Each entry links to the GitHub Issue for the
+finding in each affected repo; **Related PRs** shows open pull requests that
+close that issue.
+
 HEREDOC
+
+  # Iterate checks in severity then alphabetical order
+  local checks_ordered
+  checks_ordered=$(jq -rn '[inputs]
+    | group_by(.check)
+    | map({check: .[0].check, severity: .[0].severity})
+    | sort_by([(if .severity == "error" then 0 else 1 end), .check])
+    | .[].check
+  ' "$ISSUES_FILE" 2>/dev/null || echo "")
+
+  while IFS= read -r check; do
+    [ -z "$check" ] && continue
+
+    local check_issues severity category issue_count
+    check_issues=$(jq -cn --arg c "$check" '[inputs | select(.check == $c)] | sort_by(.repo)' "$ISSUES_FILE")
+    severity=$(jq -r '.[0].severity' <<< "$check_issues")
+    category=$(jq -r '.[0].category' <<< "$check_issues")
+    issue_count=$(jq 'length' <<< "$check_issues")
+
+    printf '\n### `%s`\n' "$check" >> "$SUMMARY_FILE"
+    printf '**Severity:** `%s` | **Category:** %s | **%d repo(s) affected**\n\n' \
+      "$severity" "$category" "$issue_count" >> "$SUMMARY_FILE"
+    printf '| Repo | Issue | Related PRs |\n' >> "$SUMMARY_FILE"
+    printf '|------|-------|-------------|\n' >> "$SUMMARY_FILE"
+
+    while IFS= read -r issue_entry; do
+      local repo issue_num issue_url pr_links
+      repo=$(jq -r '.repo'    <<< "$issue_entry")
+      issue_num=$(jq -r '.number' <<< "$issue_entry")
+      issue_url=$(jq -r '.url'    <<< "$issue_entry")
+
+      pr_links=$(jq -r \
+        --arg repo "$repo" \
+        --argjson inum "$issue_num" \
+        '[.[] | select(.repo == $repo and (.closes | map(. == $inum) | any))
+          | "[#\(.pr_number)](\(.pr_url))"]
+        | if length > 0 then join(", ") else "—" end' \
+        "$pr_data_file")
+
+      printf '| [%s](https://github.com/%s/%s) | [#%s](%s) | %s |\n' \
+        "$repo" "$ORG" "$repo" "$issue_num" "$issue_url" "$pr_links" \
+        >> "$SUMMARY_FILE"
+    done < <(jq -c '.[]' <<< "$check_issues")
+  done <<< "$checks_ordered"
+
+  rm -f "$pr_data_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -1471,9 +1609,44 @@ main() {
     # Create one umbrella issue per audit run grouping all findings by remediation category.
     # Both individual issues and the umbrella get the `claude` label for agent pickup.
     create_umbrella_issue
+
+    # Append per-check issue links and related open PRs to the step summary
+    info "Fetching linked PRs for issue summary..."
+    append_issue_pr_links
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi
+
+  # Write issue-management counts and append to summary (conditional on issue management running)
+  if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+    printf '{"added":%d,"existing":%d,"removed":%d}\n' \
+      "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" > "$ISSUE_COUNTS_FILE"
+    cat >> "$SUMMARY_FILE" <<HEREDOC
+
+## Issue Management
+
+| Action | Count |
+|--------|-------|
+| Added (new) | $ISSUES_ADDED |
+| Existing (updated) | $ISSUES_EXISTING |
+| Removed (resolved) | $ISSUES_REMOVED |
+HEREDOC
+  else
+    printf '{"added":0,"existing":0,"removed":0}\n' > "$ISSUE_COUNTS_FILE"
+    cat >> "$SUMMARY_FILE" <<HEREDOC
+
+## Issue Management
+
+_Issue management was skipped (DRY\_RUN=$DRY_RUN, CREATE\_ISSUES=$CREATE_ISSUES)._
+HEREDOC
+  fi
+
+  # Append footer (always last)
+  cat >> "$SUMMARY_FILE" <<HEREDOC
+
+---
+*Generated by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
+HEREDOC
 
   # Output report paths
   echo "findings=$FINDINGS_FILE"
