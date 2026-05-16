@@ -7,4 +7,5 @@
 # This keeps CODEOWNERS files stable and centralizes membership management.
 # See: standards/codeowners-standard.md
 
+# Default catch-all — org-leads own everything
 * @petry-projects/org-leads
