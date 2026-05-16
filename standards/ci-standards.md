@@ -2095,6 +2095,7 @@ All repos MUST align to the latest version of each action:
 ## Dev-Lead Agent
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
 It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 
@@ -2145,6 +2146,10 @@ event on it.
 =======
 The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state. It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 >>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
+=======
+The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
+It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
+>>>>>>> dfdafbb (fix(org-status): fix truncation, add charts, remove don-petry, summary-first layout (#287))
 
 ### Adopting the Dev-Lead Agent
 
@@ -2212,6 +2217,7 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 | Idempotency markers | No | Yes (SHA-based) |
 | CI relay deduplication | No | Yes |
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 | **CodeQL action** | v4 | markets (currently v3) |
 <<<<<<< HEAD
@@ -2225,3 +2231,5 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 =======
 
 >>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
+=======
+>>>>>>> dfdafbb (fix(org-status): fix truncation, add charts, remove don-petry, summary-first layout (#287))

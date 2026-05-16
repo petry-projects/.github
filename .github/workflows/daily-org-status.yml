@@ -70,6 +70,7 @@ jobs:
             printf '%s' "$FOOTER" >> /tmp/report_truncated.md
             mv /tmp/report_truncated.md /tmp/report.md
             echo "Final size: $(wc -c < /tmp/report.md) bytes"
+<<<<<<< HEAD
 =======
           MAX_BYTES=60000
 =======
@@ -79,6 +80,8 @@ jobs:
             truncated=$(head -c "$MAX_BYTES" /tmp/report.md)
             printf '%s\n\n_Report truncated — exceeded GitHub issue body limit._\n' "$truncated" > /tmp/report.md
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+>>>>>>> dfdafbb (fix(org-status): fix truncation, add charts, remove don-petry, summary-first layout (#287))
           fi
 
       - name: Create daily-report issue
