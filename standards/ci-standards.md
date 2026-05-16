@@ -556,7 +556,7 @@ present as an org-level secret; no per-repo setup needed.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that
 repos have `pr-review-mention.yml` as a thin caller stub delegating to
-`petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v1`.
+`petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2`.
 
 ---
 
