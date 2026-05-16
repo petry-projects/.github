@@ -41,7 +41,7 @@ ISSUES_ADDED=0
 ISSUES_EXISTING=0
 ISSUES_REMOVED=0
 
-REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
 # Code scanning), not a per-repo workflow file. The check_codeql_default_setup
@@ -718,7 +718,7 @@ check_centralized_workflow_stubs() {
 
   # workflow-filename:expected-reusable-basename
   local centralized=(
-    "claude.yml:claude-code-reusable"
+    "dev-lead.yml:dev-lead-reusable"
     "auto-rebase.yml:auto-rebase-reusable"
     "dependency-audit.yml:dependency-audit-reusable"
     "dependabot-automerge.yml:dependabot-automerge-reusable"
@@ -1564,7 +1564,7 @@ main() {
     check_sonarcloud "$repo"
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
-    check_claude_workflow_checkout "$repo"
+    # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_centralized_check_names "$repo"
