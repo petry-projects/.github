@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -44,7 +44,8 @@ reusable, not a local edit.
 | Template | Tier | Purpose |
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
+| [`dev-lead.yml`](workflows/dev-lead.yml) | 1 | Event-driven AI automation (PR fixes, CI relay, review responses, issue handling) — replaced `claude.yml` 2026-05 |
+| ~~[`claude.yml`](workflows/claude.yml)~~ | ~~1~~ | **Deprecated 2026-05.** Replaced by `dev-lead.yml`. See [§5 Migration](#migration-from-claudeyml). |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
 | [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
@@ -296,7 +297,12 @@ If omitted, gitleaks runs in open-source mode (free, no license needed).
 | `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
 | Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
 
-### 5. Claude Code (`claude.yml`)
+### 5. Claude Code (`claude.yml`) — *Deprecated 2026-05*
+
+> **Deprecated.** `claude.yml` has been removed from all `petry-projects` repos and replaced by
+> `dev-lead.yml`. See [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent) and
+> [Migration from `claude.yml`](#migration-from-claudeyml). The content below is preserved for
+> historical reference only.
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
 A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
