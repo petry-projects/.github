@@ -1099,7 +1099,8 @@ All repos MUST align to the latest version of each action:
 
 ## Dev-Lead Agent
 
-The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state. It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
+The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
+It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 
 ### Adopting the Dev-Lead Agent
 
@@ -1139,4 +1140,3 @@ See tracking issue petry-projects/.github-private#180 for the shadow period stat
 | Anti-loop guard | No | Yes |
 | Idempotency markers | No | Yes (SHA-based) |
 | CI relay deduplication | No | Yes |
-
