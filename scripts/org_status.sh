@@ -310,11 +310,11 @@ Then produce ALL of these sections in EXACTLY this order. Output each \`##\` sec
 A single compact table with one row per metric:
 | Metric | Value |
 |---|---|
-- Total open PRs — sum all repos
-- PRs needing rebase — sum needs_rebase across all repos
-- Total open issues — sum all repos
-- PR merges (last 8 days) — sum .org across all dates in Merge Activity — Daily Counts
-- Open discussions — count all discussions
+| Total open PRs | _sum all repos_ |
+| PRs needing rebase | _sum needs_rebase across all repos_ |
+| Total open issues | _sum all repos_ |
+| PR merges (last 8 days) | _sum .org across all dates in Merge Activity — Daily Counts_ |
+| Open discussions | _count all discussions_ |
 
 Then immediately after the table, a mermaid pie chart of open PRs by category (use the org-wide totals):
 \`\`\`mermaid
@@ -440,10 +440,10 @@ echo "JSON lines: $(wc -l < "$REPORT_JSON")" >&2
 echo "JSON first 600 chars:" >&2
 head -c 600 "$REPORT_JSON" >&2
 echo "" >&2
-jq '{stop_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),result_start:((.result//"")|.[0:120])}' "$REPORT_JSON" >&2 || echo "jq parse failed" >&2
-if ! jq -e '.result' "$REPORT_JSON" > /dev/null 2>&1; then
-  echo "ERROR: claude returned no .result field — raw output:" >&2
+if ! jq -e '(.result // "") | type == "string" and length > 0' "$REPORT_JSON" > /dev/null 2>&1; then
+  echo "ERROR: claude returned missing or empty .result field — raw output:" >&2
   cat "$REPORT_JSON" >&2
   exit 1
 fi
+jq '{stop_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),result_start:((.result//"")|.[0:120])}' "$REPORT_JSON" >&2 || true
 jq -r '.result' "$REPORT_JSON"
