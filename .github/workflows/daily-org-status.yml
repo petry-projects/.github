@@ -43,9 +43,12 @@ jobs:
           echo "Report size: ${REPORT_SIZE} bytes (limit: ${MAX_BYTES})"
           if [ "$REPORT_SIZE" -gt "$MAX_BYTES" ]; then
             echo "Truncating to line boundary near ${MAX_BYTES} bytes..."
-            TRUNCATE_AT=$(python3 -c "d=open('/tmp/report.md','rb').read($MAX_BYTES);nl=d.rfind(b'\n');print(nl+1 if nl>=0 else len(d))")
+            FOOTER=$'\n_Report truncated — exceeded GitHub issue body limit._\n'
+            FOOTER_LEN=$(printf '%s' "$FOOTER" | wc -c)
+            SAFE_BUDGET=$(( MAX_BYTES - FOOTER_LEN ))
+            TRUNCATE_AT=$(python3 -c "d=open('/tmp/report.md','rb').read(${SAFE_BUDGET});nl=d.rfind(b'\n');print(nl+1 if nl>=0 else len(d))")
             head -c "$TRUNCATE_AT" /tmp/report.md > /tmp/report_truncated.md
-            printf '\n_Report truncated — exceeded GitHub issue body limit._\n' >> /tmp/report_truncated.md
+            printf '%s' "$FOOTER" >> /tmp/report_truncated.md
             mv /tmp/report_truncated.md /tmp/report.md
             echo "Final size: $(wc -c < /tmp/report.md) bytes"
           fi
