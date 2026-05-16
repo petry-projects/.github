@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `claude.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -44,7 +44,8 @@ reusable, not a local edit.
 | Template | Tier | Purpose |
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
-| [`claude.yml`](workflows/claude.yml) | 1 | Thin caller delegating to the org-level reusable Claude Code workflow (PR reviews, issue automation, CI failure fixes) |
+| [`dev-lead.yml`](workflows/dev-lead.yml) | 1 | Event-driven AI automation (PR fixes, CI relay, review responses, issue handling) — replaced `claude.yml` 2026-05 |
+| ~~`claude.yml`~~ | ~~1~~ | **Deprecated 2026-05.** Replaced by `dev-lead.yml`. See [§5 Migration](#migration-from-claudeyml). |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
 | [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
@@ -70,7 +71,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
 
 Every repository MUST have these 7 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
-SonarCloud, and Claude Code workflows are documented as patterns
+SonarCloud, and Dev-Lead Agent workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack. CodeQL is
 **not** a workflow file: it is configured via GitHub-managed default setup
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
@@ -296,10 +297,15 @@ If omitted, gitleaks runs in open-source mode (free, no license needed).
 | `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
 | Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
 
-### 5. Claude Code (`claude.yml`)
+### 5. Claude Code (`claude.yml`) — *Deprecated 2026-05*
+
+> **Deprecated.** `claude.yml` has been removed from all `petry-projects` repos and replaced by
+> `dev-lead.yml`. See [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent) and
+> [Migration from `claude.yml`](#migration-from-claudeyml). The content below is preserved for
+> historical reference only.
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
-A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
+The template at [`standards/workflows/claude.yml`](workflows/claude.yml) is preserved for historical reference.
 
 > **OIDC security constraint — `claude.yml` is immutable on PR branches.**
 > Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
@@ -347,7 +353,9 @@ The workflow has three jobs:
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
 UI feature which consumes Copilot premium requests.
 
-**Standard configuration:**
+**Archived configuration — do not adopt.** The YAML below is a read-only historical reference;
+`claude.yml` is no longer deployed in org repos. For the current AI-automation implementation,
+see [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent).
 
 ```yaml
 name: Claude Code
@@ -455,39 +463,28 @@ jobs:
                comment tagging the relevant code owners to review and merge.
 ```
 
-**Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
+*Historical secrets: `CLAUDE_CODE_OAUTH_TOKEN`*
 
-**Required labels:** The `claude` label (color: `7c3aed`) must exist on every
-repository. The weekly compliance audit ensures this label is present. It can
-also be applied manually to any issue to trigger Claude.
+*Historical labels: `claude` (color: `7c3aed`) — was required on every repo for issue-triggered automation.*
 
-**How Claude follows org standards:** `claude-code-action` automatically reads
-`CLAUDE.md` from the repository root. The org-level `.github/CLAUDE.md` is
-inherited by repos without their own. Each repo's `CLAUDE.md` references
-`AGENTS.md` for cross-cutting development standards (TDD, SOLID, pre-commit
-checks, etc.). The `claude-issue` job adds an automation `prompt` for the
-issue-to-PR lifecycle, but Claude still reads `CLAUDE.md` and `AGENTS.md`
-for project-specific context.
+**How Claude followed org standards:** `claude-code-action` read `CLAUDE.md` from the repository
+root. The org-level `.github/CLAUDE.md` was inherited by repos without their own. Each repo's
+`CLAUDE.md` referenced `AGENTS.md` for cross-cutting standards. The `claude-issue` job added an
+automation `prompt` for the issue-to-PR lifecycle. These behaviors are now handled by `dev-lead.yml`.
 
-**Permissions note:** Both jobs use the same permission set. `contents: write`
-is required for issue-triggered work where Claude creates branches and pushes
-commits. `actions: read` and `checks: read` enable Claude to monitor CI status
-via the GitHub MCP tools (`get_ci_status`, `get_workflow_run_details`,
-`download_job_log`).
+**Permissions note:** Both jobs used the same permission set: `contents: write` for branch/push
+operations, `actions: read` and `checks: read` for CI monitoring via GitHub MCP tools.
 
-**Dependabot behavior:** The Claude Code step in the `claude` job is skipped
-for Dependabot PRs (the `if` condition on the step). The job still runs and
-reports SUCCESS to satisfy required status checks. See
-[AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
+**Dependabot behavior:** The Claude Code step in the `claude` job was skipped
+for Dependabot PRs. The job still ran and reported SUCCESS to satisfy required
+status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
 
-**Issue trigger security:** The `issues: [labeled]` event fires when any user
-with triage or write access applies a label. The label name check in the `if:`
-condition ensures only the `claude` label triggers the workflow — other labels
-are ignored. Apply the `claude` label manually to any issue to trigger Claude.
+**Issue trigger security:** The `issues: [labeled]` event fired when any user
+with triage or write access applied a label. Only the `claude` label triggered
+the workflow — other labels were ignored.
 
-**Maintainer notification:** The `claude-issue` prompt reads `CODEOWNERS` at
-runtime to determine who to tag. No per-repo customization is needed as long
-as `CODEOWNERS` is present (checked by the compliance audit).
+**Maintainer notification:** The `claude-issue` prompt read `CODEOWNERS` at
+runtime to determine who to tag.
 
 ### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
@@ -1027,7 +1024,7 @@ autofix:
 2. **Create `ci.yml`** with lint, format, typecheck, and test stages
 3. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
 4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
-5. **Add `claude.yml`** for AI code review
+5. **Add `dev-lead.yml`** from [`standards/workflows/`](workflows/) for AI-driven PR automation
 6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
