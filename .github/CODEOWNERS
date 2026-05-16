@@ -25,5 +25,6 @@
 >>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
 =======
 
+# Default catch-all — org-leads own everything
 * @petry-projects/org-leads
 >>>>>>> 6bce134 (chore: standardize CODEOWNERS on @petry-projects/org-leads team (#192))
