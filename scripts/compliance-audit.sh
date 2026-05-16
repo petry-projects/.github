@@ -720,6 +720,7 @@ check_centralized_workflow_stubs() {
   local entry wf reusable version
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable version <<< "$entry"
+    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
