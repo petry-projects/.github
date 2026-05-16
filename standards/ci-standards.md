@@ -45,7 +45,7 @@ reusable, not a local edit.
 |----------|------|---------|
 | [`agent-shield.yml`](workflows/agent-shield.yml) | 1 | Deep agent-config security scan via `ecc-agentshield` |
 | [`dev-lead.yml`](workflows/dev-lead.yml) | 1 | Event-driven AI automation (PR fixes, CI relay, review responses, issue handling) — replaced `claude.yml` 2026-05 |
-| ~~[`claude.yml`](workflows/claude.yml)~~ | ~~1~~ | **Deprecated 2026-05.** Replaced by `dev-lead.yml`. See [§5 Migration](#migration-from-claudeyml). |
+| ~~`claude.yml`~~ | ~~1~~ | **Deprecated 2026-05.** Replaced by `dev-lead.yml`. See [§5 Migration](#migration-from-claudeyml). |
 | [`dependabot-automerge.yml`](workflows/dependabot-automerge.yml) | 1 | Auto-approve and squash-merge eligible Dependabot PRs |
 | [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
@@ -353,7 +353,9 @@ The workflow has three jobs:
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
 UI feature which consumes Copilot premium requests.
 
-**Standard configuration:**
+**Archived configuration — do not adopt.** The YAML below is a read-only historical reference;
+`claude.yml` is no longer deployed in org repos. For the current AI-automation implementation,
+see [Adopting the Dev-Lead Agent](#adopting-the-dev-lead-agent).
 
 ```yaml
 name: Claude Code
@@ -461,39 +463,28 @@ jobs:
                comment tagging the relevant code owners to review and merge.
 ```
 
-**Required secrets:** `CLAUDE_CODE_OAUTH_TOKEN`
+*Historical secrets: `CLAUDE_CODE_OAUTH_TOKEN`*
 
-**Required labels:** The `claude` label (color: `7c3aed`) must exist on every
-repository. The weekly compliance audit ensures this label is present. It can
-also be applied manually to any issue to trigger Claude.
+*Historical labels: `claude` (color: `7c3aed`) — was required on every repo for issue-triggered automation.*
 
-**How Claude follows org standards:** `claude-code-action` automatically reads
-`CLAUDE.md` from the repository root. The org-level `.github/CLAUDE.md` is
-inherited by repos without their own. Each repo's `CLAUDE.md` references
-`AGENTS.md` for cross-cutting development standards (TDD, SOLID, pre-commit
-checks, etc.). The `claude-issue` job adds an automation `prompt` for the
-issue-to-PR lifecycle, but Claude still reads `CLAUDE.md` and `AGENTS.md`
-for project-specific context.
+**How Claude followed org standards:** `claude-code-action` read `CLAUDE.md` from the repository
+root. The org-level `.github/CLAUDE.md` was inherited by repos without their own. Each repo's
+`CLAUDE.md` referenced `AGENTS.md` for cross-cutting standards. The `claude-issue` job added an
+automation `prompt` for the issue-to-PR lifecycle. These behaviors are now handled by `dev-lead.yml`.
 
-**Permissions note:** Both jobs use the same permission set. `contents: write`
-is required for issue-triggered work where Claude creates branches and pushes
-commits. `actions: read` and `checks: read` enable Claude to monitor CI status
-via the GitHub MCP tools (`get_ci_status`, `get_workflow_run_details`,
-`download_job_log`).
+**Permissions note:** Both jobs used the same permission set: `contents: write` for branch/push
+operations, `actions: read` and `checks: read` for CI monitoring via GitHub MCP tools.
 
-**Dependabot behavior:** The Claude Code step in the `claude` job is skipped
-for Dependabot PRs (the `if` condition on the step). The job still runs and
-reports SUCCESS to satisfy required status checks. See
-[AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
+**Dependabot behavior:** The Claude Code step in the `claude` job was skipped
+for Dependabot PRs. The job still ran and reported SUCCESS to satisfy required
+status checks. See [AGENTS.md](../AGENTS.md#claude-code-workflow-on-dependabot-prs).
 
-**Issue trigger security:** The `issues: [labeled]` event fires when any user
-with triage or write access applies a label. The label name check in the `if:`
-condition ensures only the `claude` label triggers the workflow — other labels
-are ignored. Apply the `claude` label manually to any issue to trigger Claude.
+**Issue trigger security:** The `issues: [labeled]` event fired when any user
+with triage or write access applied a label. Only the `claude` label triggered
+the workflow — other labels were ignored.
 
-**Maintainer notification:** The `claude-issue` prompt reads `CODEOWNERS` at
-runtime to determine who to tag. No per-repo customization is needed as long
-as `CODEOWNERS` is present (checked by the compliance audit).
+**Maintainer notification:** The `claude-issue` prompt read `CODEOWNERS` at
+runtime to determine who to tag.
 
 ### 6. Dependabot Auto-Merge (`dependabot-automerge.yml`)
 
