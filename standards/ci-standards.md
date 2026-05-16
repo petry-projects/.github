@@ -71,7 +71,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
 
 Every repository MUST have these 7 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
-SonarCloud, and Claude Code workflows are documented as patterns
+SonarCloud, and Dev-Lead Agent workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack. CodeQL is
 **not** a workflow file: it is configured via GitHub-managed default setup
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
@@ -305,7 +305,7 @@ If omitted, gitleaks runs in open-source mode (free, no license needed).
 > historical reference only.
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
-A copy-paste ready template is available at [`standards/workflows/claude.yml`](workflows/claude.yml).
+The template at [`standards/workflows/claude.yml`](workflows/claude.yml) is preserved for historical reference.
 
 > **OIDC security constraint — `claude.yml` is immutable on PR branches.**
 > Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
@@ -1033,7 +1033,7 @@ autofix:
 2. **Create `ci.yml`** with lint, format, typecheck, and test stages
 3. **Enable CodeQL default setup** via `apply-repo-settings.sh` (or `gh api -X PATCH repos/<org>/<repo>/code-scanning/default-setup -F state=configured`) — do **not** add a `codeql.yml` workflow file
 4. **Add `sonarcloud.yml`** and configure `sonar-project.properties`
-5. **Add `claude.yml`** for AI code review
+5. **Add `dev-lead.yml`** from [`standards/workflows/`](workflows/) for AI-driven PR automation
 6. **Add `dependabot.yml`** from the appropriate template in [`standards/dependabot/`](dependabot/)
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
