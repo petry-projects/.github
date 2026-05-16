@@ -17,12 +17,18 @@
 # pr-review agent cascade.
 #
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Requires:
 #   GH_PAT_WORKFLOWS     — org secret, classic PAT (repo scope) for API calls and dispatch
 #   DON_PETRY_BOT_GH_PAT — org secret, classic PAT owned by donpetry-bot (repo scope) for posting comments
 =======
 # Requires: GH_PAT_WORKFLOWS org secret (classic PAT with repo scope).
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+# Requires:
+#   GH_PAT_WORKFLOWS     — org secret, classic PAT (repo scope) for API calls and dispatch
+#   DON_PETRY_BOT_GH_PAT — org secret, classic PAT owned by donpetry-bot (repo scope) for posting comments
+>>>>>>> b583cc3 (fix: use DON_PETRY_BOT_GH_PAT for acknowledgement comments)
 name: PR Review — Mention Trigger (Reusable)
 
 on:
@@ -30,13 +36,19 @@ on:
     secrets:
       GH_PAT_WORKFLOWS:
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> b583cc3 (fix: use DON_PETRY_BOT_GH_PAT for acknowledgement comments)
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true
       DON_PETRY_BOT_GH_PAT:
         description: "Classic PAT owned by donpetry-bot, used to post acknowledgement comments as the bot"
+<<<<<<< HEAD
 =======
         description: "Classic PAT with repo scope used to post comments and dispatch the review agent"
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+>>>>>>> b583cc3 (fix: use DON_PETRY_BOT_GH_PAT for acknowledgement comments)
         required: true
 
 jobs:
@@ -152,10 +164,14 @@ jobs:
         if: steps.trust.outputs.trusted == 'true'
         env:
 <<<<<<< HEAD
+<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
 =======
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+          GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
+>>>>>>> b583cc3 (fix: use DON_PETRY_BOT_GH_PAT for acknowledgement comments)
           PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
