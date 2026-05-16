@@ -8,14 +8,19 @@
 # repository_dispatch event to petry-projects/.github-private to trigger the
 # pr-review agent cascade.
 #
-# Requires: GH_PAT_WORKFLOWS org secret (classic PAT with repo scope).
+# Requires:
+#   GH_PAT_WORKFLOWS     — org secret, classic PAT (repo scope) for API calls and dispatch
+#   DON_PETRY_BOT_GH_PAT — org secret, classic PAT owned by donpetry-bot (repo scope) for posting comments
 name: PR Review — Mention Trigger (Reusable)
 
 on:
   workflow_call:
     secrets:
       GH_PAT_WORKFLOWS:
-        description: "Classic PAT with repo scope used to post comments and dispatch the review agent"
+        description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
+        required: true
+      DON_PETRY_BOT_GH_PAT:
+        description: "Classic PAT owned by donpetry-bot, used to post acknowledgement comments as the bot"
         required: true
 
 jobs:
@@ -105,7 +110,7 @@ jobs:
       - name: Post acknowledgement comment
         if: steps.trust.outputs.trusted == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
