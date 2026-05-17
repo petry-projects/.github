@@ -51,15 +51,31 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
-              echo "::warning::Failed to scan $ORG/$REPO"
-              echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
-              echo "::endgroup::"
-              continue
+            # We capture stderr to a separate file to detect parsing errors (malformed workflows)
+            ERROR_LOG="$RESULTS_DIR/${REPO}_error.log"
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2> "$ERROR_LOG"; then
+              # If scorecard failed, check if it was due to a malformed workflow
+              if grep -q "could not parse as YAML" "$ERROR_LOG"; then
+                echo "::warning::Detected malformed YAML in $ORG/$REPO. Treating as finding."
+                # We'll inject a custom finding into the summary and handle issue creation below
+                AGG_SCORE="0"
+                MALFORMED_WORKFLOW="true"
+              else
+                echo "::warning::Failed to scan $ORG/$REPO"
+                echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
+                echo "::endgroup::"
+                continue
+              fi
+            else
+              MALFORMED_WORKFLOW="false"
             fi
 
             # Extract aggregate score
-            AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
+            if [ "$MALFORMED_WORKFLOW" = "true" ]; then
+                AGG_SCORE="0"
+            else
+                AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
+            fi
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
@@ -68,14 +84,29 @@ jobs:
             CLOSED_COUNT=0
             CREATED_COUNT=0
 
-            # Process each check directly using jq to avoid large strings in shell loop
-            NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
+            if [ "$MALFORMED_WORKFLOW" = "true" ]; then
+              # Handle malformed workflow finding
+              CHECK_NAME="Malformed-Workflow"
+              SCORE=0
+              REASON="One or more GitHub workflow files could not be parsed as YAML (see scan logs for details)."
+              DOC_URL="https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions"
+              
+              # TDD: Re-use the existing issue logic by providing the variables it expects
+              # We need to simulate a loop iteration or just run the logic once
+              NUM_CHECKS=1
+            else
+              # Process each check directly using jq to avoid large strings in shell loop
+              NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
+            fi
+
             for i in $(seq 0 $((NUM_CHECKS - 1))); do
-              ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
-              CHECK_NAME=$(echo "$ROW" | jq -r '.name')
-              SCORE=$(echo "$ROW" | jq -r '.score')
-              REASON=$(echo "$ROW" | jq -r '.reason')
-              DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
+              if [ "$MALFORMED_WORKFLOW" = "false" ]; then
+                ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
+                CHECK_NAME=$(echo "$ROW" | jq -r '.name')
+                SCORE=$(echo "$ROW" | jq -r '.score')
+                REASON=$(echo "$ROW" | jq -r '.reason')
+                DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
+              fi
 
               # Skip non-actionable checks
               if echo "$SKIP_CHECKS" | grep -q "$CHECK_NAME"; then
