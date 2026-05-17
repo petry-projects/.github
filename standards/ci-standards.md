@@ -856,26 +856,26 @@ incorrect pinned one.
 ### Exception: Internal Reusable Workflow References
 
 Calls to `petry-projects/.github` reusable workflows use tag references
-(`@v1`, `@main`) — **not SHA pins** — and are exempt from this policy.
+(`@v1`, `@v2`, or `@main`) — **not SHA pins** — and are exempt from this policy.
 
 ```yaml
 # CORRECT — tag ref for internal reusable workflow
-uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@v1
+uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
 
 # WRONG — do not SHA-pin internal reusable workflow refs
-uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
 ```
 
 **Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
-the default branch. Anthropic's OIDC token endpoint validates that
-`.github/workflows/claude.yml` on a PR branch is identical to the default
-branch — any diff causes `401 Workflow validation failed` and Claude Code
-cannot run on that PR.
+the default branch. Anthropic's OIDC token endpoint validates that the
+workflow file on a PR branch is identical to the default branch — any diff
+causes `401 Workflow validation failed` and the agent cannot run on that PR.
 
-The `@v1` tag on `petry-projects/.github` is managed deliberately (bumped only
-on backward-compatible releases) and is not subject to tag-force-push risk
-because the org controls the tag. **Do not open compliance PRs to pin these
-references.**
+The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
+deliberately (bumped only on backward-compatible releases) and are not subject
+to tag-force-push risk because the org controls the tag. **Do not open
+compliance PRs to pin these references.**
 
 ---
 
