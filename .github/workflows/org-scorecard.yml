@@ -73,6 +73,7 @@ jobs:
             # Run scorecard
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             # We capture stderr to a separate file to detect parsing errors (malformed workflows)
             ERROR_LOG="$RESULTS_DIR/${REPO}_error.log"
             if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2> "$ERROR_LOG"; then
@@ -105,11 +106,16 @@ jobs:
               echo "::warning::Failed to scan $ORG/$REPO. Output:"
               cat "$RESULT_FILE"
 >>>>>>> bd8ad01 (debug: full output capture for scorecard)
+=======
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
+              echo "::warning::Failed to scan $ORG/$REPO"
+>>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
               echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
               echo "::endgroup::"
               continue
             fi
 
+<<<<<<< HEAD
             # Debug: show the result file content
             echo "--- Scorecard Output ---"
             cat "$RESULT_FILE"
@@ -123,6 +129,10 @@ jobs:
               continue
 >>>>>>> e87f7b5 (debug: add logging and validation for scorecard results)
             fi
+=======
+            # Extract aggregate score
+            AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
+>>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
@@ -131,6 +141,7 @@ jobs:
             CLOSED_COUNT=0
             CREATED_COUNT=0
 
+<<<<<<< HEAD
             if [ "$MALFORMED_WORKFLOW" = "true" ]; then
               # Handle malformed workflow finding
               CHECK_NAME="Malformed-Workflow"
@@ -154,6 +165,16 @@ jobs:
                 REASON=$(echo "$ROW" | jq -r '.reason')
                 DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
               fi
+=======
+            # Process each check directly using jq to avoid large strings in shell loop
+            NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
+            for i in $(seq 0 $((NUM_CHECKS - 1))); do
+              ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
+              CHECK_NAME=$(echo "$ROW" | jq -r '.name')
+              SCORE=$(echo "$ROW" | jq -r '.score')
+              REASON=$(echo "$ROW" | jq -r '.reason')
+              DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
+>>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
 
               # Skip non-actionable checks
               if echo "$SKIP_CHECKS" | grep -q "$CHECK_NAME"; then
