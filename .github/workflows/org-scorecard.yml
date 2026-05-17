@@ -131,8 +131,12 @@ jobs:
             fi
 =======
             # Extract aggregate score
+<<<<<<< HEAD
             AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
 >>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
+=======
+            AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
+>>>>>>> 57c1c5e (fix: update aggregate score extraction key for scorecard v5.5.0)
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
