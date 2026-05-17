@@ -100,7 +100,9 @@ log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
 
-# escape_ere escapes ERE metacharacters in a string for literal matching in grep -E
+# escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
+# This ensures that version tags (e.g. v2.1) and reusable basenames are treated
+# as literal strings even if they contain regex metacharacters.
 escape_ere() {
   printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/{}]/\\&/g'
 }
