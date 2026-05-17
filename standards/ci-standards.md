@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@v1` | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — repos on `@v1` pick it up after the `v1` tag is bumped; repos on `@main` pick it up on their next run. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@<version>`, where `<version>` is the canonical tag for that reusable (see `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh`; most are `@v1`, `pr-review-mention` is `@v2`) | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the canonical tag is bumped deliberately when a release is ready. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -33,11 +33,12 @@ file with that header, **stop and read the header first** — if the change
 isn't allowed by the contract, the right move is a PR against the central
 reusable, not a local edit.
 
-> **Why pin to `@v1`?** Stubs reference reusables by tag, not `@main`, so a
+> **Why pin to a canonical tag?** Stubs reference reusables by tag, not `@main`, so a
 > bad commit on the central repo's `main` branch cannot break every
-> downstream repo simultaneously. The `v1` tag is bumped deliberately when
-> a backward-compatible release is ready; breaking changes will publish a
-> `v2` tag that downstream repos opt into explicitly.
+> downstream repo simultaneously. Each reusable has its own canonical tag
+> (most are `@v1`; `pr-review-mention` is `@v2`). A tag is bumped deliberately
+> when a backward-compatible release is ready; breaking changes publish a new
+> tag that downstream repos opt into explicitly.
 
 ### Available templates
 
@@ -556,7 +557,7 @@ present as an org-level secret; no per-repo setup needed.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that
 repos have `pr-review-mention.yml` as a thin caller stub delegating to
-`petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v1`.
+`petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2`.
 
 ---
 
@@ -855,26 +856,26 @@ incorrect pinned one.
 ### Exception: Internal Reusable Workflow References
 
 Calls to `petry-projects/.github` reusable workflows use tag references
-(`@v1`, `@main`) — **not SHA pins** — and are exempt from this policy.
+(`@v1`, `@v2`, or `@main`) — **not SHA pins** — and are exempt from this policy.
 
 ```yaml
 # CORRECT — tag ref for internal reusable workflow
-uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
+uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@v1
+uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
 
 # WRONG — do not SHA-pin internal reusable workflow refs
-uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
 ```
 
 **Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
-the default branch. Anthropic's OIDC token endpoint validates that
-`.github/workflows/claude.yml` on a PR branch is identical to the default
-branch — any diff causes `401 Workflow validation failed` and Claude Code
-cannot run on that PR.
+the default branch. Anthropic's OIDC token endpoint validates that the
+workflow file on a PR branch is identical to the default branch — any diff
+causes `401 Workflow validation failed` and the agent cannot run on that PR.
 
-The `@v1` tag on `petry-projects/.github` is managed deliberately (bumped only
-on backward-compatible releases) and is not subject to tag-force-push risk
-because the org controls the tag. **Do not open compliance PRs to pin these
-references.**
+The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
+deliberately (bumped only on backward-compatible releases) and are not subject
+to tag-force-push risk because the org controls the tag. **Do not open
+compliance PRs to pin these references.**
 
 ---
 
