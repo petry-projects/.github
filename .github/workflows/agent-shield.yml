@@ -33,6 +33,7 @@ jobs:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
 =======
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
@@ -43,3 +44,6 @@ jobs:
 =======
     uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v1
 >>>>>>> 173a538 (fix: restore double .github path in agent-shield and claude reusable refs)
+=======
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
+>>>>>>> c0cdcbe (chore(deps): Bump petry-projects/.github/.github/workflows/agent-shield-reusable.yml from 1 to 2 (#306))
