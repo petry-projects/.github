@@ -51,16 +51,18 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
-              echo "::warning::Failed to scan $ORG/$REPO"
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2>&1; then
+              echo "::warning::Failed to scan $ORG/$REPO. Output:"
+              cat "$RESULT_FILE"
               echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
               echo "::endgroup::"
               continue
             fi
 
-            # Debug: show first few lines of result file
-            head -c 100 "$RESULT_FILE"
-            echo ""
+            # Debug: show the result file content
+            echo "--- Scorecard Output ---"
+            cat "$RESULT_FILE"
+            echo "--- End Scorecard Output ---"
 
             # Check if RESULT_FILE is empty or invalid JSON
             if [ ! -s "$RESULT_FILE" ] || ! jq -e . "$RESULT_FILE" >/dev/null 2>&1; then
