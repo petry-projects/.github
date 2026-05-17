@@ -59,7 +59,7 @@ jobs:
             fi
 
             # Extract aggregate score
-            AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
+            AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
