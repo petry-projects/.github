@@ -51,15 +51,24 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2>/dev/null; then
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
               echo "::warning::Failed to scan $ORG/$REPO"
               echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
               echo "::endgroup::"
               continue
             fi
 
-            # Extract aggregate score
-            AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
+            # Debug: show first few lines of result file
+            head -c 100 "$RESULT_FILE"
+            echo ""
+
+            # Check if RESULT_FILE is empty or invalid JSON
+            if [ ! -s "$RESULT_FILE" ] || ! jq -e . "$RESULT_FILE" >/dev/null 2>&1; then
+              echo "::warning::Invalid or empty JSON results for $ORG/$REPO"
+              echo "| $REPO | ERROR | Invalid results |" >> "$SUMMARY_FILE"
+              echo "::endgroup::"
+              continue
+            fi
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
