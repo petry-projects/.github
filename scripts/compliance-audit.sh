@@ -100,6 +100,11 @@ log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
 
+# escape_ere escapes ERE metacharacters in a string for literal matching in grep -E
+escape_ere() {
+  printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/]/\\&/g'
+}
+
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
@@ -761,7 +766,10 @@ check_centralized_workflow_stubs() {
     # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
     # Anchor to start-of-line + optional indent so a `# uses: ...` comment
     # cannot satisfy the check.
-    local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@${version}"
+    local esc_reusable esc_version
+    esc_reusable=$(escape_ere "$reusable")
+    esc_version=$(escape_ere "$version")
+    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
 
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
       continue  # stub is correctly pinned to the canonical version — compliant
@@ -769,7 +777,7 @@ check_centralized_workflow_stubs() {
 
     # Determine why it's non-compliant for a more actionable message.
     local why
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to \`@${version}\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
