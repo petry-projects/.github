@@ -144,6 +144,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml@v1
+    uses: petry-projects/.github/.github/workflows/dependabot-automerge-reusable.yml@v2
     secrets: inherit
 >>>>>>> 59592bb (fix(ci): enable allow_auto_merge and convert dependabot-automerge to thin-caller stub (#223))
