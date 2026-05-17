@@ -51,26 +51,15 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2>&1; then
-              echo "::warning::Failed to scan $ORG/$REPO. Output:"
-              cat "$RESULT_FILE"
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
+              echo "::warning::Failed to scan $ORG/$REPO"
               echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
               echo "::endgroup::"
               continue
             fi
 
-            # Debug: show the result file content
-            echo "--- Scorecard Output ---"
-            cat "$RESULT_FILE"
-            echo "--- End Scorecard Output ---"
-
-            # Check if RESULT_FILE is empty or invalid JSON
-            if [ ! -s "$RESULT_FILE" ] || ! jq -e . "$RESULT_FILE" >/dev/null 2>&1; then
-              echo "::warning::Invalid or empty JSON results for $ORG/$REPO"
-              echo "| $REPO | ERROR | Invalid results |" >> "$SUMMARY_FILE"
-              echo "::endgroup::"
-              continue
-            fi
+            # Extract aggregate score
+            AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
@@ -79,8 +68,10 @@ jobs:
             CLOSED_COUNT=0
             CREATED_COUNT=0
 
-            # Process each check
-            for ROW in $(jq -c '.checks[]' "$RESULT_FILE"); do
+            # Process each check directly using jq to avoid large strings in shell loop
+            NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
+            for i in $(seq 0 $((NUM_CHECKS - 1))); do
+              ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
               CHECK_NAME=$(echo "$ROW" | jq -r '.name')
               SCORE=$(echo "$ROW" | jq -r '.score')
               REASON=$(echo "$ROW" | jq -r '.reason')
