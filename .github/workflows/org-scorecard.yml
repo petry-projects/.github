@@ -90,7 +90,7 @@ jobs:
               SCORE=0
               REASON="One or more GitHub workflow files could not be parsed as YAML (see scan logs for details)."
               DOC_URL="https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions"
-              
+
               # TDD: Re-use the existing issue logic by providing the variables it expects
               # We need to simulate a loop iteration or just run the logic once
               NUM_CHECKS=1
