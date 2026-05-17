@@ -71,6 +71,7 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
+<<<<<<< HEAD
             # We capture stderr to a separate file to detect parsing errors (malformed workflows)
             ERROR_LOG="$RESULTS_DIR/${REPO}_error.log"
             if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2> "$ERROR_LOG"; then
@@ -95,6 +96,25 @@ jobs:
                 AGG_SCORE="0"
             else
                 AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
+=======
+            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
+              echo "::warning::Failed to scan $ORG/$REPO"
+              echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Debug: show first few lines of result file
+            head -c 100 "$RESULT_FILE"
+            echo ""
+
+            # Check if RESULT_FILE is empty or invalid JSON
+            if [ ! -s "$RESULT_FILE" ] || ! jq -e . "$RESULT_FILE" >/dev/null 2>&1; then
+              echo "::warning::Invalid or empty JSON results for $ORG/$REPO"
+              echo "| $REPO | ERROR | Invalid results |" >> "$SUMMARY_FILE"
+              echo "::endgroup::"
+              continue
+>>>>>>> e87f7b5 (debug: add logging and validation for scorecard results)
             fi
 
             # Ensure scorecard label exists
