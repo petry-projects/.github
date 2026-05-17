@@ -534,23 +534,43 @@ check_sonarcloud() {
 check_codeql_default_setup() {
   local repo="$1"
 
-  # Query the default-setup state. The endpoint returns 200 with a JSON body
-  # describing the state, OR a 4xx if the repo has no code scanning capability
-  # (e.g. private without GHAS, archived). Treat any non-"configured" state
-  # as a finding so the audit surfaces what needs remediation.
-  local state
-  state=$(gh_api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
+  # Query the default-setup state.
+  # IMPORTANT: Do NOT use the gh_api() retry wrapper here. When gh api gets a
+  # 403 it outputs the error JSON body to stdout before exiting non-zero. The
+  # retry wrapper loops 3 times without suppressing stdout, so the captured
+  # output ends up as 3 concatenated error bodies — indistinguishable from a
+  # real "not-configured" state and causing persistent false-positive findings.
+  # We capture the response body and exit code separately so we can detect a
+  # 403 permission error and skip without filing a spurious finding.
+  local raw_response=""
+  local api_ok=0
+  raw_response=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" 2>/dev/null) || api_ok=$?
 
-  if [ "$state" != "configured" ]; then
-    local detail
-    if [ -z "$state" ]; then
-      detail="CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+  if [ "$api_ok" -ne 0 ]; then
+    # Distinguish a 403 permission error from other failures (404, 500, …).
+    # The gh api error body contains `"status": "403"` (a JSON string) for
+    # "Resource not accessible by personal access token" responses.
+    if echo "$raw_response" | jq -e '.status == "403"' > /dev/null 2>&1; then
+      # ORG_SCORECARD_TOKEN lacks the security_events scope required by this
+      # endpoint. We cannot determine the CodeQL default-setup state, so we
+      # skip without adding a finding — a 403 from the audit token must not be
+      # misreported as "not configured". To verify state manually run:
+      #   gh api repos/$ORG/$repo/code-scanning/default-setup
+      # with a token that carries security_events (or repo-admin) scope.
+      info "  CodeQL default setup check skipped for $repo — audit token lacks required permissions (403)"
     else
-      detail="CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`."
+      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+        "CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
+        "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
     fi
-    add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
-      "$detail" \
-      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+  else
+    local state
+    state=$(echo "$raw_response" | jq -r '.state // ""')
+    if [ "$state" != "configured" ]; then
+      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+        "CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
+        "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
+    fi
   fi
 
   # Stray workflow check: any codeql.yml under .github/workflows is drift.
