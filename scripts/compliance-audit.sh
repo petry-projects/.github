@@ -100,6 +100,13 @@ log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
 
+# escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
+# This ensures that version tags (e.g. v2.1) and reusable basenames are treated
+# as literal strings even if they contain regex metacharacters.
+escape_ere() {
+  printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/{}]/\\&/g'
+}
+
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
@@ -701,17 +708,20 @@ check_ci_concurrency() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
+# Check: Tier 1 centralized workflows must be thin caller stubs pinned to the
+# canonical version tag for their reusable.
 #
 # For each workflow that the org has centralized into a reusable workflow,
 # verify the downstream repo's copy is a stub that delegates via:
-#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@v1
+#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@<version>
 #
 # This prevents drift: a repo that copies the inline pre-centralization
-# version (or pins to @main, or pins to an older tag) is flagged so it
-# can be re-synced from the standard. The central .github repo itself is
+# version (or pins to @main, or pins to a non-canonical tag) is flagged so
+# it can be re-synced from the standard. The central .github repo itself is
 # exempt because it owns the reusables and may legitimately reference
 # its own workflows by @main during release prep.
+#
+# Array format: "workflow-filename:expected-reusable-basename:version-tag"
 # ---------------------------------------------------------------------------
 check_centralized_workflow_stubs() {
   local repo="$1"
@@ -720,16 +730,16 @@ check_centralized_workflow_stubs() {
   # own reusables by @main; skip the stub check for it.
   [ "$repo" = ".github" ] && return
 
-  # workflow-filename:expected-reusable-basename
+  # workflow-filename:expected-reusable-basename:version-tag
   local centralized=(
-    "dev-lead.yml:dev-lead-reusable"
-    "auto-rebase.yml:auto-rebase-reusable"
-    "dependency-audit.yml:dependency-audit-reusable"
-    "dependabot-automerge.yml:dependabot-automerge-reusable"
-    "dependabot-rebase.yml:dependabot-rebase-reusable"
-    "agent-shield.yml:agent-shield-reusable"
-    "feature-ideation.yml:feature-ideation-reusable"
-    "pr-review-mention.yml:pr-review-mention-reusable"
+    "dev-lead.yml:dev-lead-reusable:v1"
+    "auto-rebase.yml:auto-rebase-reusable:v1"
+    "dependency-audit.yml:dependency-audit-reusable:v1"
+    "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
+    "dependabot-rebase.yml:dependabot-rebase-reusable:v1"
+    "agent-shield.yml:agent-shield-reusable:v1"
+    "feature-ideation.yml:feature-ideation-reusable:v1"
+    "pr-review-mention.yml:pr-review-mention-reusable:v2"
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -738,9 +748,10 @@ check_centralized_workflow_stubs() {
   workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
   [ -z "$workflow_list" ] && return
 
-  local entry wf reusable
+  local entry wf reusable version
   for entry in "${centralized[@]}"; do
-    IFS=':' read -r wf reusable <<< "$entry"
+    IFS=':' read -r wf reusable version <<< "$entry"
+    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
@@ -758,19 +769,22 @@ check_centralized_workflow_stubs() {
     [ -z "$decoded" ] && continue
 
     # Required pattern: a non-comment line whose `uses:` value is exactly
-    # petry-projects/.github/.github/workflows/<reusable>.yml@v1
+    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
     # Anchor to start-of-line + optional indent so a `# uses: ...` comment
     # cannot satisfy the check.
-    local expected="petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@v1"
+    local esc_reusable esc_version
+    esc_reusable=$(escape_ere "$reusable")
+    esc_version=$(escape_ere "$version")
+    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
 
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
-      continue  # stub is correctly pinned to @v1 — compliant
+      continue  # stub is correctly pinned to the canonical version — compliant
     fi
 
     # Determine why it's non-compliant for a more actionable message.
     local why
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@v1\` (org standard)"
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
+      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -778,7 +792,7 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@v1\`." \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
       "standards/ci-standards.md#centralization-tiers"
   done
 }
