@@ -24,6 +24,7 @@
 #     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 #   - merge conflict (422): posts an idempotent comment noting that dev-lead will
 #     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
 #     triggers the rebase intent in dev-lead.yml
@@ -41,13 +42,16 @@
 >>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
 =======
 #   - merge conflict (422): posts an idempotent comment noting that Claude will
+=======
+#   - merge conflict (422): posts an idempotent comment noting that dev-lead will
+>>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
 #     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
-#     triggers the claude-rebase job in claude-code-reusable.yml
+#     triggers the rebase intent in dev-lead.yml
 #
-# Secrets: GH_PAT_WORKFLOWS is optional but required for the claude-rebase
-# trigger to work. Sentinel comments posted with GITHUB_TOKEN do not fire
+# Secrets: GH_PAT_WORKFLOWS is optional but required for the rebase sentinel
+# to trigger dev-lead. Sentinel comments posted with GITHUB_TOKEN do not fire
 # issue_comment workflow runs (GitHub limitation). When the PAT is absent the
-# sentinel is still posted but claude-rebase will not be scheduled.
+# sentinel is still posted but dev-lead will not be scheduled.
 # No auto-merge logic.
 >>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
 name: Auto-rebase non-Dependabot PRs (Reusable)
@@ -65,7 +69,7 @@ on:
 =======
     secrets:
       GH_PAT_WORKFLOWS:
-        description: "PAT with workflows scope — required for sentinel comment to trigger claude-rebase"
+        description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false
 >>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
 
@@ -149,6 +153,7 @@ jobs:
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 # Merge conflict — post the sentinel to trigger dev-lead rebase.
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
@@ -188,12 +193,15 @@ jobs:
 =======
                 # Merge conflict — post the sentinel to trigger claude-rebase.
 >>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
+=======
+                # Merge conflict — post the sentinel to trigger dev-lead rebase.
+>>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
                 # Re-trigger strategy: embed the current BASE_BRANCH HEAD SHA in
                 # the sentinel so we can detect whether the base has moved. If an
                 # existing sentinel already carries the same SHA, skip delete+repost
-                # (avoiding cancellation of an in-flight claude-rebase run). Only
+                # (avoiding cancellation of an in-flight dev-lead rebase run). Only
                 # delete and re-post when the base HEAD has changed (new conflict).
                 BASE_SHA=$(gh api "repos/$REPO/git/ref/heads/$BASE_BRANCH" --jq '.object.sha')
                 SENTINEL_PREFIX="<!-- auto-rebase-conflict:"
@@ -219,7 +227,7 @@ jobs:
 =======
                   CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
                   if [[ "$HAS_PAT" == "true" ]]; then
-                    CONFLICT_BODY+=$'\n\n'"Claude will attempt to resolve this automatically. If it cannot, a"
+                    CONFLICT_BODY+=$'\n\n'"dev-lead will attempt to resolve this automatically. If it cannot, a"
                     CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
                     CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
                   else

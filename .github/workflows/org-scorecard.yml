@@ -170,10 +170,14 @@ jobs:
               REASON="One or more GitHub workflow files could not be parsed as YAML (see scan logs for details)."
               DOC_URL="https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions"
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
               
 >>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
+=======
+
+>>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
               # TDD: Re-use the existing issue logic by providing the variables it expects
               # We need to simulate a loop iteration or just run the logic once
               NUM_CHECKS=1
