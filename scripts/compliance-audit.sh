@@ -102,7 +102,7 @@ warn() { echo "::warning::$*" >&2; }
 
 # escape_ere escapes ERE metacharacters in a string for literal matching in grep -E
 escape_ere() {
-  printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/]/\\&/g'
+  printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/{}]/\\&/g'
 }
 
 # Retry wrapper for gh api calls (handles rate limits)
