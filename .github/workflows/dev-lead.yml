@@ -38,12 +38,25 @@ on:
 permissions: {}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
 # per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
 # traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
 
 =======
 >>>>>>> e6d47e0 (feat(dev-lead): adopt dev-lead agent (Phase 8 cross-repo rollout))
+=======
+concurrency:
+  # One active run per repo; ci-relay (check_run) keeps an ephemeral per-SHA slot
+  # so it can fire immediately without blocking or being blocked by the dispatch queue.
+  group: >-
+    ${{
+      github.event_name == 'check_run' && format('dev-lead-ci-relay-{0}', github.event.check_run.head_sha) ||
+      'dev-lead'
+    }}
+  cancel-in-progress: false
+
+>>>>>>> 6306793 (feat(concurrency): add per-repo serialized concurrency to dev-lead stubs (#322))
 jobs:
   dev-lead:
     uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
