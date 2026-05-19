@@ -38,9 +38,13 @@ SKIP_REPOS=(".github" ".github-private")
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
   dev-lead.yml
 =======
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+  dev-lead.yml
+>>>>>>> 7a80a3f (chore: add dev-lead.yml to DEPLOYABLE_WORKFLOWS (#324))
   agent-shield.yml
   auto-rebase.yml
   claude.yml
