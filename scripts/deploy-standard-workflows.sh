@@ -37,6 +37,7 @@ SKIP_REPOS=(".github" ".github-private")
 # feature-ideation.yml (requires repo-specific project_context input).
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
+  dev-lead.yml
   agent-shield.yml
   auto-rebase.yml
   claude.yml
