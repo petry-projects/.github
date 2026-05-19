@@ -153,7 +153,7 @@ jobs:
 
           # Use double-quoted jq expression with \$self so the shell produces
           # a literal "$self" for jq without triggering SC2016 (which flags
-          # shell variables in single-quoted strings).
+          # shell variables in single-quoted strings). $self is a jq variable.
           NOT_PASSING=$(echo "$CHECKS" | jq \
             --arg self "$SELF_CHECK" \
             "map(select(.name != \$self)) | map(select(.bucket != \"pass\" and .bucket != \"skipping\")) | length")
@@ -178,22 +178,16 @@ jobs:
 
           # 4. No unresolved review threads.
           #    REST API has no resolved field on review comments; GraphQL is
-          #    required. Paginating with first:100 covers the vast majority of
-          #    PRs; threads beyond 100 are an edge case noted in the TODO below.
+          #    required. \$owner/\$repo/\$number are GraphQL variable references;
+          #    the backslash-dollar escaping prevents shell expansion while
+          #    keeping the literal $ that GraphQL expects.
           # TODO: paginate reviewThreads for PRs with >100 threads.
           UNRESOLVED=$(gh api graphql \
-            -f query='query($owner:String!,$repo:String!,$number:Int!){
-              repository(owner:$owner,name:$repo){
-                pullRequest(number:$number){
-                  reviewThreads(first:100){nodes{isResolved}}
-                }
-              }
-            }' \
+            -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved}}}}}" \
             -f owner="${REPO%%/*}" \
             -f repo="${REPO##*/}" \
             -F number="${PR_NUMBER}" \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
-                  | select(.isResolved == false)] | length')
+            --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length")
           if [ "$UNRESOLVED" -gt 0 ]; then
             echo "$UNRESOLVED unresolved review thread(s) — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
