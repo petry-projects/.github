@@ -23,12 +23,21 @@
 name: PR Auto-Review — Ready Check
 
 on:
+  # workflow_run fires when a named GitHub Actions workflow completes.
+  # check_suite does NOT trigger for GitHub Actions runs, so this is required
+  # to catch CI turning green on a PR.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  # check_suite covers third-party CI checks (e.g. SonarCloud, external apps).
   check_suite:
     types: [completed]
+  # Re-evaluate readiness after review state changes.
   pull_request_review:
     types: [submitted, dismissed]
-  pull_request_review_thread:
-    types: [resolved]
+  # Re-evaluate when the PR is first opened, updated, or comes out of draft.
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions: {}
 
@@ -36,5 +45,7 @@ jobs:
   pr-auto-review:
     permissions:
       pull-requests: read
+      checks: read
+      actions: read
     uses: ./.github/workflows/pr-auto-review-reusable.yml  # local ref — always current
     secrets: inherit
