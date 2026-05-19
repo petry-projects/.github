@@ -48,4 +48,5 @@ jobs:
       checks: read
       actions: read
     uses: ./.github/workflows/pr-auto-review-reusable.yml  # local ref — always current
-    secrets: inherit
+    secrets:
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_WORKFLOWS }}
