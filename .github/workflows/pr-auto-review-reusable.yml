@@ -151,12 +151,12 @@ jobs:
             "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
 
-          # SC2016: $self is a jq variable (passed via --arg), not a shell variable.
-          # shellcheck disable=SC2016
+          # Use double-quoted jq expression with \$self so the shell produces
+          # a literal "$self" for jq without triggering SC2016 (which flags
+          # shell variables in single-quoted strings).
           NOT_PASSING=$(echo "$CHECKS" | jq \
             --arg self "$SELF_CHECK" \
-            '[.[] | select(.bucket != "pass" and .bucket != "skipping")
-                  | select($self == "" or .name != $self)] | length')
+            "map(select(.name != \$self)) | map(select(.bucket != \"pass\" and .bucket != \"skipping\")) | length")
 
           if [ "$NOT_PASSING" -gt 0 ]; then
             echo "$NOT_PASSING of $TOTAL check(s) are not yet passing — skipping"
