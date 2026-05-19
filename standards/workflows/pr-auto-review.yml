@@ -51,4 +51,5 @@ jobs:
       checks: read
       actions: read
     uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@v2
-    secrets: inherit
+    secrets:
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_WORKFLOWS }}
