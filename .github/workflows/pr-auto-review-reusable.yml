@@ -6,14 +6,14 @@
 # Fires a review-agent dispatch when a PR meets ALL of the following criteria:
 #   1. PR is open and not a draft
 #   2. All CI checks are completed and passing (no pending / failing)
-#   3. No reviews in CHANGES_REQUESTED state
+#   3. Effective review decision is not CHANGES_REQUESTED
 #   4. No unresolved review threads
 #
-# Triggered by:
-#   check_suite:completed           — a check suite finished (fast-exits if not success)
-#   pull_request_review:submitted   — a review was submitted (may clear CHANGES_REQUESTED)
-#   pull_request_review:dismissed   — a changes-requested review was dismissed
-#   pull_request_review_thread:resolved — a review thread was resolved
+# Triggered by (events forwarded from the thin caller):
+#   workflow_run:completed      — a named CI workflow finished green
+#   check_suite:completed       — a third-party check suite finished green
+#   pull_request:opened/reopened/synchronize/ready_for_review
+#   pull_request_review:submitted/dismissed
 #
 # Requires:
 #   GH_PAT_WORKFLOWS — org secret, classic PAT (repo scope) for API calls and dispatch
@@ -31,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
+      checks: read
+      actions: read
 
     steps:
       - name: Resolve PR URL
@@ -40,22 +42,44 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ github.event_name }}" in
+            workflow_run)
+              # workflow_run fires when a named CI workflow completes (Actions-aware).
+              CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+              if [ "$CONCLUSION" != "success" ]; then
+                echo "Workflow run conclusion is '$CONCLUSION' — skipping"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+              PR_URL=$(gh api "/repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
+                --jq '[.[] | select(.state == "open" and .draft == false)][0].html_url // empty' \
+                2>/dev/null || true)
+              ;;
             check_suite)
-              # Short-circuit: only worth proceeding if the suite itself succeeded.
+              # check_suite covers third-party CI (e.g. SonarCloud).
+              # NOTE: this event does NOT fire for GitHub Actions runs; use
+              # workflow_run in the caller for Actions-based CI.
               CONCLUSION="${{ github.event.check_suite.conclusion }}"
               if [ "$CONCLUSION" != "success" ]; then
                 echo "Check suite conclusion is '$CONCLUSION' — skipping"
                 echo "skip=true" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
-              # check_suite.pull_requests only covers same-repo PRs; the commits
-              # API also surfaces cross-fork PRs.
               HEAD_SHA="${{ github.event.check_suite.head_sha }}"
               PR_URL=$(gh api "/repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
                 --jq '[.[] | select(.state == "open" and .draft == false)][0].html_url // empty' \
                 2>/dev/null || true)
               ;;
-            pull_request_review | pull_request_review_thread)
+            pull_request)
+              # Skip draft PRs early to avoid unnecessary API calls.
+              if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+                echo "PR is a draft — skipping"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              PR_URL="${{ github.event.pull_request.html_url }}"
+              ;;
+            pull_request_review)
               PR_URL="${{ github.event.pull_request.html_url }}"
               ;;
             *)
@@ -84,12 +108,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fetch basic PR metadata in one call.
-          PR_META=$(gh pr view "$PR_URL" --json state,isDraft,number,baseRepository)
+          # Fetch basic PR metadata in one call, including the effective review
+          # decision so we don't need a separate REST call for reviews history.
+          PR_META=$(gh pr view "$PR_URL" \
+            --json state,isDraft,number,baseRepository,reviewDecision)
           STATE=$(echo "$PR_META" | jq -r '.state')
           IS_DRAFT=$(echo "$PR_META" | jq -r '.isDraft')
           PR_NUMBER=$(echo "$PR_META" | jq -r '.number')
           REPO=$(echo "$PR_META" | jq -r '.baseRepository.nameWithOwner')
+          REVIEW_DECISION=$(echo "$PR_META" | jq -r '.reviewDecision // ""')
 
           # 1. PR must be open and not a draft.
           if [ "$STATE" != "OPEN" ] || [ "$IS_DRAFT" = "true" ]; then
@@ -100,17 +127,31 @@ jobs:
           echo "PR is open and not a draft ✓"
 
           # 2. All CI checks must be completed and passing.
-          #    gh pr checks --json returns objects with a "bucket" field:
-          #    "pass" | "skipping" | "fail" | "pending" | "cancel"
-          CHECKS=$(gh pr checks "$PR_URL" --json bucket,name 2>/dev/null || echo "[]")
+          #    gh pr checks --json may exit non-zero when checks are
+          #    failing/pending but still writes the JSON payload to stdout;
+          #    use || true so set -e doesn't discard that output.
+          CHECKS=$(gh pr checks "$PR_URL" --json bucket,name 2>/dev/null || true)
+          if [ -z "${CHECKS}" ]; then
+            CHECKS="[]"
+          fi
           TOTAL=$(echo "$CHECKS" | jq 'length')
           if [ "$TOTAL" -eq 0 ]; then
             echo "No CI checks found on this PR — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          NOT_PASSING=$(echo "$CHECKS" | \
-            jq '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length')
+
+          # Exclude this workflow's own in-progress check so it doesn't
+          # block itself on every trigger.
+          SELF_CHECK=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
+
+          NOT_PASSING=$(echo "$CHECKS" | jq \
+            --arg self "$SELF_CHECK" \
+            '[.[] | select(.bucket != "pass" and .bucket != "skipping")
+                  | select($self == "" or .name != $self)] | length')
+
           if [ "$NOT_PASSING" -gt 0 ]; then
             echo "$NOT_PASSING of $TOTAL check(s) are not yet passing — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -118,17 +159,22 @@ jobs:
           fi
           echo "All $TOTAL CI check(s) passing ✓"
 
-          # 3. No reviews in CHANGES_REQUESTED state.
-          CHANGES_REQ=$(gh api "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
-            --jq '[.[] | select(.state == "CHANGES_REQUESTED")] | length')
-          if [ "$CHANGES_REQ" -gt 0 ]; then
-            echo "$CHANGES_REQ review(s) in CHANGES_REQUESTED state — skipping"
+          # 3. Effective review decision must not be CHANGES_REQUESTED.
+          #    reviewDecision reflects the aggregate current state (accounts for
+          #    dismissals and superseding reviews), unlike the REST reviews list
+          #    which returns full history and can produce false positives.
+          if [ "$REVIEW_DECISION" = "CHANGES_REQUESTED" ]; then
+            echo "Effective review decision is CHANGES_REQUESTED — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "No CHANGES_REQUESTED reviews ✓"
+          echo "No CHANGES_REQUESTED review decision ✓"
 
-          # 4. No unresolved review threads (REST API has no resolved field; use GraphQL).
+          # 4. No unresolved review threads.
+          #    REST API has no resolved field on review comments; GraphQL is
+          #    required. Paginating with first:100 covers the vast majority of
+          #    PRs; threads beyond 100 are an edge case noted in the TODO below.
+          # TODO: paginate reviewThreads for PRs with >100 threads.
           UNRESOLVED=$(gh api graphql \
             -f query='query($owner:String!,$repo:String!,$number:Int!){
               repository(owner:$owner,name:$repo){
