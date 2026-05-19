@@ -108,14 +108,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Fetch basic PR metadata in one call, including the effective review
-          # decision so we don't need a separate REST call for reviews history.
+          # Derive the base repository (owner/repo) from the PR URL.
+          # gh pr view --json does not expose baseRepository; parsing the URL
+          # is simpler and works for both same-repo and fork PRs.
+          REPO=$(echo "$PR_URL" | sed 's|https://github.com/||; s|/pull/.*||')
+
+          # Fetch PR metadata in one call, including the effective review decision.
           PR_META=$(gh pr view "$PR_URL" \
-            --json state,isDraft,number,baseRepository,reviewDecision)
+            --json state,isDraft,number,reviewDecision)
           STATE=$(echo "$PR_META" | jq -r '.state')
           IS_DRAFT=$(echo "$PR_META" | jq -r '.isDraft')
           PR_NUMBER=$(echo "$PR_META" | jq -r '.number')
-          REPO=$(echo "$PR_META" | jq -r '.baseRepository.nameWithOwner')
           REVIEW_DECISION=$(echo "$PR_META" | jq -r '.reviewDecision // ""')
 
           # 1. PR must be open and not a draft.
@@ -141,12 +144,15 @@ jobs:
             exit 0
           fi
 
-          # Exclude this workflow's own in-progress check so it doesn't
-          # block itself on every trigger.
+          # Get the name of this workflow's own check run so it can be excluded
+          # from the gate — an in-progress run shows as "pending" and would
+          # otherwise block itself on every trigger.
           SELF_CHECK=$(gh api \
             "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
 
+          # SC2016: $self is a jq variable (passed via --arg), not a shell variable.
+          # shellcheck disable=SC2016
           NOT_PASSING=$(echo "$CHECKS" | jq \
             --arg self "$SELF_CHECK" \
             '[.[] | select(.bucket != "pass" and .bucket != "skipping")
