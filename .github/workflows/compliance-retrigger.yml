@@ -2,7 +2,11 @@ name: Compliance Issue Re-trigger
 
 on:
   schedule:
+<<<<<<< HEAD
     - cron: '0 5 * * *'   # Daily at 05:00 UTC (12:00 AM CDT)
+=======
+    - cron: '0 14 * * *'   # Daily at 14:00 UTC (9 AM CDT)
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
   workflow_dispatch:
     inputs:
       stale_days:
@@ -37,7 +41,11 @@ jobs:
 
     steps:
       - name: Checkout .github repo
+<<<<<<< HEAD
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+=======
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 
       - name: Re-trigger stale compliance issues
         run: bash scripts/compliance-retrigger.sh

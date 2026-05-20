@@ -10,6 +10,7 @@ set -euo pipefail
 #      Disabled workflows silently swallow issue-labeled events — findings
 #      will never be fixed even if labels are applied correctly.
 #   2. Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
+<<<<<<< HEAD
 #      have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
 #      label (remove + re-add) to re-fire the issues:labeled event and give
 #      dev-lead a fresh chance to create a fix PR.
@@ -22,6 +23,12 @@ set -euo pipefail
 #      concurrent dev-lead runs in any single repo to one, avoiding the rebase
 #      storms and token exhaustion a fleet-wide burst would cause.
 #
+=======
+#      have no associated open PR on a dev-lead branch.  Cycles the "claude"
+#      label (remove + re-add) to re-fire the issues:labeled event and give
+#      dev-lead a fresh chance to create a fix PR.
+#
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 # Why re-trigger instead of relying on the original event?
 #   GitHub only fires issues:labeled once per label application.  If dev-lead
 #   had a transient failure at that moment (template error, git-identity bug,
@@ -34,12 +41,17 @@ set -euo pipefail
 #   STALE_DAYS    — issues older than this are considered stale (default: 2)
 #   DRY_RUN       — set to "true" to log actions without executing them
 #   AUDIT_LABEL   — label used to tag compliance findings (default: compliance-audit)
+<<<<<<< HEAD
 #   TRIGGER_LABEL — label used to trigger dev-lead (default: dev-lead)
+=======
+#   TRIGGER_LABEL — label used to trigger dev-lead (default: claude)
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 
 ORG="${ORG:-petry-projects}"
 STALE_DAYS="${STALE_DAYS:-2}"
 DRY_RUN="${DRY_RUN:-false}"
 AUDIT_LABEL="${AUDIT_LABEL:-compliance-audit}"
+<<<<<<< HEAD
 TRIGGER_LABEL="${TRIGGER_LABEL:-dev-lead}"
 # Legacy label to also sweep during the transition window before the one-time
 # migration script has run. Issues that still carry only the old label are
@@ -65,6 +77,15 @@ WORKFLOWS_ENABLED=0
 # every path that could engage dev-lead.
 declare -A REPO_ENGAGED=()
 
+=======
+TRIGGER_LABEL="${TRIGGER_LABEL:-claude}"
+
+ISSUES_RETRIGGERED=0
+ISSUES_SKIPPED=0
+WORKFLOWS_DISABLED=0
+WORKFLOWS_ENABLED=0
+
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -73,10 +94,14 @@ info()  { echo "[info]  $*"; }
 warn()  { echo "[warn]  $*" >&2; }
 error() { echo "[error] $*" >&2; }
 
+<<<<<<< HEAD
 # has_open_pr / cycle_label live in lib/dev-lead-retrigger.sh as
 # dl_dev_lead_active() and dl_cycle_trigger_label(), shared with the weekly
 # compliance audit so both stay in sync with dev-lead's branch-naming
 # convention. Sourced via SCRIPT_DIR resolved at the top of the file.
+=======
+gh_api() { gh api "$@"; }
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 
 # stale_cutoff — ISO timestamp N days ago
 stale_cutoff() {
@@ -85,6 +110,33 @@ stale_cutoff() {
                    print((datetime.now(timezone.utc)-timedelta(days=${STALE_DAYS})).strftime('%Y-%m-%dT%H:%M:%SZ'))"
 }
 
+<<<<<<< HEAD
+=======
+# has_open_pr <repo> <issue_number>
+# Returns 0 (true) if there is an open PR with head ref dev-lead/issue-<number>*
+has_open_pr() {
+  local repo="$1" issue="$2"
+  local count
+  count=$(gh_api "repos/$ORG/$repo/pulls?state=open" \
+    --jq "[.[] | select(.head.ref | startswith(\"dev-lead/issue-${issue}\"))] | length" \
+    2>/dev/null || echo "0")
+  [ "${count:-0}" -gt 0 ]
+}
+
+# cycle_label <repo> <issue>
+# Removes and re-adds TRIGGER_LABEL so issues:labeled fires again.
+cycle_label() {
+  local repo="$1" issue="$2"
+  if [ "$DRY_RUN" = "true" ]; then
+    info "[dry-run] would cycle '$TRIGGER_LABEL' on $repo#$issue"
+    return 0
+  fi
+  gh api -X DELETE "repos/$ORG/$repo/issues/$issue/labels/$TRIGGER_LABEL" 2>/dev/null || true
+  gh api -X POST "repos/$ORG/$repo/issues/$issue/labels" \
+    --field "labels[]=$TRIGGER_LABEL" >/dev/null
+}
+
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 # ---------------------------------------------------------------------------
 # Step 1: Check dev-lead workflow health in fleet repos
 # ---------------------------------------------------------------------------
@@ -142,6 +194,7 @@ retrigger_stale_issues() {
   cutoff=$(stale_cutoff)
   info "Stale cutoff: $cutoff"
 
+<<<<<<< HEAD
   # Search across the whole org. Fetch raw response first so we can detect
   # HTTP errors — gh api dumps the error JSON to stdout and exits non-zero,
   # which the old `--jq '.items[]' || echo ""` pattern silently swallowed,
@@ -185,6 +238,18 @@ retrigger_stale_issues() {
 
   if [ -z "$issues" ]; then
     info "No open compliance-audit issues found with '$TRIGGER_LABEL' label."
+=======
+  # Search across the whole org
+  local issues
+  issues=$(gh api \
+    "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open&per_page=100" \
+    --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
+    2>/dev/null || echo "")
+
+  if [ -z "$issues" ]; then
+    info "No open compliance-audit issues found."
+    return 0
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
   fi
 
   while IFS= read -r issue_json; do
@@ -195,6 +260,7 @@ retrigger_stale_issues() {
     created_at=$(echo "$issue_json" | jq -r '.created_at')
     title=$(echo "$issue_json" | jq -r '.title')
 
+<<<<<<< HEAD
     # Issues arrive oldest-first, so once we hit one newer than the cutoff every
     # remaining issue is also newer (not stale) — stop scanning entirely.
     if [[ "$created_at" > "$cutoff" ]]; then
@@ -216,10 +282,23 @@ retrigger_stale_issues() {
     if dl_dev_lead_active "$ORG" "$repo" "$number"; then
       info "Skipping $repo#$number — dev-lead already active (open PR or in-progress); $repo slot taken"
       REPO_ENGAGED[$repo]=1
+=======
+    # Check if stale
+    if [[ "$created_at" > "$cutoff" ]]; then
+      info "Skipping $repo#$number ($title) — created $created_at, not yet stale"
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
       continue
     fi
 
+    # Check if a dev-lead PR already exists for this issue
+    if has_open_pr "$repo" "$number"; then
+      info "Skipping $repo#$number — open dev-lead PR already exists"
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
+      ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+      continue
+    fi
+
+<<<<<<< HEAD
     # Take the repo's slot for this run regardless of cycle outcome, so a
     # transient failure cannot let a second issue in the same repo fire and
     # reintroduce burst behaviour. The next daily sweep retries this repo.
@@ -313,6 +392,16 @@ retrigger_stale_issues() {
   fi
 
   info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped, ${ISSUES_DEFERRED} deferred (repo already engaged this run)"
+=======
+    info "Re-triggering $repo#$number: $title (created $created_at)"
+    cycle_label "$repo" "$number"
+    ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+    # Brief pause to avoid flooding the API
+    sleep 1
+  done <<< "$issues"
+
+  info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped"
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
 }
 
 # ---------------------------------------------------------------------------
@@ -328,7 +417,10 @@ print_summary() {
   echo "  Dry run         : ${DRY_RUN}"
   echo "  Issues retriggered  : ${ISSUES_RETRIGGERED}"
   echo "  Issues skipped      : ${ISSUES_SKIPPED}"
+<<<<<<< HEAD
   echo "  Issues deferred     : ${ISSUES_DEFERRED} (repo already engaged this run)"
+=======
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
   echo "  Workflows re-enabled: ${WORKFLOWS_DISABLED}"
   echo "  Workflows already active: ${WORKFLOWS_ENABLED}"
   echo "=========================================="
@@ -341,7 +433,10 @@ print_summary() {
       echo "| ------ | ----- |"
       echo "| Issues retriggered | $ISSUES_RETRIGGERED |"
       echo "| Issues skipped (PR exists or recent) | $ISSUES_SKIPPED |"
+<<<<<<< HEAD
       echo "| Issues deferred (repo already engaged this run) | $ISSUES_DEFERRED |"
+=======
+>>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
       echo "| dev-lead workflows re-enabled | $WORKFLOWS_DISABLED |"
       echo "| dev-lead workflows already active | $WORKFLOWS_ENABLED |"
       echo "| Stale threshold | ${STALE_DAYS} days |"
