@@ -390,6 +390,10 @@ private.yml
 # End of petry-projects secrets baseline
 # ============================================================================
 <<<<<<< HEAD
+<<<<<<< HEAD
 .dev-lead/
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+.dev-lead/
+>>>>>>> e292471 (feat: implement issue #251 — Compliance: secret_scanning_ai_detection (#327))
