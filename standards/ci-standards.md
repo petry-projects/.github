@@ -53,6 +53,7 @@ reusable, not a local edit.
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+| [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -559,6 +560,87 @@ present as an org-level secret; no per-repo setup needed.
 repos have `pr-review-mention.yml` as a thin caller stub delegating to
 `petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2`.
 
+### 11. Copilot Cloud Agent Setup (`copilot-setup-steps.yml`)
+
+**Recommended for all repos.** Pre-installs tools and dependencies in the Copilot
+cloud agent's ephemeral environment before the agent begins working. This is a
+**Tier 2 per-repo template** because the setup steps are inherently tech-stack-specific.
+
+**Why this matters:** Without a setup file Copilot discovers and installs dependencies
+itself via trial and error — slow, non-deterministic, and impossible for repos with
+private packages. Pre-installing dependencies via a deterministic setup file:
+
+- Speeds up every agent session (no discovery phase)
+- Ensures exact tool versions that match CI
+- Makes internal/private packages available to the agent
+- Surfaces missing instruction files (`AGENTS.md`, `copilot-instructions.md`) at
+  session start so the agent is fully oriented before it touches any code
+
+**Adoption:** Copy [`standards/workflows/copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml)
+verbatim to `.github/workflows/copilot-setup-steps.yml` in the target repo, then uncomment
+the stack block(s) matching the repo's tech stack and delete the rest.
+
+> **Important:** The file must be merged to the default branch before it takes effect —
+> GitHub does not pick it up from feature branches.
+
+**Constraints enforced by GitHub (not configurable):**
+
+| Constraint | Value |
+|---|---|
+| Job name | Must be exactly `copilot-setup-steps` |
+| `timeout-minutes` | Max 59 |
+| `fetch-depth` on checkout | Always overridden by the agent |
+| Customizable job keys | `steps`, `permissions`, `runs-on`, `services`, `snapshot`, `timeout-minutes` |
+| Default branch required | Workflow only triggers when present on the default branch |
+
+**Workflow trigger pattern** (standard — validates the file on change):
+
+```yaml
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+```
+
+**Stack blocks** (see template for full commented examples with SHA-pinned actions):
+
+| Stack | Actions used | Cache strategy |
+|---|---|---|
+| Node.js / npm | `actions/setup-node@v4` | Built-in npm cache via `cache: "npm"` |
+| Node.js / pnpm | `pnpm/action-setup@v4` + `actions/setup-node@v4` | Built-in pnpm cache via `cache: "pnpm"` |
+| Go | `actions/setup-go@v5` | Built-in module cache via `cache-dependency-path` |
+| Python / pip | `actions/setup-python@v5` | Built-in pip cache via `cache: "pip"` |
+
+**Optional additions** (uncomment in the template as needed):
+
+| Optional step | Use when |
+|---|---|
+| Build step (`npm run build`) | Agent needs pre-built artifacts (generated types, dist files) to run tests |
+| `gh-aw` MCP extension | Repo does heavy GitHub platform work (PR management, issue triage, release automation) |
+| `services:` block | Agent needs a database or queue service running during tests (see Elasticsearch example in `github/docs`, SQL Server in `dotnet/efcore`) |
+
+**Verify step** (required — always runs last): Prints tool versions and confirms
+`AGENTS.md` exists. **Fails the job if `AGENTS.md` is missing** — a repo without
+`AGENTS.md` violates agent-standards.md and the agent won't be properly oriented.
+
+**Fetching the template programmatically:**
+
+```bash
+gh api repos/petry-projects/.github/contents/standards/workflows/copilot-setup-steps.yml \
+  --jq '.content' | base64 -d > .github/workflows/copilot-setup-steps.yml
+```
+
+**Real-world inspiration** for advanced patterns (services, custom runners, Docker caching):
+
+- Multi-language monorepo: `github/copilot-sdk`
+- Node.js + Electron + custom runner pool: `microsoft/vscode`
+- SQL Server + CosmosDB services: `dotnet/efcore`
+- Docker image pre-pull with parallel caching: `Significant-Gravitas/AutoGPT`
+
 ---
 
 ## Conditional Workflows
@@ -1030,9 +1112,12 @@ autofix:
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
 9. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
-10. **Configure secrets** in the repository settings
-11. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
-12. **Pin all action references** to commit SHAs
+10. **Add `copilot-setup-steps.yml`** from [`standards/workflows/`](workflows/) — uncomment the
+    stack block(s) that match the repo's tech stack, delete the rest, then merge to `main` and
+    run manually from the Actions tab to verify
+11. **Configure secrets** in the repository settings
+12. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
+13. **Pin all action references** to commit SHAs
 
 ---
 
@@ -1047,14 +1132,14 @@ The **CodeQL** column reflects GitHub default setup state (`configured` vs
 carrying a per-repo `codeql.yml` after this standard lands are flagged as
 drift, not as compliant.
 
-| Repository | CI | CodeQL† | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config |
-|------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|
-| **broodly** | Yes | Pending | Yes | Yes | Yes | Yes | Yes | Yes |
-| **markets** | — | Pending | Yes | Yes | — | Yes | Yes | Partial |
-| **google-app-scripts** | Yes | Pending | Yes | Yes | Yes | Yes (older) | — | Non-standard |
-| **TalkTerm** | Yes | Pending | — | — | Yes | — | — | — |
-| **ContentTwin** | — | Pending | Yes | — | — | — | — | — |
-| **bmad-bgreat-suite** | — | Pending | — | — | — | — | — | — |
+| Repository | CI | CodeQL† | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config | Copilot Setup |
+|------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|:-------------:|
+| **broodly** | Yes | Pending | Yes | Yes | Yes | Yes | Yes | Yes | — |
+| **markets** | — | Pending | Yes | Yes | — | Yes | Yes | Partial | — |
+| **google-app-scripts** | Yes | Pending | Yes | Yes | Yes | Yes (older) | — | Non-standard | — |
+| **TalkTerm** | Yes | Pending | — | — | Yes | — | — | — | — |
+| **ContentTwin** | — | Pending | Yes | — | — | — | — | — | — |
+| **bmad-bgreat-suite** | — | Pending | — | — | — | — | — | — | — |
 
 † **CodeQL** values are listed as `Pending` for every repo because the
 default-setup migration is the work this standard introduces; the next
@@ -1073,6 +1158,7 @@ Every `—` in the table above is a gap that must be remediated. Priority order:
 4. **markets:** Missing CI pipeline and Coverage; Dependabot config only covers `github-actions` (missing `npm` ecosystem)
 5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
 6. **All repos:** Enable CodeQL default setup via `apply-repo-settings.sh` and remove any pre-existing `codeql.yml` workflow file
+7. **All repos:** Add `copilot-setup-steps.yml` — copy from [`standards/workflows/`](workflows/copilot-setup-steps.yml), uncomment the matching stack block, and merge to `main`
 
 ### Version Inconsistencies
 
