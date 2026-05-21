@@ -201,7 +201,7 @@ section_needs_review() {
     local repo number title url opened ci approvals
     repo=$(printf '%s' "$pr" | jq -r '.repo')
     number=$(printf '%s' "$pr" | jq -r '.number')
-    title=$(printf '%s' "$pr" | jq -r '.title | gsub("|"; "\\|")')
+    title=$(printf '%s' "$pr" | jq -r '.title | gsub("[|]"; "\\|")')
     url=$(printf '%s' "$pr" | jq -r '.url')
     opened=$(printf '%s' "$pr" | jq -r '.opened')
     ci=$(printf '%s' "$pr" | jq -r '.ci // ""')
@@ -263,7 +263,7 @@ section_open_issues() {
     while IFS= read -r issue; do
       local number title url opened labels linked_pr
       number=$(printf '%s' "$issue" | jq -r '.number')
-      title=$(printf '%s' "$issue" | jq -r '.title | gsub("|"; "\\|")')
+      title=$(printf '%s' "$issue" | jq -r '.title | gsub("[|]"; "\\|")')
       url=$(printf '%s' "$issue" | jq -r '.url')
       opened=$(printf '%s' "$issue" | jq -r '.createdAt | split("T")[0]')
       labels=$(printf '%s' "$issue" | jq -r '[.labels[].name] | join(", ")')
@@ -295,7 +295,7 @@ section_open_discussions() {
     while IFS= read -r disc; do
       local number title url opened replies
       number=$(printf '%s' "$disc" | jq -r '.number')
-      title=$(printf '%s' "$disc" | jq -r '.title | gsub("|"; "\\|")')
+      title=$(printf '%s' "$disc" | jq -r '.title | gsub("[|]"; "\\|")')
       url=$(printf '%s' "$disc" | jq -r '.url')
       opened=$(printf '%s' "$disc" | jq -r '.createdAt | split("T")[0]')
       replies=$(printf '%s' "$disc" | jq -r '.comments.totalCount')
