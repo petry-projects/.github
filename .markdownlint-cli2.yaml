@@ -3,6 +3,8 @@ ignores:
   - "node_modules/**"
 
 config:
+  MD010:
+    code_blocks: false   # Makefiles and similar require literal tabs — exclude
   MD013:
     line_length: 200
     tables: false        # Tables often have long rows — exclude
