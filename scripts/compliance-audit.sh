@@ -1007,6 +1007,63 @@ check_copilot_setup_steps() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: .github/copilot-instructions.md exists with required sections
+#
+# Every repo SHOULD have a repo-level Copilot instructions file to give
+# Copilot specific context it cannot derive from code alone: the active
+# tech stack versions, project structure, exact local dev commands, required
+# environment variables, and testing thresholds. The org-level baseline in
+# petry-projects/.github supplies org-wide rules (SOLID, TDD, logging, CI
+# gates, PR workflow); repo-level files extend it with repo-specific detail.
+# Copilot prioritises repository instructions over org instructions, so the
+# repo-level file is the primary surface for per-project customisation.
+#
+# Checks:
+#   1. File present at .github/copilot-instructions.md (warning if missing)
+#   2. Required sections present: "## Tech Stack" and "## Local Dev Commands"
+#      (warning per missing section)
+#
+# The .github repo itself is exempt — it holds the org-level baseline, not
+# a per-repo extension.
+#
+# See standards/copilot-instructions-standard.md for the required sections
+# and fill-in template.
+# ---------------------------------------------------------------------------
+check_copilot_instructions() {
+  local repo="$1"
+
+  # The .github repo holds the org-level baseline — exempt from the
+  # repo-level requirement.
+  [ "$repo" = ".github" ] && return
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/copilot-instructions.md" \
+    --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
+      "Missing \`.github/copilot-instructions.md\`. Every repo should provide a repo-level Copilot instructions file with its specific tech stack, project structure, local dev commands, required environment variables, and testing configuration. The org-level baseline in \`petry-projects/.github\` covers org-wide rules; this file adds the repo-specific context Copilot cannot infer from code alone. Copy the template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\` to get started." \
+      "standards/copilot-instructions-standard.md"
+    return
+  fi
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+
+  # Verify required section headers (level-2, case-insensitive)
+  local required_sections=("Tech Stack" "Local Dev Commands")
+  for section in "${required_sections[@]}"; do
+    local slug
+    slug=$(echo "$section" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    if ! echo "$decoded" | grep -qiE "^##[[:space:]]+${section}"; then
+      add_finding "$repo" "standards" "copilot-instructions-missing-${slug}" "warning" \
+        "\`.github/copilot-instructions.md\` is missing the required \`## $section\` section. See \`standards/copilot-instructions-standard.md\` for the required template and guidance on what to include." \
+        "standards/copilot-instructions-standard.md"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -1619,6 +1676,7 @@ main() {
     check_claude_md "$repo"
     check_agents_md "$repo"
     check_copilot_setup_steps "$repo"
+    check_copilot_instructions "$repo"
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 

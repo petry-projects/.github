@@ -3,6 +3,27 @@
 This standard defines how to create and maintain GitHub Copilot custom instruction files across
 the **petry-projects** organization.
 
+## Purpose and Benefits
+
+GitHub Copilot generates suggestions based on the open file and surrounding context, but it
+cannot infer project-specific facts from code alone: which test runner is in use, what the exact
+local dev commands are, which bounded contexts a repo defines, or what coverage thresholds are
+enforced in CI. Without instruction files, every developer and every agent session must
+re-discover this context through trial-and-error or by reading the README.
+
+Instruction files solve this by surfacing the right context to Copilot automatically:
+
+| Benefit | How instruction files deliver it |
+|---------|----------------------------------|
+| **Consistent suggestions** | Copilot sees org coding standards on every request — SOLID, DDD, TDD, structured logging — without requiring the developer to repeat them |
+| **Reduced onboarding friction** | New contributors and agents get the project's stack, structure, and commands immediately, not after reading multiple docs |
+| **Enforced standards** | Language-specific files (TypeScript, Go, Terraform, …) embed org linting, formatting, and security rules so Copilot proposes compliant code by default |
+| **Less review churn** | Fewer review comments on style and convention violations; agents are less likely to introduce drift |
+| **Faster agent execution** | Copilot coding agents pre-load the right dependencies and follow the right patterns without a bootstrapping phase |
+
+The org-level baseline (`petry-projects/.github`) covers rules that apply everywhere. Repo-level
+files add the project-specific context that makes suggestions accurate for that repo in particular.
+
 ## Overview
 
 GitHub Copilot supports three scopes of instruction files:
@@ -157,6 +178,19 @@ for full development standards.
 
 ## Compliance
 
-The compliance audit script (`scripts/compliance-audit.sh`) does not currently check for the
-presence of `copilot-instructions.md`. Adding a check is tracked as a feature request. Until
-then, maintain the file as a team discipline item.
+The weekly compliance audit (`scripts/compliance-audit.sh`) enforces this standard
+automatically. Two `warning`-severity checks run against every repository in the org:
+
+| Check ID | Trigger | Remediation |
+|----------|---------|-------------|
+| `missing-copilot-instructions` | `.github/copilot-instructions.md` is absent | Copy the template below and fill in the repo-specific sections |
+| `copilot-instructions-missing-tech-stack` | File exists but `## Tech Stack` section is absent | Add the section — list runtimes, frameworks, and major library versions |
+| `copilot-instructions-missing-local-dev-commands` | File exists but `## Local Dev Commands` section is absent | Add the section — include exact install, dev-run, test, lint, and typecheck commands |
+
+Findings are reported as `warning` (not `error`) because the org-level baseline in
+`petry-projects/.github` ensures minimum Copilot guidance even without a repo-level file.
+However, all warnings are tracked in the weekly compliance report and surfaced as GitHub issues
+for remediation.
+
+The `petry-projects/.github` repo itself is exempt from the repo-level check — its
+`.github/copilot-instructions.md` is the org-level baseline that applies to all repos.
