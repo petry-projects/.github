@@ -2084,7 +2084,46 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
     return
   fi
 
+<<<<<<< HEAD
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  # Category-specific remediation instructions
+  local remediation_steps
+  case "$category" in
+    settings)
+      remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` with a token that has admin access to the repository (requires a classic PAT with \`repo\` scope or equivalent):
+
+\`\`\`bash
+GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
+\`\`\`
+
+This script applies all standard settings defined in \`standards/github-settings.md\` in one pass.
+For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}\`"
+      ;;
+    workflows)
+      remediation_steps="Copy the relevant workflow template from \`standards/workflows/\` verbatim — do not generate from scratch:
+
+\`\`\`bash
+gh api repos/${ORG}/.github/contents/standards/workflows/<template>.yml --jq '.content' | base64 -d > .github/workflows/<template>.yml
+\`\`\`
+
+Available templates: \`agent-shield.yml\`, \`claude.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
+      ;;
+    labels)
+      remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` — it applies standard labels alongside settings:
+
+\`\`\`bash
+GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
+\`\`\`"
+      ;;
+    *)
+      remediation_steps="Please review the linked standard and bring this repository into compliance.
+
+See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance."
+      ;;
+  esac
+
+>>>>>>> 4edc666 (fix: enable allow_auto_merge and improve compliance audit remediation guidance (#244))
   # Build issue body — variable values are safe (from our own check logic + GitHub API)
   local body="## Compliance Finding
 
@@ -2103,12 +2142,16 @@ ${detail}
 ## Remediation
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ${remediation_steps}
 =======
 Please review the linked standard and bring this repository into compliance.
 
 See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance.
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+${remediation_steps}
+>>>>>>> 4edc666 (fix: enable allow_auto_merge and improve compliance audit remediation guidance (#244))
 
 ---
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
