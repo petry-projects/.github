@@ -49,6 +49,12 @@ The `excludeAgent` frontmatter key restricts which tools use the instructions
 Priority order (highest to lowest): Personal instructions → Repository instructions →
 Organization instructions.
 
+> **Subscription note:** Org-level instructions via the org's `.github` repository require
+> a **GitHub Copilot Business or Enterprise** subscription. On individual Copilot plans, only
+> repository-level and path-specific instructions are active. The repo-level
+> `.github/copilot-instructions.md` works on all subscription tiers and is therefore the most
+> universally reliable location for project-specific context.
+
 ## Org-Level Instruction Files
 
 The following files live in this repo (`petry-projects/.github`) and apply org-wide:

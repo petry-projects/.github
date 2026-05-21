@@ -224,7 +224,7 @@ check_action_pinning() {
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
     local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^\s*-?\s*uses:\s+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
 
     if [ -n "$unpinned" ]; then
       local count
@@ -447,7 +447,7 @@ check_codeowners() {
   #   2. Additional teams (@petry-projects/<slug>) are allowed.
   #   3. Individual users (@username without "/") are forbidden.
   local owner_lines
-  owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
+  owner_lines=$(echo "$codeowners_content" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')
 
   if [ -z "$owner_lines" ]; then
     add_finding "$repo" "settings" "codeowners-empty" "error" \

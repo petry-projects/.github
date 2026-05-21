@@ -66,15 +66,18 @@ the module. Group related functionality into focused packages.
 Use **`log/slog`** (Go 1.21+) as the default structured logger:
 
 ```go
-import "log/slog"
+import (
+    "log/slog"
+    "os"
+)
 
-// Production: JSON output to stdout
+// Wire up once at program start (e.g., main.go).
+// Production — structured JSON for log aggregation:
 logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+// Development — swap the handler for human-readable text:
+// logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-// Development: human-readable text to stderr
-logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-
-// Propagate via context for OpenTelemetry integration:
+// Propagate the logger via context so OpenTelemetry can bridge trace/span IDs:
 logger.InfoContext(ctx, "order placed", "order_id", orderID, "user_id", userID)
 ```
 
