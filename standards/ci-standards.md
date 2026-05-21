@@ -594,6 +594,7 @@ the stack block(s) matching the repo's tech stack and delete the rest.
 | Default branch required | Workflow only triggers when present on the default branch |
 
 **Workflow trigger pattern** (standard — validates the file on change):
+
 ```yaml
 on:
   workflow_dispatch:
@@ -627,12 +628,14 @@ on:
 `AGENTS.md` violates agent-standards.md and the agent won't be properly oriented.
 
 **Fetching the template programmatically:**
+
 ```bash
 gh api repos/petry-projects/.github/contents/standards/workflows/copilot-setup-steps.yml \
   --jq '.content' | base64 -d > .github/workflows/copilot-setup-steps.yml
 ```
 
 **Real-world inspiration** for advanced patterns (services, custom runners, Docker caching):
+
 - Multi-language monorepo: `github/copilot-sdk`
 - Node.js + Electron + custom runner pool: `microsoft/vscode`
 - SQL Server + CosmosDB services: `dotnet/efcore`
@@ -1109,7 +1112,9 @@ autofix:
 7. **Add `dependabot-automerge.yml`** from [`standards/workflows/`](workflows/)
 8. **Add `dependency-audit.yml`** from [`standards/workflows/`](workflows/)
 9. **Add `agent-shield.yml`** from [`standards/workflows/`](workflows/)
-10. **Add `copilot-setup-steps.yml`** from [`standards/workflows/`](workflows/) — uncomment the stack block(s) that match the repo's tech stack, delete the rest, then merge to `main` and run manually from the Actions tab to verify
+10. **Add `copilot-setup-steps.yml`** from [`standards/workflows/`](workflows/) — uncomment the
+    stack block(s) that match the repo's tech stack, delete the rest, then merge to `main` and
+    run manually from the Actions tab to verify
 11. **Configure secrets** in the repository settings
 12. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
 13. **Pin all action references** to commit SHAs

@@ -973,6 +973,39 @@ check_agents_md() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: copilot-setup-steps.yml exists
+# ---------------------------------------------------------------------------
+# Every repo should have a copilot-setup-steps.yml to pre-install tools and
+# dependencies in the Copilot cloud agent environment before it starts work.
+# Without it the agent discovers dependencies via trial and error, which is
+# slow, non-deterministic, and impossible for repos with private packages.
+# See standards/ci-standards.md §11 Copilot Cloud Agent Setup.
+# ---------------------------------------------------------------------------
+check_copilot_setup_steps() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/copilot-setup-steps.yml" \
+    --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-copilot-setup-steps" "warning" \
+      "Missing \`.github/workflows/copilot-setup-steps.yml\` — every repo should pre-install tools and dependencies for the Copilot cloud agent. Copy the template from the org standards and uncomment the stack block(s) for this repo." \
+      "standards/ci-standards.md"
+    return
+  fi
+
+  # Verify the file contains the mandatory copilot-setup-steps job name
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  if ! echo "$decoded" | grep -q 'copilot-setup-steps'; then
+    add_finding "$repo" "standards" "copilot-setup-steps-invalid-job-name" "error" \
+      "\`.github/workflows/copilot-setup-steps.yml\` exists but does not contain a job named \`copilot-setup-steps\` — GitHub requires this exact job name to pick up the file." \
+      "standards/ci-standards.md"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -1189,7 +1222,7 @@ create_umbrella_issue() {
     "ci-workflows|Workflows|per-repo workflow additions"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
-    "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
+    "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
   )
 
   local body
@@ -1584,6 +1617,7 @@ main() {
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
+    check_copilot_setup_steps "$repo"
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 
