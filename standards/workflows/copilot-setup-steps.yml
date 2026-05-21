@@ -103,7 +103,7 @@ jobs:
       #     cache: "npm"
       #
       # - name: Install Node.js dependencies
-      #   run: npm ci
+      #   run: npm ci --ignore-scripts
 
       # ── NODE.JS / PNPM ────────────────────────────────────────────────────────
       # Uncomment for repos using pnpm (e.g., broodly TypeScript layer).
@@ -119,7 +119,7 @@ jobs:
       #     cache: "pnpm"
       #
       # - name: Install Node.js dependencies (pnpm)
-      #   run: pnpm install --frozen-lockfile
+      #   run: pnpm install --frozen-lockfile --ignore-scripts
 
       # ── GO ────────────────────────────────────────────────────────────────────
       # Uncomment for repos with Go code (e.g., broodly API layer).
