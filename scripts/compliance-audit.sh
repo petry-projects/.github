@@ -224,7 +224,7 @@ check_action_pinning() {
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
     local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^\s*-?\s*uses:\s+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
 
     if [ -n "$unpinned" ]; then
       local count
@@ -447,7 +447,7 @@ check_codeowners() {
   #   2. Additional teams (@petry-projects/<slug>) are allowed.
   #   3. Individual users (@username without "/") are forbidden.
   local owner_lines
-  owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
+  owner_lines=$(echo "$codeowners_content" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')
 
   if [ -z "$owner_lines" ]; then
     add_finding "$repo" "settings" "codeowners-empty" "error" \
@@ -973,6 +973,142 @@ check_agents_md() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: copilot-setup-steps.yml exists
+# ---------------------------------------------------------------------------
+# Every repo should have a copilot-setup-steps.yml to pre-install tools and
+# dependencies in the Copilot cloud agent environment before it starts work.
+# Without it the agent discovers dependencies via trial and error, which is
+# slow, non-deterministic, and impossible for repos with private packages.
+# See standards/ci-standards.md §11 Copilot Cloud Agent Setup.
+# ---------------------------------------------------------------------------
+check_copilot_setup_steps() {
+  local repo="$1"
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/copilot-setup-steps.yml" \
+    --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-copilot-setup-steps" "warning" \
+      "Missing \`.github/workflows/copilot-setup-steps.yml\` — every repo should pre-install tools and dependencies for the Copilot cloud agent. Copy the template from the org standards and uncomment the stack block(s) for this repo." \
+      "standards/ci-standards.md"
+    return
+  fi
+
+  # Verify the workflow contains jobs.copilot-setup-steps specifically.
+  # Use a small indentation-based parser (not a loose grep) so comments or similarly
+  # named keys elsewhere cannot falsely satisfy this compliance check.
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  if ! echo "$decoded" | python3 -c '
+import re
+import sys
+
+lines = sys.stdin.read().splitlines()
+jobs_indent = None
+child_indent = None
+in_jobs = False
+found = False
+
+for raw in lines:
+    # Skip empty lines and comments
+    if re.match(r"^[ \t]*(#.*)?$", raw):
+        continue
+
+    indent = len(raw) - len(raw.lstrip(" \t"))
+    line = raw.strip()
+
+    if not in_jobs:
+        if re.match(r"^jobs:[ \t]*(#.*)?$", line):
+            in_jobs = True
+            jobs_indent = indent
+        continue
+
+    # Left jobs section
+    if indent <= jobs_indent:
+        break
+
+    # Determine direct-child indentation under jobs (first mapping key)
+    if child_indent is None and re.match(r"^[^:#][^:]*:[ \t]*(#.*)?$", line):
+        child_indent = indent
+
+    # Match the exact required direct child key (quoted or unquoted YAML key)
+    if child_indent is not None and indent == child_indent and re.match(r'^["\']?copilot-setup-steps["\']?:[ ]*(#.*)?$', line):
+        found = True
+        break
+
+sys.exit(0 if found else 1)
+'; then
+    add_finding "$repo" "standards" "copilot-setup-steps-invalid-job-name" "error" \
+      "\`.github/workflows/copilot-setup-steps.yml\` exists but does not contain a job named \`copilot-setup-steps\` — GitHub requires this exact job name to pick up the file." \
+      "standards/ci-standards.md"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: .github/copilot-instructions.md exists with required sections
+#
+# Every repo SHOULD have a repo-level Copilot instructions file to give
+# Copilot specific context it cannot derive from code alone: the active
+# tech stack versions, project structure, exact local dev commands, required
+# environment variables, and testing thresholds. The org-level baseline in
+# petry-projects/.github supplies org-wide rules (SOLID, TDD, logging, CI
+# gates, PR workflow); repo-level files extend it with repo-specific detail.
+# Copilot prioritises repository instructions over org instructions, so the
+# repo-level file is the primary surface for per-project customisation.
+#
+# Checks:
+#   1. File present at .github/copilot-instructions.md (warning if missing)
+#   2. Required sections present: "## Tech Stack" and "## Local Dev Commands"
+#      (warning per missing section)
+#
+# The .github repo itself is exempt — it holds the canonical template, not
+# a per-repo extension.
+#
+# See standards/copilot-instructions-standard.md for the required sections
+# and fill-in template.
+# ---------------------------------------------------------------------------
+check_copilot_instructions() {
+  local repo="$1"
+
+  # The .github repo holds the canonical template — exempt from the
+  # per-repo requirement.
+  [ "$repo" = ".github" ] && return
+
+  local content
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/copilot-instructions.md" \
+    --jq '.content' 2>/dev/null || echo "")
+
+  if [ -z "$content" ]; then
+    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
+      "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
+      "standards/copilot-instructions-standard.md"
+    return
+  fi
+
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+
+  # Strip fenced code blocks before checking for required section headers so
+  # that ## headings inside code examples (e.g. template snippets) cannot
+  # falsely satisfy the check.
+  local prose
+  prose=$(echo "$decoded" | awk '/^```/{in_block=!in_block; next} !in_block{print}')
+
+  # Verify required section headers (level-2, case-insensitive)
+  local required_sections=("Tech Stack" "Local Dev Commands")
+  for section in "${required_sections[@]}"; do
+    local slug
+    slug=$(echo "$section" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    if ! echo "$prose" | grep -qiE "^##[[:space:]]+${section}"; then
+      add_finding "$repo" "standards" "copilot-instructions-missing-${slug}" "warning" \
+        "\`.github/copilot-instructions.md\` is missing the required \`## $section\` section. See \`standards/copilot-instructions-standard.md\` for the required template and guidance on what to include." \
+        "standards/copilot-instructions-standard.md"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -1189,7 +1325,7 @@ create_umbrella_issue() {
     "ci-workflows|Workflows|per-repo workflow additions"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
-    "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
+    "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
   )
 
   local body
@@ -1584,6 +1720,8 @@ main() {
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
+    check_copilot_setup_steps "$repo"
+    check_copilot_instructions "$repo"
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 
