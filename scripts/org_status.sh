@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Daily org status — collects GitHub org data and generates a markdown report to stdout.
 # Report generation is handled by org_report.sh (programmatic, no external AI dependency).
 set -euo pipefail
@@ -13,6 +14,16 @@ source "${SCRIPT_DIR}/org_report.sh"
 set -euo pipefail
 
 >>>>>>> af066a7 (Daily org status report via GitHub Actions (#169))
+=======
+# Daily org status — collects GitHub org data and generates a markdown report to stdout.
+# Report generation is handled by org_report.sh (programmatic, no external AI dependency).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/org_report.sh
+source "${SCRIPT_DIR}/org_report.sh"
+
+>>>>>>> 9a72202 (refactor(org-status): replace Claude with programmatic report generation (#332))
 TODAY=$(date -u +%Y-%m-%d)
 if [[ "$(uname)" == "Darwin" ]]; then
   SINCE=$(date -u -v-7d +%Y-%m-%d)
@@ -494,6 +505,7 @@ DISCUSSIONS=$(gh api graphql -f query='
 echo "::endgroup::" >&2
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # ── Generate Report ───────────────────────────────────────────────────────────
 ISSUE_LIMIT=25
 ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq --argjson limit "$ISSUE_LIMIT" '
@@ -511,6 +523,9 @@ generate_org_report
 # ── Build Prompt ──────────────────────────────────────────────────────────────
 # Limit issues per repo to keep prompt size manageable and ensure Claude has
 # enough output budget to generate all sections (especially the PR tables first).
+=======
+# ── Generate Report ───────────────────────────────────────────────────────────
+>>>>>>> 9a72202 (refactor(org-status): replace Claude with programmatic report generation (#332))
 ISSUE_LIMIT=25
 ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq --argjson limit "$ISSUE_LIMIT" '
   map({
@@ -520,9 +535,8 @@ ISSUES_BY_REPO_TRIMMED=$(echo "$ISSUES_BY_REPO" | jq --argjson limit "$ISSUE_LIM
     issues:    .issues[:$limit]
   })')
 
-cat > "$DATA_DIR/prompt.txt" << PROMPT
-Generate a daily GitHub org status report for petry-projects on $TODAY.
 
+<<<<<<< HEAD
 Use ONLY the data below. Output ONLY the markdown report — no preamble, no commentary.
 
 CRITICAL: You MUST output ALL sections listed in REPORT FORMAT, in order. Do NOT skip or abbreviate any section.
@@ -714,3 +728,7 @@ fi
 jq '{stop_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),result_start:((.result//"")|.[0:120])}' "$REPORT_JSON" >&2 || true
 jq -r '.result' "$REPORT_JSON"
 >>>>>>> dfdafbb (fix(org-status): fix truncation, add charts, remove don-petry, summary-first layout (#287))
+=======
+echo "Generating report..." >&2
+generate_org_report
+>>>>>>> 9a72202 (refactor(org-status): replace Claude with programmatic report generation (#332))
