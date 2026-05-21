@@ -1032,8 +1032,8 @@ for raw in lines:
     if child_indent is None and re.match(r"^[^:#][^:]*:[ \t]*(#.*)?$", line):
         child_indent = indent
 
-    # Match the exact required direct child key
-    if child_indent is not None and indent == child_indent and re.match(r"^copilot-setup-steps:[ \t]*(#.*)?$", line):
+    # Match the exact required direct child key (quoted or unquoted YAML key)
+    if child_indent is not None and indent == child_indent and re.match(r'^["\']?copilot-setup-steps["\']?:[ ]*(#.*)?$', line):
         found = True
         break
 
@@ -1062,7 +1062,7 @@ sys.exit(0 if found else 1)
 #   2. Required sections present: "## Tech Stack" and "## Local Dev Commands"
 #      (warning per missing section)
 #
-# The .github repo itself is exempt — it holds the org-level baseline, not
+# The .github repo itself is exempt — it holds the canonical template, not
 # a per-repo extension.
 #
 # See standards/copilot-instructions-standard.md for the required sections
@@ -1071,8 +1071,8 @@ sys.exit(0 if found else 1)
 check_copilot_instructions() {
   local repo="$1"
 
-  # The .github repo holds the org-level baseline — exempt from the
-  # repo-level requirement.
+  # The .github repo holds the canonical template — exempt from the
+  # per-repo requirement.
   [ "$repo" = ".github" ] && return
 
   local content
@@ -1081,7 +1081,7 @@ check_copilot_instructions() {
 
   if [ -z "$content" ]; then
     add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
-      "Missing \`.github/copilot-instructions.md\`. Every repo should provide a repo-level Copilot instructions file with its specific tech stack, project structure, local dev commands, required environment variables, and testing configuration. The org-level baseline in \`petry-projects/.github\` covers org-wide rules; this file adds the repo-specific context Copilot cannot infer from code alone. Copy the template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\` to get started." \
+      "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
       "standards/copilot-instructions-standard.md"
     return
   fi
@@ -1089,12 +1089,18 @@ check_copilot_instructions() {
   local decoded
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
+  # Strip fenced code blocks before checking for required section headers so
+  # that ## headings inside code examples (e.g. template snippets) cannot
+  # falsely satisfy the check.
+  local prose
+  prose=$(echo "$decoded" | awk '/^```/{in_block=!in_block; next} !in_block{print}')
+
   # Verify required section headers (level-2, case-insensitive)
   local required_sections=("Tech Stack" "Local Dev Commands")
   for section in "${required_sections[@]}"; do
     local slug
     slug=$(echo "$section" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-    if ! echo "$decoded" | grep -qiE "^##[[:space:]]+${section}"; then
+    if ! echo "$prose" | grep -qiE "^##[[:space:]]+${section}"; then
       add_finding "$repo" "standards" "copilot-instructions-missing-${slug}" "warning" \
         "\`.github/copilot-instructions.md\` is missing the required \`## $section\` section. See \`standards/copilot-instructions-standard.md\` for the required template and guidance on what to include." \
         "standards/copilot-instructions-standard.md"
