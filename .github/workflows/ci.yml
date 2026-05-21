@@ -161,12 +161,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      security-events: write
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
+<<<<<<< HEAD
       - name: Install gitleaks
         env:
 <<<<<<< HEAD
@@ -200,3 +202,12 @@ jobs:
       - name: Run gitleaks
         run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
 >>>>>>> 6f46503 (fix(ci): secret-scan job + dtolnay SHA pin (.github repo — compliance #276) (#277))
+=======
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        with:
+          args: detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+>>>>>>> e4c1475 (feat: implement issue #299 — Compliance audit — 2026-05-15 (#336))

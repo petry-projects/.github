@@ -388,6 +388,7 @@ check_action_pinning() {
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
 <<<<<<< HEAD
+<<<<<<< HEAD
     # Exclude $ORG/.github reusable workflow refs — these use tag refs
     # (@v1, @v2, @main) by design per ci-standards.md#action-pinning-policy
     local unpinned
@@ -400,6 +401,13 @@ check_action_pinning() {
 =======
     unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
 >>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
+=======
+    # Exclude internal reusable workflow calls to petry-projects/.github and
+    # petry-projects/.github-private — per ci-standards.md#action-pinning-policy,
+    # these use deliberate tag refs (@v1, @v2, @main) and are explicitly exempt.
+    local unpinned
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE 'uses:[[:space:]]+petry-projects/(\.github|\.github-private)/' || true)
+>>>>>>> e4c1475 (feat: implement issue #299 — Compliance audit — 2026-05-15 (#336))
 
     if [ -n "$unpinned" ]; then
       local count
