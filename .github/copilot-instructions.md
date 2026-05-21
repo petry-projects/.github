@@ -1,10 +1,18 @@
-# Copilot Instructions — Petry Projects Organization
+# Copilot Instructions — petry-projects/.github
 
-## Organization Overview
+> **Note:** This file applies to the `petry-projects/.github` repository only. Copilot
+> instruction files are repository-scoped — there is no automatic org-wide propagation. Every
+> other repo in the org must have its own `.github/copilot-instructions.md`. Use this file as
+> the canonical template; the weekly compliance audit enforces deployment to each repo.
 
-**Petry Projects** builds TypeScript-first applications: Electron desktop apps (TalkTerm),
-backend services, Google Apps Script automation, and GitHub infrastructure. The primary stack is
-TypeScript · React · Electron · Vitest · Node.js · Go · Python · Terraform · GitHub Actions.
+## Repository Overview
+
+This is the **org standards repository** for `petry-projects`. It contains org-wide AI agent
+standards (`AGENTS.md`), canonical CI workflow templates (`standards/workflows/`), the
+compliance audit script, and the canonical Copilot instruction files that every repo should
+adopt.
+
+Primary stack for work done in this repo: Bash · YAML · Markdown · Python (scripts).
 
 ## Standards Reference
 
@@ -86,10 +94,11 @@ secret scanning runs on every PR.
 
 ---
 
-## Extending These Instructions Per Repository
+## Deploying These Instructions to Each Repository
 
-Each repository SHOULD provide its own `.github/copilot-instructions.md`. Repository-level
-instructions take priority over this org-level file. A repo-level file SHOULD cover:
+Every repository MUST have its own `.github/copilot-instructions.md` — this file does not
+propagate automatically. Copy this file as the starting point, then tailor it to the repo.
+A repo-level file SHOULD cover:
 
 1. **About** — one sentence describing what the repo does and its role in the org
 2. **Tech stack** — frameworks, libraries, and major versions specific to this repo

@@ -26,15 +26,20 @@ files add the project-specific context that makes suggestions accurate for that 
 
 ## Overview
 
-GitHub Copilot supports three scopes of instruction files:
+GitHub Copilot supports two types of instruction files, both scoped to the individual
+repository they live in:
 
 | Type | File | Scope |
 |------|------|-------|
-| **Org-level** (this repo) | `.github/copilot-instructions.md` | Applies to all repos in the org via the special `.github` repository |
-| **Repo-level** | `.github/copilot-instructions.md` in each repo | Applies to that repo; extends or overrides the org-level baseline |
-| **Path-specific** | `.github/instructions/<name>.instructions.md` | Applies to files matching the `applyTo` glob pattern |
+| **Repo-wide** | `.github/copilot-instructions.md` | Applies to all Copilot requests in that repo |
+| **Path-specific** | `.github/instructions/<name>.instructions.md` | Applies when the file being edited matches the `applyTo` glob pattern |
 
-Path-specific files use YAML frontmatter to specify which files they apply to:
+> **There is no automatic org-wide propagation.** Placing `copilot-instructions.md` in the
+> `petry-projects/.github` repository makes it apply to that repo only — it does not broadcast
+> to other repos in the org. Org-wide coverage is achieved by deploying the file to every repo,
+> which the weekly compliance audit enforces (see [Compliance](#compliance) below).
+
+Path-specific files use YAML frontmatter to declare which files they apply to:
 
 ```yaml
 ---
@@ -43,31 +48,27 @@ applyTo: "**/*.ts,**/*.tsx"
 ---
 ```
 
-The `excludeAgent` frontmatter key restricts which tools use the instructions
+The `excludeAgent` frontmatter key restricts which Copilot tools use the instructions
 (`"code-review"` or `"cloud-agent"`).
 
-Priority order (highest to lowest): Personal instructions → Repository instructions →
-Organization instructions.
+Priority order within a repository (highest to lowest): Personal instructions → Repository
+instructions.
 
-> **Subscription note:** Org-level instructions via the org's `.github` repository require
-> a **GitHub Copilot Business or Enterprise** subscription. On individual Copilot plans, only
-> repository-level and path-specific instructions are active. The repo-level
-> `.github/copilot-instructions.md` works on all subscription tiers and is therefore the most
-> universally reliable location for project-specific context.
+## Canonical Instruction Files (source of truth in this repo)
 
-## Org-Level Instruction Files
-
-The following files live in this repo (`petry-projects/.github`) and apply org-wide:
+The following files live in `petry-projects/.github` and serve as the **canonical templates**
+that every repo should adopt. They apply to this repo only as-is; each other repo gets its own
+copy via the per-repo rollout described in [Creating a Repo-Level copilot-instructions.md](#creating-a-repo-level-copilot-instructionsmd).
 
 | File | Languages / Scope |
 |------|-------------------|
-| `.github/copilot-instructions.md` | All repos — org-wide defaults |
+| `.github/copilot-instructions.md` | Repo-wide baseline (copy to each repo) |
 | `.github/instructions/typescript.instructions.md` | `**/*.ts`, `**/*.tsx` |
 | `.github/instructions/javascript.instructions.md` | `**/*.js`, `**/*.mjs`, `**/*.cjs` |
 | `.github/instructions/python.instructions.md` | `**/*.py` |
-| `.github/instructions/go.instructions.md` | `**/*.go`, `**/go.mod`, `**/go.sum` |
+| `.github/instructions/go.instructions.md` | `**/*.go` |
 | `.github/instructions/terraform.instructions.md` | `**/*.tf`, `**/*.tfvars`, `**/*.tftest.hcl` |
-| `.github/instructions/shell.instructions.md` | `**/*.sh`, `**/*.bash`, `**/Makefile` |
+| `.github/instructions/shell.instructions.md` | `**/*.sh`, `**/*.bash` |
 
 ## Adding a New Language
 
