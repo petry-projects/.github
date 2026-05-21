@@ -223,8 +223,10 @@ check_action_pinning() {
     # Find uses: directives that are NOT SHA-pinned
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
+    # Exclude internal reusable workflow refs (petry-projects/.github/.github/workflows/*@*)
+    # per the exception documented in standards/ci-standards.md#action-pinning-policy
     local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE 'petry-projects/\.github/\.github/workflows/[^@]+@' || true)
 
     if [ -n "$unpinned" ]; then
       local count
