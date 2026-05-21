@@ -995,11 +995,50 @@ check_copilot_setup_steps() {
     return
   fi
 
-  # Verify the file contains the mandatory copilot-setup-steps job key (structural check:
-  # match an indented YAML key so a bare comment cannot falsely satisfy the check)
+  # Verify the workflow contains jobs.copilot-setup-steps specifically.
+  # Use a small indentation-based parser (not a loose grep) so comments or similarly
+  # named keys elsewhere cannot falsely satisfy this compliance check.
   local decoded
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-  if ! echo "$decoded" | grep -qE '^\s+copilot-setup-steps\s*:'; then
+  if ! echo "$decoded" | python3 -c '
+import re
+import sys
+
+lines = sys.stdin.read().splitlines()
+jobs_indent = None
+child_indent = None
+in_jobs = False
+found = False
+
+for raw in lines:
+    # Skip empty lines and comments
+    if re.match(r"^[ \t]*(#.*)?$", raw):
+        continue
+
+    indent = len(raw) - len(raw.lstrip(" \t"))
+    line = raw.strip()
+
+    if not in_jobs:
+        if re.match(r"^jobs:[ \t]*(#.*)?$", line):
+            in_jobs = True
+            jobs_indent = indent
+        continue
+
+    # Left jobs section
+    if indent <= jobs_indent:
+        break
+
+    # Determine direct-child indentation under jobs (first mapping key)
+    if child_indent is None and re.match(r"^[^:#][^:]*:[ \t]*(#.*)?$", line):
+        child_indent = indent
+
+    # Match the exact required direct child key
+    if child_indent is not None and indent == child_indent and re.match(r"^copilot-setup-steps:[ \t]*(#.*)?$", line):
+        found = True
+        break
+
+sys.exit(0 if found else 1)
+'; then
     add_finding "$repo" "standards" "copilot-setup-steps-invalid-job-name" "error" \
       "\`.github/workflows/copilot-setup-steps.yml\` exists but does not contain a job named \`copilot-setup-steps\` — GitHub requires this exact job name to pick up the file." \
       "standards/ci-standards.md"
