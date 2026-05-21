@@ -394,8 +394,12 @@ check_action_pinning() {
     unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE "uses:[[:space:]]+$ORG/\\.github(-private)?/\\.github/workflows/" || true)
 =======
     local unpinned
+<<<<<<< HEAD
     unpinned=$(echo "$decoded" | grep -E '^\s*-?\s*uses:\s+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 
     if [ -n "$unpinned" ]; then
       local count
@@ -1674,6 +1678,9 @@ check_agents_md() {
 # ---------------------------------------------------------------------------
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 # Check: copilot-setup-steps.yml exists
 # ---------------------------------------------------------------------------
 # Every repo should have a copilot-setup-steps.yml to pre-install tools and
@@ -1734,7 +1741,11 @@ for raw in lines:
         child_indent = indent
 
     # Match the exact required direct child key (quoted or unquoted YAML key)
+<<<<<<< HEAD
     if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
+=======
+    if child_indent is not None and indent == child_indent and re.match(r'^["\']?copilot-setup-steps["\']?:[ ]*(#.*)?$', line):
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
         found = True
         break
 
@@ -1810,8 +1821,11 @@ check_copilot_instructions() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 =======
 >>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -2230,10 +2244,14 @@ create_umbrella_issue() {
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
 <<<<<<< HEAD
+<<<<<<< HEAD
     "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
 =======
     "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
 >>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
+=======
+    "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
   )
 
   local body
@@ -2945,10 +2963,15 @@ main() {
     check_agents_md "$repo"
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     check_copilot_setup_steps "$repo"
     check_copilot_instructions "$repo"
 =======
 >>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
+=======
+    check_copilot_setup_steps "$repo"
+    check_copilot_instructions "$repo"
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 =======

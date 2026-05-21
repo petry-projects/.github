@@ -215,7 +215,11 @@ reusable, not a local edit.
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
 =======
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+<<<<<<< HEAD
 >>>>>>> d3d768d (fix: rename @petry-review-bot mention trigger to @donpetry-bot (#266))
+=======
+| [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
 project name in a comment, a different cron schedule for a known reason). Anything
@@ -1155,6 +1159,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/copilot-setup-s
 - SQL Server + CosmosDB services: `dotnet/efcore`
 - Docker image pre-pull with parallel caching: `Significant-Gravitas/AutoGPT`
 
+<<<<<<< HEAD
 ---
 
 ## Conditional Workflows
@@ -1346,6 +1351,8 @@ repos have `pr-review-mention.yml` as a thin caller stub delegating to
 >>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
 
 >>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 ---
 
 ## Conditional Workflows
@@ -1968,6 +1975,7 @@ autofix:
 11. **Configure secrets** in the repository settings
 12. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
 13. **Pin all action references** to commit SHAs
+<<<<<<< HEAD
 =======
 3. **Add `codeql.yml`** with the appropriate language(s)
 =======
@@ -1991,6 +1999,8 @@ autofix:
 11. **Set required status checks** in branch protection (see [GitHub Settings](github-settings.md))
 12. **Pin all action references** to commit SHAs
 >>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 
 ---
 
@@ -2010,6 +2020,9 @@ carrying a per-repo `codeql.yml` after this standard lands are flagged as
 drift, not as compliant.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 | Repository | CI | CodeQL† | SonarCloud | Claude | Coverage | Dep Auto-merge | Dep Audit | Dependabot Config | Copilot Setup |
 |------------|:--:|:------:|:----------:|:------:|:--------:|:--------------:|:---------:|:-----------------:|:-------------:|
 | **broodly** | Yes | Pending | Yes | Yes | Yes | Yes | Yes | Yes | — |
@@ -2018,6 +2031,7 @@ drift, not as compliant.
 | **TalkTerm** | Yes | Pending | — | — | Yes | — | — | — | — |
 | **ContentTwin** | — | Pending | Yes | — | — | — | — | — | — |
 | **bmad-bgreat-suite** | — | Pending | — | — | — | — | — | — | — |
+<<<<<<< HEAD
 
 † **CodeQL** values are listed as `Pending` for every repo because the
 default-setup migration is the work this standard introduces; the next
@@ -2044,6 +2058,8 @@ fleet) will flip the cells to `Yes` or surface specific failures via the
 | **TalkTerm** | Yes | Pending | — | — | Yes | — | — | — |
 | **ContentTwin** | — | Pending | Yes | — | — | — | — | — |
 | **bmad-bgreat-suite** | — | Pending | — | — | — | — | — | — |
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 
 † **CodeQL** values are listed as `Pending` for every repo because the
 default-setup migration is the work this standard introduces; the next
@@ -2066,6 +2082,7 @@ Every `—` in the table above is a gap that must be remediated. Priority order:
 5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
 6. **All repos:** Enable CodeQL default setup via `apply-repo-settings.sh` and remove any pre-existing `codeql.yml` workflow file
 7. **All repos:** Add `copilot-setup-steps.yml` — copy from [`standards/workflows/`](workflows/copilot-setup-steps.yml), uncomment the matching stack block, and merge to `main`
+<<<<<<< HEAD
 =======
 1. **bmad-bgreat-suite:** Missing all CI workflows — needs full onboarding
 2. **ContentTwin:** Missing CI, CodeQL, Claude, Coverage, Dependabot — 5 of 8 categories missing
@@ -2081,6 +2098,8 @@ Every `—` in the table above is a gap that must be remediated. Priority order:
 5. **google-app-scripts:** Missing dependency audit; Dependabot npm `limit:10` (should be `0` per policy); auto-merge uses older `--admin` bypass pattern
 6. **All repos:** Enable CodeQL default setup via `apply-repo-settings.sh` and remove any pre-existing `codeql.yml` workflow file
 >>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
+=======
+>>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 
 ### Version Inconsistencies
 

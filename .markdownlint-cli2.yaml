@@ -38,6 +38,8 @@ config:
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
 =======
 config:
+  MD010:
+    code_blocks: false   # Makefiles and similar require literal tabs — exclude
   MD013:
     line_length: 200
     tables: false        # Tables often have long rows — exclude
