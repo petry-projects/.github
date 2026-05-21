@@ -55,7 +55,7 @@ All services emit structured JSON logs in production. Every entry includes `time
 the message string:
 
 - **Wrong:** `logger.info("User 1234 placed order 5678")`
-- **Right:** `logger.info("order placed", { user_id: "1234", order_id: "5678" })`
+- **Right:** `logger.info({ user_id: "1234", order_id: "5678" }, "order placed")`
 
 Use `pino` in TypeScript/Node.js and `log/slog` in Go. Never use `console.log` in application
 code. Never log passwords, tokens, API keys, cookies, or PII.

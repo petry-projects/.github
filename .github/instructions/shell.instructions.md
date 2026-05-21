@@ -1,6 +1,6 @@
 ---
 description: Shell script development standards for the Petry Projects organization
-applyTo: "**/*.sh,**/*.bash,**/Makefile"
+applyTo: "**/*.sh,**/*.bash"
 ---
 
 # Shell Script Development Standards

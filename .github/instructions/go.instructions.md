@@ -1,6 +1,6 @@
 ---
 description: Go development standards for the Petry Projects organization, based on Effective Go and Google's Go Style Guide
-applyTo: "**/*.go,**/go.mod,**/go.sum"
+applyTo: "**/*.go"
 ---
 
 # Go Development Standards
@@ -68,15 +68,14 @@ Use **`log/slog`** (Go 1.21+) as the default structured logger:
 ```go
 import "log/slog"
 
-// Production: JSON output
-handler := slog.NewJSONHandler(os.Stdout, nil)
-logger := slog.New(handler)
+// Production: JSON output to stdout
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-// Development: text output
-handler := slog.NewTextHandler(os.Stderr, nil)
+// Development: human-readable text to stderr
+logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 // Propagate via context for OpenTelemetry integration:
-slog.InfoContext(ctx, "order placed", "order_id", orderID, "user_id", userID)
+logger.InfoContext(ctx, "order placed", "order_id", orderID, "user_id", userID)
 ```
 
 - **Never use the global `log` package** from the standard library.
@@ -96,9 +95,10 @@ slog.InfoContext(ctx, "order placed", "order_id", orderID, "user_id", userID)
 - Use channels for communication between goroutines; use `sync.Mutex` for protecting shared
   state.
 - Close channels from the sender side only.
-- WaitGroup by Go version:
-  - Go ≥ 1.25: use `wg.Go(fn)` (new method).
+- WaitGroup pattern:
+  - Go ≥ 1.25: `sync.WaitGroup` gains a `Go(fn func())` method — use `wg.Go(fn)` directly.
   - Go < 1.25: use the classic `wg.Add(1)` / `defer wg.Done()` pattern.
+  - For error propagation across goroutines, prefer `golang.org/x/sync/errgroup` (`eg.Go(fn)`) over bare `sync.WaitGroup`.
 
 ## HTTP Clients and I/O
 

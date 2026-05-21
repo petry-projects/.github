@@ -5,13 +5,13 @@ the **petry-projects** organization.
 
 ## Overview
 
-GitHub Copilot supports two types of instruction files:
+GitHub Copilot supports three scopes of instruction files:
 
 | Type | File | Scope |
 |------|------|-------|
-| **Org-level** (this repo) | `.github/copilot-instructions.md` | Applies to all org repos |
-| **Repo-level** | `.github/copilot-instructions.md` in each repo | Overrides org-level for that repo |
-| **Path-specific** | `.github/instructions/<name>.instructions.md` | Applies to matching file patterns |
+| **Org-level** (this repo) | `.github/copilot-instructions.md` | Applies to all repos in the org via the special `.github` repository |
+| **Repo-level** | `.github/copilot-instructions.md` in each repo | Applies to that repo; extends or overrides the org-level baseline |
+| **Path-specific** | `.github/instructions/<name>.instructions.md` | Applies to files matching the `applyTo` glob pattern |
 
 Path-specific files use YAML frontmatter to specify which files they apply to:
 
@@ -146,7 +146,7 @@ for full development standards.
 
 - **Max length:** ~two pages. Copilot applies instructions most effectively when they are
   concise and broadly applicable. Longer files may be truncated.
-- **Task-specific, not task-specific:** Instructions should apply to all work in the repo, not
+- **Repo-wide, not task-specific:** Instructions should apply to all work in the repo, not
   to a single task or PR.
 - **Actionable language:** Prefer imperatives ("use `pino` for logging") over descriptions
   ("this repo uses pino for logging").

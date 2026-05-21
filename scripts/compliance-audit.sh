@@ -995,10 +995,11 @@ check_copilot_setup_steps() {
     return
   fi
 
-  # Verify the file contains the mandatory copilot-setup-steps job name
+  # Verify the file contains the mandatory copilot-setup-steps job key (structural check:
+  # match an indented YAML key so a bare comment cannot falsely satisfy the check)
   local decoded
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-  if ! echo "$decoded" | grep -q 'copilot-setup-steps'; then
+  if ! echo "$decoded" | grep -qE '^\s+copilot-setup-steps\s*:'; then
     add_finding "$repo" "standards" "copilot-setup-steps-invalid-job-name" "error" \
       "\`.github/workflows/copilot-setup-steps.yml\` exists but does not contain a job named \`copilot-setup-steps\` — GitHub requires this exact job name to pick up the file." \
       "standards/ci-standards.md"
