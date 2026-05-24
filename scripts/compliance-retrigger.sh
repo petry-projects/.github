@@ -143,13 +143,17 @@ retrigger_stale_issues() {
   # producing a single "Skipping null#null" iteration when the token lacked
   # search scope. See: failure mode where ORG_SCORECARD_TOKEN scope did not
   # permit cross-org search but the script still reported success.
+  #
+  # Capture stdout only; let stderr flow to the runner log so warnings (CLI
+  # update notifications, network retries) stay visible and do not corrupt
+  # the JSON parsed below.
   local raw rc
   raw=$(gh api \
-    "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open&per_page=100" \
-    2>&1) && rc=0 || rc=$?
+    "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open&per_page=100") \
+    && rc=0 || rc=$?
 
   if [ "$rc" -ne 0 ]; then
-    error "search/issues API call failed (exit $rc). Response:"
+    error "search/issues API call failed (exit $rc). Response (stdout):"
     echo "$raw" | head -5 >&2
     error "Cannot retrigger issues; aborting. Check GH_TOKEN scope — token must be able to read issues across all repos in org ${ORG}."
     return 1
