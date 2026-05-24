@@ -66,6 +66,7 @@ jobs:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@7bf5a75b92730dedb6db7eacf2881f4c578080ac # v1
 =======
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@208ec2d69b75227d375edf8745d84fbac05a76b2 # v1 — bump SHA after tag update
@@ -76,6 +77,9 @@ jobs:
 =======
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@c7104f49cb590c46ae219d9bd677fc68073692b7 # v1
 >>>>>>> 5b66673 (chore(deps): Bump petry-projects/.github/.github/workflows/feature-ideation-reusable.yml from ee22b427cbce9ecadcf2b436acb57c3adf0cb63d to c7104f49cb590c46ae219d9bd677fc68073692b7 (#304))
+=======
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@1a1e11e849b716abc926b93e0c03f701184f704e # v1
+>>>>>>> b6f0535 (chore(deps): Bump petry-projects/.github/.github/workflows/feature-ideation-reusable.yml from c7104f49cb590c46ae219d9bd677fc68073692b7 to 1a1e11e849b716abc926b93e0c03f701184f704e (#348))
     with:
       project_context: |
         petry-projects/.github is the org-level standards and tooling repository
