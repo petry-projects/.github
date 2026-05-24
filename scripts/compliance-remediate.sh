@@ -71,6 +71,26 @@ warn()  { echo "[WARN]  $*" >&2; }
 skip()  { echo "[SKIP]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 
+# ---------------------------------------------------------------------------
+# Portable base64 helpers — GNU base64 uses `-w 0` / `-d`, macOS BSD base64
+# uses no wrapping by default and `-D` to decode. Feature-detect once.
+# ---------------------------------------------------------------------------
+b64_encode() {
+  if base64 --help 2>&1 | grep -q -- '-w'; then
+    base64 -w 0
+  else
+    base64 | tr -d '\n'
+  fi
+}
+
+b64_decode() {
+  if printf '' | base64 -d >/dev/null 2>&1; then
+    base64 -d
+  else
+    base64 -D
+  fi
+}
+
 # Counters
 remediated_direct=0
 remediated_pr=0
@@ -137,15 +157,36 @@ remediate_check_suite_auto_trigger() {
     return 0
   fi
 
+  # The check-suites/preferences endpoint rejects OAuth-style tokens (gho_*)
+  # and GitHub-App user-to-server tokens — only classic PATs (ghp_*) with
+  # repo scope work. Skip with a clear reason rather than logging a failure.
+  local token="${GH_TOKEN:-}"
+  if [[ "$token" == gho_* ]] || [[ "$token" == ghu_* ]]; then
+    skip "GH_TOKEN is an OAuth/user-to-server token — check-suites/preferences requires a classic PAT (ghp_*)"
+    report_skip "$repo" "$check" \
+      "GH_TOKEN type cannot patch \`check-suites/preferences\` — run \`scripts/fix-check-suite-prefs.sh\` with a classic PAT"
+    return 0
+  fi
+
   local payload
   payload=$(jq -n --argjson id "$app_id" '{"auto_trigger_checks":[{"app_id":$id,"setting":false}]}')
 
-  if echo "$payload" | gh api -X PATCH "repos/$ORG/$repo/check-suites/preferences" \
-      --input - > /dev/null 2>&1; then
+  local api_response http_status
+  api_response=$(echo "$payload" | gh api -X PATCH "repos/$ORG/$repo/check-suites/preferences" \
+      --input - 2>&1 > /dev/null)
+  http_status=$?
+
+  if [ "$http_status" -eq 0 ]; then
     ok "Disabled check-suite auto-trigger for app $app_id on $ORG/$repo"
     report_direct "$repo" "$check" "Set \`auto_trigger=false\` for app_id=$app_id"
+  elif echo "$api_response" | grep -qE '(HTTP 40[34]|Not Found|Resource not accessible)'; then
+    # 403/404 on this endpoint typically means the token type is wrong even
+    # when prefix detection above didn't catch it (e.g. fine-grained PAT).
+    skip "check-suites/preferences PATCH not permitted for $ORG/$repo (likely token type) — converting to skip"
+    report_skip "$repo" "$check" \
+      "PATCH \`check-suites/preferences\` returned 403/404 — token may lack required scope; use \`scripts/fix-check-suite-prefs.sh\` with a classic PAT"
   else
-    err "Failed to disable check-suite auto-trigger for app $app_id on $ORG/$repo"
+    err "Failed to disable check-suite auto-trigger for app $app_id on $ORG/$repo: $api_response"
     report_fail "$repo" "$check" "PATCH check-suites/preferences failed for app_id=$app_id"
   fi
 }
@@ -212,8 +253,8 @@ remediate_codeowners() {
 "
 
   if [ "$DRY_RUN" = "true" ]; then
-    skip "[DRY] Would create/update .github/CODEOWNERS in $ORG/$repo"
-    report_direct "$repo" "$check" "DRY: would create/update \`.github/CODEOWNERS\` with \`@petry-projects/org-leads\`"
+    skip "[DRY] Would open CODEOWNERS PR in $ORG/$repo"
+    report_pr "$repo" "$check" "DRY: would open PR creating/updating \`.github/CODEOWNERS\` with \`@petry-projects/org-leads\`"
     return 0
   fi
 
@@ -261,7 +302,7 @@ remediate_codeowners() {
 
   # Create or update the file via Contents API
   local encoded_content
-  encoded_content=$(printf '%s' "$codeowners_content" | base64 -w 0)
+  encoded_content=$(printf '%s' "$codeowners_content" | b64_encode)
 
   local api_args=(-X PUT "repos/$ORG/$repo/contents/$existing_path"
     -f message="fix: update CODEOWNERS to use @petry-projects/org-leads team (compliance remediation)"
@@ -351,7 +392,7 @@ remediate_unpinned_actions() {
   fi
 
   local decoded
-  decoded=$(echo "$encoded" | base64 -d 2>/dev/null || echo "")
+  decoded=$(printf '%s' "$encoded" | b64_decode 2>/dev/null || echo "")
   [ -z "$decoded" ] && { report_fail "$repo" "unpinned-actions-$workflow_file" "base64 decode failed"; return 0; }
 
   # Find all unpinned uses: directives
@@ -376,9 +417,20 @@ remediate_unpinned_actions() {
   while IFS= read -r ref; do
     [ -z "$ref" ] && continue
 
-    local action_part tag_part
+    local action_part tag_part repo_part
     action_part="${ref%@*}"
     tag_part="${ref##*@}"
+
+    # `action_part` may be either a direct action (`owner/repo`) or a reusable
+    # workflow path (`owner/repo/.github/workflows/file.yml`). The git/refs and
+    # commits APIs take `owner/repo`, so peel off any trailing path segments
+    # while keeping `action_part` intact for the replacement.
+    repo_part=$(echo "$action_part" | awk -F/ 'NF>=2 {print $1"/"$2}')
+    if [ -z "$repo_part" ]; then
+      warn "Could not parse owner/repo from $ref — skipping"
+      pins_failed=$((pins_failed + 1))
+      continue
+    fi
 
     # Skip if already a full SHA (shouldn't occur given grep above)
     if echo "$tag_part" | grep -qE '^[0-9a-f]{40}$'; then
@@ -391,7 +443,7 @@ remediate_unpinned_actions() {
     # must be dereferenced to get the commit SHA.
     local commit_sha=""
     local ref_json
-    ref_json=$(gh api "repos/$action_part/git/refs/tags/$tag_part" 2>/dev/null || echo "")
+    ref_json=$(gh api "repos/$repo_part/git/refs/tags/$tag_part" 2>/dev/null || echo "")
 
     if [ -n "$ref_json" ]; then
       local obj_type obj_sha
@@ -400,7 +452,7 @@ remediate_unpinned_actions() {
 
       if [ "$obj_type" = "tag" ]; then
         # Annotated tag — dereference the tag object
-        commit_sha=$(gh api "repos/$action_part/git/tags/$obj_sha" \
+        commit_sha=$(gh api "repos/$repo_part/git/tags/$obj_sha" \
           --jq '.object.sha' 2>/dev/null || echo "")
       else
         commit_sha="$obj_sha"
@@ -409,7 +461,7 @@ remediate_unpinned_actions() {
 
     # Fallback: commits API
     if [ -z "$commit_sha" ]; then
-      commit_sha=$(gh api "repos/$action_part/commits?sha=$tag_part&per_page=1" \
+      commit_sha=$(gh api "repos/$repo_part/commits?sha=$tag_part&per_page=1" \
         --jq '.[0].sha' 2>/dev/null || echo "")
     fi
 
@@ -419,11 +471,14 @@ remediate_unpinned_actions() {
       continue
     fi
 
-    # Replace uses: owner/action@tag → uses: owner/action@sha # tag
+    # Replace `uses:<ws>owner/action@tag` → `uses: owner/action@sha # tag`.
+    # Use [[:space:]]+ so any amount of tabs/spaces between `uses:` and the ref
+    # matches (still valid YAML). Indentation before `uses:` is preserved
+    # because it sits outside the match.
     local escaped_ref
-    escaped_ref=$(printf '%s' "$ref" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    escaped_ref=$(printf '%s' "$ref" | sed 's/[][\.*^$()+?{|/]/\\&/g')
     patched_content=$(echo "$patched_content" \
-      | sed "s|uses: ${escaped_ref}|uses: ${action_part}@${commit_sha} # ${tag_part}|g")
+      | sed -E "s|uses:[[:space:]]+${escaped_ref}|uses: ${action_part}@${commit_sha} # ${tag_part}|g")
 
     ok "  Pinned $ref → $commit_sha"
     pins_applied=$((pins_applied + 1))
@@ -437,9 +492,9 @@ remediate_unpinned_actions() {
   fi
 
   if [ "$DRY_RUN" = "true" ]; then
-    skip "[DRY] Would pin $pins_applied action(s) in $ORG/$repo/.github/workflows/$workflow_file"
-    report_direct "$repo" "unpinned-actions-$workflow_file" \
-      "DRY: would pin $pins_applied action(s)"
+    skip "[DRY] Would open PR pinning $pins_applied action(s) in $ORG/$repo/.github/workflows/$workflow_file"
+    report_pr "$repo" "unpinned-actions-$workflow_file" \
+      "DRY: would open PR pinning $pins_applied action(s)"
     return 0
   fi
 
@@ -473,7 +528,7 @@ remediate_unpinned_actions() {
   fi
 
   local new_encoded
-  new_encoded=$(printf '%s' "$patched_content" | base64 -w 0)
+  new_encoded=$(printf '%s' "$patched_content" | b64_encode)
 
   local failed_note=""
   [ "$pins_failed" -gt 0 ] && \
