@@ -195,12 +195,16 @@ retrigger_stale_issues() {
   info "Stale cutoff: $cutoff"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1a1e11e (fix(compliance): detect HTTP errors in compliance-retrigger search (#346))
   # Search across the whole org. Fetch raw response first so we can detect
   # HTTP errors — gh api dumps the error JSON to stdout and exits non-zero,
   # which the old `--jq '.items[]' || echo ""` pattern silently swallowed,
   # producing a single "Skipping null#null" iteration when the token lacked
   # search scope. See: failure mode where ORG_SCORECARD_TOKEN scope did not
   # permit cross-org search but the script still reported success.
+<<<<<<< HEAD
   # is:issue is REQUIRED — GitHub now rejects search/issues queries that omit
   # is:issue/is:pull-request with HTTP 422 (this was the bug that broke the daily
   # sweep). sort=created&order=asc surfaces the oldest (most-stuck) issue per repo
@@ -242,9 +246,33 @@ retrigger_stale_issues() {
   # Search across the whole org
   local issues
   issues=$(gh api \
+=======
+  local raw rc
+  raw=$(gh api \
+>>>>>>> 1a1e11e (fix(compliance): detect HTTP errors in compliance-retrigger search (#346))
     "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open&per_page=100" \
-    --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
-    2>/dev/null || echo "")
+    2>&1) && rc=0 || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    error "search/issues API call failed (exit $rc). Response:"
+    echo "$raw" | head -5 >&2
+    error "Cannot retrigger issues; aborting. Check GH_TOKEN scope — token must be able to read issues across all repos in org ${ORG}."
+    return 1
+  fi
+
+  # Detect error-response JSON even when exit code was 0 (defensive).
+  if echo "$raw" | jq -e 'has("message") and (.items | not)' >/dev/null 2>&1; then
+    error "search/issues returned an error response:"
+    echo "$raw" | jq -r '.message' >&2
+    return 1
+  fi
+
+  local total
+  total=$(echo "$raw" | jq -r '.total_count // 0')
+  info "search/issues returned ${total} matching issues"
+
+  local issues
+  issues=$(echo "$raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
 
   if [ -z "$issues" ]; then
     info "No open compliance-audit issues found."
