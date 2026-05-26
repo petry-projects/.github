@@ -1750,10 +1750,14 @@ for raw in lines:
 
     # Match the exact required direct child key (quoted or unquoted YAML key)
 <<<<<<< HEAD
+<<<<<<< HEAD
     if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
 =======
     if child_indent is not None and indent == child_indent and re.match(r'^["\']?copilot-setup-steps["\']?:[ ]*(#.*)?$', line):
 >>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
+=======
+    if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
+>>>>>>> 3f861e1 (fix(compliance-audit): correct regex quote escaping to resolve syntax error on line 1039)
         found = True
         break
 
