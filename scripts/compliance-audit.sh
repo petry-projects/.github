@@ -1694,7 +1694,7 @@ main() {
   fi
   if ! gh auth status >/dev/null 2>&1; then
     echo "::error::gh auth failed — GH_TOKEN is set but authentication did not succeed." \
-      "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has 'Administration: Read-only' and 'Metadata: Read-only' repository scopes." >&2
+      "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has repository permissions: 'Administration: Read-only', 'Metadata: Read-only', 'Contents: Read-only', 'Issues: Read and write'; and organization permission: 'Metadata: Read-only' (required to list repositories)." >&2
     exit 1
   fi
 
