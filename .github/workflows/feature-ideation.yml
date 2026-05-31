@@ -63,7 +63,7 @@ jobs:
       discussions: write
       actions: read
       id-token: write
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@1a1e11e849b716abc926b93e0c03f701184f704e # v1
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@3f861e1d05f3486fef7548fd7ae8967e006b6726 # v1
     with:
       project_context: |
         petry-projects/.github is the org-level standards and tooling repository
