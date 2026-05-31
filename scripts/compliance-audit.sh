@@ -110,11 +110,9 @@ escape_ere() {
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
-  local output rc
+  local output
   for i in $(seq 1 $retries); do
-    output=$(gh api "$@" 2>/dev/null)
-    rc=$?
-    if [ $rc -eq 0 ]; then
+    if output=$(gh api "$@" 2>/dev/null); then
       echo "$output"
       return 0
     fi
