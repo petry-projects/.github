@@ -1,0 +1,108 @@
+name: Auto-add to Initiatives project
+
+# Adds qualifying issues, PRs, and Ideas-category discussions to the
+# org-level Initiatives project (https://github.com/orgs/petry-projects/projects/1).
+#
+# Noise gate (issues/PRs): include only items labeled `dev-lead` and NOT labeled
+# any of: compliance-audit, health-check, fleet-tracker, daily-report.
+#
+# Discussions: include only those in the `Ideas` category, added as draft items
+# (the Projects v2 GraphQL API does not accept Discussion node IDs as content).
+#
+# Tracking: petry-projects/.github#387
+# Discussion: petry-projects/.github#386
+
+on:
+  issues:
+    types: [opened, labeled, reopened]
+  pull_request_target:
+    types: [opened, labeled, reopened, ready_for_review]
+  discussion:
+    types: [created, category_changed, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: add-to-project-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: PVT_kwDOD2inqs4BZq3-
+  PROJECT_URL: https://github.com/orgs/petry-projects/projects/1
+
+jobs:
+  add-issue-or-pr:
+    if: ${{ github.event_name == 'issues' || github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate noise gate and add to project
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          LABELS_JSON: ${{ toJson(github.event.issue.labels || github.event.pull_request.labels) }}
+          CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+          CONTENT_URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED="dev-lead"
+          EXCLUDED=("compliance-audit" "health-check" "fleet-tracker" "daily-report")
+
+          has_label() {
+            printf '%s' "$LABELS_JSON" | jq -e --arg name "$1" 'any(.name == $name)' >/dev/null
+          }
+
+          if ! has_label "$REQUIRED"; then
+            echo "Skip ${CONTENT_URL}: missing required label '${REQUIRED}'"
+            exit 0
+          fi
+
+          for ex in "${EXCLUDED[@]}"; do
+            if has_label "$ex"; then
+              echo "Skip ${CONTENT_URL}: has excluded label '${ex}'"
+              exit 0
+            fi
+          done
+
+          echo "Adding ${CONTENT_URL} to ${PROJECT_URL}"
+          gh api graphql \
+            -F projectId="${PROJECT_ID}" \
+            -F contentId="${CONTENT_NODE_ID}" \
+            -f query='mutation($projectId:ID!,$contentId:ID!){
+              addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){
+                item { id }
+              }
+            }'
+
+  add-discussion:
+    if: ${{ github.event_name == 'discussion' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Ideas-category discussion as draft item
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          DISC_TITLE: ${{ github.event.discussion.title }}
+          DISC_URL: ${{ github.event.discussion.html_url }}
+          DISC_NUMBER: ${{ github.event.discussion.number }}
+          DISC_CATEGORY: ${{ github.event.discussion.category.name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${DISC_CATEGORY}" != "Ideas" ]]; then
+            echo "Skip discussion #${DISC_NUMBER}: category '${DISC_CATEGORY}' (not 'Ideas')"
+            exit 0
+          fi
+
+          TITLE="[Discussion #${DISC_NUMBER}] ${DISC_TITLE}"
+          BODY=$(printf 'Source: %s\n\nAuto-added from Ideas-category discussion.' "${DISC_URL}")
+
+          echo "Adding discussion #${DISC_NUMBER} as draft to ${PROJECT_URL}"
+          gh api graphql \
+            -F projectId="${PROJECT_ID}" \
+            -F title="${TITLE}" \
+            -F body="${BODY}" \
+            -f query='mutation($projectId:ID!,$title:String!,$body:String!){
+              addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){
+                projectItem { id }
+              }
+            }'
