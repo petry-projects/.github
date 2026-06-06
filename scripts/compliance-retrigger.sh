@@ -208,18 +208,19 @@ retrigger_stale_issues() {
   # issue both recovers the lost event and acts as a lazy per-issue migration.
   if [ -n "${LEGACY_TRIGGER_LABEL:-}" ] && [ "$LEGACY_TRIGGER_LABEL" != "$TRIGGER_LABEL" ]; then
     info "Sweeping pre-migration '$LEGACY_TRIGGER_LABEL'-labeled issues..."
-    local legacy_raw legacy_rc
+    local legacy_issues legacy_rc
     # Exclude issues that already carry TRIGGER_LABEL — they were handled above.
-    legacy_raw=$(gh api \
+    # --paginate walks all result pages so issues beyond the first 100 are included.
+    legacy_issues=$(gh api --paginate \
       "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open&per_page=100" \
+      --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
       2>&1) && legacy_rc=0 || legacy_rc=$?
     if [ "$legacy_rc" -ne 0 ]; then
       warn "Legacy label sweep search failed (exit $legacy_rc) — pre-migration issues not swept this run"
     else
-      local legacy_total legacy_issues
-      legacy_total=$(echo "$legacy_raw" | jq -r '.total_count // 0')
+      local legacy_total
+      legacy_total=$(echo "$legacy_issues" | jq -s 'length')
       info "Legacy sweep found ${legacy_total} matching issues"
-      legacy_issues=$(echo "$legacy_raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
       while IFS= read -r issue_json; do
         [ -z "$issue_json" ] && continue
         number=$(echo "$issue_json" | jq -r '.number')
