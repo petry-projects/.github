@@ -136,12 +136,12 @@ migrate_repo() {
   if [ "$DELETE_OLD_LABEL" = "true" ] && [ "$repo_failed" -eq 0 ]; then
     if [ "$DRY_RUN" = "true" ]; then
       info "[dry-run] would DELETE label '$OLD_LABEL' from $repo"
+      LABELS_DELETED=$((LABELS_DELETED + 1))
     else
       gh api -X DELETE "repos/$ORG/$repo/labels/$OLD_LABEL" >/dev/null 2>&1 \
-        && info "  deleted '$OLD_LABEL' label from $repo" \
+        && { info "  deleted '$OLD_LABEL' label from $repo"; LABELS_DELETED=$((LABELS_DELETED + 1)); } \
         || warn "  failed to delete '$OLD_LABEL' label from $repo"
     fi
-    LABELS_DELETED=$((LABELS_DELETED + 1))
   elif [ "$repo_failed" -ne 0 ]; then
     warn "  keeping '$OLD_LABEL' on $repo — one or more re-labels failed"
   fi
