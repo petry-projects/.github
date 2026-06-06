@@ -46,9 +46,12 @@ dl_dev_lead_active() {
   # PR — respect that window, but cap it at IN_PROGRESS_MAX_HOURS so a crashed or
   # cancelled run cannot block retrigger indefinitely.
   local in_progress
-  in_progress=$(gh api "repos/$org/$repo/issues/$issue" \
+  if ! in_progress=$(gh api "repos/$org/$repo/issues/$issue" \
     --jq '.labels[].name | select(. == "in-progress")' \
-    2>/dev/null || echo "")
+    2>/dev/null); then
+    echo "[warn]  Issue lookup for $org/$repo#$issue failed — treating as active to avoid duplicate work" >&2
+    return 0
+  fi
 
   if [ -n "$in_progress" ]; then
     local in_progress_max_hours="${IN_PROGRESS_MAX_HOURS:-4}"

@@ -158,8 +158,7 @@ retrigger_stale_issues() {
   issues=$(echo "$raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
 
   if [ -z "$issues" ]; then
-    info "No open compliance-audit issues found."
-    return 0
+    info "No open compliance-audit issues found with '$TRIGGER_LABEL' label."
   fi
 
   while IFS= read -r issue_json; do
@@ -238,15 +237,23 @@ retrigger_stale_issues() {
         fi
         info "Adding '$TRIGGER_LABEL' to pre-migration issue $repo#$number: $title"
         if [ "$DRY_RUN" = "true" ]; then
-          info "[dry-run] would add '$TRIGGER_LABEL' to $repo#$number"
-          ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
-        elif gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
-          --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1; then
-          info "  added '$TRIGGER_LABEL' to $repo#$number"
+          info "[dry-run] would ensure '$TRIGGER_LABEL' label exists in $repo and add it to #$number"
           ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
         else
-          warn "Failed to add '$TRIGGER_LABEL' to $repo#$number — issue may not be retriggered"
-          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          # Repos in the pre-migration state may only have the legacy label
+          # object. Ensure the new label exists before trying to apply it so
+          # the add-label API call does not fail silently and leave the issue
+          # invisible to the main dev-lead sweep.
+          gh label create "$TRIGGER_LABEL" --repo "$ORG/$repo" \
+            --color "8B5CF6" --description "For dev-lead agent pickup" --force 2>/dev/null || true
+          if gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
+            --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1; then
+            info "  added '$TRIGGER_LABEL' to $repo#$number"
+            ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+          else
+            warn "Failed to add '$TRIGGER_LABEL' to $repo#$number — issue may not be retriggered"
+            ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          fi
         fi
       done <<< "$legacy_issues"
     fi

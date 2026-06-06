@@ -116,6 +116,10 @@ migrate_repo() {
     if dl_dev_lead_active "$ORG" "$repo" "$num"; then
       info "  #$num has active dev-lead work — deferring migration"
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+      # Mark the repo as unsafe to delete the old label: this issue still
+      # carries only the old label and deleting it would leave the issue with
+      # no trigger label while dev-lead's active run or PR is in flight.
+      repo_failed=1
       continue
     fi
     if [ "$DRY_RUN" = "true" ]; then
