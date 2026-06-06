@@ -52,6 +52,7 @@ jobs:
       repos_with_findings: ${{ steps.audit.outputs.repos_with_findings }}
       issues_added: ${{ steps.audit.outputs.issues_added }}
       issues_existing: ${{ steps.audit.outputs.issues_existing }}
+      issues_retriggered: ${{ steps.audit.outputs.issues_retriggered }}
       issues_removed: ${{ steps.audit.outputs.issues_removed }}
     steps:
       - name: Checkout .github repo
@@ -83,12 +84,14 @@ jobs:
           if [ -f "$COUNTS_FILE" ]; then
             ISSUES_ADDED=$(jq '.added' "$COUNTS_FILE")
             ISSUES_EXISTING=$(jq '.existing' "$COUNTS_FILE")
+            ISSUES_RETRIGGERED=$(jq '.retriggered // 0' "$COUNTS_FILE")
             ISSUES_REMOVED=$(jq '.removed' "$COUNTS_FILE")
           else
-            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_REMOVED=0
+            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_RETRIGGERED=0; ISSUES_REMOVED=0
           fi
           echo "issues_added=$ISSUES_ADDED" >> "$GITHUB_OUTPUT"
           echo "issues_existing=$ISSUES_EXISTING" >> "$GITHUB_OUTPUT"
+          echo "issues_retriggered=$ISSUES_RETRIGGERED" >> "$GITHUB_OUTPUT"
           echo "issues_removed=$ISSUES_REMOVED" >> "$GITHUB_OUTPUT"
 
       - name: Write step summary
@@ -332,6 +335,7 @@ jobs:
             - Repos with findings: ${{ needs.audit.outputs.repos_with_findings }}
             - Issues added (new): ${{ needs.audit.outputs.issues_added }}
             - Issues existing (updated): ${{ needs.audit.outputs.issues_existing }}
+            - Issues re-triggered (dev-lead re-engaged on persistent findings): ${{ needs.audit.outputs.issues_retriggered }}
             - Issues removed (resolved): ${{ needs.audit.outputs.issues_removed }}
 
             ### Health Survey (runtime telemetry)
@@ -556,6 +560,7 @@ jobs:
             |--------|-------|
             | Added (new) | ${{ needs.audit.outputs.issues_added }} |
             | Existing (updated) | ${{ needs.audit.outputs.issues_existing }} |
+            | Re-triggered (dev-lead re-engaged) | ${{ needs.audit.outputs.issues_retriggered }} |
             | Removed (resolved) | ${{ needs.audit.outputs.issues_removed }} |
 
             Group by compliance issue type — one subsection per distinct check/finding type,

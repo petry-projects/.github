@@ -40,6 +40,7 @@ ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
 ISSUES_ADDED=0
 ISSUES_EXISTING=0
 ISSUES_REMOVED=0
+ISSUES_RETRIGGERED=0
 
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
@@ -129,6 +130,11 @@ gh_api() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
+
+# Shared dev-lead retrigger helpers — dl_dev_lead_active() and
+# dl_cycle_trigger_label(). Used to re-engage dev-lead on persistent findings.
+# shellcheck source=lib/dev-lead-retrigger.sh
+. "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
 
 # ---------------------------------------------------------------------------
 # Ecosystem detection
@@ -1214,13 +1220,33 @@ This finding is still open.
 **Detail:** $detail
 
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || update_ok=false
-    # Ensure claude label is present on pre-existing issues regardless
-    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
     if [ "$update_ok" = "true" ]; then
       info "Updated existing issue #$existing in $repo for: $check"
       ISSUES_EXISTING=$((ISSUES_EXISTING + 1))
     else
       warn "Failed to update existing issue #$existing in $repo for: $check"
+    fi
+
+    # Re-engage dev-lead on findings that PERSIST across audits.
+    #
+    # dev-lead listens on issues:labeled and fires only once per label
+    # application. The `claude` label is already present on a pre-existing
+    # issue, so a plain --add-label is a no-op that emits no event and dev-lead
+    # is never re-triggered. To give it a fresh chance to produce a fix PR we
+    # cycle the label (remove + re-add) — UNLESS dev-lead is already working
+    # this issue (open dev-lead PR or `in-progress` label), in which case we
+    # must not interrupt it and simply ensure the label is present.
+    if dl_dev_lead_active "$ORG" "$repo" "$existing"; then
+      gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
+      info "Existing issue #$existing in $repo — dev-lead already active, not re-triggering"
+    elif dl_cycle_trigger_label "$ORG" "$repo" "$existing" "claude" "$DRY_RUN"; then
+      info "Re-triggered dev-lead on persistent issue #$existing in $repo for: $check"
+      ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+    else
+      # Cycle failed mid-way — ensure the label is at least present so the issue
+      # is not left without its trigger label.
+      gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
+      warn "Failed to re-trigger dev-lead on issue #$existing in $repo for: $check"
     fi
     # Record existing issue for umbrella
     jq --null-input \
@@ -1808,8 +1834,8 @@ main() {
 
   # Write issue-management counts and append to summary (conditional on issue management running)
   if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
-    printf '{"added":%d,"existing":%d,"removed":%d}\n' \
-      "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" > "$ISSUE_COUNTS_FILE"
+    printf '{"added":%d,"existing":%d,"removed":%d,"retriggered":%d}\n' \
+      "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" "$ISSUES_RETRIGGERED" > "$ISSUE_COUNTS_FILE"
     cat >> "$SUMMARY_FILE" <<HEREDOC
 
 ## Issue Management
@@ -1818,10 +1844,11 @@ main() {
 |--------|-------|
 | Added (new) | $ISSUES_ADDED |
 | Existing (updated) | $ISSUES_EXISTING |
+| Re-triggered (dev-lead re-engaged) | $ISSUES_RETRIGGERED |
 | Removed (resolved) | $ISSUES_REMOVED |
 HEREDOC
   else
-    printf '{"added":0,"existing":0,"removed":0}\n' > "$ISSUE_COUNTS_FILE"
+    printf '{"added":0,"existing":0,"removed":0,"retriggered":0}\n' > "$ISSUE_COUNTS_FILE"
     cat >> "$SUMMARY_FILE" <<HEREDOC
 
 ## Issue Management

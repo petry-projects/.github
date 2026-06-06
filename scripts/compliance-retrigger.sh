@@ -34,6 +34,11 @@ DRY_RUN="${DRY_RUN:-false}"
 AUDIT_LABEL="${AUDIT_LABEL:-compliance-audit}"
 TRIGGER_LABEL="${TRIGGER_LABEL:-claude}"
 
+# Shared dev-lead retrigger helpers (dl_dev_lead_active, dl_cycle_trigger_label).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/dev-lead-retrigger.sh
+. "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
+
 ISSUES_RETRIGGERED=0
 ISSUES_SKIPPED=0
 WORKFLOWS_DISABLED=0
@@ -47,37 +52,16 @@ info()  { echo "[info]  $*"; }
 warn()  { echo "[warn]  $*" >&2; }
 error() { echo "[error] $*" >&2; }
 
-gh_api() { gh api "$@"; }
+# has_open_pr / cycle_label live in lib/dev-lead-retrigger.sh as
+# dl_dev_lead_active() and dl_cycle_trigger_label(), shared with the weekly
+# compliance audit so both stay in sync with dev-lead's branch-naming
+# convention. Sourced via SCRIPT_DIR resolved at the top of the file.
 
 # stale_cutoff — ISO timestamp N days ago
 stale_cutoff() {
   date -u -d "${STALE_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
     || python3 -c "from datetime import datetime,timedelta,timezone; \
                    print((datetime.now(timezone.utc)-timedelta(days=${STALE_DAYS})).strftime('%Y-%m-%dT%H:%M:%SZ'))"
-}
-
-# has_open_pr <repo> <issue_number>
-# Returns 0 (true) if there is an open PR with head ref dev-lead/issue-<number>*
-has_open_pr() {
-  local repo="$1" issue="$2"
-  local count
-  count=$(gh_api "repos/$ORG/$repo/pulls?state=open" \
-    --jq "[.[] | select(.head.ref | startswith(\"dev-lead/issue-${issue}\"))] | length" \
-    2>/dev/null || echo "0")
-  [ "${count:-0}" -gt 0 ]
-}
-
-# cycle_label <repo> <issue>
-# Removes and re-adds TRIGGER_LABEL so issues:labeled fires again.
-cycle_label() {
-  local repo="$1" issue="$2"
-  if [ "$DRY_RUN" = "true" ]; then
-    info "[dry-run] would cycle '$TRIGGER_LABEL' on $repo#$issue"
-    return 0
-  fi
-  gh api -X DELETE "repos/$ORG/$repo/issues/$issue/labels/$TRIGGER_LABEL" 2>/dev/null || true
-  gh api -X POST "repos/$ORG/$repo/issues/$issue/labels" \
-    --field "labels[]=$TRIGGER_LABEL" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -189,15 +173,15 @@ retrigger_stale_issues() {
       continue
     fi
 
-    # Check if a dev-lead PR already exists for this issue
-    if has_open_pr "$repo" "$number"; then
-      info "Skipping $repo#$number — open dev-lead PR already exists"
+    # Skip if dev-lead is already working this issue (open PR or in-progress).
+    if dl_dev_lead_active "$ORG" "$repo" "$number"; then
+      info "Skipping $repo#$number — dev-lead already active (open PR or in-progress)"
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
       continue
     fi
 
     info "Re-triggering $repo#$number: $title (created $created_at)"
-    cycle_label "$repo" "$number"
+    dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"
     ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
     # Brief pause to avoid flooding the API
     sleep 1
