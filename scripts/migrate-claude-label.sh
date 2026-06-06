@@ -50,6 +50,11 @@ LABELS_DELETED=0
 info()  { echo "[info]  $*"; }
 warn()  { echo "[warn]  $*" >&2; }
 
+# Shared dev-lead retrigger helpers (dl_dev_lead_active).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/dev-lead-retrigger.sh
+. "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
+
 # repo_has_label <repo> <label> — 0 if the label object exists in the repo.
 repo_has_label() {
   gh api "repos/$ORG/$1/labels/$2" --jq '.name' >/dev/null 2>&1
@@ -102,6 +107,14 @@ migrate_repo() {
     [ -z "$num" ] && continue
     if issue_has_label "$repo" "$num" "$NEW_LABEL"; then
       info "  #$num already has '$NEW_LABEL' — skipping"
+      ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+      continue
+    fi
+    # Skip issues where dev-lead is already actively working (open PR or
+    # in-progress label) to avoid emitting a duplicate issues:labeled event
+    # that would start a second run in parallel with the active one.
+    if dl_dev_lead_active "$ORG" "$repo" "$num"; then
+      info "  #$num has active dev-lead work — deferring migration"
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
       continue
     fi

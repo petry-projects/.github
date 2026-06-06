@@ -33,6 +33,10 @@ STALE_DAYS="${STALE_DAYS:-2}"
 DRY_RUN="${DRY_RUN:-false}"
 AUDIT_LABEL="${AUDIT_LABEL:-compliance-audit}"
 TRIGGER_LABEL="${TRIGGER_LABEL:-dev-lead}"
+# Legacy label to also sweep during the transition window before the one-time
+# migration script has run. Issues that still carry only the old label are
+# found here and given the new label so dev-lead picks them up.
+LEGACY_TRIGGER_LABEL="${LEGACY_TRIGGER_LABEL:-claude}"
 
 # Shared dev-lead retrigger helpers (dl_dev_lead_active, dl_cycle_trigger_label).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -197,6 +201,56 @@ retrigger_stale_issues() {
     fi
     # dl_cycle_trigger_label already sleeps 1s internally; no additional pause needed.
   done <<< "$issues"
+
+  # Sweep pre-migration issues that still carry only the legacy trigger label.
+  # When this change is deployed before the one-time migration has run, open
+  # compliance issues with the legacy label would otherwise be invisible to the
+  # main search above and never retriggered. Adding TRIGGER_LABEL to each such
+  # issue both recovers the lost event and acts as a lazy per-issue migration.
+  if [ -n "${LEGACY_TRIGGER_LABEL:-}" ] && [ "$LEGACY_TRIGGER_LABEL" != "$TRIGGER_LABEL" ]; then
+    info "Sweeping pre-migration '$LEGACY_TRIGGER_LABEL'-labeled issues..."
+    local legacy_raw legacy_rc
+    # Exclude issues that already carry TRIGGER_LABEL — they were handled above.
+    legacy_raw=$(gh api \
+      "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open&per_page=100" \
+      2>&1) && legacy_rc=0 || legacy_rc=$?
+    if [ "$legacy_rc" -ne 0 ]; then
+      warn "Legacy label sweep search failed (exit $legacy_rc) — pre-migration issues not swept this run"
+    else
+      local legacy_total legacy_issues
+      legacy_total=$(echo "$legacy_raw" | jq -r '.total_count // 0')
+      info "Legacy sweep found ${legacy_total} matching issues"
+      legacy_issues=$(echo "$legacy_raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
+      while IFS= read -r issue_json; do
+        [ -z "$issue_json" ] && continue
+        number=$(echo "$issue_json" | jq -r '.number')
+        repo=$(echo "$issue_json" | jq -r '.repo')
+        created_at=$(echo "$issue_json" | jq -r '.created_at')
+        title=$(echo "$issue_json" | jq -r '.title')
+        if [[ "$created_at" > "$cutoff" ]]; then
+          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          continue
+        fi
+        if dl_dev_lead_active "$ORG" "$repo" "$number"; then
+          info "Skipping legacy $repo#$number — dev-lead already active"
+          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          continue
+        fi
+        info "Adding '$TRIGGER_LABEL' to pre-migration issue $repo#$number: $title"
+        if [ "$DRY_RUN" = "true" ]; then
+          info "[dry-run] would add '$TRIGGER_LABEL' to $repo#$number"
+          ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+        elif gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
+          --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1; then
+          info "  added '$TRIGGER_LABEL' to $repo#$number"
+          ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+        else
+          warn "Failed to add '$TRIGGER_LABEL' to $repo#$number — issue may not be retriggered"
+          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+        fi
+      done <<< "$legacy_issues"
+    fi
+  fi
 
   info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped"
 }
