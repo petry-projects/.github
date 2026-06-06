@@ -81,9 +81,9 @@ migrate_repo() {
   fi
 
   # 2. Re-label every OPEN issue currently carrying the old label.
-  local issues
+  local issues repo_failed=0
   issues=$(gh issue list --repo "$ORG/$repo" --label "$OLD_LABEL" --state open \
-    --json number -q '.[].number' 2>/dev/null || echo "")
+    --limit 1000 --json number -q '.[].number' 2>/dev/null || echo "")
   while IFS= read -r num; do
     [ -z "$num" ] && continue
     if issue_has_label "$repo" "$num" "$NEW_LABEL"; then
@@ -94,15 +94,18 @@ migrate_repo() {
     if [ "$DRY_RUN" = "true" ]; then
       info "[dry-run] would add '$NEW_LABEL' to $repo#$num"
     else
-      gh issue edit "$num" --repo "$ORG/$repo" --add-label "$NEW_LABEL" >/dev/null 2>&1 \
-        && info "  added '$NEW_LABEL' to $repo#$num" \
-        || warn "  failed to add '$NEW_LABEL' to $repo#$num"
+      if gh issue edit "$num" --repo "$ORG/$repo" --add-label "$NEW_LABEL" >/dev/null 2>&1; then
+        info "  added '$NEW_LABEL' to $repo#$num"
+      else
+        warn "  failed to add '$NEW_LABEL' to $repo#$num"
+        repo_failed=1
+      fi
     fi
     LABELS_ADDED=$((LABELS_ADDED + 1))
   done <<< "$issues"
 
   # 3. Delete the old label object (strips it from all issues/PRs).
-  if [ "$DELETE_OLD_LABEL" = "true" ]; then
+  if [ "$DELETE_OLD_LABEL" = "true" ] && [ "$repo_failed" -eq 0 ]; then
     if [ "$DRY_RUN" = "true" ]; then
       info "[dry-run] would DELETE label '$OLD_LABEL' from $repo"
     else
@@ -111,6 +114,8 @@ migrate_repo() {
         || warn "  failed to delete '$OLD_LABEL' label from $repo"
     fi
     LABELS_DELETED=$((LABELS_DELETED + 1))
+  elif [ "$repo_failed" -ne 0 ]; then
+    warn "  keeping '$OLD_LABEL' on $repo — one or more re-labels failed"
   fi
 }
 
@@ -121,7 +126,7 @@ main() {
   if [ -n "$TARGET_REPO" ]; then
     repos="${TARGET_REPO#"$ORG/"}"
   else
-    repos=$(gh repo list "$ORG" --no-archived --limit 200 --json name -q '.[].name')
+    repos=$(gh repo list "$ORG" --no-archived --limit 1000 --json name -q '.[].name')
   fi
 
   for repo in $repos; do
