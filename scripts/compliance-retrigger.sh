@@ -10,7 +10,7 @@ set -euo pipefail
 #      Disabled workflows silently swallow issue-labeled events — findings
 #      will never be fixed even if labels are applied correctly.
 #   2. Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
-#      have no associated open PR on a dev-lead branch.  Cycles the "claude"
+#      have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
 #      label (remove + re-add) to re-fire the issues:labeled event and give
 #      dev-lead a fresh chance to create a fix PR.
 #
@@ -26,13 +26,22 @@ set -euo pipefail
 #   STALE_DAYS    — issues older than this are considered stale (default: 2)
 #   DRY_RUN       — set to "true" to log actions without executing them
 #   AUDIT_LABEL   — label used to tag compliance findings (default: compliance-audit)
-#   TRIGGER_LABEL — label used to trigger dev-lead (default: claude)
+#   TRIGGER_LABEL — label used to trigger dev-lead (default: dev-lead)
 
 ORG="${ORG:-petry-projects}"
 STALE_DAYS="${STALE_DAYS:-2}"
 DRY_RUN="${DRY_RUN:-false}"
 AUDIT_LABEL="${AUDIT_LABEL:-compliance-audit}"
-TRIGGER_LABEL="${TRIGGER_LABEL:-claude}"
+TRIGGER_LABEL="${TRIGGER_LABEL:-dev-lead}"
+# Legacy label to also sweep during the transition window before the one-time
+# migration script has run. Issues that still carry only the old label are
+# found here and given the new label so dev-lead picks them up.
+LEGACY_TRIGGER_LABEL="${LEGACY_TRIGGER_LABEL:-claude}"
+
+# Shared dev-lead retrigger helpers (dl_dev_lead_active, dl_cycle_trigger_label).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/dev-lead-retrigger.sh
+. "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
 
 ISSUES_RETRIGGERED=0
 ISSUES_SKIPPED=0
@@ -47,37 +56,16 @@ info()  { echo "[info]  $*"; }
 warn()  { echo "[warn]  $*" >&2; }
 error() { echo "[error] $*" >&2; }
 
-gh_api() { gh api "$@"; }
+# has_open_pr / cycle_label live in lib/dev-lead-retrigger.sh as
+# dl_dev_lead_active() and dl_cycle_trigger_label(), shared with the weekly
+# compliance audit so both stay in sync with dev-lead's branch-naming
+# convention. Sourced via SCRIPT_DIR resolved at the top of the file.
 
 # stale_cutoff — ISO timestamp N days ago
 stale_cutoff() {
   date -u -d "${STALE_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
     || python3 -c "from datetime import datetime,timedelta,timezone; \
                    print((datetime.now(timezone.utc)-timedelta(days=${STALE_DAYS})).strftime('%Y-%m-%dT%H:%M:%SZ'))"
-}
-
-# has_open_pr <repo> <issue_number>
-# Returns 0 (true) if there is an open PR with head ref dev-lead/issue-<number>*
-has_open_pr() {
-  local repo="$1" issue="$2"
-  local count
-  count=$(gh_api "repos/$ORG/$repo/pulls?state=open" \
-    --jq "[.[] | select(.head.ref | startswith(\"dev-lead/issue-${issue}\"))] | length" \
-    2>/dev/null || echo "0")
-  [ "${count:-0}" -gt 0 ]
-}
-
-# cycle_label <repo> <issue>
-# Removes and re-adds TRIGGER_LABEL so issues:labeled fires again.
-cycle_label() {
-  local repo="$1" issue="$2"
-  if [ "$DRY_RUN" = "true" ]; then
-    info "[dry-run] would cycle '$TRIGGER_LABEL' on $repo#$issue"
-    return 0
-  fi
-  gh api -X DELETE "repos/$ORG/$repo/issues/$issue/labels/$TRIGGER_LABEL" 2>/dev/null || true
-  gh api -X POST "repos/$ORG/$repo/issues/$issue/labels" \
-    --field "labels[]=$TRIGGER_LABEL" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -170,8 +158,7 @@ retrigger_stale_issues() {
   issues=$(echo "$raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
 
   if [ -z "$issues" ]; then
-    info "No open compliance-audit issues found."
-    return 0
+    info "No open compliance-audit issues found with '$TRIGGER_LABEL' label."
   fi
 
   while IFS= read -r issue_json; do
@@ -189,19 +176,89 @@ retrigger_stale_issues() {
       continue
     fi
 
-    # Check if a dev-lead PR already exists for this issue
-    if has_open_pr "$repo" "$number"; then
-      info "Skipping $repo#$number — open dev-lead PR already exists"
+    # Skip if dev-lead is already working this issue (open PR or in-progress).
+    if dl_dev_lead_active "$ORG" "$repo" "$number"; then
+      info "Skipping $repo#$number — dev-lead already active (open PR or in-progress)"
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
       continue
     fi
 
     info "Re-triggering $repo#$number: $title (created $created_at)"
-    cycle_label "$repo" "$number"
-    ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
-    # Brief pause to avoid flooding the API
-    sleep 1
+    if dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"; then
+      ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+    else
+      warn "Failed to re-trigger dev-lead on issue #$number in $repo — attempting to restore label"
+      # The label may have been deleted but the re-add failed. Restore it so the
+      # issue remains visible to the next sweep's search query.
+      if [ "$DRY_RUN" != "true" ]; then
+        gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
+          --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1 \
+          && info "Restored $TRIGGER_LABEL on $repo#$number" \
+          || warn "Could not restore $TRIGGER_LABEL on $repo#$number — issue may drop out of next sweep"
+      fi
+      ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+    fi
+    # dl_cycle_trigger_label already sleeps 1s internally; no additional pause needed.
   done <<< "$issues"
+
+  # Sweep pre-migration issues that still carry only the legacy trigger label.
+  # When this change is deployed before the one-time migration has run, open
+  # compliance issues with the legacy label would otherwise be invisible to the
+  # main search above and never retriggered. Adding TRIGGER_LABEL to each such
+  # issue both recovers the lost event and acts as a lazy per-issue migration.
+  if [ -n "${LEGACY_TRIGGER_LABEL:-}" ] && [ "$LEGACY_TRIGGER_LABEL" != "$TRIGGER_LABEL" ]; then
+    info "Sweeping pre-migration '$LEGACY_TRIGGER_LABEL'-labeled issues..."
+    local legacy_issues legacy_rc
+    # Exclude issues that already carry TRIGGER_LABEL — they were handled above.
+    # --paginate walks all result pages so issues beyond the first 100 are included.
+    legacy_issues=$(gh api --paginate \
+      "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open&per_page=100" \
+      --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
+      2>&1) && legacy_rc=0 || legacy_rc=$?
+    if [ "$legacy_rc" -ne 0 ]; then
+      warn "Legacy label sweep search failed (exit $legacy_rc) — pre-migration issues not swept this run"
+    else
+      local legacy_total
+      legacy_total=$(echo "$legacy_issues" | jq -s 'length')
+      info "Legacy sweep found ${legacy_total} matching issues"
+      while IFS= read -r issue_json; do
+        [ -z "$issue_json" ] && continue
+        number=$(echo "$issue_json" | jq -r '.number')
+        repo=$(echo "$issue_json" | jq -r '.repo')
+        created_at=$(echo "$issue_json" | jq -r '.created_at')
+        title=$(echo "$issue_json" | jq -r '.title')
+        if [[ "$created_at" > "$cutoff" ]]; then
+          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          continue
+        fi
+        if dl_dev_lead_active "$ORG" "$repo" "$number"; then
+          info "Skipping legacy $repo#$number — dev-lead already active"
+          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          continue
+        fi
+        info "Adding '$TRIGGER_LABEL' to pre-migration issue $repo#$number: $title"
+        if [ "$DRY_RUN" = "true" ]; then
+          info "[dry-run] would ensure '$TRIGGER_LABEL' label exists in $repo and add it to #$number"
+          ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+        else
+          # Repos in the pre-migration state may only have the legacy label
+          # object. Ensure the new label exists before trying to apply it so
+          # the add-label API call does not fail silently and leave the issue
+          # invisible to the main dev-lead sweep.
+          gh label create "$TRIGGER_LABEL" --repo "$ORG/$repo" \
+            --color "8B5CF6" --description "For dev-lead agent pickup" --force 2>/dev/null || true
+          if gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
+            --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1; then
+            info "  added '$TRIGGER_LABEL' to $repo#$number"
+            ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+          else
+            warn "Failed to add '$TRIGGER_LABEL' to $repo#$number — issue may not be retriggered"
+            ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          fi
+        fi
+      done <<< "$legacy_issues"
+    fi
+  fi
 
   info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped"
 }
