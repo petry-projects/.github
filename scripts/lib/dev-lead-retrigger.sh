@@ -76,7 +76,20 @@ dl_dev_lead_active() {
     elapsed_hours=$(( (now_epoch - labeled_epoch) / 3600 ))
 
     [ "$elapsed_hours" -le "$in_progress_max_hours" ] && return 0
-    # in-progress label is stale (agent likely crashed); fall through to return 1.
+    # in-progress label is stale (agent likely crashed). Remove it before
+    # returning inactive: AGENTS.md's claim protocol requires any agent to skip
+    # an issue that still carries in-progress, so leaving the label in place
+    # means the next dev-lead run will immediately skip the issue even after the
+    # trigger label is cycled, leaving the crash unrecovered.
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      echo "[dry-run] would remove stale 'in-progress' from $org/$repo#$issue" >&2
+    else
+      gh api -X DELETE "repos/$org/$repo/issues/$issue/labels/in-progress" \
+        >/dev/null 2>&1 \
+        && echo "[info]  Removed stale 'in-progress' from $org/$repo#$issue" >&2 \
+        || echo "[warn]  Could not remove stale 'in-progress' from $org/$repo#$issue — dev-lead may skip it" >&2
+    fi
+    # fall through to return 1 (inactive)
   fi
 
   return 1
