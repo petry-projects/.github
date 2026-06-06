@@ -181,8 +181,11 @@ retrigger_stale_issues() {
     fi
 
     info "Re-triggering $repo#$number: $title (created $created_at)"
-    dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"
-    ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+    if dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"; then
+      ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
+    else
+      warn "Failed to re-trigger dev-lead on issue #$number in $repo"
+    fi
     # Brief pause to avoid flooding the API
     sleep 1
   done <<< "$issues"

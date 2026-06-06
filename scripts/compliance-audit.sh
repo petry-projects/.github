@@ -1237,7 +1237,6 @@ This finding is still open.
     # this issue (open dev-lead PR or `in-progress` label), in which case we
     # must not interrupt it and simply ensure the label is present.
     if dl_dev_lead_active "$ORG" "$repo" "$existing"; then
-      gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
       info "Existing issue #$existing in $repo — dev-lead already active, not re-triggering"
     elif dl_cycle_trigger_label "$ORG" "$repo" "$existing" "claude" "$DRY_RUN"; then
       info "Re-triggered dev-lead on persistent issue #$existing in $repo for: $check"

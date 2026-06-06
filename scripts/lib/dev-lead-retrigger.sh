@@ -29,7 +29,7 @@ dl_dev_lead_active() {
   # Require the trailing "-" so issue 1 does not match branch "issue-12-...".
   local pr_count
   pr_count=$(gh api "repos/$org/$repo/pulls?state=open" \
-    --jq "[.[] | select(.head.ref | startswith(\"dev-lead/issue-${issue}-\"))] | length" \
+    --jq "[.[] | select(.head.ref | type == \"string\" and startswith(\"dev-lead/issue-${issue}-\"))] | length" \
     2>/dev/null || echo "0")
   [ "${pr_count:-0}" -gt 0 ] && return 0
 
@@ -37,7 +37,7 @@ dl_dev_lead_active() {
   # PR — respect that window too.
   local in_progress
   in_progress=$(gh api "repos/$org/$repo/issues/$issue" \
-    --jq '[.labels[].name] | index("in-progress") // empty' \
+    --jq '.labels[].name | select(. == "in-progress")' \
     2>/dev/null || echo "")
   [ -n "$in_progress" ] && return 0
 
