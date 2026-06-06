@@ -5,6 +5,9 @@
 #   Phase 1-3: Load data, categorize findings, research root causes.
 #   Phase 4: Evaluate against industry best practices & emerging capabilities.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
 #   Phase 5: Create actionable issues per repo (dev-lead label for agent pickup).
 #   Phase 6: Summary report.
 # Standard: https://github.com/${{ github.repository_owner }}/.github/tree/main/standards
@@ -112,6 +115,7 @@ jobs:
             ISSUES_ADDED=$(jq '.added' "$COUNTS_FILE")
             ISSUES_EXISTING=$(jq '.existing' "$COUNTS_FILE")
 <<<<<<< HEAD
+<<<<<<< HEAD
             ISSUES_RETRIGGERED=$(jq '.retriggered // 0' "$COUNTS_FILE")
             ISSUES_REMOVED=$(jq '.removed' "$COUNTS_FILE")
           else
@@ -125,12 +129,16 @@ jobs:
 =======
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
 =======
+=======
+            ISSUES_RETRIGGERED=$(jq '.retriggered // 0' "$COUNTS_FILE")
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
             ISSUES_REMOVED=$(jq '.removed' "$COUNTS_FILE")
           else
-            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_REMOVED=0
+            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_RETRIGGERED=0; ISSUES_REMOVED=0
           fi
           echo "issues_added=$ISSUES_ADDED" >> "$GITHUB_OUTPUT"
           echo "issues_existing=$ISSUES_EXISTING" >> "$GITHUB_OUTPUT"
+          echo "issues_retriggered=$ISSUES_RETRIGGERED" >> "$GITHUB_OUTPUT"
           echo "issues_removed=$ISSUES_REMOVED" >> "$GITHUB_OUTPUT"
 
 >>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
@@ -352,10 +360,14 @@ jobs:
   # -----------------------------------------------------------------------
   # Job 3: Combined analysis — Claude reviews both datasets
 <<<<<<< HEAD
+<<<<<<< HEAD
   # Creates actionable issues in the appropriate repo with the dev-lead label.
 =======
   # Creates actionable issues in the appropriate repo with the claude label.
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+  # Creates actionable issues in the appropriate repo with the dev-lead label.
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
   # -----------------------------------------------------------------------
   analyze:
     name: Analyze & Create Issues (Claude)
@@ -471,6 +483,7 @@ jobs:
 =======
             - Issues added (new): ${{ needs.audit.outputs.issues_added }}
             - Issues existing (updated): ${{ needs.audit.outputs.issues_existing }}
+            - Issues re-triggered (dev-lead re-engaged on persistent findings): ${{ needs.audit.outputs.issues_retriggered }}
             - Issues removed (resolved): ${{ needs.audit.outputs.issues_removed }}
 >>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
 
@@ -586,10 +599,14 @@ jobs:
             opportunity (max 2-3), create a standards proposal issue in `${{ github.repository_owner }}/.github`:
             - Title: `Standards: <concise description of the proposed standard>`
 <<<<<<< HEAD
+<<<<<<< HEAD
             - Labels: `dev-lead,enhancement`
 =======
             - Labels: `claude,enhancement`
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+            - Labels: `dev-lead,enhancement`
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
             - Body must include:
               - **Proposed Standard** — the specific policy, workflow, or configuration to adopt
               - **Rationale** — why this matters, linked to the feasibility/impact/urgency assessment
@@ -606,6 +623,7 @@ jobs:
             - Standards improvement proposals go in `${{ github.repository_owner }}/.github`
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             **IMPORTANT: Every issue MUST have the `dev-lead` label** so it gets picked up for implementation.
             Ensure the `dev-lead` label exists in the target repo before creating the issue:
             ```bash
@@ -616,6 +634,12 @@ jobs:
             ```bash
             gh label create claude --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For Claude agent pickup" 2>/dev/null || true
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+            **IMPORTANT: Every issue MUST have the `dev-lead` label** so it gets picked up for implementation.
+            Ensure the `dev-lead` label exists in the target repo before creating the issue:
+            ```bash
+            gh label create dev-lead --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For dev-lead agent pickup" 2>/dev/null || true
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
             ```
 
             Additional labels by type: `bug`, `security`, `ci`, `automation`, `enhancement`, `documentation`
@@ -629,10 +653,14 @@ jobs:
             gh issue create --repo ${{ github.repository_owner }}/<target-repo> \
               --title "<severity prefix>: <concise title>" \
 <<<<<<< HEAD
+<<<<<<< HEAD
               --label "dev-lead,<other-labels>" \
 =======
               --label "claude,<other-labels>" \
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+              --label "dev-lead,<other-labels>" \
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
               --body "<structured body>"
             ```
 
@@ -758,9 +786,13 @@ jobs:
             | Added (new) | ${{ needs.audit.outputs.issues_added }} |
             | Existing (updated) | ${{ needs.audit.outputs.issues_existing }} |
 <<<<<<< HEAD
+<<<<<<< HEAD
             | Re-triggered (dev-lead re-engaged) | ${{ needs.audit.outputs.issues_retriggered }} |
 =======
 >>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
+=======
+            | Re-triggered (dev-lead re-engaged) | ${{ needs.audit.outputs.issues_retriggered }} |
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
             | Removed (resolved) | ${{ needs.audit.outputs.issues_removed }} |
 
             Group by compliance issue type — one subsection per distinct check/finding type,
@@ -819,6 +851,7 @@ jobs:
 
             - **Do not fix code or push changes.** Analysis and issue creation only.
 <<<<<<< HEAD
+<<<<<<< HEAD
             - **Do not close or modify existing issues** beyond adding the `dev-lead` label.
             - **Do not create PRs.** Only create issues with actionable recommendations.
             - **Every issue gets the `dev-lead` label.** No exceptions.
@@ -827,6 +860,11 @@ jobs:
             - **Do not create PRs.** Only create issues with actionable recommendations.
             - **Every issue gets the `claude` label.** No exceptions.
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+            - **Do not close or modify existing issues** beyond adding the `dev-lead` label.
+            - **Do not create PRs.** Only create issues with actionable recommendations.
+            - **Every issue gets the `dev-lead` label.** No exceptions.
+>>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
             - **Repo-specific issues go in that repo.** Org-wide issues go in `.github`.
             - **Be specific.** Include run IDs, URLs, and exact error messages.
             - **Deduplicate aggressively.** One well-written issue beats five vague ones.
