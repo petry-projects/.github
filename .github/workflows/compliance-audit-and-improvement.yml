@@ -4,7 +4,7 @@
 # Job 3: Claude analyzes both datasets in six phases:
 #   Phase 1-3: Load data, categorize findings, research root causes.
 #   Phase 4: Evaluate against industry best practices & emerging capabilities.
-#   Phase 5: Create actionable issues per repo (claude label for agent pickup).
+#   Phase 5: Create actionable issues per repo (dev-lead label for agent pickup).
 #   Phase 6: Summary report.
 # Standard: https://github.com/${{ github.repository_owner }}/.github/tree/main/standards
 name: Org Standards Compliance Audit
@@ -276,7 +276,7 @@ jobs:
 
   # -----------------------------------------------------------------------
   # Job 3: Combined analysis — Claude reviews both datasets
-  # Creates actionable issues in the appropriate repo with the claude label.
+  # Creates actionable issues in the appropriate repo with the dev-lead label.
   # -----------------------------------------------------------------------
   analyze:
     name: Analyze & Create Issues (Claude)
@@ -449,7 +449,7 @@ jobs:
             exclusively **proposed new or improved standards** for the org. For each top
             opportunity (max 2-3), create a standards proposal issue in `${{ github.repository_owner }}/.github`:
             - Title: `Standards: <concise description of the proposed standard>`
-            - Labels: `claude,enhancement`
+            - Labels: `dev-lead,enhancement`
             - Body must include:
               - **Proposed Standard** — the specific policy, workflow, or configuration to adopt
               - **Rationale** — why this matters, linked to the feasibility/impact/urgency assessment
@@ -465,10 +465,10 @@ jobs:
             - Issues affecting multiple repos or org-wide concerns go in `${{ github.repository_owner }}/.github`
             - Standards improvement proposals go in `${{ github.repository_owner }}/.github`
 
-            **IMPORTANT: Every issue MUST have the `claude` label** so it gets picked up for implementation.
-            Ensure the `claude` label exists in the target repo before creating the issue:
+            **IMPORTANT: Every issue MUST have the `dev-lead` label** so it gets picked up for implementation.
+            Ensure the `dev-lead` label exists in the target repo before creating the issue:
             ```bash
-            gh label create claude --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For Claude agent pickup" 2>/dev/null || true
+            gh label create dev-lead --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For dev-lead agent pickup" 2>/dev/null || true
             ```
 
             Additional labels by type: `bug`, `security`, `ci`, `automation`, `enhancement`, `documentation`
@@ -481,7 +481,7 @@ jobs:
             ```bash
             gh issue create --repo ${{ github.repository_owner }}/<target-repo> \
               --title "<severity prefix>: <concise title>" \
-              --label "claude,<other-labels>" \
+              --label "dev-lead,<other-labels>" \
               --body "<structured body>"
             ```
 
@@ -517,9 +517,9 @@ jobs:
               per-repo issues; your job is to identify systemic patterns and create higher-level
               issues for them.
             - If a similar issue exists, add a comment with latest findings instead
-            - When commenting on existing issues, also ensure the `claude` label is present:
+            - When commenting on existing issues, also ensure the `dev-lead` label is present:
               ```bash
-              gh issue edit <number> --repo ${{ github.repository_owner }}/<repo> --add-label claude
+              gh issue edit <number> --repo ${{ github.repository_owner }}/<repo> --add-label dev-lead
               ```
 
             **Before writing the Phase 6 summary**, gather linked PR data for all issues you
@@ -602,9 +602,9 @@ jobs:
             ## Rules
 
             - **Do not fix code or push changes.** Analysis and issue creation only.
-            - **Do not close or modify existing issues** beyond adding the `claude` label.
+            - **Do not close or modify existing issues** beyond adding the `dev-lead` label.
             - **Do not create PRs.** Only create issues with actionable recommendations.
-            - **Every issue gets the `claude` label.** No exceptions.
+            - **Every issue gets the `dev-lead` label.** No exceptions.
             - **Repo-specific issues go in that repo.** Org-wide issues go in `.github`.
             - **Be specific.** Include run IDs, URLs, and exact error messages.
             - **Deduplicate aggressively.** One well-written issue beats five vague ones.

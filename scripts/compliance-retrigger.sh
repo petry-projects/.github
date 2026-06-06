@@ -10,7 +10,7 @@ set -euo pipefail
 #      Disabled workflows silently swallow issue-labeled events — findings
 #      will never be fixed even if labels are applied correctly.
 #   2. Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
-#      have no associated open PR on a dev-lead branch.  Cycles the "claude"
+#      have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
 #      label (remove + re-add) to re-fire the issues:labeled event and give
 #      dev-lead a fresh chance to create a fix PR.
 #
@@ -26,13 +26,13 @@ set -euo pipefail
 #   STALE_DAYS    — issues older than this are considered stale (default: 2)
 #   DRY_RUN       — set to "true" to log actions without executing them
 #   AUDIT_LABEL   — label used to tag compliance findings (default: compliance-audit)
-#   TRIGGER_LABEL — label used to trigger dev-lead (default: claude)
+#   TRIGGER_LABEL — label used to trigger dev-lead (default: dev-lead)
 
 ORG="${ORG:-petry-projects}"
 STALE_DAYS="${STALE_DAYS:-2}"
 DRY_RUN="${DRY_RUN:-false}"
 AUDIT_LABEL="${AUDIT_LABEL:-compliance-audit}"
-TRIGGER_LABEL="${TRIGGER_LABEL:-claude}"
+TRIGGER_LABEL="${TRIGGER_LABEL:-dev-lead}"
 
 # Shared dev-lead retrigger helpers (dl_dev_lead_active, dl_cycle_trigger_label).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1161,9 +1161,9 @@ ensure_audit_label() {
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
-  gh label create "claude" \
+  gh label create "dev-lead" \
     --repo "$ORG/$repo" \
-    --description "For Claude agent pickup" \
+    --description "For dev-lead agent pickup" \
     --color "8B5CF6" \
     --force 2>/dev/null || true
 }
@@ -1230,21 +1230,21 @@ This finding is still open.
     # Re-engage dev-lead on findings that PERSIST across audits.
     #
     # dev-lead listens on issues:labeled and fires only once per label
-    # application. The `claude` label is already present on a pre-existing
+    # application. The `dev-lead` label is already present on a pre-existing
     # issue, so a plain --add-label is a no-op that emits no event and dev-lead
     # is never re-triggered. To give it a fresh chance to produce a fix PR we
     # cycle the label (remove + re-add) — UNLESS dev-lead is already working
     # this issue (open dev-lead PR or `in-progress` label), in which case we
-    # must not interrupt it and simply ensure the label is present.
+    # leave it alone (the label is already present, so no action is needed).
     if dl_dev_lead_active "$ORG" "$repo" "$existing"; then
       info "Existing issue #$existing in $repo — dev-lead already active, not re-triggering"
-    elif dl_cycle_trigger_label "$ORG" "$repo" "$existing" "claude" "$DRY_RUN"; then
+    elif dl_cycle_trigger_label "$ORG" "$repo" "$existing" "dev-lead" "$DRY_RUN"; then
       info "Re-triggered dev-lead on persistent issue #$existing in $repo for: $check"
       ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
     else
       # Cycle failed mid-way — ensure the label is at least present so the issue
       # is not left without its trigger label.
-      gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
+      gh issue edit "$existing" --repo "$ORG/$repo" --add-label "dev-lead" 2>/dev/null || true
       warn "Failed to re-trigger dev-lead on issue #$existing in $repo for: $check"
     fi
     # Record existing issue for umbrella
@@ -1319,11 +1319,11 @@ ${remediation_steps}
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
-  # Individual finding issues get both compliance-audit and claude labels so agents can pick them up.
+  # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
-    --label "claude" \
+    --label "dev-lead" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -1463,7 +1463,7 @@ Findings are grouped by remediation category. Address each category together to 
   umbrella_url=$(gh issue create --repo "$ORG/.github" \
     --title "$title" \
     --label "$AUDIT_LABEL" \
-    --label "claude" \
+    --label "dev-lead" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$umbrella_url" ]; then
@@ -1821,7 +1821,7 @@ main() {
     done
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
-    # Both individual issues and the umbrella get the `claude` label for agent pickup.
+    # Both individual issues and the umbrella get the `dev-lead` label for agent pickup.
     create_umbrella_issue
 
     # Append per-check issue links and related open PRs to the step summary
