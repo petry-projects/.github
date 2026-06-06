@@ -82,8 +82,22 @@ migrate_repo() {
 
   # 2. Re-label every OPEN issue currently carrying the old label.
   local issues repo_failed=0
-  issues=$(gh issue list --repo "$ORG/$repo" --label "$OLD_LABEL" --state open \
-    --limit 1000 --json number -q '.[].number' 2>/dev/null || echo "")
+  # URL-encode the label for the REST query parameter.
+  local encoded_old_label
+  encoded_old_label=$(printf '%s' "$OLD_LABEL" \
+    | python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read().strip(),safe=''))" 2>/dev/null \
+    || printf '%s' "$OLD_LABEL" | sed 's/ /%20/g')
+  # Use gh api --paginate for truly unlimited results; gh issue list --limit
+  # caps at a fixed number and does not paginate beyond it. Treat a failed
+  # listing as a repo_failed condition so we never delete the old label if we
+  # could not confirm every open issue was migrated.
+  if ! issues=$(gh api \
+    "repos/$ORG/$repo/issues?state=open&labels=${encoded_old_label}&per_page=100" \
+    --paginate --jq '.[] | select(.pull_request == null) | .number' 2>/dev/null); then
+    warn "  failed to list open '$OLD_LABEL' issues in $repo — skipping deletion to avoid data loss"
+    repo_failed=1
+    issues=""
+  fi
   while IFS= read -r num; do
     [ -z "$num" ] && continue
     if issue_has_label "$repo" "$num" "$NEW_LABEL"; then
@@ -93,15 +107,16 @@ migrate_repo() {
     fi
     if [ "$DRY_RUN" = "true" ]; then
       info "[dry-run] would add '$NEW_LABEL' to $repo#$num"
+      LABELS_ADDED=$((LABELS_ADDED + 1))
     else
       if gh issue edit "$num" --repo "$ORG/$repo" --add-label "$NEW_LABEL" >/dev/null 2>&1; then
         info "  added '$NEW_LABEL' to $repo#$num"
+        LABELS_ADDED=$((LABELS_ADDED + 1))
       else
         warn "  failed to add '$NEW_LABEL' to $repo#$num"
         repo_failed=1
       fi
     fi
-    LABELS_ADDED=$((LABELS_ADDED + 1))
   done <<< "$issues"
 
   # 3. Delete the old label object (strips it from all issues/PRs).
