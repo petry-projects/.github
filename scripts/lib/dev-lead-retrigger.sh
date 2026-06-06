@@ -27,19 +27,47 @@ dl_dev_lead_active() {
 
   # Match the dev-lead branch exactly: "dev-lead/issue-<n>-<timestamp>".
   # Require the trailing "-" so issue 1 does not match branch "issue-12-...".
+  # Use --paginate so repos with >100 open PRs are fully scanned.
   local pr_count
-  pr_count=$(gh api "repos/$org/$repo/pulls?state=open" \
+  pr_count=$(gh api "repos/$org/$repo/pulls?state=open&per_page=100" \
+    --paginate \
     --jq "[.[] | select(.head.ref | type == \"string\" and startswith(\"dev-lead/issue-${issue}-\"))] | length" \
-    2>/dev/null || echo "0")
+    2>/dev/null | awk '{s+=$1} END {print s+0}')
   [ "${pr_count:-0}" -gt 0 ] && return 0
 
   # An agent currently mid-run marks the issue `in-progress` before it pushes a
-  # PR — respect that window too.
+  # PR — respect that window, but cap it at IN_PROGRESS_MAX_HOURS so a crashed or
+  # cancelled run cannot block retrigger indefinitely.
   local in_progress
   in_progress=$(gh api "repos/$org/$repo/issues/$issue" \
     --jq '.labels[].name | select(. == "in-progress")' \
     2>/dev/null || echo "")
-  [ -n "$in_progress" ] && return 0
+
+  if [ -n "$in_progress" ]; then
+    local in_progress_max_hours="${IN_PROGRESS_MAX_HOURS:-4}"
+    local labeled_at
+    labeled_at=$(gh api "repos/$org/$repo/issues/$issue/events?per_page=100" \
+      --paginate \
+      --jq '.[] | select(.event == "labeled" and .label.name == "in-progress") | .created_at' \
+      2>/dev/null | tail -1 || echo "")
+
+    if [ -z "$labeled_at" ] || [ "$labeled_at" = "null" ]; then
+      # Cannot determine when the label was applied; trust it conservatively.
+      return 0
+    fi
+
+    local now_epoch labeled_epoch elapsed_hours
+    now_epoch=$(date -u +%s)
+    labeled_epoch=$(date -u -d "$labeled_at" +%s 2>/dev/null \
+      || python3 -c "import sys, calendar, datetime; \
+                     ts = sys.stdin.read().strip(); \
+                     print(calendar.timegm(datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').timetuple()))" \
+      <<< "$labeled_at")
+    elapsed_hours=$(( (now_epoch - labeled_epoch) / 3600 ))
+
+    [ "$elapsed_hours" -le "$in_progress_max_hours" ] && return 0
+    # in-progress label is stale (agent likely crashed); fall through to return 1.
+  fi
 
   return 1
 }
@@ -58,7 +86,13 @@ dl_cycle_trigger_label() {
     return 0
   fi
 
-  gh api -X DELETE "repos/$org/$repo/issues/$issue/labels/$label" >/dev/null 2>&1 || true
+  # URL-encode the label for the REST path segment to handle names that contain
+  # spaces or other reserved characters.
+  local encoded_label
+  encoded_label=$(printf '%s' "$label" \
+    | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read().strip(), safe=''))" 2>/dev/null \
+    || printf '%s' "$label" | sed 's/ /%20/g')
+  gh api -X DELETE "repos/$org/$repo/issues/$issue/labels/$encoded_label" >/dev/null 2>&1 || true
   # Let GitHub register the removal before re-adding so the add is not coalesced
   # with the delete (which would emit no labeled event).
   sleep 1

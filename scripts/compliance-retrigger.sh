@@ -184,10 +184,18 @@ retrigger_stale_issues() {
     if dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"; then
       ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
     else
-      warn "Failed to re-trigger dev-lead on issue #$number in $repo"
+      warn "Failed to re-trigger dev-lead on issue #$number in $repo — attempting to restore label"
+      # The label may have been deleted but the re-add failed. Restore it so the
+      # issue remains visible to the next sweep's search query.
+      if [ "$DRY_RUN" != "true" ]; then
+        gh api -X POST "repos/$ORG/$repo/issues/$number/labels" \
+          --field "labels[]=$TRIGGER_LABEL" >/dev/null 2>&1 \
+          && info "Restored $TRIGGER_LABEL on $repo#$number" \
+          || warn "Could not restore $TRIGGER_LABEL on $repo#$number — issue may drop out of next sweep"
+      fi
+      ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
     fi
-    # Brief pause to avoid flooding the API
-    sleep 1
+    # dl_cycle_trigger_label already sleeps 1s internally; no additional pause needed.
   done <<< "$issues"
 
   info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped"
