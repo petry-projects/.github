@@ -321,6 +321,7 @@ env:
 ```
 
 **Secret requirements by engine:**
+
 - **Claude**: requires `CLAUDE_CODE_OAUTH_TOKEN` only
 - **Gemini**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GOOGLE_API_KEY`
 - **Copilot**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GH_PAT` (GitHub token with Copilot scope)
@@ -477,6 +478,7 @@ The org runs several automated workflows across all repositories:
 The **Actions Fleet Monitor** runs daily and provides critical visibility into workflow health:
 
 **Metrics tracked per workflow:**
+
 - Total runs, successful runs, failed runs, cancelled runs (over lookback window)
 - Failure rate (`failed / total`)
 - Duration percentiles (p50 and p95)
@@ -485,6 +487,7 @@ The **Actions Fleet Monitor** runs daily and provides critical visibility into w
 **Lookback window:** Defaults to 1 day; can be customized with `--field lookback_days=N` when running manually
 
 **Results delivery:**
+
 - Step Summary — workflow results table displayed in GitHub Actions UI (visible on every run)
 - GitHub Issue — created in `.github-private` when any workflow has failed runs
 
