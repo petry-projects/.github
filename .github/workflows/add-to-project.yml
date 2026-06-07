@@ -6,22 +6,20 @@ name: Auto-add to Initiatives project
 #
 # Auth: uses the `petry-projects-planner` GitHub App (App ID 3985527) to
 # mint a fresh installation token per run via actions/create-github-app-token.
-# The App is granted Organization Projects: Read+write and repo Issues +
-# Pull requests: Read. Org secrets: INITIATIVES_APP_ID, INITIATIVES_APP_PRIVATE_KEY.
+# Org secrets: INITIATIVES_APP_ID, INITIATIVES_APP_PRIVATE_KEY.
+#
+# Implementation lives in sourceable shell scripts so it can be unit-tested
+# (see test/workflows/add-to-project/ and add-to-project-tests.yml):
+#   .github/scripts/add-to-project/add-issue-or-pr.sh
+#   .github/scripts/add-to-project/reconcile-discussion.sh
 #
 # Scope: this workflow only fires for events in petry-projects/.github.
 # Multi-repo rollout is tracked separately as a follow-on to #387 and would
 # need a reusable workflow callable from each repo (or an org-level webhook
-# handler). Until then, items originating in other repos must be added to
-# the project manually.
+# handler).
 #
 # Noise gate (issues/PRs): include only items labeled `dev-lead` and NOT
 # labeled any of: compliance-audit, health-check, fleet-tracker, daily-report.
-#
-# Discussions: include only those in the `Ideas` category, added as draft
-# items (the Projects v2 GraphQL API does not accept Discussion node IDs
-# as `ProjectV2ItemContent`).
-#
 #
 # Discussion state machine: on each discussion event, look up the existing
 # draft item for that discussion (matched by title prefix `[Discussion #N] `).
@@ -71,8 +69,12 @@ jobs:
           (github.event_name == 'pull_request_target' &&
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v5.0.0
+
       - name: Mint App installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -88,42 +90,17 @@ jobs:
           CONTENT_URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-
-          REQUIRED="dev-lead"
-          EXCLUDED=("compliance-audit" "health-check" "fleet-tracker" "daily-report")
-
-          has_label() {
-            printf '%s' "$LABELS_JSON" | jq -e --arg name "$1" 'any(.name == $name)' >/dev/null
-          }
-
-          if ! has_label "$REQUIRED"; then
-            echo "Skip ${CONTENT_URL}: missing required label '${REQUIRED}'"
-            exit 0
-          fi
-
-          for ex in "${EXCLUDED[@]}"; do
-            if has_label "$ex"; then
-              echo "Skip ${CONTENT_URL}: has excluded label '${ex}'"
-              exit 0
-            fi
-          done
-
-          echo "Adding ${CONTENT_URL} to ${PROJECT_URL}"
-          # shellcheck disable=SC2016  # $projectId/$contentId are GraphQL variables, not shell
-          gh api graphql \
-            -F projectId="${PROJECT_ID}" \
-            -F contentId="${CONTENT_NODE_ID}" \
-            -f query='mutation($projectId:ID!,$contentId:ID!){
-              addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){
-                item { id }
-              }
-            }'
+          bash "${GITHUB_WORKSPACE}/.github/scripts/add-to-project/add-issue-or-pr.sh"
 
   reconcile-discussion:
     if: ${{ github.event_name == 'discussion' }}
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v5.0.0
+
       - name: Mint App installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -140,66 +117,4 @@ jobs:
           DISC_CATEGORY: ${{ github.event.discussion.category.name }}
         run: |
           set -euo pipefail
-
-          PREFIX="[Discussion #${DISC_NUMBER}] "
-
-          # Fetch all current draft items and look for one matching this
-          # discussion by title prefix. Pagination ceiling is 100 items;
-          # at ~15 items today, that's years of headroom. If the project
-          # ever exceeds 100, this query needs to paginate via `after:`.
-          # shellcheck disable=SC2016  # $projectId is a GraphQL variable
-          ITEMS_JSON=$(gh api graphql \
-            -F projectId="${PROJECT_ID}" \
-            -f query='query($projectId:ID!){
-              node(id:$projectId){
-                ... on ProjectV2 {
-                  items(first:100){
-                    nodes {
-                      id
-                      content { ... on DraftIssue { title } }
-                    }
-                  }
-                }
-              }
-            }')
-
-          EXISTING_ITEM_ID=$(printf '%s' "${ITEMS_JSON}" | jq -r \
-            --arg prefix "${PREFIX}" \
-            '.data.node.items.nodes[]
-              | select(.content.title != null and (.content.title | startswith($prefix)))
-              | .id' | head -n 1)
-
-          if [[ "${DISC_CATEGORY}" == "Ideas" ]]; then
-            if [[ -n "${EXISTING_ITEM_ID}" ]]; then
-              echo "Discussion #${DISC_NUMBER} already tracked (item ${EXISTING_ITEM_ID}); no-op"
-              exit 0
-            fi
-            TITLE="[Discussion #${DISC_NUMBER}] ${DISC_TITLE}"
-            BODY=$(printf 'Source: %s\n\nAuto-added from Ideas-category discussion.' "${DISC_URL}")
-            echo "Adding discussion #${DISC_NUMBER} as draft to ${PROJECT_URL}"
-            # shellcheck disable=SC2016  # $projectId/$title/$body are GraphQL variables
-            gh api graphql \
-              -F projectId="${PROJECT_ID}" \
-              -F title="${TITLE}" \
-              -F body="${BODY}" \
-              -f query='mutation($projectId:ID!,$title:String!,$body:String!){
-                addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){
-                  projectItem { id }
-                }
-              }'
-          else
-            if [[ -z "${EXISTING_ITEM_ID}" ]]; then
-              echo "Discussion #${DISC_NUMBER} not tracked (category '${DISC_CATEGORY}'); no-op"
-              exit 0
-            fi
-            echo "Removing draft for discussion #${DISC_NUMBER} (now in category '${DISC_CATEGORY}'); item ${EXISTING_ITEM_ID}"
-            # shellcheck disable=SC2016  # $projectId/$itemId are GraphQL variables
-            gh api graphql \
-              -F projectId="${PROJECT_ID}" \
-              -F itemId="${EXISTING_ITEM_ID}" \
-              -f query='mutation($projectId:ID!,$itemId:ID!){
-                deleteProjectV2Item(input:{projectId:$projectId,itemId:$itemId}){
-                  deletedItemId
-                }
-              }'
-          fi
+          bash "${GITHUB_WORKSPACE}/.github/scripts/add-to-project/reconcile-discussion.sh"
