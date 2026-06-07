@@ -1,13 +1,21 @@
 name: Auto-add to Initiatives project
 
-# Adds qualifying issues, PRs, and Ideas-category discussions to the
-# org-level Initiatives project (https://github.com/orgs/petry-projects/projects/1).
+# Adds qualifying issues, PRs, and Ideas-category discussions in
+# petry-projects/.github to the org-level Initiatives project
+# (https://github.com/orgs/petry-projects/projects/1).
 #
-# Noise gate (issues/PRs): include only items labeled `dev-lead` and NOT labeled
-# any of: compliance-audit, health-check, fleet-tracker, daily-report.
+# Scope: this workflow only fires for events in petry-projects/.github.
+# Multi-repo rollout is tracked separately as a follow-on to #387 and would
+# need a reusable workflow callable from each repo (or an org-level webhook
+# handler). Until then, items originating in other repos must be added to
+# the project manually.
 #
-# Discussions: include only those in the `Ideas` category, added as draft items
-# (the Projects v2 GraphQL API does not accept Discussion node IDs as content).
+# Noise gate (issues/PRs): include only items labeled `dev-lead` and NOT
+# labeled any of: compliance-audit, health-check, fleet-tracker, daily-report.
+#
+# Discussions: include only those in the `Ideas` category, added as draft
+# items (the Projects v2 GraphQL API does not accept Discussion node IDs
+# as `ProjectV2ItemContent`).
 #
 # Tracking: petry-projects/.github#387
 # Discussion: petry-projects/.github#386
@@ -18,10 +26,7 @@ on:
   pull_request_target:
     types: [opened, labeled, reopened, ready_for_review]
   discussion:
-    types: [created, category_changed, labeled]
-
-permissions:
-  contents: read
+    types: [created, category_changed]
 
 concurrency:
   group: add-to-project-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
@@ -33,8 +38,15 @@ env:
 
 jobs:
   add-issue-or-pr:
-    if: ${{ github.event_name == 'issues' || github.event_name == 'pull_request_target' }}
+    # Gate pull_request_target on trusted author to prevent fork PRs from
+    # triggering a secret-bearing runner. Issues don't have this concern
+    # (creators can't set labels they don't have permission for).
+    if: >-
+      ${{ github.event_name == 'issues' ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Evaluate noise gate and add to project
         env:
@@ -42,8 +54,14 @@ jobs:
           LABELS_JSON: ${{ toJson(github.event.issue.labels || github.event.pull_request.labels) }}
           CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
           CONTENT_URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
+        # shellcheck disable=SC2016
         run: |
           set -euo pipefail
+
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::PROJECTS_TOKEN secret is not configured. See petry-projects/.github#387 for setup."
+            exit 1
+          fi
 
           REQUIRED="dev-lead"
           EXCLUDED=("compliance-audit" "health-check" "fleet-tracker" "daily-report")
@@ -77,6 +95,7 @@ jobs:
   add-discussion:
     if: ${{ github.event_name == 'discussion' }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Add Ideas-category discussion as draft item
         env:
@@ -85,8 +104,14 @@ jobs:
           DISC_URL: ${{ github.event.discussion.html_url }}
           DISC_NUMBER: ${{ github.event.discussion.number }}
           DISC_CATEGORY: ${{ github.event.discussion.category.name }}
+        # shellcheck disable=SC2016
         run: |
           set -euo pipefail
+
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::PROJECTS_TOKEN secret is not configured. See petry-projects/.github#387 for setup."
+            exit 1
+          fi
 
           if [[ "${DISC_CATEGORY}" != "Ideas" ]]; then
             echo "Skip discussion #${DISC_NUMBER}: category '${DISC_CATEGORY}' (not 'Ideas')"
