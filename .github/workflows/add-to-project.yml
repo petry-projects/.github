@@ -23,6 +23,13 @@ name: Auto-add to Initiatives project
 # as `ProjectV2ItemContent`).
 #
 #
+# Discussion state machine: on each discussion event, look up the existing
+# draft item for that discussion (matched by title prefix `[Discussion #N] `).
+#   - Ideas + no existing draft → add
+#   - Ideas + existing draft → skip (dedup; covers re-entries into Ideas)
+#   - non-Ideas + existing draft → delete (cleanup when leaving Ideas)
+#   - non-Ideas + no existing draft → no-op
+#
 # Known limit (deferred to multi-repo follow-on): fork PRs whose author
 # is FIRST_TIMER/CONTRIBUTOR will not be auto-added even when a maintainer
 # applies the `dev-lead` label, because the gate evaluates the *author's*
@@ -112,7 +119,7 @@ jobs:
               }
             }'
 
-  add-discussion:
+  reconcile-discussion:
     if: ${{ github.event_name == 'discussion' }}
     runs-on: ubuntu-latest
     permissions: {}
@@ -124,7 +131,7 @@ jobs:
           app-id: ${{ secrets.INITIATIVES_APP_ID }}
           private-key: ${{ secrets.INITIATIVES_APP_PRIVATE_KEY }}
 
-      - name: Add Ideas-category discussion as draft item
+      - name: Reconcile draft item with current discussion category
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DISC_TITLE: ${{ github.event.discussion.title }}
@@ -134,22 +141,65 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${DISC_CATEGORY}" != "Ideas" ]]; then
-            echo "Skip discussion #${DISC_NUMBER}: category '${DISC_CATEGORY}' (not 'Ideas')"
-            exit 0
-          fi
+          PREFIX="[Discussion #${DISC_NUMBER}] "
 
-          TITLE="[Discussion #${DISC_NUMBER}] ${DISC_TITLE}"
-          BODY=$(printf 'Source: %s\n\nAuto-added from Ideas-category discussion.' "${DISC_URL}")
-
-          echo "Adding discussion #${DISC_NUMBER} as draft to ${PROJECT_URL}"
-          # shellcheck disable=SC2016  # $projectId/$title/$body are GraphQL variables, not shell
-          gh api graphql \
+          # Fetch all current draft items and look for one matching this
+          # discussion by title prefix. Pagination ceiling is 100 items;
+          # at ~15 items today, that's years of headroom. If the project
+          # ever exceeds 100, this query needs to paginate via `after:`.
+          # shellcheck disable=SC2016  # $projectId is a GraphQL variable
+          ITEMS_JSON=$(gh api graphql \
             -F projectId="${PROJECT_ID}" \
-            -F title="${TITLE}" \
-            -F body="${BODY}" \
-            -f query='mutation($projectId:ID!,$title:String!,$body:String!){
-              addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){
-                projectItem { id }
+            -f query='query($projectId:ID!){
+              node(id:$projectId){
+                ... on ProjectV2 {
+                  items(first:100){
+                    nodes {
+                      id
+                      content { ... on DraftIssue { title } }
+                    }
+                  }
+                }
               }
-            }'
+            }')
+
+          EXISTING_ITEM_ID=$(printf '%s' "${ITEMS_JSON}" | jq -r \
+            --arg prefix "${PREFIX}" \
+            '.data.node.items.nodes[]
+              | select(.content.title != null and (.content.title | startswith($prefix)))
+              | .id' | head -n 1)
+
+          if [[ "${DISC_CATEGORY}" == "Ideas" ]]; then
+            if [[ -n "${EXISTING_ITEM_ID}" ]]; then
+              echo "Discussion #${DISC_NUMBER} already tracked (item ${EXISTING_ITEM_ID}); no-op"
+              exit 0
+            fi
+            TITLE="[Discussion #${DISC_NUMBER}] ${DISC_TITLE}"
+            BODY=$(printf 'Source: %s\n\nAuto-added from Ideas-category discussion.' "${DISC_URL}")
+            echo "Adding discussion #${DISC_NUMBER} as draft to ${PROJECT_URL}"
+            # shellcheck disable=SC2016  # $projectId/$title/$body are GraphQL variables
+            gh api graphql \
+              -F projectId="${PROJECT_ID}" \
+              -F title="${TITLE}" \
+              -F body="${BODY}" \
+              -f query='mutation($projectId:ID!,$title:String!,$body:String!){
+                addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){
+                  projectItem { id }
+                }
+              }'
+          else
+            if [[ -z "${EXISTING_ITEM_ID}" ]]; then
+              echo "Discussion #${DISC_NUMBER} not tracked (category '${DISC_CATEGORY}'); no-op"
+              exit 0
+            fi
+            echo "Removing draft for discussion #${DISC_NUMBER} (now in category '${DISC_CATEGORY}'); item ${EXISTING_ITEM_ID}"
+            # shellcheck disable=SC2016  # $projectId/$itemId are GraphQL variables
+            gh api graphql \
+              -F projectId="${PROJECT_ID}" \
+              -F itemId="${EXISTING_ITEM_ID}" \
+              -f query='mutation($projectId:ID!,$itemId:ID!){
+                deleteProjectV2Item(input:{projectId:$projectId,itemId:$itemId}){
+                  deletedItemId
+                }
+              }'
+          fi
