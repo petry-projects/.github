@@ -39,6 +39,12 @@ reusable, not a local edit.
 > (most are `@v1`; `pr-review-mention` is `@v2`). A tag is bumped deliberately
 > when a backward-compatible release is ready; breaking changes publish a new
 > tag that downstream repos opt into explicitly.
+>
+> **Exception — `dev-lead`.** The dev-lead reusable lives in the private
+> `petry-projects/.github-private` repo (it checks out private prompts/scripts)
+> and is pinned `@main`, not a tag — so caller-permission and security fixes
+> propagate immediately instead of waiting for a tag bump or the monthly
+> standards-sync. See [Dev-Lead Agent](#dev-lead-agent).
 
 ### Available templates
 
@@ -937,16 +943,19 @@ incorrect pinned one.
 
 ### Exception: Internal Reusable Workflow References
 
-Calls to `petry-projects/.github` reusable workflows use tag references
-(`@v1`, `@v2`, or `@main`) — **not SHA pins** — and are exempt from this policy.
+Calls to `petry-projects/.github` and `petry-projects/.github-private` reusable
+workflows use tag or branch references (`@v1`, `@v2`, or `@main`) — **not SHA
+pins** — and are exempt from this policy.
 
 ```yaml
-# CORRECT — tag ref for internal reusable workflow
-uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@v1
+# CORRECT — tag ref for a public internal reusable workflow
 uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
 
+# CORRECT — dev-lead lives in the private repo and tracks @main (see Dev-Lead Agent)
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
+
 # WRONG — do not SHA-pin internal reusable workflow refs
-uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
 ```
 
 **Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
@@ -1179,6 +1188,49 @@ All repos MUST align to the latest version of each action:
 
 The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
 It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
+
+### Concurrency, pinning, and the permission contract
+
+Three things are deliberately **not** tuned in the caller stub — they are owned
+centrally so they cannot drift per repo:
+
+- **Concurrency.** The stub carries **no `concurrency:` block**. Concurrency is
+  centralized in `dev-lead-reusable.yml` with per-issue / per-PR / ci-relay
+  lanes (`dev-lead-issue-<n>`, `dev-lead-pr-<n>`, `dev-lead-ci-relay-<sha>`,
+  `cancel-in-progress: false`). This keeps a labeled-issue pickup from being
+  cancelled by unrelated PR follow-up traffic — per-stub concurrency previously
+  drifted into three incompatible variants and starved issue pickups
+  (petry-projects/.github#402). Running lanes in parallel is safe because the
+  agent checks out PR branches in an isolated worktree (`.github-private#448`).
+- **Pin.** The stub pins
+  `petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main`
+  — `@main`, not a tag — so a caller-permission or security fix reaches every
+  repo immediately rather than waiting for a tag bump or the monthly
+  standards-sync.
+- **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
+  set the reusable requests**:
+
+  ```yaml
+  permissions:
+    contents: write
+    pull-requests: write
+    issues: write
+    actions: read
+    checks: read
+    statuses: read
+  ```
+
+  A reusable workflow can only use permissions its caller grants; if the
+  reusable requests a scope the stub lacks, **every consumer fails at startup**
+  (`startup_failure`, with no runtime error). When the reusable needs a new
+  scope, add it to the template **and** every shim *before* the reusable
+  requests it — the `caller-permissions` CI guard in `.github-private` enforces
+  that ordering.
+
+To exclude a specific PR or issue from the agent — e.g. a PR that edits the
+dev-lead workflow itself, so the agent doesn't pile commits onto its own infra
+change — add the **`dev-lead:hands-off`** label; the classifier then skips every
+event on it.
 
 ### Adopting the Dev-Lead Agent
 
