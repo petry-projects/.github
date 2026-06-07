@@ -15,15 +15,25 @@
 #
 # Functions (sourceable):
 #   evaluate_noise_gate <labels_json>
-#       Returns 0 if the labels qualify, 1 if they don't.
-#       Echoes "skip" + reason on stderr when not qualifying.
+#       Returns 0 if the labels qualify, 1 if they don't (a clean Skip).
+#       Returns 64 on bad arg-count and 65 on bad jq input shape — those
+#       are programmer/payload bugs and the caller must NOT treat them as
+#       a clean skip.
+#       Echoes a short reason on stderr when not qualifying.
 #   add_content_to_project <content_node_id>
 #   process_issue_or_pr <content_node_id> <content_url> <labels_json>
 
 set -euo pipefail
 
-_atp_log() {
-  printf '%s\n' "$*"
+_atp_require_env() {
+  if [ -z "${PROJECT_ID:-}" ]; then
+    printf '[%s] PROJECT_ID env var is required\n' "$1" >&2
+    return 64
+  fi
+  if [ -z "${GH_TOKEN:-}" ]; then
+    printf '::error::[%s] GH_TOKEN is empty. INITIATIVES_APP_ID / INITIATIVES_APP_PRIVATE_KEY are likely unset or stale. See petry-projects/.github#387.\n' "$1" >&2
+    return 64
+  fi
 }
 
 evaluate_noise_gate() {
@@ -32,24 +42,51 @@ evaluate_noise_gate() {
     return 64
   fi
   local labels_json="$1"
-  local required="dev-lead"
-  # Excluded labels must not appear together with `dev-lead`.
-  local excluded=("compliance-audit" "health-check" "fleet-tracker" "daily-report")
 
-  if ! printf '%s' "${labels_json}" | jq -e --arg name "${required}" 'any(.name == $name)' >/dev/null; then
-    printf "missing required label '%s'\n" "${required}" >&2
-    return 1
+  # Defensive: GitHub event payloads can deliver labels=null in some
+  # delivery variants. Treat any non-array as the empty-labels case
+  # rather than letting jq abort the script under set -e.
+  if ! printf '%s' "${labels_json}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    labels_json='[]'
   fi
 
-  local ex
-  for ex in "${excluded[@]}"; do
-    if printf '%s' "${labels_json}" | jq -e --arg name "${ex}" 'any(.name == $name)' >/dev/null; then
-      printf "has excluded label '%s'\n" "${ex}" >&2
-      return 1
-    fi
-  done
+  local required="dev-lead"
+  # Excluded labels must not appear together with `dev-lead`. Run in ONE
+  # jq invocation rather than spawning per-label so we stay cheap and the
+  # policy is declarative in one place.
+  local result
+  result=$(printf '%s' "${labels_json}" | jq -r \
+    --arg required "${required}" \
+    --argjson excluded '["compliance-audit","health-check","fleet-tracker","daily-report"]' \
+    '
+      [.[].name] as $names
+      | if ($names | index($required) | not) then
+          "missing:" + $required
+        else
+          ([$excluded[] | select(. as $e | $names | index($e))]) as $hits
+          | if ($hits | length) > 0 then "excluded:" + $hits[0]
+            else "ok"
+            end
+        end
+    ')
 
-  return 0
+  case "${result}" in
+    ok)
+      return 0
+      ;;
+    missing:*)
+      printf "missing required label '%s'\n" "${result#missing:}" >&2
+      return 1
+      ;;
+    excluded:*)
+      printf "has excluded label '%s'\n" "${result#excluded:}" >&2
+      return 1
+      ;;
+    *)
+      printf '[evaluate_noise_gate] unexpected gate result %q\n' "${result}" >&2
+      return 65
+      ;;
+  esac
 }
 
 add_content_to_project() {
@@ -67,7 +104,7 @@ add_content_to_project() {
       addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){
         item { id }
       }
-    }'
+    }' >/dev/null
 }
 
 process_issue_or_pr() {
@@ -75,21 +112,35 @@ process_issue_or_pr() {
     printf '[process_issue_or_pr] expected 3 args (content_node_id content_url labels_json), got %d\n' "$#" >&2
     return 64
   fi
-  if [ -z "${PROJECT_ID:-}" ]; then
-    printf '[process_issue_or_pr] PROJECT_ID env var is required\n' >&2
-    return 64
-  fi
+  _atp_require_env process_issue_or_pr || return $?
   local content_node_id="$1"
   local content_url="$2"
   local labels_json="$3"
 
+  # Run the gate. Distinguish:
+  #   exit 0 → qualifies, add
+  #   exit 1 → clean skip, log reason and continue
+  #   exit 64/65 → programmer or payload bug, fail loudly so the workflow
+  #               run is marked failed instead of silently dropping the item.
   local reason
-  if reason=$(evaluate_noise_gate "${labels_json}" 2>&1); then
-    _atp_log "Adding ${content_url} to ${PROJECT_URL:-the project}"
-    add_content_to_project "${content_node_id}"
-  else
-    _atp_log "Skip ${content_url}: ${reason}"
-  fi
+  set +e
+  reason=$(evaluate_noise_gate "${labels_json}" 2>&1)
+  local gate_status=$?
+  set -e
+
+  case "${gate_status}" in
+    0)
+      printf 'Adding %s to %s\n' "${content_url}" "${PROJECT_URL:-the project}"
+      add_content_to_project "${content_node_id}"
+      ;;
+    1)
+      printf 'Skip %s: %s\n' "${content_url}" "${reason}"
+      ;;
+    *)
+      printf '[process_issue_or_pr] noise gate returned %d (programmer/payload bug, not a clean skip): %s\n' "${gate_status}" "${reason}" >&2
+      return "${gate_status}"
+      ;;
+  esac
 }
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then

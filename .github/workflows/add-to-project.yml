@@ -43,16 +43,23 @@ on:
   pull_request_target:
     types: [opened, labeled, reopened, ready_for_review]
   discussion:
-    types: [created, category_changed]
+    # `deleted` and `transferred` are subscribed so an Ideas-tracked
+    # discussion that vanishes also has its draft cleaned up by
+    # reconcile_discussion (the find-then-delete branch handles a
+    # null category as 'not Ideas').
+    types: [created, category_changed, deleted, transferred]
 
 # Per standards/ci-standards.md: multi-job workflows must declare top-level
 # `permissions: {}` so the compliance audit's check_workflow_permissions
-# predicate passes. Jobs grant the minimum they need (here: nothing — they
-# use the App-minted token, not GITHUB_TOKEN).
+# predicate passes. Jobs grant the minimum they need: contents:read on the
+# checkout step (so the scripts can be invoked), and nothing more.
 permissions: {}
 
 concurrency:
-  group: add-to-project-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
+  # Same content (same issue/PR/discussion number) always shares a group
+  # regardless of event subtype, so `created` and `category_changed` for
+  # the same discussion can't race against each other.
+  group: add-to-project-${{ github.event_name == 'discussion' && format('disc-{0}', github.event.discussion.number) || format('{0}-{1}', github.event_name, github.event.issue.number || github.event.pull_request.number) }}
   cancel-in-progress: false
 
 env:
