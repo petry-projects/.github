@@ -22,6 +22,13 @@ name: Auto-add to Initiatives project
 # items (the Projects v2 GraphQL API does not accept Discussion node IDs
 # as `ProjectV2ItemContent`).
 #
+#
+# Known limit (deferred to multi-repo follow-on): fork PRs whose author
+# is FIRST_TIMER/CONTRIBUTOR will not be auto-added even when a maintainer
+# applies the `dev-lead` label, because the gate evaluates the *author's*
+# association, not the labeler's. Workaround until then: manually add such
+# PRs to the project from the Projects UI.
+#
 # Tracking: petry-projects/.github#387
 # Discussion: petry-projects/.github#386
 
@@ -32,6 +39,12 @@ on:
     types: [opened, labeled, reopened, ready_for_review]
   discussion:
     types: [created, category_changed]
+
+# Per standards/ci-standards.md: multi-job workflows must declare top-level
+# `permissions: {}` so the compliance audit's check_workflow_permissions
+# predicate passes. Jobs grant the minimum they need (here: nothing — they
+# use the App-minted token, not GITHUB_TOKEN).
+permissions: {}
 
 concurrency:
   group: add-to-project-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
