@@ -75,10 +75,7 @@ jobs:
     # Gate pull_request_target on trusted author to prevent fork PRs from
     # triggering a secret-bearing runner. Issues don't have this concern
     # (creators can't set labels they don't have permission for).
-    if: >-
-      ${{ github.event_name == 'issues' ||
-          (github.event_name == 'pull_request_target' &&
-           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
+    if: ${{ github.event_name == 'issues' || (github.event_name == 'pull_request_target' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
