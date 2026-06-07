@@ -193,6 +193,42 @@ assert_invocation_count() {
   assert_last_invocation_contains "deleteProjectV2Item" "$expected_id"
 }
 
+@test "empty category (deleted/transferred payload) + existing draft → delete (cleanup)" {
+  # `discussion:deleted` / `discussion:transferred` may deliver an empty
+  # or missing discussion.category. Treat as non-Ideas: if a draft exists
+  # for the discussion, clean it up.
+  local page="${TT_TMP}/page1.json"
+  write_items_page "$page" false "" "[Discussion #42] Some title"
+  local expected_id
+  expected_id=$(jq -r '.data.node.items.nodes[0].id' <"$page")
+
+  local script="${TT_TMP}/script.txt"
+  {
+    gh_script_line 0 "$page" "-"
+    gh_script_line 0 "-" "-"
+  } >"$script"
+  export GH_STUB_SCRIPT="$script"
+
+  run reconcile_discussion 42 "Title" "https://example.invalid/d/42" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Removing draft for discussion #42"* ]]
+  assert_invocation_count 2
+  assert_last_invocation_contains "deleteProjectV2Item" "$expected_id"
+}
+
+@test "empty category + no existing draft → no-op (deleted before automation tracked it)" {
+  local page="${TT_TMP}/page1.json"
+  write_items_page "$page" false "" "[Discussion #99] something else"
+  local script="${TT_TMP}/script.txt"
+  gh_script_line 0 "$page" "-" >"$script"
+  export GH_STUB_SCRIPT="$script"
+
+  run reconcile_discussion 42 "Title" "https://example.invalid/d/42" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not tracked"* ]]
+  assert_invocation_count 1
+}
+
 @test "non-Ideas + no existing draft → no-op, one (find) gh call" {
   local page="${TT_TMP}/page1.json"
   write_items_page "$page" false "" "[Discussion #1] unrelated"

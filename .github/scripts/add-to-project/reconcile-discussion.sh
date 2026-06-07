@@ -237,9 +237,14 @@ reconcile_discussion() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  # DISC_CATEGORY may legitimately be empty for `deleted` and `transferred`
+  # payloads (the discussion may already be gone, or category is null).
+  # The non-Ideas branch of reconcile_discussion treats any non-"Ideas"
+  # value — including "" — as "if a draft exists, clean it up", which is
+  # the right behavior for deleted/transferred.
   reconcile_discussion \
     "${DISC_NUMBER:?DISC_NUMBER is required}" \
     "${DISC_TITLE:?DISC_TITLE is required}" \
     "${DISC_URL:?DISC_URL is required}" \
-    "${DISC_CATEGORY:?DISC_CATEGORY is required}"
+    "${DISC_CATEGORY:-}"
 fi
