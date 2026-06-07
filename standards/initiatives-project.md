@@ -17,6 +17,8 @@ The signal we filter for is **"strategic work that benefits from a roll-up view"
 
 The four excluded labels are the noise gate. They flag automation-generated work that, while real, doesn't belong on a strategic roll-up: routine compliance fixes, fleet-monitor failures, daily status reports.
 
+> **Gate is evolving.** The current `dev-lead`-as-inclusion gate is a pilot shape. The org's working consensus is that `dev-lead` is a *work-assignment* signal (it tells the dev-lead agent to pick up the work), not a *classification* signal. The follow-on in [#415](https://github.com/petry-projects/.github/issues/415) will switch to topic labels (`agentic-framework`, `fleet-ops`, `compliance`, `tooling`) as the qualifying signal, with `dev-lead` orthogonal.
+
 ### Auto-cleaned
 
 | Trigger | Result |
@@ -31,7 +33,7 @@ The reconciliation is idempotent — re-delivered webhooks don't double-error.
 
 - **Issues / PRs from repos other than `.github`** — multi-repo rollout is a follow-on (see deferred items below).
 - **Fork PRs labeled by a maintainer when the author is `FIRST_TIMER` / `CONTRIBUTOR`.** The `pull_request_target` gate evaluates the PR author's association; this is documented as a known limit in the workflow header.
-- **Historical (already-open) qualifying items.** The workflow only fires on new events. To backfill, add via the UI or the GraphQL API.
+- **Historical (already-open) qualifying items.** The workflow only fires on new events. Backfilled in bulk on 2026-06-07 — see #387 retro.
 
 To add a content-linked item manually:
 
@@ -52,16 +54,31 @@ gh api graphql -F projectId="PVT_kwDOD2inqs4BZq3-" -F contentId="$NODE_ID" \
 
 ## Fields
 
+The board has two correlated single-select fields for taxonomy — **Theme** is the top-level bucket, **Initiative** is the specific program within a Theme. Roadmap-view grouping uses Initiative; cross-cutting filters (e.g., "what is Agentic Framework working on?") use Theme.
+
 | Field | Values | Use it for |
 |---|---|---|
 | **Status** | `Inbox` → `Specced` → `In Dev` → `In Review` → `Deployed` → `Verified` → `Wont do` | Stage tracking. `Inbox` is the default for auto-adds; promote manually as work moves. |
-| **Initiative** | `Compliance Blitz`, `Compliance program`, `Fleet Monitor`, `Agent Shield`, `Auto-rebase`, `Self-healing`, `Model fallback`, `Tooling`, `Ad hoc` | Program bucket — what initiative this item belongs to. |
+| **Theme** | `Agentic Framework`, `Fleet Operations`, `Compliance`, `Tooling`, `Ad hoc` | Top-level bucket. |
+| **Initiative** | *see Theme → Initiative table below* | Program-level bucket within a Theme. |
 | **Work type** | `Feature`, `Spike`, `Fix`, `Infra`, `Security`, `Docs` | Categorization. (Named `Work type`, not `Type` — `Type` is a reserved field name in GitHub Projects v2.) |
 | **Priority** | `P0`, `P1`, `P2`, `P3` | Triage / sequencing. |
 | **Owner-agent** | `dev-lead`, `claude`, `coderabbit`, `copilot`, `human` | Who's expected to drive this. |
 | **Target date** | (date) | Optional commitment date. Used on the Roadmap view. |
 
-Field schema is locked in for the pilot's 30-day review window. Renaming or removing single-select options on a populated project is painful — propose schema changes in [#387](https://github.com/petry-projects/.github/issues/387).
+### Theme → Initiative
+
+| Theme | Initiatives |
+|---|---|
+| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model fallback` |
+| **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards` |
+| **Compliance** | `Compliance program`, `Compliance Blitz`, `Self-healing`, `Auto-rebase` |
+| **Tooling** | `Initiatives Project`, `Tooling` |
+| **Ad hoc** | `Ad hoc` |
+
+**`Org Standards`** specifically covers work *defined in `.github`* and propagated to other repos: CI baselines, CODEOWNERS, branch rulesets, push protection, scorecard/sonarcloud, repo settings, org secrets, org apps.
+
+Schema reviews go through [#387](https://github.com/petry-projects/.github/issues/387). Renaming or removing single-select options on a populated project is painful — coordinate before changing.
 
 ## Views
 
@@ -95,9 +112,10 @@ test/workflows/add-to-project/                   # 35 bats tests, gh stub, fixtu
 
 Tracked in [#415](https://github.com/petry-projects/.github/issues/415). Summary:
 
-- **Multi-repo rollout** — workflow only fires for events in `.github` today.
+- **Multi-repo rollout** — workflow only fires for events in `.github` today; most of `.github-private`'s strategic work has to be added manually.
+- **Topic-label gate** — replace the current `dev-lead`-as-inclusion-signal with topic labels (`agentic-framework`, `fleet-ops`, `compliance`, `tooling`). `dev-lead` remains as a work-assignment signal (orthogonal).
+- **Configurable gate** — move the inclusion / exclusion list out of the shell and into a versioned config file in `.github`.
 - **Issue/PR cleanup-on-label-change** — `process_issue_or_pr` only adds; it doesn't reconcile when an existing item later receives an excluded label.
-- **Configurable noise gate** — required-label + excluded-labels list is hard-coded in `evaluate_noise_gate`. Same for `Ideas` category in `reconcile_discussion`.
 - **Fork-PR maintainer-label gate** — `pull_request_target` author_association evaluates the PR author, not the labeler.
 
 These belong in one follow-on PR so the underlying mechanism (a generic `reconcile_content_with_project`) gets designed once instead of three times.
@@ -109,4 +127,5 @@ These belong in one follow-on PR so the underlying mechanism (a generic `reconci
 - **Validation + 30-day review:** [#414](https://github.com/petry-projects/.github/issues/414)
 - **Multi-repo follow-on:** [#415](https://github.com/petry-projects/.github/issues/415)
 - **Pilot retrospective:** [#416](https://github.com/petry-projects/.github/issues/416)
+- **Workflow fix — single-line if:** [#418](https://github.com/petry-projects/.github/pull/418)
 - **Issue Fields rollout:** discussion [#364](https://github.com/petry-projects/.github/discussions/364) (waiting on Project schema to stabilize ~30 days)
