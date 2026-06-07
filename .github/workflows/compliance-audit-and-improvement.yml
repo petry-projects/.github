@@ -73,6 +73,7 @@ jobs:
     steps:
       - name: Checkout .github repo
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+<<<<<<< HEAD
 =======
 =======
       issues_added: ${{ steps.audit.outputs.issues_added }}
@@ -83,6 +84,8 @@ jobs:
       - name: Checkout .github repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 >>>>>>> 59a31d3 (feat: extend compliance audit with CI/automation health survey (#13))
+=======
+>>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
 
       - name: Run compliance audit
         id: audit
@@ -382,6 +385,9 @@ jobs:
     steps:
       - name: Checkout .github repo
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Download compliance audit report
