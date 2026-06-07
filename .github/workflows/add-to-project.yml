@@ -66,8 +66,8 @@ jobs:
           LABELS_JSON: ${{ toJson(github.event.issue.labels || github.event.pull_request.labels) }}
           CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
           CONTENT_URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
-        # shellcheck disable=SC2016
         run: |
+          # shellcheck disable=SC2016
           set -euo pipefail
 
           REQUIRED="dev-lead"
@@ -118,8 +118,8 @@ jobs:
           DISC_URL: ${{ github.event.discussion.html_url }}
           DISC_NUMBER: ${{ github.event.discussion.number }}
           DISC_CATEGORY: ${{ github.event.discussion.category.name }}
-        # shellcheck disable=SC2016
         run: |
+          # shellcheck disable=SC2016
           set -euo pipefail
 
           if [[ "${DISC_CATEGORY}" != "Ideas" ]]; then
