@@ -78,6 +78,10 @@ jobs:
       actions: read
       checks: read
 <<<<<<< HEAD
+<<<<<<< HEAD
       statuses: read
 =======
 >>>>>>> d34e514 (feat(standards): add dev-lead agent caller stub standard (replaces claude.yml))
+=======
+      statuses: read
+>>>>>>> 7bf5a75 (feat(dev-lead): add statuses: read to caller template permissions)
