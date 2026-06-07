@@ -4,6 +4,11 @@ name: Auto-add to Initiatives project
 # petry-projects/.github to the org-level Initiatives project
 # (https://github.com/orgs/petry-projects/projects/1).
 #
+# Auth: uses the `petry-projects-planner` GitHub App (App ID 3985527) to
+# mint a fresh installation token per run via actions/create-github-app-token.
+# The App is granted Organization Projects: Read+write and repo Issues +
+# Pull requests: Read. Org secrets: INITIATIVES_APP_ID, INITIATIVES_APP_PRIVATE_KEY.
+#
 # Scope: this workflow only fires for events in petry-projects/.github.
 # Multi-repo rollout is tracked separately as a follow-on to #387 and would
 # need a reusable workflow callable from each repo (or an org-level webhook
@@ -48,20 +53,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     steps:
+      - name: Mint App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.INITIATIVES_APP_ID }}
+          private-key: ${{ secrets.INITIATIVES_APP_PRIVATE_KEY }}
+
       - name: Evaluate noise gate and add to project
         env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           LABELS_JSON: ${{ toJson(github.event.issue.labels || github.event.pull_request.labels) }}
           CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
           CONTENT_URL: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
         # shellcheck disable=SC2016
         run: |
           set -euo pipefail
-
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error::PROJECTS_TOKEN secret is not configured. See petry-projects/.github#387 for setup."
-            exit 1
-          fi
 
           REQUIRED="dev-lead"
           EXCLUDED=("compliance-audit" "health-check" "fleet-tracker" "daily-report")
@@ -97,9 +104,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     steps:
+      - name: Mint App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.INITIATIVES_APP_ID }}
+          private-key: ${{ secrets.INITIATIVES_APP_PRIVATE_KEY }}
+
       - name: Add Ideas-category discussion as draft item
         env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DISC_TITLE: ${{ github.event.discussion.title }}
           DISC_URL: ${{ github.event.discussion.html_url }}
           DISC_NUMBER: ${{ github.event.discussion.number }}
@@ -107,11 +121,6 @@ jobs:
         # shellcheck disable=SC2016
         run: |
           set -euo pipefail
-
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error::PROJECTS_TOKEN secret is not configured. See petry-projects/.github#387 for setup."
-            exit 1
-          fi
 
           if [[ "${DISC_CATEGORY}" != "Ideas" ]]; then
             echo "Skip discussion #${DISC_NUMBER}: category '${DISC_CATEGORY}' (not 'Ideas')"
