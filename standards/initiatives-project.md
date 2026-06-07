@@ -57,9 +57,20 @@ The reconciliation is idempotent — re-delivered webhooks don't double-error.
 To add a content-linked item manually:
 
 ```bash
-# REST returns the node_id for either an issue OR a PR (PRs are issues
-# in GitHub's data model). Simpler than GraphQL's separate fields.
-NODE_ID=$(gh api repos/<owner>/<repo>/issues/<n> -q .node_id)
+# Resolve the node ID. issueOrPullRequest returns the PR-typed ID for
+# PRs and the Issue-typed ID for issues — addProjectV2ItemById wants
+# the content-specific one. REST '/issues/<n>' returns the Issue-typed
+# id even for a PR, which is the wrong content type for the mutation.
+NODE_ID=$(gh api graphql \
+  -F owner=<owner> -F repo=<repo> -F n=<n> \
+  -f query='query($owner:String!,$repo:String!,$n:Int!){
+    repository(owner:$owner, name:$repo) {
+      issueOrPullRequest(number:$n) {
+        ... on Issue { id }
+        ... on PullRequest { id }
+      }
+    }
+  }' -q '.data.repository.issueOrPullRequest.id')
 
 # Add to the project
 gh api graphql -F projectId="PVT_kwDOD2inqs4BZq3-" -F contentId="$NODE_ID" \
