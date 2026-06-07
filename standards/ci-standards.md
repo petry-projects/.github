@@ -42,7 +42,7 @@ reusable, not a local edit.
 >
 > **Exception — `dev-lead`.** The dev-lead reusable lives in the private
 > `petry-projects/.github-private` repo (it checks out private prompts/scripts)
-> and is pinned `@main`, not a tag — so caller-permission and security fixes
+> and is pinned `@main`, not a tag — so permission and security fixes
 > propagate immediately instead of waiting for a tag bump or the monthly
 > standards-sync. See [Dev-Lead Agent](#dev-lead-agent).
 
@@ -1201,14 +1201,14 @@ centrally so they cannot drift per repo:
   cancelled by unrelated PR follow-up traffic — per-stub concurrency previously
   drifted into three incompatible variants and starved issue pickups
   (petry-projects/.github#402). Running lanes in parallel is safe because the
-  agent checks out PR branches in an isolated worktree (`.github-private#448`).
+  agent checks out PR branches in an isolated worktree (petry-projects/.github-private#448).
 - **Pin.** The stub pins
   `petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main`
-  — `@main`, not a tag — so a caller-permission or security fix reaches every
+  — `@main`, not a tag — so a permission or security fix reaches every
   repo immediately rather than waiting for a tag bump or the monthly
   standards-sync.
 - **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
-  set the reusable requests**:
+  set that the reusable requests**:
 
   ```yaml
   permissions:
