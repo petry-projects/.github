@@ -438,10 +438,13 @@ lacks these, the check falls back to a proxy verification:
 2. If the alerts endpoint also fails, `security_and_analysis_unavailable`
    (warning) is reported.
 
-**To enable full verification:** add the `security_events` OAuth scope to
-`ORG_SCORECARD_TOKEN` in org Settings → Secrets, or run
-`scripts/apply-repo-settings.sh <repo>` with an admin token to configure all
-required settings and grant the audit token visibility.
+**To enable audit verification:** regenerate the classic PAT backing
+`ORG_SCORECARD_TOKEN` (Developer Settings → Personal access tokens) with the
+`security_events` scope, then update the stored value in org Settings →
+Secrets → Actions. **To enforce required settings:** run
+`scripts/apply-repo-settings.sh <repo>` with a repository-admin token.
+Note: running the apply script configures settings but does not grant the
+audit token the visibility it needs — both steps may be needed.
 
 ---
 

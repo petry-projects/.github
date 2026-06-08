@@ -117,7 +117,7 @@ pp_apply_security_and_analysis() {
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
     ok "$ORG/$repo security_and_analysis updated successfully"
   else
-    err "Failed to PATCH security_and_analysis for $ORG/$repo — token requires admin or \`security_events\` OAuth scope, and the org plan must support these features"
+    err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
     return 1
   fi
 }
@@ -135,10 +135,14 @@ pp_check_security_and_analysis() {
 
   if [ "$sa" = "{}" ] || [ -z "$sa" ]; then
     # security_and_analysis is not readable via the current token (requires
-    # admin or security_events OAuth scope).  Use the secret-scanning alerts
-    # endpoint as a proxy: it is accessible without admin scope on public
-    # repositories.  A valid array response confirms scanning is active; a
-    # non-array response (404/error) suggests it may be disabled.
+    # admin permissions on the repository).  Use the secret-scanning alerts
+    # endpoint as a proxy: an admin with the security_events scope (but not
+    # the full repo scope) can access the alerts endpoint even when
+    # security_and_analysis is unavailable due to scope differences.  Note:
+    # the alerts endpoint requires repository admin privileges regardless of
+    # visibility — public repositories do not bypass the admin requirement.
+    # A valid array response confirms scanning is active; a non-array
+    # response (404/error) suggests it may be disabled.
     local alerts_response
     alerts_response=$(gh_api \
       "repos/$ORG/$repo/secret-scanning/alerts?state=open&per_page=1" \
@@ -151,7 +155,7 @@ pp_check_security_and_analysis() {
       # admin / security_events scope; report as partially unverifiable so the
       # finding reflects the actual state of knowledge.
       add_finding "$repo" "push-protection" "security_and_analysis_unverifiable" "warning" \
-        "Secret scanning is active but push_protection, ai_detection, non_provider_patterns, and dependabot_security_updates cannot be individually verified — the audit token lacks admin or \`security_events\` OAuth scope. To fully verify or enforce all settings: (1) add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\`, or (2) run \`scripts/apply-repo-settings.sh $repo\` with an admin token." \
+        "Secret scanning is active but secret_scanning_push_protection, secret_scanning_ai_detection, secret_scanning_non_provider_patterns, and dependabot_security_updates cannot be individually verified — the audit token lacks repository admin permissions. To enable audit verification: regenerate the PAT backing ORG_SCORECARD_TOKEN with the security_events scope (Developer Settings → Personal access tokens) and update the secret value. To enforce all required settings: run \`scripts/apply-repo-settings.sh $repo\` with a repository-admin token." \
         "$PP_STANDARD_REF#required-repo-level-settings"
     else
       # Both the primary API field and the proxy check indicate that scanning
