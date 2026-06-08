@@ -39,6 +39,7 @@ permissions: {}
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
 # per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
 # traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
@@ -64,6 +65,11 @@ concurrency:
       'dev-lead'
     }}
   cancel-in-progress: false
+=======
+# Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
+# per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
+# traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
+>>>>>>> ae0a8e4 (fix(dev-lead): add statuses:read (fixes startup_failure) + centralise concurrency [template + .github stub] (#403))
 
 >>>>>>> 6306793 (feat(concurrency): add per-repo serialized concurrency to dev-lead stubs (#322))
 jobs:
