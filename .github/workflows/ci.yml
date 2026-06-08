@@ -175,7 +175,7 @@ jobs:
     steps:
       - name: Checkout (full history)
         # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-        # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v4 --jq '.object.sha'
+        # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v6.0.2 --jq '.object.sha'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
