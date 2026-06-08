@@ -312,12 +312,14 @@ Set `vars.DEV_LEAD_ENGINE` per-repo to choose the engine; defaults to `claude`.
 | **Gemini** | `gemini` | `CLAUDE_CODE_OAUTH_TOKEN`, `GOOGLE_API_KEY` | Google Gemini for code review (fallback if Claude unavailable) | Supported |
 | **Copilot** | `copilot` | `CLAUDE_CODE_OAUTH_TOKEN`, `GH_PAT` | GitHub Copilot for code review (GitHub-native alternative) | Supported |
 
-**Configuration per-repo:**
+**Configuration per-repo (set as a repository variable):**
 
-```yaml
-# In .github/workflows/dev-lead.yml (caller stub)
-env:
-  DEV_LEAD_ENGINE: gemini  # or 'copilot'; defaults to 'claude'
+```bash
+# GitHub does not propagate caller workflow env: values into called reusable
+# workflows, so setting env: in the caller stub has no effect. Use a repository
+# variable instead, which the reusable workflow reads as vars.DEV_LEAD_ENGINE.
+gh variable set DEV_LEAD_ENGINE --body "gemini" --repo petry-projects/<repo>
+# Alternatively: Settings → Secrets and variables → Actions → Variables → New variable
 ```
 
 **Secret requirements by engine:**
