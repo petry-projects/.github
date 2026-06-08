@@ -76,15 +76,21 @@ pp_apply_security_and_analysis() {
 
   if [ "$current" = "{}" ] || [ -z "$current" ]; then
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
     # Cannot read the current security_and_analysis state — the token may lack
     # admin or security_events scope, or the settings have not yet been
     # configured.  Apply all required settings unconditionally: every required
     # value is "enabled", so this is idempotent and safe.
     info "  security_and_analysis is currently unreadable — applying all required settings"
+<<<<<<< HEAD
 =======
     err "Could not fetch security_and_analysis for $ORG/$repo — check token has admin scope"
     return 1
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
   fi
 
   local needs_patch=false
@@ -123,10 +129,14 @@ pp_apply_security_and_analysis() {
     ok "$ORG/$repo security_and_analysis updated successfully"
   else
 <<<<<<< HEAD
+<<<<<<< HEAD
     err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
 =======
     err "Failed to PATCH security_and_analysis for $ORG/$repo — check admin scope and that the org plan supports these features"
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+    err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
     return 1
   fi
 }
@@ -144,6 +154,9 @@ pp_check_security_and_analysis() {
 
   if [ "$sa" = "{}" ] || [ -z "$sa" ]; then
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
     # security_and_analysis is not readable via the current token (requires
     # admin permissions on the repository).  Use the secret-scanning alerts
     # endpoint as a proxy: an admin with the security_events scope (but not
@@ -174,11 +187,14 @@ pp_check_security_and_analysis() {
         "Could not fetch security_and_analysis and the secret-scanning alerts proxy check also returned a non-array response — token may lack admin or \`security_events\` OAuth scope, or secret scanning may be disabled. Run \`scripts/apply-repo-settings.sh $repo\` with an admin token to enable all required settings, then add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\` to allow the audit to verify them." \
         "$PP_STANDARD_REF#required-repo-level-settings"
     fi
+<<<<<<< HEAD
 =======
     add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
       "Could not fetch security_and_analysis — token may lack admin scope, or the repo's plan does not expose these settings" \
       "$PP_STANDARD_REF#required-repo-level-settings"
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
     return
   fi
 

@@ -501,6 +501,9 @@ Findings are reported as GitHub Issues labeled `security` + `compliance-audit`
 per the existing audit flow.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
 ### Token scope requirement
 
 The `security_and_analysis` field in `GET /repos/{owner}/{repo}` is only
@@ -523,8 +526,11 @@ Secrets → Actions. **To enforce required settings:** run
 Note: running the apply script configures settings but does not grant the
 audit token the visibility it needs — both steps may be needed.
 
+<<<<<<< HEAD
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
+=======
+>>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
 ---
 
 ## Related Standards
