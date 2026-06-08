@@ -68,9 +68,11 @@ The app installation must be granted the following repository/org permissions:
 - **Issues:** Read-only (required for the action to resolve issue node IDs)
 - **Pull requests:** Read-only (required for the action to resolve PR node IDs)
 
-> **Note:** Fine-grained personal access tokens (PATs) do not support
-> organization-level Projects v2. If you need a PAT-based fallback, use a
-> classic PAT with the `project` OAuth scope instead of a fine-grained token.
+> **Note:** If you need a PAT-based fallback instead of the GitHub App,
+> fine-grained personal access tokens (PATs) support organization-level
+> Projects v2. Grant the token `Organization permissions → Projects: read & write`
+> plus `Issues: read-only` and `Pull requests: read-only` — the same permission
+> set listed above for the app installation.
 
 ### Discussion items
 
