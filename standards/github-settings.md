@@ -244,7 +244,7 @@ but the categories are universal.
 |-------|----------|---------------|-------|
 | **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
 | **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
-| **Claude Code** | All repos | `claude` | AI code review on every PR |
+| **Dev-Lead Agent** | All repos | `Dev-Lead Agent / dev-lead` | AI code review and agent automation on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
 | **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
@@ -306,11 +306,11 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 The **dev-lead agent** workflow (`dev-lead.yml`) supports multiple AI engines for PR review and automation.
 Set `vars.DEV_LEAD_ENGINE` per-repo to choose the engine; defaults to `claude`.
 
-| Engine | Engine ID | Required Secret | Optional Secret | Purpose | Status |
-|--------|-----------|-----------------|-----------------|---------|--------|
-| **Claude** | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` | — | Anthropic Claude models for code review | Active (default) |
-| **Gemini** | `gemini` | `CLAUDE_CODE_OAUTH_TOKEN` | `GOOGLE_API_KEY` | Google Gemini for code review (fallback if Claude unavailable) | Supported |
-| **Copilot** | `copilot` | `CLAUDE_CODE_OAUTH_TOKEN` | `GH_PAT` | GitHub Copilot for code review (GitHub-native alternative) | Supported |
+| Engine | Engine ID | Required Secrets | Purpose | Status |
+|--------|-----------|-----------------|---------|--------|
+| **Claude** | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic Claude models for code review | Active (default) |
+| **Gemini** | `gemini` | `CLAUDE_CODE_OAUTH_TOKEN`, `GOOGLE_API_KEY` | Google Gemini for code review (fallback if Claude unavailable) | Supported |
+| **Copilot** | `copilot` | `CLAUDE_CODE_OAUTH_TOKEN`, `GH_PAT` | GitHub Copilot for code review (GitHub-native alternative) | Supported |
 
 **Configuration per-repo:**
 
@@ -378,6 +378,8 @@ all repos automatically — no per-repo setup needed:
 | `APP_ID` | GitHub App ID for Dependabot auto-merge (app_id: 3167543) |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action and dev-lead agent (default engine) |
+| `GH_PAT_WORKFLOWS` | Classic PAT with `repo` scope; required for cross-repo script access and dev-lead to push workflow files |
+| `GITLEAKS_LICENSE` | Gitleaks license key required for `secret-scan` job in organization repositories (see [ci-standards.md](ci-standards.md#4-secret-scanning-ciymll--gitleaks-job)) |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
 
 #### Optional secrets (by feature)
@@ -386,7 +388,6 @@ all repos automatically — no per-repo setup needed:
 |--------|---------|---------------|
 | `GOOGLE_API_KEY` | Gemini API authentication | Repos using `vars.DEV_LEAD_ENGINE=gemini` |
 | `GH_PAT` | GitHub token with Copilot scope | Repos using `vars.DEV_LEAD_ENGINE=copilot` |
-| `GITLEAKS_LICENSE` | Gitleaks license for enhanced detection | High-security repos running advanced secret scanning |
 
 Repos may require repo-specific secrets beyond this standard set.
 
@@ -467,11 +468,11 @@ The org runs several automated workflows across all repositories:
 
 | Workflow | Schedule | Purpose | Details |
 |----------|----------|---------|---------|
-| **Actions Fleet Monitor** (`actions-fleet-monitor.yml`) | Daily, 6:00 UTC | Monitor health of all GitHub Actions workflows across the org | Tracks success/failure rates, duration percentiles (p50/p95), and assigns status (HEALTHY/WARNING/DEGRADED/CRITICAL) per workflow; creates issues when workflows have failures |
+| **Actions Fleet Monitor** (`actions-fleet-monitor.yml` in `petry-projects/.github-private`) | Daily, 6:00 UTC | Monitor health of all GitHub Actions workflows across the org | Tracks success/failure rates, duration percentiles (p50/p95), and assigns status (HEALTHY/WARNING/DEGRADED/CRITICAL) per workflow; creates issues when workflows have failures |
 | **Org Scorecard Review** (`org-scorecard.yml`) | Weekly, Monday 9:00 UTC | Security posture scoring for all public repos via OpenSSF Scorecard | Creates/updates/closes GitHub Issues with findings; auto-closes when resolved |
-| **Org Standards Compliance Audit** (`compliance-audit-and-improvement.yml`) | Weekly, Friday 12:00 UTC | Deterministic audit of all repos against org standards + runtime health survey | Identifies missing workflows, misconfigured settings, stale PRs, security alerts; creates actionable issues labeled `claude` for agent remediation |
+| **Org Standards Compliance Audit** (`compliance-audit-and-improvement.yml`) | Weekly, Friday 12:00 UTC | Deterministic audit of all repos against org standards + runtime health survey | Identifies missing workflows, misconfigured settings, stale PRs, security alerts; creates actionable issues labeled `dev-lead` for agent remediation |
 | **Daily Org Status** (`daily-org-status.yml`) | Daily, 6:00 UTC | Org-wide health snapshot — PR counts, CI failures, dependency vulnerabilities | Reports via PR comments and workflow summary |
-| **Dependency Audit** (`dependency-audit.yml`) | On-demand (manual trigger) | Multi-ecosystem dependency vulnerability scan (npm, pnpm, go, cargo, pip) | Creates GitHub Issues for vulnerable transitive dependencies across all repos |
+| **Dependency Audit** (`dependency-audit.yml`) | Per-repo CI (push/PR to `main`) | Multi-ecosystem dependency vulnerability scan (npm, pnpm, go, cargo, pip) | Fails the build when dependencies have known security advisories; adopted per-repo via the standard caller stub |
 
 ### Actions Fleet Monitor Details
 
@@ -552,7 +553,7 @@ Every Friday at 12:00 UTC, the **Org Standards Compliance Audit** runs across al
 3. **Issue creation and categorization:**
    - Each finding becomes a GitHub Issue in the repository, labeled `compliance-audit`
    - High-priority findings (errors) are escalated for immediate remediation
-   - Issues include a `claude` label for agent-driven automation
+   - Issues include a `dev-lead` label for agent-driven automation
    - Fixed issues are auto-closed by the audit
 
 4. **Org-level summary and reporting:**
