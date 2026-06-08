@@ -759,8 +759,12 @@ or a Claude agent to address.
 HEADER
 
   # Read all findings and group by repo
-  local repos
-  repos=$(jq -r '[.[].repo] | unique[]' "$FINDINGS_FILE" 2>/dev/null || echo "")
+  local repos jq_stderr
+  if ! repos=$(jq -r '[.[].repo] | unique[]' "$FINDINGS_FILE" 2>/tmp/_cr_jq_err); then
+    jq_stderr=$(cat /tmp/_cr_jq_err 2>/dev/null || true)
+    err "Failed to parse FINDINGS_FILE ($FINDINGS_FILE): $jq_stderr"
+    exit 1
+  fi
 
   if [ -z "$repos" ]; then
     info "No findings to remediate — nothing to do"
