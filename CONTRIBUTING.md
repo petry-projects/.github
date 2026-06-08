@@ -27,8 +27,16 @@ adds items to the board automatically:
 | Item type | Rule |
 |---|---|
 | Issues | Labeled `dev-lead` **and** none of the excluded labels below |
-| Pull requests | Labeled `dev-lead` **and** none of the excluded labels below |
+| Pull requests | Labeled `dev-lead` **and** none of the excluded labels below _(see fork-PR exception)_ |
 | Discussions | Created in (or moved into) the **Ideas** category — added as draft items |
+
+> **Fork-PR exception:** The `add-to-project` workflow uses `pull_request_target`
+> and gates on the PR author's association being `OWNER`, `MEMBER`, or
+> `COLLABORATOR`. PRs from external contributors (`FIRST_TIMER` or `CONTRIBUTOR`
+> author association) are **skipped** even when a maintainer applies the
+> `dev-lead` label, because the gate evaluates the *author's* association, not
+> the labeler's. Workaround: manually add such PRs from the
+> [Projects UI](https://github.com/orgs/petry-projects/projects/1).
 
 ### Noise gate — excluded labels
 
