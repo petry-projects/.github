@@ -43,10 +43,26 @@ operational items that would flood the board with noise:
 
 ### Token requirement
 
-The workflow requires an org-level secret `PROJECTS_TOKEN` — a fine-grained PAT
-(or GitHub App installation token) with `Projects: Read and write` permission
-scoped to the `petry-projects` organization. This is a one-time manual setup;
-see issue [#387](https://github.com/petry-projects/.github/issues/387) for details.
+The workflow authenticates using the **`petry-projects-planner` GitHub App**
+(App ID 3985527) via
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token).
+Two org-level secrets must be set — this is a one-time manual setup;
+see issue [#387](https://github.com/petry-projects/.github/issues/387) for details:
+
+| Secret | Value |
+|---|---|
+| `INITIATIVES_APP_ID` | The numeric App ID (`3985527`) |
+| `INITIATIVES_APP_PRIVATE_KEY` | The PEM private key generated for the app |
+
+The app installation must be granted the following repository/org permissions:
+
+- **Organization projects:** Read and write
+- **Issues:** Read-only (required for the action to resolve issue node IDs)
+- **Pull requests:** Read-only (required for the action to resolve PR node IDs)
+
+> **Note:** Fine-grained personal access tokens (PATs) do not support
+> organization-level Projects v2. If you need a PAT-based fallback, use a
+> classic PAT with the `project` OAuth scope instead of a fine-grained token.
 
 ### Discussion items
 
