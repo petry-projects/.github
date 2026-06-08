@@ -115,5 +115,5 @@ jobs:
 
       - name: Run gitleaks
         run: |
-          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1 # NOSONAR — version-pinned go install verified via Go checksum DB (sum.golang.org)
           gitleaks detect --source . --redact --verbose --exit-code 1
