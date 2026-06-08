@@ -6,7 +6,7 @@
 #
 # Rulesets managed:
 #   pr-quality    — pull request review requirements and merge policy
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
+#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Dev-Lead Agent)
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -124,6 +124,9 @@ detect_required_checks() {
     # required-but-skipped check fails the gate, so we cannot require
     # the per-ecosystem jobs.
     checks+=("dependency-audit / Detect ecosystems")
+  fi
+  if echo "$workflows" | grep -qx "dev-lead.yml"; then
+    checks+=("Dev-Lead Agent / dev-lead")
   fi
   # dependabot-automerge / dependabot-rebase are intentionally NOT
   # required: dependabot-automerge runs only on dependabot[bot] PRs and
