@@ -182,3 +182,4 @@ jobs:
               echo "  Warning: failed to merge PR #$PR_NUMBER"
             fi
           done <<< "$PRS"
+
