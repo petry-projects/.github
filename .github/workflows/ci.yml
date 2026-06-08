@@ -215,9 +215,12 @@ jobs:
 =======
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        with:
-          args: detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+<<<<<<< HEAD
 >>>>>>> e4c1475 (feat: implement issue #299 — Compliance audit — 2026-05-15 (#336))
+=======
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ARGS: detect --source . --redact --verbose --exit-code 1
+>>>>>>> 62516a7 (fix(compliance): 2026-05-11 audit findings for .github repo (#243))
