@@ -178,6 +178,9 @@ jobs:
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9cebcf7 (fix(dependabot-rebase): handle 404 from compare API — skip PR when branch not found)
             # Branch may be transiently unavailable (race: PR list fetched before
             # branch delete propagates). Skip gracefully instead of crashing.
             if ! BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
@@ -364,3 +367,4 @@ jobs:
               echo "  Warning: failed to merge PR #$PR_NUMBER"
             fi
           done <<< "$PRS"
+
