@@ -775,23 +775,29 @@ check_centralized_workflow_stubs() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-    # Required pattern: a non-comment line whose `uses:` value is exactly
-    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
-    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
-    # cannot satisfy the check.
+    # Accept two canonical forms — anchor to start-of-line + optional indent so
+    # a `# uses: ...` comment cannot satisfy the check.
+    #
+    # Preferred (SHA-pinned, satisfies SonarCloud security gate):
+    #   uses: petry-projects/.github/.github/workflows/<reusable>.yml@<40-hex-SHA> [# comment]
+    # Legacy (still accepted for backwards compatibility):
+    #   uses: petry-projects/.github/.github/workflows/<reusable>.yml@<version>
     local esc_reusable esc_version
     esc_reusable=$(escape_ere "$reusable")
     esc_version=$(escape_ere "$version")
-    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
+    local base="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml"
 
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
-      continue  # stub is correctly pinned to the canonical version — compliant
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${base}@[0-9a-f]{40}([[:space:]]|$)"; then
+      continue  # SHA-pinned reference to canonical reusable — compliant
+    fi
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${base}@${esc_version}([[:space:]]|$)"; then
+      continue  # version-tag reference — compliant (SHA-pinned preferred; see canonical stub)
     fi
 
     # Determine why it's non-compliant for a more actionable message.
     local why
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
+      why="references the reusable but is not pinned to a full commit SHA or \`@${version}\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -799,7 +805,7 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml\` using a SHA-pinned reference (see the stub for the current SHA)." \
       "standards/ci-standards.md#centralization-tiers"
   done
 }
