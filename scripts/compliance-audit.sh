@@ -631,7 +631,7 @@ check_repo_settings() {
 =======
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key | if . == null then \"null\" else tostring end")
+    actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
 >>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
@@ -643,10 +643,14 @@ check_repo_settings() {
   # Default branch
   local default_branch
 <<<<<<< HEAD
+<<<<<<< HEAD
   default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
 =======
   default_branch=$(echo "$settings" | jq -r '.default_branch')
 >>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
+=======
+  default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
+>>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$default_branch" != "main" ]; then
     add_finding "$repo" "settings" "default-branch" "error" \
       "Default branch is \`$default_branch\`, should be \`main\`" \

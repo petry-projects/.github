@@ -236,10 +236,14 @@ apply_settings() {
   for key in "${!EXPECTED[@]}"; do
     local actual
 <<<<<<< HEAD
+<<<<<<< HEAD
     actual=$(printf '%s' "$current" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
 =======
     actual=$(echo "$current" | jq -r ".$key // \"null\"")
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+    actual=$(printf '%s' "$current" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
+>>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
     local expected="${EXPECTED[$key]}"
 
     if [ "$actual" != "$expected" ]; then
@@ -254,10 +258,14 @@ apply_settings() {
   # Check string settings separately (jq -f flag for strings)
   local squash_title
 <<<<<<< HEAD
+<<<<<<< HEAD
   squash_title=$(printf '%s' "$current" | jq -r '.squash_merge_commit_title // "null"')
 =======
   squash_title=$(echo "$current" | jq -r '.squash_merge_commit_title // "null"')
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+  squash_title=$(printf '%s' "$current" | jq -r '.squash_merge_commit_title // "null"')
+>>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$squash_title" != "PR_TITLE" ]; then
     info "  squash_merge_commit_title: $squash_title → PR_TITLE"
     needs_patch=true
@@ -268,10 +276,14 @@ apply_settings() {
 
   local squash_msg
 <<<<<<< HEAD
+<<<<<<< HEAD
   squash_msg=$(printf '%s' "$current" | jq -r '.squash_merge_commit_message // "null"')
 =======
   squash_msg=$(echo "$current" | jq -r '.squash_merge_commit_message // "null"')
 >>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
+=======
+  squash_msg=$(printf '%s' "$current" | jq -r '.squash_merge_commit_message // "null"')
+>>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$squash_msg" != "COMMIT_MESSAGES" ]; then
     info "  squash_merge_commit_message: $squash_msg → COMMIT_MESSAGES"
     needs_patch=true
