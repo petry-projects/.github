@@ -1144,7 +1144,7 @@ check_copilot_instructions() {
     --jq '.content' 2>/dev/null || echo "")
 
   if [ -z "$content" ]; then
-    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
+    add_finding "$repo" "standards" "missing-copilot-instructions" "error" \
       "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
       "standards/copilot-instructions-standard.md"
     return
@@ -1328,7 +1328,7 @@ GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
 This script applies all standard settings defined in \`standards/github-settings.md\` in one pass.
 For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}\`"
       ;;
-    workflows)
+    ci-workflows|workflows)
       remediation_steps="Copy the relevant workflow template from \`standards/workflows/\` verbatim — do not generate from scratch:
 
 \`\`\`bash
