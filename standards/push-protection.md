@@ -216,7 +216,6 @@ secret-scan:
   runs-on: ubuntu-latest
   permissions:
     contents: read
-    security-events: write
   steps:
     - name: Checkout (full history)
       # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
@@ -225,19 +224,19 @@ secret-scan:
       with:
         fetch-depth: 0
 
-      - name: Install gitleaks
-        # go install verifies the module checksum via sum.golang.org — no
-        # separate SHA verification needed. The go module path is under
-        # zricethezav/ (legacy) even though the GitHub repo moved to gitleaks/.
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
-        with:
-          go-version: stable
-          cache: false
+    - name: Install gitleaks
+      # go install verifies the module checksum via sum.golang.org — no
+      # separate SHA verification needed. The go module path is under
+      # zricethezav/ (legacy) even though the GitHub repo moved to gitleaks/.
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
+      with:
+        go-version: stable
+        cache: false
 
-      - name: Run gitleaks
-        run: |
-          go install github.com/zricethezav/gitleaks/v8@v8.30.1
-          gitleaks detect --source . --redact --verbose --exit-code 1
+    - name: Run gitleaks
+      run: |
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        gitleaks detect --source . --redact --verbose --exit-code 1
 ```
 
 > **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
