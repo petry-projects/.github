@@ -736,8 +736,11 @@ check_centralized_workflow_stubs() {
   [ "$repo" = ".github" ] && return
 
   # workflow-filename:expected-reusable-basename:version-tag
+  # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
+  # the private petry-projects/.github-private repo and is pinned @main (not a
+  # .github @v1 tag), so it doesn't fit this check's .github/@version model. It
+  # is validated by check_dev_lead_stub() below.
   local centralized=(
-    "dev-lead.yml:dev-lead-reusable:v1"
     "auto-rebase.yml:auto-rebase-reusable:v1"
     "dependency-audit.yml:dependency-audit-reusable:v1"
     "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
@@ -800,6 +803,56 @@ check_centralized_workflow_stubs() {
       "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
       "standards/ci-standards.md#centralization-tiers"
   done
+}
+
+# ---------------------------------------------------------------------------
+# Check: dev-lead.yml caller stub conforms to the centralized contract
+#
+# Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
+# @main, and its concurrency + permissions are owned centrally (see
+# standards/ci-standards.md#dev-lead-agent). A stub drifts — and breaks — in
+# three ways this check catches (all root causes of petry-projects/.github#402):
+#
+#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@main.
+#   2. Local concurrency block: per-stub concurrency drifts and cancels issue
+#      pickups; concurrency is owned by the reusable (per-issue/per-PR lanes).
+#   3. Missing `statuses: read`: the reusable requests it since #435, so without
+#      it every run fails at startup (startup_failure) with no runtime error.
+# ---------------------------------------------------------------------------
+check_dev_lead_stub() {
+  local repo="$1"
+
+  # .github holds the template (exercised by the reusable's own CI) and
+  # .github-private runs the workflow inline rather than as a caller stub.
+  [ "$repo" = ".github" ] && return
+  [ "$repo" = ".github-private" ] && return
+
+  local content decoded
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/dev-lead.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # repo hasn't adopted dev-lead — nothing to check
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # 1) Canonical pin (non-comment `uses:` line, exact ref).
+  if ! echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@main([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 2) No per-stub concurrency block — concurrency is owned by the reusable.
+  if echo "$decoded" | grep -qE "^concurrency:"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
+      "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 3) Caller permissions must grant `statuses: read`.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
+      "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1779,6 +1832,7 @@ main() {
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
+    check_dev_lead_stub "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
