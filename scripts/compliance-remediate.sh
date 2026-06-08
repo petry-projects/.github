@@ -146,6 +146,7 @@ remediate_setting() {
 }
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # Direct API: nested security_and_analysis settings
 # ---------------------------------------------------------------------------
 # The security_and_analysis settings live under a nested object on the repo
@@ -184,6 +185,8 @@ remediate_security_analysis_setting() {
 }
 
 # ---------------------------------------------------------------------------
+=======
+>>>>>>> 39f159c (feat: add compliance-remediate.sh — close the audit -> auto-fix -> PR loop (#220))
 # Direct API: disable check-suite auto-trigger for problematic apps
 # ---------------------------------------------------------------------------
 remediate_check_suite_auto_trigger() {
@@ -723,9 +726,12 @@ remediate_finding() {
       report_skip "$repo" "$check" \
         "Dependabot config updates require human review — fix using standards/dependabot-policy.md"
       ;;
+<<<<<<< HEAD
     push-protection/non_provider_patterns_enabled | push-protection/secret_scanning_non_provider_patterns)
       remediate_security_analysis_setting "$repo" "secret_scanning_non_provider_patterns" "enabled" "$check"
       ;;
+=======
+>>>>>>> 39f159c (feat: add compliance-remediate.sh — close the audit -> auto-fix -> PR loop (#220))
     push-protection/*)
       report_skip "$repo" "$check" \
         "Push protection settings require security_and_analysis API scope — run scripts/apply-repo-settings.sh"

@@ -393,6 +393,7 @@ private.yml
 <<<<<<< HEAD
 .dev-lead/
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 =======
@@ -401,3 +402,5 @@ private.yml
 =======
 .dev-lead/
 >>>>>>> 7289c1c (docs: document fine-grained token scopes for ORG_SCORECARD_TOKEN (#248))
+=======
+>>>>>>> 39f159c (feat: add compliance-remediate.sh — close the audit -> auto-fix -> PR loop (#220))
