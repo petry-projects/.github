@@ -154,7 +154,7 @@ remediate_setting() {
 remediate_security_analysis_setting() {
   local repo="$1" setting="$2" expected_status="$3" check="$4"
 
-  if [ "$DRY_RUN" = "true" ]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
     skip "[DRY] Would PATCH $ORG/$repo: security_and_analysis.$setting.status=$expected_status"
     report_direct "$repo" "$check" \
       "DRY: would PATCH \`security_and_analysis.$setting.status=$expected_status\`"
@@ -162,10 +162,15 @@ remediate_security_analysis_setting() {
   fi
 
   local payload
-  payload=$(jq -n \
+  if ! payload=$(jq -n \
     --arg key "$setting" \
     --arg status "$expected_status" \
-    '{security_and_analysis: {($key): {status: $status}}}')
+    '{security_and_analysis: {($key): {status: $status}}}') || [[ -z "$payload" ]]; then
+    err "Failed to build payload for $ORG/$repo: security_and_analysis.$setting.status=$expected_status"
+    report_fail "$repo" "$check" \
+      "jq failed to build payload for security_and_analysis.$setting.status=$expected_status"
+    return 0
+  fi
 
   if printf '%s' "$payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
     ok "Fixed $ORG/$repo: security_and_analysis.$setting.status=$expected_status"

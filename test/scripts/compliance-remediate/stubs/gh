@@ -26,7 +26,12 @@ fi
 
 if [ -n "${GH_STUB_STDIN_LOG:-}" ]; then
   # Drain stdin so the calling shell isn't blocked. Empty stdin is fine.
-  cat >>"$GH_STUB_STDIN_LOG" || true
+  # Don't suppress failures — a broken log path means broken test
+  # instrumentation, which would silently weaken payload assertions.
+  cat >>"$GH_STUB_STDIN_LOG" || {
+    echo "gh stub: failed to append stdin to GH_STUB_STDIN_LOG=$GH_STUB_STDIN_LOG" >&2
+    exit 1
+  }
 fi
 
 if [ -n "${GH_STUB_STDOUT:-}" ]; then
