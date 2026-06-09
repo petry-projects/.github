@@ -135,9 +135,20 @@ title-pattern heuristics being good enough.
 
 ```bash
 # 1. Read the existing options FIRST (always, even for a one-option add)
-gh api graphql -f query='{ node(id: "<FIELD_ID>") {
-  ... on ProjectV2SingleSelectField { options { id name color description } }
-} }'
+gh api graphql -F fieldId="<FIELD_ID>" -f query='
+  query($fieldId: ID!) {
+    node(id: $fieldId) {
+      ... on ProjectV2SingleSelectField {
+        options {
+          id
+          name
+          color
+          description
+        }
+      }
+    }
+  }
+'
 
 # 2. Build the full new option list. Existing entries MUST carry their id;
 #    new entries omit the id so the API assigns one.
