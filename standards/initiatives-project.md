@@ -117,6 +117,61 @@ Schema reviews go through
 removing single-select options on a populated project is painful —
 coordinate before changing.
 
+### Adding or modifying single-select options safely
+
+`updateProjectV2Field` with `singleSelectOptions` is a **full replacement**
+of the option list. Any existing option whose `id` is not round-tripped in
+the mutation gets dropped and recreated with a fresh `id`. Every project
+item that referenced the old `id` then points at nothing — the field reads
+as "no value" in the UI.
+
+On 2026-06-08 the Initiative field lost 301 of 313 assignments this way
+when a parallel session added a new option without including the existing
+options' `id`s in the mutation. Recovery worked (re-categorize from item
+titles + bulk re-apply) but cost ~3 min of API churn and depends on
+title-pattern heuristics being good enough.
+
+**Safe pattern for any single-select schema change:**
+
+```bash
+# 1. Read the existing options FIRST (always, even for a one-option add)
+gh api graphql -F fieldId="<FIELD_ID>" -f query='
+  query($fieldId: ID!) {
+    node(id: $fieldId) {
+      ... on ProjectV2SingleSelectField {
+        options {
+          id
+          name
+          color
+          description
+        }
+      }
+    }
+  }
+'
+
+# 2. Build the full new option list. Existing entries MUST carry their id;
+#    new entries omit the id so the API assigns one.
+gh api graphql -f query='mutation {
+  updateProjectV2Field(input: {
+    fieldId: "<FIELD_ID>"
+    singleSelectOptions: [
+      {id: "<existing_id_1>", name: "<existing_name_1>", color: GRAY, description: "..."},
+      {id: "<existing_id_2>", name: "<existing_name_2>", color: BLUE, description: "..."},
+      # ... every existing option, each with its id ...
+      {name: "<new_option>", color: PURPLE, description: "..."}  # NEW — no id
+    ]
+  }) {
+    projectV2Field { ... on ProjectV2SingleSelectField { options { id name } } }
+  }
+}'
+```
+
+If you're using a higher-level helper (a Claude session, a script) and
+it's not obvious whether existing IDs are being round-tripped, **dump the
+options before** the mutation, **diff the option IDs after**, and stop
+if any existing `id` changed before you mutate items further.
+
 ## Views
 
 The project ships with four views (the API can't create them; they're
