@@ -248,8 +248,8 @@ apply_check_suite_prefs() {
   if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
     for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
       local setting
-      setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
-        '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
+      setting=$(jq -r --argjson id "$app_id" \
+        '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting | if . == null then "missing" else . end' <<< "$prefs")
       # "missing" means the app has never run in this repo — no orphaned suite possible, skip
       if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
         all_disabled=false
