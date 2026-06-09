@@ -1258,7 +1258,7 @@ event on it.
 
 When Fleet Monitor flags a `dev-lead.yml` stub as DEGRADED (failure rate > 10%),
 the fix is almost never in the stub itself — the stub is a Tier-1 caller and
-the centralised contract makes it byte-equivalent across repos. Match the
+the centralized contract makes it byte-equivalent across repos. Match the
 failed-run log line against the table below and act in the indicated repo.
 
 | Log signature in failing run | Root cause | Where to fix |
