@@ -118,6 +118,9 @@ removing single-select options on a populated project is painful —
 coordinate before changing.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9aad093 (docs(standards): warn that updateProjectV2Field replaces the full option list (#420))
 ### Adding or modifying single-select options safely
 
 `updateProjectV2Field` with `singleSelectOptions` is a **full replacement**
@@ -173,8 +176,11 @@ it's not obvious whether existing IDs are being round-tripped, **dump the
 options before** the mutation, **diff the option IDs after**, and stop
 if any existing `id` changed before you mutate items further.
 
+<<<<<<< HEAD
 =======
 >>>>>>> 8d7cb8a (docs(standards): add Initiatives Project operator guide (#417))
+=======
+>>>>>>> 9aad093 (docs(standards): warn that updateProjectV2Field replaces the full option list (#420))
 ## Views
 
 The project ships with four views (the API can't create them; they're
