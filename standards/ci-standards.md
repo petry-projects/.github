@@ -244,14 +244,31 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+      # First attempt. continue-on-error lets the retry step below recover from
+      # transient 403/5xx responses from binaries.sonarsource.com (the scanner
+      # CLI download), without failing the job on a single CDN blip.
       - name: SonarCloud Scan
+        id: sonar
         if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        continue-on-error: true
+      - name: SonarCloud Scan (retry)
+        if: ${{ env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure' }}
         uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
 ```
 
 **Required secrets:** `SONAR_TOKEN`
 
 Each repo needs a `sonar-project.properties` file at root with project key and org.
+
+**Why the retry?** `SonarSource/sonarqube-scan-action` first downloads the
+SonarScanner CLI binary from `binaries.sonarsource.com`. That CDN occasionally
+returns transient `403`/`5xx` responses unrelated to the workflow, secrets, or
+runner — a single blip would otherwise fail the whole job and skew the fleet
+failure-rate metric. The first scan step uses `continue-on-error: true` and an
+`id`; the second step re-invokes the same pinned action only when the first
+attempt reports `outcome == 'failure'`. The job fails only when both attempts
+fail, so a single transient CDN error no longer trips the workflow.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
