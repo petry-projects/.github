@@ -229,11 +229,9 @@ secret-scan:
       # To upgrade: download the new checksums.txt from the gitleaks release page,
       # update the version tag and the sha256 hash below.
       run: |
-        curl -sSfL \
-          https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
-          -o /tmp/gitleaks.tar.gz
-        echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" \
-          | sha256sum -c
+        GITLEAKS_URL=https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+        curl -sSfL "$GITLEAKS_URL" -o /tmp/gitleaks.tar.gz # NOSONAR — official GitHub release, SHA256 checksum verified below
+        echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c
         tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
         sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
