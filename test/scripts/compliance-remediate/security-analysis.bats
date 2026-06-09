@@ -26,10 +26,38 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# Apply path: secret_scanning_non_provider_patterns is auto-remediated
+# Apply path: non_provider_patterns_enabled (canonical audit check name)
+# is auto-remediated
 # ---------------------------------------------------------------------------
 
-@test "applies PATCH to security_and_analysis for secret_scanning_non_provider_patterns" {
+@test "applies PATCH to security_and_analysis for non_provider_patterns_enabled" {
+  findings="$(tt_write_finding ".github" "push-protection" "non_provider_patterns_enabled")"
+  report_dir="${TT_TMP}/report"
+
+  GH_TOKEN=fake \
+    FINDINGS_FILE="$findings" \
+    REPORT_DIR="$report_dir" \
+    DRY_RUN=false \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  # gh was called with `api -X PATCH repos/petry-projects/.github --input -`
+  grep -qE 'api -X PATCH repos/petry-projects/\.github (.*)--input -' "$GH_STUB_LOG"
+
+  # The stdin payload must enable the specific setting via the nested object
+  grep -q '"security_and_analysis"' "$GH_STUB_STDIN_LOG"
+  grep -q '"secret_scanning_non_provider_patterns"' "$GH_STUB_STDIN_LOG"
+  grep -q '"enabled"' "$GH_STUB_STDIN_LOG"
+
+  # The finding should land in the direct-fix table, not in skipped
+  grep -q 'non_provider_patterns_enabled' "$report_dir/remediation-report.md"
+  ! grep -q 'non_provider_patterns_enabled' "$report_dir/skipped.md"
+}
+
+# Backward-compat alias: the legacy `secret_scanning_non_provider_patterns`
+# finding name is still routed to the same handler.
+@test "applies PATCH to security_and_analysis for secret_scanning_non_provider_patterns (legacy alias)" {
   findings="$(tt_write_finding ".github" "push-protection" "secret_scanning_non_provider_patterns")"
   report_dir="${TT_TMP}/report"
 

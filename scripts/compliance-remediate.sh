@@ -718,7 +718,7 @@ remediate_finding() {
       report_skip "$repo" "$check" \
         "Dependabot config updates require human review — fix using standards/dependabot-policy.md"
       ;;
-    push-protection/secret_scanning_non_provider_patterns)
+    push-protection/non_provider_patterns_enabled | push-protection/secret_scanning_non_provider_patterns)
       remediate_security_analysis_setting "$repo" "secret_scanning_non_provider_patterns" "enabled" "$check"
       ;;
     push-protection/*)
