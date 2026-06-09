@@ -278,18 +278,20 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          INITIAL_PR: ${{ github.event.check_run.pull_requests[0].number }}
+          EVENT_HEAD_SHA: ${{ github.event.check_run.head_sha }}
         run: |
-          PR="${{ github.event.check_run.pull_requests[0].number }}"
+          PR="$INITIAL_PR"
           if [ -z "$PR" ]; then
             PR=$(gh api \
-              "repos/${{ github.repository }}/commits/${{ github.event.check_run.head_sha }}/pulls" \
+              "repos/$GITHUB_REPOSITORY/commits/$EVENT_HEAD_SHA/pulls" \
               --jq '[.[] | select(.state == "open")] | first | .number // empty')
           fi
           # Trust gate: skip fork PRs — this job has write/secret access
           if [ -n "$PR" ]; then
-            HEAD_REPO=$(gh api "repos/${{ github.repository }}/pulls/$PR" \
+            HEAD_REPO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
               --jq '.head.repo.full_name // empty')
-            if [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
+            if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
               echo "Skipping: fork PR (head=$HEAD_REPO)"
               PR=""
             fi
