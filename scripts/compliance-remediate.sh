@@ -146,6 +146,39 @@ remediate_setting() {
 }
 
 # ---------------------------------------------------------------------------
+# Direct API: nested security_and_analysis settings
+# ---------------------------------------------------------------------------
+# The security_and_analysis settings live under a nested object on the repo
+# resource, so they can't be patched via `gh api -F key=value` (that only
+# sends flat form fields). Build the nested JSON and PATCH via stdin.
+remediate_security_analysis_setting() {
+  local repo="$1" setting="$2" expected_status="$3" check="$4"
+
+  if [ "$DRY_RUN" = "true" ]; then
+    skip "[DRY] Would PATCH $ORG/$repo: security_and_analysis.$setting.status=$expected_status"
+    report_direct "$repo" "$check" \
+      "DRY: would PATCH \`security_and_analysis.$setting.status=$expected_status\`"
+    return 0
+  fi
+
+  local payload
+  payload=$(jq -n \
+    --arg key "$setting" \
+    --arg status "$expected_status" \
+    '{security_and_analysis: {($key): {status: $status}}}')
+
+  if printf '%s' "$payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
+    ok "Fixed $ORG/$repo: security_and_analysis.$setting.status=$expected_status"
+    report_direct "$repo" "$check" \
+      "Set \`security_and_analysis.$setting.status=$expected_status\`"
+  else
+    err "Failed to patch $ORG/$repo: security_and_analysis.$setting.status=$expected_status"
+    report_fail "$repo" "$check" \
+      "PATCH security_and_analysis.$setting.status=$expected_status failed (token may lack repo-admin permission)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Direct API: disable check-suite auto-trigger for problematic apps
 # ---------------------------------------------------------------------------
 remediate_check_suite_auto_trigger() {
@@ -684,6 +717,9 @@ remediate_finding() {
     dependabot/*)
       report_skip "$repo" "$check" \
         "Dependabot config updates require human review — fix using standards/dependabot-policy.md"
+      ;;
+    push-protection/secret_scanning_non_provider_patterns)
+      remediate_security_analysis_setting "$repo" "secret_scanning_non_provider_patterns" "enabled" "$check"
       ;;
     push-protection/*)
       report_skip "$repo" "$check" \
