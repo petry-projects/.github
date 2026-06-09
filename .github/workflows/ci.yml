@@ -108,12 +108,14 @@ jobs:
           fetch-depth: 0
 
       - name: Install gitleaks
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
-        with:
-          go-version: stable
-          cache: false
+        run: |
+          curl -sSfL \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            -o /tmp/gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" \
+            | sha256sum -c
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
       - name: Run gitleaks
-        run: |
-          go install github.com/zricethezav/gitleaks/v8@v8.30.1 # NOSONAR — version-pinned go install verified via Go checksum DB (sum.golang.org)
-          gitleaks detect --source . --redact --verbose --exit-code 1
+        run: gitleaks detect --source . --redact --verbose --exit-code 1

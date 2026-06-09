@@ -225,26 +225,28 @@ secret-scan:
         fetch-depth: 0
 
     - name: Install gitleaks
-      # go install verifies the module checksum via sum.golang.org — no
-      # separate SHA verification needed. The go module path is under
-      # zricethezav/ (legacy) even though the GitHub repo moved to gitleaks/.
-      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
-      with:
-        go-version: stable
-        cache: false
+      # Download the pre-built binary and verify its SHA256 checksum.
+      # To upgrade: download the new checksums.txt from the gitleaks release page,
+      # update the version tag and the sha256 hash below.
+      run: |
+        curl -sSfL \
+          https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+          -o /tmp/gitleaks.tar.gz
+        echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" \
+          | sha256sum -c
+        tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+        sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
     - name: Run gitleaks
-      run: |
-        go install github.com/zricethezav/gitleaks/v8@v8.30.1
-        gitleaks detect --source . --redact --verbose --exit-code 1
+      run: gitleaks detect --source . --redact --verbose --exit-code 1
 ```
 
 > **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
 > requires a paid license for GitHub organization repos. The CLI (installed via
-> `go install`) is free, uses Go's secure checksum database for integrity
-> verification, and runs the same scan. If you have a license, you can use the
-> action instead — add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to
-> the `env:` block alongside `GITHUB_TOKEN`.
+> a direct binary download with SHA256 verification) is free, fully pinned, and
+> runs the same scan. If you have a license, you can use the action instead —
+> add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to the `env:` block
+> alongside `GITHUB_TOKEN`.
 
 The job MUST:
 
