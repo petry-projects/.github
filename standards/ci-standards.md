@@ -179,11 +179,6 @@ In addition, BMAD Method-enabled repositories MUST also include the conditional
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
-In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
-documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
-for the template.
-
 ### 1. CI Pipeline (`ci.yml`)
 
 The primary build-and-test workflow. Structure varies by tech stack but must include:
