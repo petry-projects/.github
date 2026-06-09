@@ -380,6 +380,7 @@ all repos automatically — no per-repo setup needed:
 | `APP_ID` | GitHub App ID for Dependabot auto-merge (app_id: 3167543) |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action and dev-lead agent (default engine) |
+| `DON_PETRY_BOT_GH_PAT` | Classic PAT (repo scope) owned by donpetry-bot; required by `pr-review-mention-reusable.yml` to post review-mention comments as the bot identity |
 | `GH_PAT_WORKFLOWS` | Classic PAT with `repo` scope; required for cross-repo script access and dev-lead to push workflow files |
 | `GITLEAKS_LICENSE` | Gitleaks license key required for `secret-scan` job in organization repositories (see [ci-standards.md](ci-standards.md#4-secret-scanning-ciymll--gitleaks-job)) |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
