@@ -45,6 +45,7 @@ jobs:
       # the `Lint` status check (referenced by branch protection) is unchanged.
       - name: Lint YAML
         if: always()
+<<<<<<< HEAD
 =======
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 =======
@@ -58,6 +59,8 @@ jobs:
 
       - name: Lint YAML
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+>>>>>>> e79ae53 (feat: implement issue #329 — [Fleet Monitor] petry-projects/.github — ci.yml (#423))
         run: |
           pip install --quiet yamllint
           yamllint -c <(cat <<'YAMLLINTRC'
@@ -75,9 +78,13 @@ jobs:
 
       - name: Lint GitHub Actions
 <<<<<<< HEAD
+<<<<<<< HEAD
         if: always()
 =======
 >>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
+=======
+        if: always()
+>>>>>>> e79ae53 (feat: implement issue #329 — [Fleet Monitor] petry-projects/.github — ci.yml (#423))
         run: |
           # Install actionlint via verified download (pinned version + checksum)
           ACTIONLINT_VERSION="1.7.7"
