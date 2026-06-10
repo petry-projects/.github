@@ -415,8 +415,10 @@ check_rulesets() {
 
   # Fetch the full ruleset list once (id + name + everything). We need ids to
   # pull each ruleset's bypass_actors below, so we cannot use --jq '.[].name'.
+  # Use --paginate so all rulesets are fetched regardless of page count, then
+  # reconstitute the per-page arrays into one flat array with jq -s '[.[]]'.
   local rulesets_json
-  rulesets_json=$(gh_api "repos/$ORG/$repo/rulesets" 2>/dev/null || echo "[]")
+  rulesets_json=$(gh_api --paginate "repos/$ORG/$repo/rulesets" 2>/dev/null | jq -s '[.[][]]' 2>/dev/null || echo "[]")
   [ -z "$rulesets_json" ] && rulesets_json="[]"
 
   local names
@@ -480,9 +482,14 @@ check_ruleset_bypass_actors() {
     local targets_default
     targets_default=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" '
       ((.conditions.ref_name.include) // []) as $inc
-      | (($inc | index("~DEFAULT_BRANCH")) != null)
-        or (($inc | index("~ALL")) != null)
-        or (($inc | index($db)) != null)
+      | ((.conditions.ref_name.exclude) // []) as $exc
+      | (
+          (($inc | index("~DEFAULT_BRANCH")) != null)
+          or (($inc | index("~ALL")) != null)
+          or (($inc | index($db)) != null)
+        )
+        and (($exc | index("~DEFAULT_BRANCH")) == null)
+        and (($exc | index($db)) == null)
     ' 2>/dev/null || echo "false")
     [ "$targets_default" != "true" ] && continue
 
