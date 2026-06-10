@@ -42,8 +42,8 @@
 PP_REQUIRED_SA_SETTINGS=(
   "secret_scanning:enabled:error:Secret scanning must be enabled"
   "secret_scanning_push_protection:enabled:error:Secret scanning push protection must be enabled"
-  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled"
-  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled"
+  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled (requires GitHub Copilot subscription; absent means the feature is unavailable for the current org plan)"
+  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled (requires GitHub Advanced Security)"
   "dependabot_security_updates:enabled:warning:Dependabot security updates should be enabled"
 )
 
@@ -115,7 +115,25 @@ pp_apply_security_and_analysis() {
   full_payload=$(echo "$payload" | jq '{security_and_analysis: .}')
 
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
-    ok "$ORG/$repo security_and_analysis updated successfully"
+    ok "$ORG/$repo security_and_analysis PATCH accepted"
+
+    # Verify each patched key was actually applied. Some settings (e.g.
+    # secret_scanning_ai_detection, secret_scanning_non_provider_patterns)
+    # require GitHub Advanced Security or a Copilot subscription; the API
+    # accepts the PATCH (HTTP 200) but silently ignores keys that the org
+    # plan does not support. Re-fetch and warn for any key still not applied.
+    local post_patch
+    post_patch=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
+    local post_entry post_key post_expected post_actual
+    for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
+      IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
+      post_actual=$(echo "$post_patch" | jq -r ".\"$post_key\".status // \"null\"")
+      if [ "$post_actual" != "$post_expected" ]; then
+        warn "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
+      else
+        ok "  $post_key: $post_actual (verified)"
+      fi
+    done
   else
     err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
     return 1
