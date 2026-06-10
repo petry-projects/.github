@@ -2,7 +2,7 @@ name: Compliance Issue Re-trigger
 
 on:
   schedule:
-    - cron: '0 14 * * *'   # Daily at 14:00 UTC (9 AM CDT)
+    - cron: '0 5 * * *'   # Daily at 05:00 UTC (12:00 AM CDT)
   workflow_dispatch:
     inputs:
       stale_days:
