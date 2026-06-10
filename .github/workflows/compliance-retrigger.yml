@@ -3,10 +3,14 @@ name: Compliance Issue Re-trigger
 on:
   schedule:
 <<<<<<< HEAD
+<<<<<<< HEAD
     - cron: '0 5 * * *'   # Daily at 05:00 UTC (12:00 AM CDT)
 =======
     - cron: '0 14 * * *'   # Daily at 14:00 UTC (9 AM CDT)
 >>>>>>> cb9fac2 (feat(compliance): add retrigger for stale issues + dev-lead workflow health enforcement (#326))
+=======
+    - cron: '0 5 * * *'   # Daily at 05:00 UTC (12:00 AM CDT)
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
   workflow_dispatch:
     inputs:
       stale_days:

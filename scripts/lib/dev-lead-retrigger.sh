@@ -1,8 +1,12 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # shellcheck shell=bash
 =======
 #!/usr/bin/env bash
 >>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
+=======
+# shellcheck shell=bash
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
 # dev-lead-retrigger.sh — shared helpers for re-engaging the dev-lead agent on a
 # compliance issue by cycling its trigger label.
 #
@@ -12,12 +16,18 @@
 #   scripts/compliance-retrigger.sh  — daily sweep; re-triggers stale issues.
 #
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
 # Caller contract:
 #   Source this file; do NOT execute it directly.  The library does NOT call
 #   `set` itself, so it is safe to source from scripts that use `set -euo pipefail`.
 #
+<<<<<<< HEAD
 =======
 >>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
+=======
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
 # Why a shared lib?
 #   Both entry points need the same two primitives, and both depend on how
 #   dev-lead names its branches (dev-lead/issue-<number>-<timestamp>, see
@@ -71,10 +81,14 @@ dl_dev_lead_active() {
       --paginate \
       --jq '.[] | select(.event == "labeled" and .label.name == "in-progress") | .created_at' \
 <<<<<<< HEAD
+<<<<<<< HEAD
       2>/dev/null | head -1 || echo "")
 =======
       2>/dev/null | tail -1 || echo "")
 >>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
+=======
+      2>/dev/null | head -1 || echo "")
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
 
     if [ -z "$labeled_at" ] || [ "$labeled_at" = "null" ]; then
       # Cannot determine when the label was applied; trust it conservatively.
@@ -85,6 +99,9 @@ dl_dev_lead_active() {
     now_epoch=$(date -u +%s)
     labeled_epoch=$(date -u -d "$labeled_at" +%s 2>/dev/null \
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
       || python3 -c "import sys, datetime; \
                      ts = sys.stdin.read().strip().replace('Z', '+00:00'); \
                      print(int(datetime.datetime.fromisoformat(ts).timestamp()))" 2>/dev/null \
@@ -93,12 +110,15 @@ dl_dev_lead_active() {
     if [ -z "$labeled_epoch" ]; then
       return 0
     fi
+<<<<<<< HEAD
 =======
       || python3 -c "import sys, calendar, datetime; \
                      ts = sys.stdin.read().strip(); \
                      print(calendar.timegm(datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').timetuple()))" \
       <<< "$labeled_at")
 >>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
+=======
+>>>>>>> d6fb9c1 (fix(compliance): unbreak daily re-trigger sweep + throttle to one issue per repo (#432))
     elapsed_hours=$(( (now_epoch - labeled_epoch) / 3600 ))
 
     [ "$elapsed_hours" -le "$in_progress_max_hours" ] && return 0
