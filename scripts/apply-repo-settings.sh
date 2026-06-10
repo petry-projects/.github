@@ -382,6 +382,9 @@ apply_check_suite_prefs() {
   info "Configuring check-suite auto-trigger preferences for $ORG/$repo ..."
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 9d0e5c9 (feat: implement issue #373 — Compliance: check-suite-auto-trigger-1236702 (#425))
   # GET 404s when prefs have never been set — treat as needing PATCH, don't bail.
   local prefs all_disabled=true
   if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
@@ -397,6 +400,7 @@ apply_check_suite_prefs() {
   else
     info "  Could not read current prefs (will apply PATCH anyway). Response: $prefs"
     all_disabled=false
+<<<<<<< HEAD
   fi
 
 =======
@@ -418,6 +422,10 @@ apply_check_suite_prefs() {
   done
 
 >>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
+=======
+  fi
+
+>>>>>>> 9d0e5c9 (feat: implement issue #373 — Compliance: check-suite-auto-trigger-1236702 (#425))
   if [ "$all_disabled" = true ]; then
     ok "$ORG/$repo check-suite prefs already correct"
     return 0
