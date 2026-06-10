@@ -140,30 +140,30 @@ bypass actor *opens* the PR. Dependabot opens its own PRs, so the
 rejected. `always` mode is safe here because the rebase workflow explicitly
 verifies CI pass and `MERGEABLE` state before calling the merge API.
 
-**API snippet to add the bypass actor to an existing ruleset:**
+**Remediation — `scripts/fix-ruleset-bypass.sh`:** normalizes bypass actors on
+**every** ruleset targeting the default branch (including legacy
+`protect-branches` / `main` rulesets that `apply-rulesets.sh` does not manage).
+Existing actors are preserved; the two required actors are added/normalized to
+`bypass_mode: always`. Dry-run emits ready-to-PUT payloads for review without
+mutating live rulesets:
 
 ```bash
-# Get current ruleset (capture bypass_actors and rules arrays)
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id>
+# Preview payloads for one repo (or --all):
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh <repo> --dry-run
 
-# PUT the full ruleset back, adding actor_id 3167543 to bypass_actors
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id> \
-  -X PUT --input ruleset.json
-# where ruleset.json adds {"actor_id": 3167543, "actor_type": "Integration", "bypass_mode": "always"}
-# to the existing bypass_actors array alongside all existing rules and conditions.
+# Apply:
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh --all
 ```
 
-**Compliance check:** verify all rulesets on all repos have the bypass actor:
+> `apply-rulesets.sh` full-replaces `pr-quality` / `code-quality` with the two
+> canonical bypass actors. `fix-ruleset-bypass.sh` is the least-destructive,
+> any-ruleset complement used to remediate audit findings.
 
-```bash
-for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 1000); do
-  for rs_id in $(gh api "repos/petry-projects/$repo/rulesets" --jq '.[].id' 2>/dev/null); do
-    rs=$(gh api "repos/petry-projects/$repo/rulesets/$rs_id" 2>/dev/null)
-    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0')
-    [[ "$missing" == "true" ]] && echo "MISSING: $repo / $(echo "$rs" | jq -r '.name')"
-  done
-done
-```
+**Compliance check:** enforced automatically by the weekly audit —
+`check_ruleset_bypass_actors()` in [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)
+verifies that every ruleset targeting the default branch grants `bypass_mode:
+always` to both required actors, and flags the `Repository admin` role
+(`RepositoryRole` id 5) as a non-conforming substitute for `OrganizationAdmin`.
 
 ### `pr-quality` — Standard Ruleset (All Repositories)
 
