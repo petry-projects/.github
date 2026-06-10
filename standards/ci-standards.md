@@ -40,11 +40,22 @@ reusable, not a local edit.
 > when a backward-compatible release is ready; breaking changes publish a new
 > tag that downstream repos opt into explicitly.
 >
-> **Exception — `dev-lead`.** The dev-lead reusable lives in the private
-> `petry-projects/.github-private` repo (it checks out private prompts/scripts)
-> and is pinned `@main`, not a tag — so permission and security fixes
-> propagate immediately instead of waiting for a tag bump or the monthly
-> standards-sync. See [Dev-Lead Agent](#dev-lead-agent).
+> **Self-hosted agentic reusables use moving channel tags, not `@v1`.** The
+> `dev-lead` and `pr-review` agents live in the private
+> `petry-projects/.github-private` repo and are **self-hosting** — they build,
+> review, and ship changes *to themselves*. Pinning their callers to `@main`
+> would mean a broken change instantly gates its own fix (the self-host circular
+> dependency); pinning to a frozen `@vN` would strand security fixes behind a
+> manual re-pin of every caller. Instead each agent has a **moving per-agent
+> channel tag** — `@dev-lead/stable`, `@pr-review/stable` — that callers pin
+> **once**. A new version is cut as an immutable `@<agent>/vX.Y.Z` audit/rollback
+> tag, validated, then promoted by **moving the channel tag centrally** in
+> `.github-private` — no caller is ever edited, and rollback is a single tag move
+> back. Callers also thread `agent_ref: <agent>/stable` so the agent's own
+> scripts/prompts checkout runs at the same pinned channel. This is the ratified
+> standard for the private agentic reusables; see
+> [Dev-Lead Agent](#dev-lead-agent) and the release-strategy initiative
+> (`petry-projects/.github-private` `docs/initiatives/agentic-release-strategy.md`).
 
 ### Available templates
 
@@ -951,8 +962,8 @@ pins** — and are exempt from this policy.
 # CORRECT — tag ref for a public internal reusable workflow
 uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
 
-# CORRECT — dev-lead lives in the private repo and tracks @main (see Dev-Lead Agent)
-uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
+# CORRECT — dev-lead/pr-review pin the moving per-agent channel tag (see Dev-Lead Agent)
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable
 
 # WRONG — do not SHA-pin internal reusable workflow refs
 uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
@@ -1208,10 +1219,16 @@ centrally so they cannot drift per repo:
   (petry-projects/.github#402). Running lanes in parallel is safe because the
   agent checks out PR branches in an isolated worktree (petry-projects/.github-private#448).
 - **Pin.** The stub pins
-  `petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main`
-  — `@main`, not a tag — so a permission or security fix reaches every
-  repo immediately rather than waiting for a tag bump or the monthly
-  standards-sync.
+  `petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable`
+  — the moving **per-agent channel tag**, not `@main` and not a frozen `@vN`.
+  A new dev-lead version is cut as an immutable `dev-lead/vX.Y.Z` tag, validated
+  on ring 0 (`.github-private` self-host), then promoted by **moving the
+  `dev-lead/stable` tag centrally** — no caller is edited, and a rollback is the
+  same tag move back. This breaks dev-lead's self-host circular dependency (a
+  broken change can no longer gate its own fix) while keeping security fixes a
+  single central tag-move away. The stub also passes
+  `with: { agent_ref: dev-lead/stable }` so dev-lead's own scripts/prompts
+  checkout runs at the same pinned channel (it defaults to `main` when omitted).
 - **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
   set that the reusable requests**:
 
