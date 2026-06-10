@@ -409,7 +409,9 @@ check_rulesets() {
   # Default branch drives which rulesets are "targeting main" below.
   local default_branch
   default_branch=$(echo "$repo_json" | jq -r '.default_branch // "main"' 2>/dev/null || echo "main")
-  [ -z "$default_branch" ] || [ "$default_branch" = "null" ] && default_branch="main"
+  if [ -z "$default_branch" ] || [ "$default_branch" = "null" ]; then
+    default_branch="main"
+  fi
 
   # Fetch the full ruleset list once (id + name + everything). We need ids to
   # pull each ruleset's bypass_actors below, so we cannot use --jq '.[].name'.
@@ -492,11 +494,20 @@ check_ruleset_bypass_actors() {
     slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
     [ -z "$slug" ] && slug="$rs_id"
 
-    # --- OrganizationAdmin role -------------------------------------------
-    local oa_always oa_any repo_admin
-    oa_always=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_type=="OrganizationAdmin" and .bypass_mode=="always")] | length > 0' 2>/dev/null || echo "false")
-    oa_any=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_type=="OrganizationAdmin")] | length > 0' 2>/dev/null || echo "false")
-    repo_admin=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_type=="RepositoryRole" and .actor_id==5)] | length > 0' 2>/dev/null || echo "false")
+    # --- Bypass actor check (single jq invocation) ------------------------
+    local oa_always oa_any repo_admin dep_always dep_any
+    local bypass_info
+    bypass_info=$(jq -r --argjson id "$DEPENDABOT_APP_ACTOR_ID" '
+      [
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin" and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="RepositoryRole" and .actor_id==5)] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id)] | length > 0)
+      ] | map(tostring) | join(" ")
+    ' <<< "$rs" 2>/dev/null || echo "false false false false false")
+    [ -z "$bypass_info" ] && bypass_info="false false false false false"
+    read -r oa_always oa_any repo_admin dep_always dep_any <<< "$bypass_info"
 
     if [ "$oa_always" != "true" ]; then
       if [ "$oa_any" = "true" ]; then
@@ -515,10 +526,6 @@ check_ruleset_bypass_actors() {
     fi
 
     # --- dependabot-automerge-petry app -----------------------------------
-    local dep_always dep_any
-    dep_always=$(echo "$rs" | jq --argjson id "$DEPENDABOT_APP_ACTOR_ID" '[.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id and .bypass_mode=="always")] | length > 0' 2>/dev/null || echo "false")
-    dep_any=$(echo "$rs" | jq --argjson id "$DEPENDABOT_APP_ACTOR_ID" '[.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id)] | length > 0' 2>/dev/null || echo "false")
-
     if [ "$dep_always" != "true" ]; then
       if [ "$dep_any" = "true" ]; then
         add_finding "$repo" "rulesets" "ruleset-bypass-dependabot-mode-$slug" "error" \
