@@ -29,7 +29,12 @@ jobs:
         with:
           globs: '**/*.md'
 
+      # if: always() — run every lint sub-step regardless of prior failures so PR
+      # authors see every lint issue in one CI run instead of fix→push→discover
+      # one more in the next run. The job still fails if any sub-step fails, so
+      # the `Lint` status check (referenced by branch protection) is unchanged.
       - name: Lint YAML
+        if: always()
         run: |
           pip install --quiet yamllint
           yamllint -c <(cat <<'YAMLLINTRC'
@@ -46,6 +51,7 @@ jobs:
           ) .github/workflows/ standards/workflows/ standards/dependabot/
 
       - name: Lint GitHub Actions
+        if: always()
         run: |
           # Install actionlint via verified download (pinned version + checksum)
           ACTIONLINT_VERSION="1.7.7"
