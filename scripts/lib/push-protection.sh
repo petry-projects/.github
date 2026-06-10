@@ -198,11 +198,19 @@ pp_check_security_and_analysis() {
   for entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     actual=$(echo "$sa" | jq -r ".\"$key\".status // \"null\"")
-    if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "push-protection" "$key" "$severity" \
-        "$detail (current: \`$actual\`, expected: \`$expected\`)" \
-        "$PP_STANDARD_REF#required-repo-level-settings"
+    if [ "$actual" = "$expected" ]; then
+      continue
     fi
+    # A null/absent status for a warning-severity setting means the feature is
+    # unavailable for the current org plan — skip rather than creating a
+    # non-actionable compliance finding that cannot be remediated without a
+    # plan upgrade.
+    if [ "$severity" = "warning" ] && [ "$actual" = "null" ]; then
+      continue
+    fi
+    add_finding "$repo" "push-protection" "$key" "$severity" \
+      "$detail (current: \`$actual\`, expected: \`$expected\`)" \
+      "$PP_STANDARD_REF#required-repo-level-settings"
   done
 }
 
