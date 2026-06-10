@@ -90,6 +90,8 @@ jobs:
       # your install steps need history (rare).
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       # ── NODE.JS / NPM ──────────────────────────────────────────────────────────
       # Uncomment for repos using npm (TypeScript, React, Electron, Google Apps Script).
@@ -177,9 +179,9 @@ jobs:
       - name: Verify environment
         run: |
           echo "=== petry-projects Copilot cloud agent environment ==="
-          echo "Repository : ${{ github.repository }}"
-          echo "Ref        : ${{ github.ref }}"
-          echo "Runner     : ${{ runner.os }} / ${{ runner.arch }}"
+          echo "Repository : ${GITHUB_REPOSITORY}"
+          echo "Ref        : ${GITHUB_REF}"
+          echo "Runner     : ${RUNNER_OS} / ${RUNNER_ARCH}"
           echo ""
           echo "--- Installed tool versions ---"
           git   --version
