@@ -122,12 +122,21 @@ pp_apply_security_and_analysis() {
     # require GitHub Advanced Security or a Copilot subscription; the API
     # accepts the PATCH (HTTP 200) but silently ignores keys that the org
     # plan does not support. Re-fetch and warn for any key still not applied.
-    local post_patch
+    local post_patch post_actuals
     post_patch=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
+    post_actuals=$(echo "$post_patch" | jq -r 'to_entries | .[] | "\(.key):\(.value.status? // "null")"' 2>/dev/null || echo "")
+
+    local -A actuals
+    while IFS=':' read -r k v; do
+      if [ -n "$k" ]; then
+        actuals["$k"]="$v"
+      fi
+    done <<< "$post_actuals"
+
     local post_entry post_key post_expected post_actual
     for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
       IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
-      post_actual=$(echo "$post_patch" | jq -r ".\"$post_key\".status // \"null\"")
+      post_actual="${actuals[$post_key]:-null}"
       if [ "$post_actual" != "$post_expected" ]; then
         warn "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
       else
