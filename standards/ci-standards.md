@@ -2225,6 +2225,9 @@ It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 | `GH_PAT_WORKFLOWS` | Yes (cross-repo) | Read access to `.github-private` scripts; push workflow files |
 | `GOOGLE_API_KEY` | No | Gemini engine fallback |
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> cb11220 (feat: implement issue #330 — [Fleet Monitor] petry-projects/.github — dev-lead.yml (#421))
 | `GH_PAT` | No | Copilot engine — **must be a fine-grained PAT.** Classic tokens (`ghp_…`) are rejected at runtime |
 
 ### Failure-mode runbook
@@ -2249,9 +2252,12 @@ register as cancelled runs in the metrics window.
 When triage points at the reusable or an external secret, **close the Fleet
 Monitor issue with a comment linking to the upstream fix** rather than editing
 the stub — local edits to a Tier-1 stub are drift.
+<<<<<<< HEAD
 =======
 | `GH_PAT` | No | Copilot engine |
 >>>>>>> d27bbf3 (docs(ci-standards): add §5 Dev-Lead Agent)
+=======
+>>>>>>> cb11220 (feat: implement issue #330 — [Fleet Monitor] petry-projects/.github — dev-lead.yml (#421))
 
 ### Migration from `claude.yml`
 
