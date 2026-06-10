@@ -241,7 +241,7 @@ jobs:
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
       # First attempt. continue-on-error lets the retry step below recover from
@@ -249,12 +249,12 @@ jobs:
       # CLI download), without failing the job on a single CDN blip.
       - name: SonarCloud Scan
         id: sonar
-        if: ${{ env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
         continue-on-error: true
       - name: SonarCloud Scan (retry)
-        if: ${{ env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure' }}
-        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        if: env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure'
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
 ```
 
 **Required secrets:** `SONAR_TOKEN`
