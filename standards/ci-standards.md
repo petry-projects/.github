@@ -46,11 +46,11 @@ reusable, not a local edit.
 > review, and ship changes *to themselves*. Pinning their callers to `@main`
 > would mean a broken change instantly gates its own fix (the self-host circular
 > dependency); pinning to a frozen `@vN` would strand security fixes behind a
-> manual re-pin of every caller. Instead each agent has a **moving per-agent
+> manual re-pin of every caller. Instead, each agent has a **moving per-agent
 > channel tag** — `@dev-lead/stable`, `@pr-review/stable` — that callers pin
 > **once**. A new version is cut as an immutable `@<agent>/vX.Y.Z` audit/rollback
 > tag, validated, then promoted by **moving the channel tag centrally** in
-> `.github-private` — no caller is ever edited, and rollback is a single tag move
+> `.github-private` — no caller is ever edited, and rollback is as simple as moving the tag
 > back. Callers also thread `agent_ref: <agent>/stable` so the agent's own
 > scripts/prompts checkout runs at the same pinned channel. This is the ratified
 > standard for the private agentic reusables; see
@@ -1223,8 +1223,8 @@ centrally so they cannot drift per repo:
   — the moving **per-agent channel tag**, not `@main` and not a frozen `@vN`.
   A new dev-lead version is cut as an immutable `dev-lead/vX.Y.Z` tag, validated
   on ring 0 (`.github-private` self-host), then promoted by **moving the
-  `dev-lead/stable` tag centrally** — no caller is edited, and a rollback is the
-  same tag move back. This breaks dev-lead's self-host circular dependency (a
+  `dev-lead/stable` tag centrally** — no caller is edited, and rollback is as simple as
+  moving the tag back. This breaks dev-lead's self-host circular dependency (a
   broken change can no longer gate its own fix) while keeping security fixes a
   single central tag-move away. The stub also passes
   `with: { agent_ref: dev-lead/stable }` so dev-lead's own scripts/prompts
