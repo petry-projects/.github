@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 # dev-lead-retrigger.sh — shared helpers for re-engaging the dev-lead agent on a
 # compliance issue by cycling its trigger label.
 #
@@ -6,6 +6,10 @@
 #   scripts/compliance-audit.sh      — weekly audit; re-triggers findings that
 #                                      persist across runs (issue still open).
 #   scripts/compliance-retrigger.sh  — daily sweep; re-triggers stale issues.
+#
+# Caller contract:
+#   Source this file; do NOT execute it directly.  The library does NOT call
+#   `set` itself, so it is safe to source from scripts that use `set -euo pipefail`.
 #
 # Why a shared lib?
 #   Both entry points need the same two primitives, and both depend on how
@@ -59,7 +63,7 @@ dl_dev_lead_active() {
     labeled_at=$(gh api "repos/$org/$repo/issues/$issue/events?per_page=100" \
       --paginate \
       --jq '.[] | select(.event == "labeled" and .label.name == "in-progress") | .created_at' \
-      2>/dev/null | tail -1 || echo "")
+      2>/dev/null | head -1 || echo "")
 
     if [ -z "$labeled_at" ] || [ "$labeled_at" = "null" ]; then
       # Cannot determine when the label was applied; trust it conservatively.
@@ -69,10 +73,14 @@ dl_dev_lead_active() {
     local now_epoch labeled_epoch elapsed_hours
     now_epoch=$(date -u +%s)
     labeled_epoch=$(date -u -d "$labeled_at" +%s 2>/dev/null \
-      || python3 -c "import sys, calendar, datetime; \
-                     ts = sys.stdin.read().strip(); \
-                     print(calendar.timegm(datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ').timetuple()))" \
-      <<< "$labeled_at")
+      || python3 -c "import sys, datetime; \
+                     ts = sys.stdin.read().strip().replace('Z', '+00:00'); \
+                     print(int(datetime.datetime.fromisoformat(ts).timestamp()))" 2>/dev/null \
+      <<< "$labeled_at" || echo "")
+
+    if [ -z "$labeled_epoch" ]; then
+      return 0
+    fi
     elapsed_hours=$(( (now_epoch - labeled_epoch) / 3600 ))
 
     [ "$elapsed_hours" -le "$in_progress_max_hours" ] && return 0
