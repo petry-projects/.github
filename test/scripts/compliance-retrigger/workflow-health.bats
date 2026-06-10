@@ -30,22 +30,22 @@ teardown() {
 
 @test "check_devlead_workflows function is not defined in the script" {
   run grep -qF "check_devlead_workflows" "$TT_SCRIPT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "WORKFLOWS_DISABLED counter is not referenced in the script" {
   run grep -qF "WORKFLOWS_DISABLED" "$TT_SCRIPT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "WORKFLOWS_ENABLED counter is not referenced in the script" {
   run grep -qF "WORKFLOWS_ENABLED" "$TT_SCRIPT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dev-lead.yml workflow state is not queried in the script" {
   run grep -qF "dev-lead.yml" "$TT_SCRIPT"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ teardown() {
 
   # No call to the dev-lead.yml endpoint
   run grep -qF "dev-lead.yml" "$GH_STUB_LOG"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------
