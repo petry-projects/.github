@@ -1269,7 +1269,30 @@ event on it.
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes | Primary LLM engine |
 | `GH_PAT_WORKFLOWS` | Yes (cross-repo) | Read access to `.github-private` scripts; push workflow files |
 | `GOOGLE_API_KEY` | No | Gemini engine fallback |
-| `GH_PAT` | No | Copilot engine |
+| `GH_PAT` | No | Copilot engine — **must be a fine-grained PAT.** Classic tokens (`ghp_…`) are rejected at runtime |
+
+### Failure-mode runbook
+
+When Fleet Monitor flags a `dev-lead.yml` stub as DEGRADED (failure rate > 10%),
+the fix is almost never in the stub itself — the stub is a Tier-1 caller and
+the centralized contract makes it byte-equivalent across repos. Match the
+failed-run log line against the table below and act in the indicated repo.
+
+| Log signature in failing run | Root cause | Where to fix |
+|------------------------------|-----------|--------------|
+| `Process completed with exit code 124` after a long-running `dispatch` step | Engine call timed out inside the reusable | `petry-projects/.github-private` — engine timeout / step-level `timeout-minutes` in `dev-lead-reusable.yml` |
+| `_ApiError ... code:429 ... Resource has been exhausted` / `RetryableQuotaError` | `GOOGLE_API_KEY` project is out of quota or prepayment credits | Google AI Studio billing for the project backing `GOOGLE_API_KEY`; until refilled, the Gemini step of the engine-fallback cascade will keep failing |
+| `Error: Classic Personal Access Tokens (ghp_) are not supported by Copilot` | `GH_PAT` is a Classic PAT and the engine cascade fell through to Copilot | Rotate `GH_PAT` to a fine-grained PAT at the org-secret level |
+| `startup_failure` with no step logs | Stub is missing a permission the reusable now requests | Update **the template** in `standards/workflows/dev-lead.yml` and every adopting stub *before* the reusable starts requesting the scope (see [Concurrency, pinning, and the permission contract](#concurrency-pinning-and-the-permission-contract)) |
+
+High cancellation counts on the run history are expected and not a defect:
+the reusable uses per-issue / per-PR / ci-relay lanes with
+`cancel-in-progress: false`, so queued events that another lane preempts still
+register as cancelled runs in the metrics window.
+
+When triage points at the reusable or an external secret, **close the Fleet
+Monitor issue with a comment linking to the upstream fix** rather than editing
+the stub — local edits to a Tier-1 stub are drift.
 
 ### Migration from `claude.yml`
 
