@@ -243,22 +243,22 @@ apply_check_suite_prefs() {
   local repo="$1"
   info "Configuring check-suite auto-trigger preferences for $ORG/$repo ..."
 
-  local prefs
-  if ! prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
-    err "  Could not read check-suite preferences for $repo. API response: $prefs"
-    return 1
+  # GET 404s when prefs have never been set — treat as needing PATCH, don't bail.
+  local prefs all_disabled=true
+  if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
+    for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
+      local setting
+      setting=$(jq -r --argjson id "$app_id" \
+        '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting | if . == null then "missing" else . end' <<< "$prefs")
+      # "missing" means the app has never run in this repo — no orphaned suite possible, skip
+      if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
+        all_disabled=false
+      fi
+    done
+  else
+    info "  Could not read current prefs (will apply PATCH anyway). Response: $prefs"
+    all_disabled=false
   fi
-
-  local all_disabled=true
-  for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
-    local setting
-    setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
-      '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
-    # "missing" means the app has never run in this repo — no orphaned suite possible, skip
-    if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
-      all_disabled=false
-    fi
-  done
 
   if [ "$all_disabled" = true ]; then
     ok "$ORG/$repo check-suite prefs already correct"
