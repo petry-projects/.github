@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Smart gh stub for compliance-retrigger tests.
+# Routes responses based on endpoint patterns in argv.
+#
+# Env vars:
+#   GH_STUB_LOG        — append-only log of all invocations (quoted args, one per line)
+#   GH_STUB_ENABLE_LOG — append-only log of workflow-enable PUT calls specifically
+#   GH_STUB_REPOS      — newline-separated repo names returned for org repos listing
+#                        (default: "test-repo")
+#   GH_STUB_WORKFLOW_STATE — state string returned for dev-lead.yml queries
+#                            (default: "disabled_manually")
+#   GH_STUB_EXIT       — exit code for unmatched calls (default: 0)
+
+set -euo pipefail
+
+if [ -n "${GH_STUB_LOG:-}" ]; then
+  printf '%q ' "$@" >>"$GH_STUB_LOG"
+  printf '\n' >>"$GH_STUB_LOG"
+fi
+
+# Detect workflow enable calls (gh api -X PUT .../enable)
+for arg in "$@"; do
+  if [[ "$arg" == */enable ]]; then
+    if [ -n "${GH_STUB_ENABLE_LOG:-}" ]; then
+      printf '%q ' "$@" >>"$GH_STUB_ENABLE_LOG"
+      printf '\n' >>"$GH_STUB_ENABLE_LOG"
+    fi
+    exit 0
+  fi
+done
+
+# Route responses by endpoint URL
+for arg in "$@"; do
+  case "$arg" in
+    *"orgs/"*"/repos"*)
+      printf '%s\n' "${GH_STUB_REPOS:-test-repo}"
+      exit 0
+      ;;
+    *"search/issues"*)
+      printf '{"total_count":0,"items":[]}\n'
+      exit 0
+      ;;
+    *"actions/workflows/dev-lead.yml"*)
+      printf '%s\n' "${GH_STUB_WORKFLOW_STATE:-disabled_manually}"
+      exit 0
+      ;;
+  esac
+done
+
+exit "${GH_STUB_EXIT:-0}"
