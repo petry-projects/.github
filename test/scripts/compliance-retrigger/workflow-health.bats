@@ -61,6 +61,8 @@ teardown() {
     GH_STUB_WORKFLOW_STATE=disabled_manually \
     run bash "$TT_SCRIPT"
 
+  # Script must have exited successfully
+  [ "$status" -eq 0 ]
   # The enable log must be empty — no workflow was re-enabled
   [ ! -s "$GH_STUB_ENABLE_LOG" ]
 }
@@ -71,6 +73,8 @@ teardown() {
     DRY_RUN=true \
     run bash "$TT_SCRIPT"
 
+  # Script must have exited successfully before inspecting the log
+  [ "$status" -eq 0 ]
   # No call to the dev-lead.yml endpoint
   run grep -qF "dev-lead.yml" "$GH_STUB_LOG"
   [ "$status" -eq 1 ]
