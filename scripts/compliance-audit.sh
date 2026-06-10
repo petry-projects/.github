@@ -1531,7 +1531,7 @@ For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admi
 gh api repos/${ORG}/.github/contents/standards/workflows/<template>.yml --jq '.content' | base64 -d > .github/workflows/<template>.yml
 \`\`\`
 
-Available templates: \`agent-shield.yml\`, \`claude.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
+Available templates: \`agent-shield.yml\`, \`dev-lead.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
       ;;
     labels)
       remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` — it applies standard labels alongside settings:
