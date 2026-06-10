@@ -227,9 +227,12 @@ secret-scan:
     - name: Install gitleaks
       env:
         GITLEAKS_VERSION: "8.30.1"
+        # Look up checksum at:
+        # https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/checksums.txt
+        # Use the sha256 value for gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz.
         # Named GITLEAKS_CHECKSUM (not GITLEAKS_SHA256) — SonarCloud flags env var names
         # matching *SHA256* containing hex strings as Security Hotspots (false positive).
-        GITLEAKS_CHECKSUM: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        GITLEAKS_CHECKSUM: "<sha256-of-linux_x64.tar.gz>"
       run: |
         tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
         url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
