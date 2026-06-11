@@ -229,11 +229,10 @@ check_action_pinning() {
     # Find uses: directives that are NOT SHA-pinned
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
-    # Exclude internal reusable workflow calls to petry-projects/.github and
-    # petry-projects/.github-private — per ci-standards.md#action-pinning-policy,
-    # these use deliberate tag refs (@v1, @v2, @main) and are explicitly exempt.
+    # Exclude $ORG/.github reusable workflow refs — these use tag refs
+    # (@v1, @v2, @main) by design per ci-standards.md#action-pinning-policy
     local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE 'uses:[[:space:]]+petry-projects/(\.github|\.github-private)/' || true)
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE "uses:[[:space:]]+$ORG/\\.github(-private)?/\\.github/workflows/" || true)
 
     if [ -n "$unpinned" ]; then
       local count
@@ -809,11 +808,12 @@ check_centralized_workflow_stubs() {
 # Check: dev-lead.yml caller stub conforms to the centralized contract
 #
 # Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
-# @main, and its concurrency + permissions are owned centrally (see
-# standards/ci-standards.md#dev-lead-agent). A stub drifts — and breaks — in
-# three ways this check catches (all root causes of petry-projects/.github#402):
+# to the moving `dev-lead/stable` channel tag (not @main, not a frozen @vN — see
+# standards/ci-standards.md#dev-lead-agent for the self-host channel model), and
+# its concurrency + permissions are owned centrally. A stub drifts — and breaks —
+# in three ways this check catches (all root causes of petry-projects/.github#402):
 #
-#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@main.
+#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@dev-lead/stable.
 #   2. Local concurrency block: per-stub concurrency drifts and cancels issue
 #      pickups; concurrency is owned by the reusable (per-issue/per-PR lanes).
 #   3. Missing `statuses: read`: the reusable requests it since #435, so without
@@ -833,21 +833,30 @@ check_dev_lead_stub() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
   [ -z "$decoded" ] && return
 
-  # 1) Canonical pin (non-comment `uses:` line, exact ref).
-  if ! echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@main([[:space:]]|$)"; then
+  # 1) Canonical pin (non-comment `uses:` line, exact ref) — the moving
+  #    dev-lead/stable channel tag (self-host channel model).
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/stable([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
-      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
-  # 2) No per-stub concurrency block — concurrency is owned by the reusable.
+  # 2) agent_ref must be threaded through to pin the same channel inside the
+  #    reusable's own script/prompt checkout (prevents split-brain on promotion).
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/stable([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/stable\` so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 3) No per-stub concurrency block — concurrency is owned by the reusable.
   if echo "$decoded" | grep -qE "^concurrency:"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
       "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
-  # 3) Caller permissions must grant `statuses: read`.
+  # 4) Caller permissions must grant `statuses: read`.
   if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
       "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
