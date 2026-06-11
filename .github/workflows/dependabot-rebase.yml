@@ -22,7 +22,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Dependabot update-and-merge — thin caller for the org-level reusable.
-# To adopt: copy this file to .github/workflows/dependabot-rebase.yml in your repo.
+# To adopt: copy standards/workflows/dependabot-rebase.yml (NOT this file) to
+#   .github/workflows/dependabot-rebase.yml in your repo. This file uses a
+#   local ref (`./.github/workflows/dependabot-rebase-reusable.yml`) that is
+#   only valid in the petry-projects/.github source-of-truth repo.
 # Required org/repo secrets (inherited):
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
