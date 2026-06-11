@@ -40,7 +40,6 @@ DEPLOYABLE_WORKFLOWS=(
   dev-lead.yml
   agent-shield.yml
   auto-rebase.yml
-  claude.yml
   dependabot-automerge.yml
   dependabot-rebase.yml
   dependency-audit.yml

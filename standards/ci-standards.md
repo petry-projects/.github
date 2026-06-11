@@ -393,7 +393,7 @@ Copy [`standards/gitleaks.toml`](gitleaks.toml) as the starting point and extend
 > historical reference only.
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
-The template at [`standards/workflows/claude.yml`](workflows/claude.yml) is preserved for historical reference.
+The template has been removed; see [Migration from `claude.yml`](#migration-from-claudeyml) below for the historical reference and migration path.
 
 > **OIDC security constraint — `claude.yml` is immutable on PR branches.**
 > Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
