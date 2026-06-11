@@ -869,45 +869,6 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: claude.yml jobs both have a checkout step
-# ---------------------------------------------------------------------------
-check_claude_workflow_checkout() {
-  local repo="$1"
-
-  local content
-  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/claude.yml" --jq '.content' 2>/dev/null || echo "")
-  [ -z "$content" ] && return  # missing workflow is caught by check_required_workflows
-
-  local decoded
-  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-  [ -z "$decoded" ] && return
-
-  # For each job that uses claude-code-action, verify a checkout step precedes it.
-  # Strategy: scan for job blocks and check each for 'actions/checkout'.
-  for job in claude claude-issue; do
-    # Extract the block starting at the job definition
-    local job_block
-    job_block=$(echo "$decoded" | awk "/^  ${job}:/{found=1} found{print; if(/^  [a-zA-Z_-]+:/ && !/^  ${job}:/) exit}" )
-    if [ -z "$job_block" ]; then
-      continue  # job not present (e.g. repo only has one job)
-    fi
-
-    if ! echo "$job_block" | grep -q 'actions/checkout'; then
-      add_finding "$repo" "ci-workflows" "claude-job-missing-checkout-${job}" "error" \
-        "The \`${job}\` job in \`claude.yml\` is missing a checkout step — claude-code-action requires the repo to be checked out to read \`CLAUDE.md\` and \`AGENTS.md\`" \
-        "standards/workflows/claude.yml"
-    fi
-  done
-
-  # Verify the check_run trigger is present — without it the claude-ci-fix job
-  # in the reusable can never fire to diagnose and fix CI failures on PRs.
-  if ! echo "$decoded" | grep -qE "^[[:space:]]+check_run:"; then
-    add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
-      "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
-      "standards/ci-standards.md#4-claude-code-claudeyml"
-  fi
-}
-
 # ---------------------------------------------------------------------------
 # Check: ci.yml uses SHA-scoped concurrency group
 #
@@ -1572,7 +1533,7 @@ For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admi
 gh api repos/${ORG}/.github/contents/standards/workflows/<template>.yml --jq '.content' | base64 -d > .github/workflows/<template>.yml
 \`\`\`
 
-Available templates: \`agent-shield.yml\`, \`claude.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
+Available templates: \`agent-shield.yml\`, \`dev-lead.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
       ;;
     labels)
       remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` — it applies standard labels alongside settings:
@@ -2068,7 +2029,6 @@ main() {
     check_sonarcloud "$repo"
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
-    # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_dev_lead_stub "$repo"

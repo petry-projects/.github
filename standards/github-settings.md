@@ -244,7 +244,7 @@ but the categories are universal.
 |-------|----------|---------------|-------|
 | **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
 | **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
-| **Claude Code** | All repos | `claude` | AI code review on every PR |
+| **Dev-Lead Agent** | All repos | `Dev-Lead Agent / dev-lead` | AI code review and agent automation on every PR |
 | **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
 | **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
 | **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
@@ -294,17 +294,44 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 
 | App | Purpose | Installed |
 |-----|---------|-----------|
-| **Claude** | AI code review and PR assistance via Claude Code Action | 2026-03-20 |
+| **Claude** | AI code review and PR assistance via Claude Code Action (default dev-lead engine) | 2026-03-20 |
 | **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge | 2026-03-23 |
 | **petry-projects-pr-review-agent** | (deprecated) GitHub App formerly used for PR review — replaced by `donpetry-bot` machine user in `@petry-projects/org-leads` because Apps cannot be CODEOWNERS | 2026-04-01 |
 | **donpetry-bot** | Machine-user account in `@petry-projects/org-leads`; satisfies CODEOWNERS for automated PR review | 2026-05-04 |
 | **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
 
+### AI Engine Support — Dev-Lead Workflow
+
+The **dev-lead agent** workflow (`dev-lead.yml`) supports multiple AI engines for PR review and automation.
+Set `vars.DEV_LEAD_ENGINE` per-repo to choose the engine; defaults to `claude`.
+
+| Engine | Engine ID | Required Secrets | Purpose | Status |
+|--------|-----------|-----------------|---------|--------|
+| **Claude** | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic Claude models for code review | Active (default) |
+| **Gemini** | `gemini` | `CLAUDE_CODE_OAUTH_TOKEN`, `GOOGLE_API_KEY` | Google Gemini for code review (fallback if Claude unavailable) | Supported |
+| **Copilot** | `copilot` | `CLAUDE_CODE_OAUTH_TOKEN`, `GH_PAT` | GitHub Copilot for code review (GitHub-native alternative) | Supported |
+
+**Configuration per-repo (set as a repository variable):**
+
+```bash
+# GitHub does not propagate caller workflow env: values into called reusable
+# workflows, so setting env: in the caller stub has no effect. Use a repository
+# variable instead, which the reusable workflow reads as vars.DEV_LEAD_ENGINE.
+gh variable set DEV_LEAD_ENGINE --body "gemini" --repo petry-projects/<repo>
+# Alternatively: Settings → Secrets and variables → Actions → Variables → New variable
+```
+
+**Secret requirements by engine:**
+
+- **Claude**: requires `CLAUDE_CODE_OAUTH_TOKEN` only
+- **Gemini**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GOOGLE_API_KEY`
+- **Copilot**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GH_PAT` (GitHub token with Copilot scope)
+
 ### Check-Suite Auto-Trigger Preferences
 
 GitHub automatically creates a check suite for any app that has previously created check runs in a repo, on every push.
-Some apps (Claude, CodeRabbit) create these suites proactively but only complete them when they have real work to do.
+Some apps (Claude, CodeRabbit, and alternative AI engines) create these suites proactively but only complete them when they have real work to do.
 When they have nothing to do, the suite stays in `queued` state indefinitely —
 **GitHub auto-merge waits for all check suites to reach a terminal state before merging**,
 so these orphaned suites permanently block auto-merge.
@@ -321,6 +348,9 @@ Disabling auto-trigger stops GitHub from creating suites on every push. The apps
 If an app has never created a check run in a repository, GitHub omits that app from `auto_trigger_checks` entirely.
 Both `scripts/apply-repo-settings.sh` and `scripts/compliance-audit.sh` treat this `missing` state as compliant —
 no PATCH is needed and no finding is raised until the app is first seen in the repo.
+
+**Additional AI engines** (Gemini, Copilot) — if a repo activates an alternative `DEV_LEAD_ENGINE`:
+Verify that the corresponding app has `auto_trigger_checks: false` set if/when it first creates a check run.
 
 **Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
 
@@ -343,12 +373,24 @@ GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
 These secrets are configured at the **organization level** and inherited by
 all repos automatically — no per-repo setup needed:
 
+#### Required secrets (all repos)
+
 | Secret | Purpose |
 |--------|---------|
 | `APP_ID` | GitHub App ID for Dependabot auto-merge (app_id: 3167543) |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action and dev-lead agent (default engine) |
+| `DON_PETRY_BOT_GH_PAT` | Classic PAT (repo scope) owned by donpetry-bot; required by `pr-review-mention-reusable.yml` to post review-mention comments as the bot identity |
+| `GH_PAT_WORKFLOWS` | Classic PAT with `repo` scope; required for cross-repo script access and dev-lead to push workflow files |
+| `GITLEAKS_LICENSE` | Gitleaks license key required for `secret-scan` job in organization repositories (see [ci-standards.md](ci-standards.md#4-secret-scanning-ciymll--gitleaks-job)) |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
+
+#### Optional secrets (by feature)
+
+| Secret | Purpose | Required for |
+|--------|---------|---------------|
+| `GOOGLE_API_KEY` | Gemini API authentication | Repos using `vars.DEV_LEAD_ENGINE=gemini` |
+| `GH_PAT` | GitHub token with Copilot scope | Repos using `vars.DEV_LEAD_ENGINE=copilot` |
 
 Repos may require repo-specific secrets beyond this standard set.
 
@@ -423,11 +465,46 @@ When creating a new repository in `petry-projects`:
 
 ---
 
-## Current Compliance Status
+## Organization-Level Workflows
 
-**Repository settings:** All 7 repos are fully compliant as of 2026-05-13
-(check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
-last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
+The org runs several automated workflows across all repositories:
+
+| Workflow | Schedule | Purpose | Details |
+|----------|----------|---------|---------|
+| **Actions Fleet Monitor** (`actions-fleet-monitor.yml` in `petry-projects/.github-private`) | Daily, 6:00 UTC | Monitor health of all GitHub Actions workflows across the org | Tracks success/failure rates, duration percentiles (p50/p95), and assigns status (HEALTHY/WARNING/DEGRADED/CRITICAL) per workflow; creates issues when workflows have failures |
+| **Org Scorecard Review** (`org-scorecard.yml`) | Weekly, Monday 9:00 UTC | Security posture scoring for all public repos via OpenSSF Scorecard | Creates/updates/closes GitHub Issues with findings; auto-closes when resolved |
+| **Org Standards Compliance Audit** (`compliance-audit-and-improvement.yml`) | Weekly, Friday 12:00 UTC | Deterministic audit of all repos against org standards + runtime health survey | Identifies missing workflows, misconfigured settings, stale PRs, security alerts; creates actionable issues labeled `dev-lead` for agent remediation |
+| **Daily Org Status** (`daily-org-status.yml`) | Daily, 6:00 UTC | Org-wide health snapshot — PR counts, CI failures, dependency vulnerabilities | Reports via PR comments and workflow summary |
+| **Dependency Audit** (`dependency-audit.yml`) | Per-repo CI (push/PR to `main`) | Multi-ecosystem dependency vulnerability scan (npm, pnpm, go, cargo, pip) | Fails the build when dependencies have known security advisories; adopted per-repo via the standard caller stub |
+
+### Actions Fleet Monitor Details
+
+The **Actions Fleet Monitor** runs daily and provides critical visibility into workflow health:
+
+**Metrics tracked per workflow:**
+
+- Total runs, successful runs, failed runs, cancelled runs (over lookback window)
+- Failure rate (`failed / total`)
+- Duration percentiles (p50 and p95)
+- Health status: `HEALTHY` (0% failures), `WARNING` (>0%, ≤20%), `DEGRADED` (>20%, ≤50%), `CRITICAL` (>50%)
+
+**Lookback window:** Defaults to 1 day; can be customized with `--field lookback_days=N` when running manually
+
+**Results delivery:**
+
+- Step Summary — workflow results table displayed in GitHub Actions UI (visible on every run)
+- GitHub Issue — created in `.github-private` when any workflow has failed runs
+
+**Manual trigger:**
+
+```bash
+gh workflow run actions-fleet-monitor.yml \
+  --repo petry-projects/.github-private \
+  --field org=petry-projects \
+  --field lookback_days=7
+```
+
+This tool is essential for detecting CI flakiness, performance degradation, and systemic workflow issues before they impact development velocity.
 
 **Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
 sweep (now enforced by `check_ruleset_bypass_actors()` and
@@ -460,14 +537,41 @@ legacy rulesets still active. **All have been remediated.** A re-audit reports
 
 ## Audit & Compliance
 
-The org runs a weekly [OpenSSF Scorecard](https://github.com/ossf/scorecard)
-audit via the [`org-scorecard.yml`](../.github/workflows/org-scorecard.yml)
-workflow. This workflow:
+### Compliance Audit Process
 
-- Scans all public repos in the org
+Every Friday at 12:00 UTC, the **Org Standards Compliance Audit** runs across all repositories:
+
+1. **Deterministic compliance checks** (`scripts/compliance-audit.sh`) verify each repo meets org standards:
+   - Required workflows present (CI, CodeQL, dev-lead agent, Dependabot, etc.)
+   - Branch protection rules and rulesets correctly configured
+   - Labels, CODEOWNERS, and settings match the standard
+   - GitHub App auto-trigger preferences set correctly
+
+2. **Runtime health survey** checks:
+   - CI failures and flaky tests
+   - Stale pull requests (open > 14 days)
+   - Security alerts (CodeQL, Dependabot, secret scanning)
+   - Dependency vulnerabilities
+
+3. **Issue creation and categorization:**
+   - Each finding becomes a GitHub Issue in the repository, labeled `compliance-audit`
+   - High-priority findings (errors) are escalated for immediate remediation
+   - Issues include a `dev-lead` label for agent-driven automation
+   - Fixed issues are auto-closed by the audit
+
+4. **Org-level summary and reporting:**
+   - Overall compliance health report
+   - Trend analysis and improvement suggestions
+   - Published as a GitHub Issue in the `.github` repository
+
+### Scorecard Results
+
+The weekly [OpenSSF Scorecard](https://github.com/ossf/scorecard) audit via
+[`org-scorecard.yml`](../.github/workflows/org-scorecard.yml) scans all public repos:
+
 - Creates/updates GitHub Issues for findings (labeled `scorecard`)
 - Auto-closes issues when checks reach a score of 10/10
 - Produces a summary report in the workflow step summary
 
-Scorecard results should be reviewed weekly and remediated per the
+Scorecard findings should be reviewed and remediated per the
 [OpenSSF Scorecard documentation](https://github.com/ossf/scorecard/blob/main/docs/checks.md).
