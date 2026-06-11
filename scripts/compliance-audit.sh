@@ -406,21 +406,249 @@ check_labels() {
 # ---------------------------------------------------------------------------
 check_rulesets() {
   local repo="$1"
+  local repo_json="${2:-}"
 
-  local rulesets
-  rulesets=$(gh_api "repos/$ORG/$repo/rulesets" --jq '.[].name' 2>/dev/null || echo "")
+  # Default branch drives which rulesets are "targeting main" below.
+  local default_branch
+  default_branch=$(echo "$repo_json" | jq -r '.default_branch // "main"' 2>/dev/null || echo "main")
+  if [ -z "$default_branch" ] || [ "$default_branch" = "null" ]; then
+    default_branch="main"
+  fi
 
-  if ! echo "$rulesets" | grep -qx "pr-quality"; then
+  # Fetch the full ruleset list once (id + name + everything). We need ids to
+  # pull each ruleset's bypass_actors below, so we cannot use --jq '.[].name'.
+  # Use --paginate so all rulesets are fetched regardless of page count, then
+  # reconstitute the per-page arrays into one flat array with jq -s '[.[]]'.
+  local rulesets_json
+  rulesets_json=$(gh_api --paginate "repos/$ORG/$repo/rulesets" 2>/dev/null | jq -s '[.[][]]' 2>/dev/null || echo "[]")
+  [ -z "$rulesets_json" ] && rulesets_json="[]"
+
+  local names
+  names=$(echo "$rulesets_json" | jq -r '.[].name' 2>/dev/null || echo "")
+
+  if ! echo "$names" | grep -qx "pr-quality"; then
     add_finding "$repo" "rulesets" "missing-pr-quality" "error" \
       "Missing \`pr-quality\` repository ruleset" \
       "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
   fi
 
-  if ! echo "$rulesets" | grep -qx "code-quality"; then
+  if ! echo "$names" | grep -qx "code-quality"; then
     add_finding "$repo" "rulesets" "missing-code-quality" "error" \
       "Missing \`code-quality\` repository ruleset (required status checks)" \
       "standards/github-settings.md#code-quality--required-checks-ruleset-all-repositories"
   fi
+
+  check_ruleset_bypass_actors "$repo" "$default_branch" "$rulesets_json"
+  check_legacy_rulesets "$repo" "$default_branch" "$rulesets_json"
+}
+
+# ---------------------------------------------------------------------------
+# Check: Ruleset bypass actors (every ruleset targeting the default branch)
+# ---------------------------------------------------------------------------
+# The standard (github-settings.md § "Bypass Actors — Required on Every Ruleset
+# Targeting main") requires that EVERY ruleset whose conditions include the
+# default branch grant always-bypass to BOTH:
+#   1. the `dependabot-automerge-petry` GitHub App (Integration, actor_id 3167543)
+#   2. the `OrganizationAdmin` role
+# GitHub evaluates bypass eligibility independently per ruleset, so a missing
+# actor on code-quality (or a legacy protect-branches / main ruleset) silently
+# blocks Dependabot auto-merge or removes the emergency admin override even when
+# pr-quality is correct. This logic previously lived only as a copy-paste shell
+# snippet in the standard and was never enforced by the audit.
+#
+# Two correctness nuances the simple snippet missed:
+#   - bypass_mode MUST be `always`. `pull_request` mode only applies when the
+#     bypass actor opens the PR; Dependabot opens its own PRs, so a
+#     `pull_request`-mode app bypass is rejected at merge time.
+#   - The `Repository admin` role (RepositoryRole, actor_id 5) is NOT the
+#     `OrganizationAdmin` role. It renders similarly in the UI but is repo-scoped
+#     and does not satisfy the org-wide emergency-override requirement.
+DEPENDABOT_APP_ACTOR_ID=3167543
+
+check_ruleset_bypass_actors() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local std_ref="standards/github-settings.md#bypass-actors--required-on-every-ruleset-targeting-main"
+
+  local ids
+  ids=$(echo "$rulesets_json" | jq -r '.[].id' 2>/dev/null || echo "")
+  [ -z "$ids" ] && return 0
+
+  local rs_id
+  for rs_id in $ids; do
+    local rs
+    rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+    [ -z "$rs" ] && continue
+
+    # Does this ruleset target the default branch? Match the GitHub aliases
+    # (~DEFAULT_BRANCH, ~ALL) or an explicit refs/heads/<default> include.
+    local targets_default
+    targets_default=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" '
+      ((.conditions.ref_name.include) // []) as $inc
+      | ((.conditions.ref_name.exclude) // []) as $exc
+      | (
+          (($inc | index("~DEFAULT_BRANCH")) != null)
+          or (($inc | index("~ALL")) != null)
+          or (($inc | index($db)) != null)
+        )
+        and (($exc | index("~DEFAULT_BRANCH")) == null)
+        and (($exc | index($db)) == null)
+    ' 2>/dev/null || echo "false")
+    [ "$targets_default" != "true" ] && continue
+
+    local rs_name
+    rs_name=$(echo "$rs" | jq -r '.name' 2>/dev/null || echo "ruleset-$rs_id")
+    # Stable, filesystem/label-safe slug for the finding id so findings don't
+    # churn across runs. Ruleset names (pr-quality, code-quality, …) are stable.
+    local slug
+    slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="$rs_id"
+
+    # --- Bypass actor check (single jq invocation) ------------------------
+    local oa_always oa_any repo_admin dep_always dep_any
+    local bypass_info
+    bypass_info=$(jq -r --argjson id "$DEPENDABOT_APP_ACTOR_ID" '
+      [
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin" and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="RepositoryRole" and .actor_id==5)] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id)] | length > 0)
+      ] | map(tostring) | join(" ")
+    ' <<< "$rs" 2>/dev/null || echo "false false false false false")
+    [ -z "$bypass_info" ] && bypass_info="false false false false false"
+    read -r oa_always oa_any repo_admin dep_always dep_any <<< "$bypass_info"
+
+    if [ "$oa_always" != "true" ]; then
+      if [ "$oa_any" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-mode-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants \`OrganizationAdmin\` bypass but not with \`bypass_mode: always\`. The standard requires \`always\` for emergency admin override on every ruleset targeting the default branch." \
+          "$std_ref"
+      elif [ "$repo_admin" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants bypass to the **Repository admin** role (RepositoryRole id 5), not the **OrganizationAdmin** role required by the standard. Repository admin is repo-scoped and does not satisfy the org-wide emergency-override requirement. Add \`OrganizationAdmin\` with \`bypass_mode: always\`." \
+          "$std_ref"
+      else
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) is missing the required \`OrganizationAdmin\` bypass actor (\`bypass_mode: always\`) for emergency admin override." \
+          "$std_ref"
+      fi
+    fi
+
+    # --- dependabot-automerge-petry app -----------------------------------
+    if [ "$dep_always" != "true" ]; then
+      if [ "$dep_any" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-dependabot-mode-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants the \`dependabot-automerge-petry\` app (id $DEPENDABOT_APP_ACTOR_ID) bypass but with the wrong mode. \`pull_request\` mode only applies when the bypass actor opens the PR; Dependabot opens its own PRs, so its merge API calls are rejected. Set \`bypass_mode: always\`." \
+          "$std_ref"
+      else
+        add_finding "$repo" "rulesets" "ruleset-bypass-dependabot-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) is missing the required \`dependabot-automerge-petry\` app (id $DEPENDABOT_APP_ACTOR_ID) bypass actor (\`bypass_mode: always\`). Without it, Dependabot auto-merge API calls are rejected by this ruleset — GitHub evaluates bypass per-ruleset, so it must be present on every ruleset targeting the default branch, not only \`pr-quality\`." \
+          "$std_ref"
+      fi
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: Legacy / non-sanctioned rulesets on the default branch
+# ---------------------------------------------------------------------------
+# `pr-quality` and `code-quality` are the ONLY sanctioned rulesets
+# (standards/github-settings.md § Repository Rulesets). Classic
+# `protect-branches` rules and ad-hoc `main` rulesets are deprecated and MUST be
+# migrated into the two sanctioned rulesets and deleted. A leftover legacy
+# ruleset is drift: it duplicates protections, and — because GitHub evaluates
+# bypass per-ruleset — it is a second place every bypass actor must be kept in
+# sync (the exact trap that produced the inconsistent OrganizationAdmin /
+# RepositoryAdmin bypass state across the fleet).
+#
+# Deleting a legacy ruleset is only safe once every required status check it
+# carries is ALSO required by a sanctioned ruleset; otherwise deletion silently
+# drops a merge gate. This check computes that migration delta and reports it so
+# remediation is deterministic: "safe to delete" vs the exact checks to migrate
+# first.
+SANCTIONED_RULESETS=("pr-quality" "code-quality")
+
+check_legacy_rulesets() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local std_ref="standards/github-settings.md#repository-rulesets"
+
+  local ids
+  ids=$(echo "$rulesets_json" | jq -r '.[].id' 2>/dev/null || echo "")
+  [ -z "$ids" ] && return 0
+
+  # jq snippet: does a ruleset (full JSON on stdin) target the default branch?
+  # Kept identical to check_ruleset_bypass_actors so the two agree on scope.
+  local targets_jq='
+    ((.conditions.ref_name.include) // []) as $inc
+    | ((.conditions.ref_name.exclude) // []) as $exc
+    | (
+        (($inc | index("~DEFAULT_BRANCH")) != null)
+        or (($inc | index("~ALL")) != null)
+        or (($inc | index($db)) != null)
+      )
+      and (($exc | index("~DEFAULT_BRANCH")) == null)
+      and (($exc | index($db)) == null)
+  '
+
+  # Pass 1: fetch every default-branch ruleset once, caching name + JSON, and
+  # accumulate the set of status-check contexts required by the SANCTIONED
+  # rulesets (the coverage that will remain after a legacy ruleset is deleted).
+  local sanctioned_ctx=""        # newline-separated contexts
+  declare -A rs_cache=()         # rs_id -> full JSON (only default-branch ones)
+  declare -A rs_name_cache=()    # rs_id -> name
+  local rs_id rs targets rs_name
+  for rs_id in $ids; do
+    rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+    [ -z "$rs" ] && continue
+    targets=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" "$targets_jq" 2>/dev/null || echo "false")
+    [ "$targets" != "true" ] && continue
+
+    rs_name=$(echo "$rs" | jq -r '.name' 2>/dev/null || echo "ruleset-$rs_id")
+    rs_cache["$rs_id"]="$rs"
+    rs_name_cache["$rs_id"]="$rs_name"
+
+    if [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]]; then
+      local ctx
+      ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+      [ -n "$ctx" ] && sanctioned_ctx+="$ctx"$'\n'
+    fi
+  done
+
+  # Pass 2: flag every non-sanctioned default-branch ruleset and compute the
+  # set of required checks it carries that are NOT covered by the sanctioned
+  # rulesets — the checks that must be migrated before it is safe to delete.
+  for rs_id in "${!rs_cache[@]}"; do
+    rs_name="${rs_name_cache[$rs_id]}"
+    [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]] && continue
+
+    rs="${rs_cache[$rs_id]}"
+    local slug
+    slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="$rs_id"
+
+    local legacy_ctx uncovered=""
+    legacy_ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+    local c
+    while IFS= read -r c; do
+      [ -z "$c" ] && continue
+      if ! grep -qxF "$c" <<< "$sanctioned_ctx"; then
+        uncovered+="\`$c\` "
+      fi
+    done <<< "$legacy_ctx"
+
+    local migrate_note
+    if [ -n "$uncovered" ]; then
+      migrate_note="**Migrate before deleting** — these required checks are not yet required by \`pr-quality\` or \`code-quality\`, so deleting this ruleset would drop them as merge gates: ${uncovered}Add them to \`code-quality\` first, then delete this ruleset."
+    else
+      migrate_note="Every required check it carries is already required by a sanctioned ruleset, so it is **safe to delete** (e.g. \`gh api -X DELETE repos/$ORG/$repo/rulesets/$rs_id\`)."
+    fi
+
+    add_finding "$repo" "rulesets" "legacy-ruleset-$slug" "error" \
+      "Legacy ruleset \`$rs_name\` (id $rs_id) targets the default branch. Only \`pr-quality\` and \`code-quality\` are sanctioned; classic \`protect-branches\` / ad-hoc \`main\` rulesets are deprecated and must be migrated into the two sanctioned rulesets and removed (a duplicate ruleset is a second place every bypass actor must be kept in sync). $migrate_note" \
+      "$std_ref"
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -1835,7 +2063,7 @@ main() {
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"
-    check_rulesets "$repo"
+    check_rulesets "$repo" "$repo_json"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
     check_codeql_default_setup "$repo"
