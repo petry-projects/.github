@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# compliance-retrigger.sh — Re-trigger stale compliance-audit issues and enforce
-# dev-lead workflow health across the fleet.
+# compliance-retrigger.sh — Re-trigger stale compliance-audit issues.
 #
 # Run daily (see .github/workflows/compliance-retrigger.yml).
 #
 # What it does:
-#   1. Verifies that the dev-lead workflow is ACTIVE in every fleet repo.
-#      Disabled workflows silently swallow issue-labeled events — findings
-#      will never be fixed even if labels are applied correctly.
-#   2. Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
-#      have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
-#      label (remove + re-add) to re-fire the issues:labeled event and give
-#      dev-lead a fresh chance to create a fix PR.
+#   Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
+#   have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
+#   label (remove + re-add) to re-fire the issues:labeled event and give
+#   dev-lead a fresh chance to create a fix PR.
 #
 #      Throttling: at most ONE issue per repo is engaged per run (shared across
 #      the primary and legacy-label sweeps), and a repo already active (open PR
@@ -54,8 +50,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ISSUES_RETRIGGERED=0
 ISSUES_SKIPPED=0
 ISSUES_DEFERRED=0
-WORKFLOWS_DISABLED=0
-WORKFLOWS_ENABLED=0
 
 # Repos that already have an in-flight dev-lead engagement THIS run — either an
 # issue we re-triggered or one we found already active. At most one engagement
@@ -86,54 +80,7 @@ stale_cutoff() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1: Check dev-lead workflow health in fleet repos
-# ---------------------------------------------------------------------------
-
-check_devlead_workflows() {
-  info "Checking dev-lead workflow state across fleet repos..."
-  local repos
-  repos=$(gh api "orgs/$ORG/repos?per_page=100" \
-    --jq '[.[] | select(.archived == false and .disabled == false) | .name][]' \
-    2>/dev/null || echo "")
-
-  while IFS= read -r repo; do
-    [ -z "$repo" ] && continue
-    local state
-    state=$(gh api "repos/$ORG/$repo/actions/workflows/dev-lead.yml" \
-      --jq '.state' 2>/dev/null || echo "missing")
-
-    case "$state" in
-      active)
-        WORKFLOWS_ENABLED=$((WORKFLOWS_ENABLED + 1))
-        ;;
-      disabled_manually|disabled_inactivity)
-        warn "dev-lead workflow is '$state' in $repo — enabling it"
-        if [ "$DRY_RUN" != "true" ]; then
-          local wf_id
-          wf_id=$(gh api "repos/$ORG/$repo/actions/workflows/dev-lead.yml" \
-            --jq '.id' 2>/dev/null || echo "")
-          if [ -n "$wf_id" ] && [ "$wf_id" != "null" ]; then
-            gh api -X PUT "repos/$ORG/$repo/actions/workflows/$wf_id/enable" 2>/dev/null \
-              && info "Enabled dev-lead in $repo" \
-              || warn "Failed to enable dev-lead in $repo"
-          fi
-        fi
-        WORKFLOWS_DISABLED=$((WORKFLOWS_DISABLED + 1))
-        ;;
-      missing)
-        # Repo does not have dev-lead.yml — not a fleet repo, skip silently
-        ;;
-      *)
-        warn "Unexpected dev-lead state '$state' in $repo"
-        ;;
-    esac
-  done <<< "$repos"
-
-  info "dev-lead workflow check complete: ${WORKFLOWS_ENABLED} active, ${WORKFLOWS_DISABLED} re-enabled"
-}
-
-# ---------------------------------------------------------------------------
-# Step 2: Re-trigger stale compliance issues
+# Re-trigger stale compliance issues
 # ---------------------------------------------------------------------------
 
 retrigger_stale_issues() {
@@ -329,8 +276,6 @@ print_summary() {
   echo "  Issues retriggered  : ${ISSUES_RETRIGGERED}"
   echo "  Issues skipped      : ${ISSUES_SKIPPED}"
   echo "  Issues deferred     : ${ISSUES_DEFERRED} (repo already engaged this run)"
-  echo "  Workflows re-enabled: ${WORKFLOWS_DISABLED}"
-  echo "  Workflows already active: ${WORKFLOWS_ENABLED}"
   echo "=========================================="
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -342,8 +287,6 @@ print_summary() {
       echo "| Issues retriggered | $ISSUES_RETRIGGERED |"
       echo "| Issues skipped (PR exists or recent) | $ISSUES_SKIPPED |"
       echo "| Issues deferred (repo already engaged this run) | $ISSUES_DEFERRED |"
-      echo "| dev-lead workflows re-enabled | $WORKFLOWS_DISABLED |"
-      echo "| dev-lead workflows already active | $WORKFLOWS_ENABLED |"
       echo "| Stale threshold | ${STALE_DAYS} days |"
       echo "| Dry run | $DRY_RUN |"
     } >> "$GITHUB_STEP_SUMMARY"
@@ -356,7 +299,6 @@ print_summary() {
 
 main() {
   info "compliance-retrigger starting (org=$ORG, stale_days=$STALE_DAYS, dry_run=$DRY_RUN)"
-  check_devlead_workflows
   retrigger_stale_issues
   print_summary
 }
