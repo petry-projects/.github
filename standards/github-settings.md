@@ -424,31 +424,31 @@ When creating a new repository in `petry-projects`:
 (check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
 last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 
-**Ruleset bypass actors & legacy rulesets (as of 2026-06-10):** a full sweep
-(now enforced by `check_ruleset_bypass_actors()` and `check_legacy_rulesets()`)
-found `.github-private` fully compliant and every other repo carrying at least
-one finding — `code-quality` rulesets missing the `dependabot-automerge-petry`
-bypass, `pr-quality` rulesets granting `RepositoryAdmin` where `OrganizationAdmin`
-is required, and four deprecated legacy rulesets still active. Remediation is in
-progress; the table below tracks it.
+**Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
+sweep (now enforced by `check_ruleset_bypass_actors()` and
+`check_legacy_rulesets()`) found `.github-private` already compliant and every
+other repo carrying findings — `code-quality` rulesets missing the
+`dependabot-automerge-petry` bypass, `pr-quality` rulesets granting
+`RepositoryAdmin` where `OrganizationAdmin` is required, and four deprecated
+legacy rulesets still active. **All have been remediated.** A re-audit reports
+**zero ruleset findings** across the fleet.
 
-| Repository | Bypass actors | Legacy ruleset to retire | Notes |
-|------------|:---:|---|-------|
-| **.github-private** | ✅ | — | Fully compliant |
-| **.github** | ⚠️ | `protect-branches` (safe to delete) | `code-quality` missing dependabot bypass; `protect-branches` uses RepositoryAdmin |
-| **bmad-bgreat-suite** | ⚠️ | `protect-branches` (safe to delete) | `code-quality` + `protect-branches` have empty bypass actors |
-| **ContentTwin** | ⚠️ | — | `code-quality` missing dependabot bypass; `pr-quality` uses RepositoryAdmin |
-| **broodly** | ⚠️ | — | `code-quality` missing dependabot bypass; `pr-quality` uses RepositoryAdmin, no dependabot |
-| **markets** | ⚠️ | — | `code-quality` empty; `pr-quality` uses RepositoryAdmin, no dependabot |
-| **TalkTerm** | ⚠️ | `main` (safe to delete) | `code-quality` missing dependabot bypass; `main` duplicates `pr-quality` |
-| **google-app-scripts** | ⚠️ | `protect-branches` (migrate `coverage` first) | `code-quality` empty; `protect-branches` requires `coverage`, not yet in `code-quality` |
+| Repository | Bypass actors | Legacy ruleset | Action taken |
+|------------|:---:|:---:|-------|
+| **.github-private** | ✅ | — | Already compliant |
+| **.github** | ✅ | retired | `code-quality` dependabot bypass added; `protect-branches` deleted |
+| **bmad-bgreat-suite** | ✅ | retired | `code-quality` bypass actors added; `protect-branches` deleted |
+| **ContentTwin** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin added |
+| **broodly** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin + dependabot added |
+| **markets** | ✅ | — | `code-quality` bypass actors added; `pr-quality` OrganizationAdmin + dependabot added |
+| **TalkTerm** | ✅ | retired | `code-quality` dependabot bypass added; redundant `main` ruleset deleted |
+| **google-app-scripts** | ✅ | retired | `coverage` migrated into `code-quality`, then `protect-branches` deleted; `code-quality` bypass actors added |
 
 > **Remediation tooling:** `scripts/fix-ruleset-bypass.sh` (bypass actors,
 > least-destructive, dry-run capable) and `scripts/apply-rulesets.sh` (canonical
 > `pr-quality` / `code-quality`). Legacy rulesets are retired with
-> `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once their
-> migration delta is clear — except `google-app-scripts/protect-branches`, whose
-> `coverage` check must be added to `code-quality` before deletion.
+> `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once
+> `check_legacy_rulesets()` reports an empty migration delta.
 
 ---
 
