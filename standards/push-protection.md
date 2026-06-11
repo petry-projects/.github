@@ -216,7 +216,6 @@ secret-scan:
   runs-on: ubuntu-latest
   permissions:
     contents: read
-    security-events: write
   steps:
     - name: Checkout (full history)
       # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
@@ -225,16 +224,28 @@ secret-scan:
       with:
         fetch-depth: 0
 
-    - name: Run gitleaks
-      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
-      # then dereference if it points at an annotated tag.
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-      with:
-        args: detect --source . --redact --verbose --exit-code 1
+    - name: Install gitleaks
+      # Download the pre-built binary and verify its SHA256 checksum.
+      # To upgrade: download the new checksums.txt from the gitleaks release page,
+      # update the version tag and the sha256 hash below.
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_linux_x64.tar.gz' --output /tmp/gitleaks.tar.gz
+        echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c
+        tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+        sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+
+    - name: Run gitleaks
+      run: gitleaks detect --source . --redact --verbose --exit-code 1
 ```
+
+> **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
+> requires a paid license for GitHub organization repos. The CLI (installed via
+> a direct binary download with SHA256 verification) is free, fully pinned, and
+> runs the same scan. If you have a license, you can use the action instead —
+> add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to the `env:` block
+> alongside `GITHUB_TOKEN`.
 
 The job MUST:
 
