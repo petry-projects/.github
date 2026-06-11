@@ -210,7 +210,7 @@ build_pr_quality_ruleset_json() {
       {
         actor_id: 3167543,
         actor_type: "Integration",
-        bypass_mode: "pull_request"
+        bypass_mode: "always"
       }
     ]
   }'
@@ -251,7 +251,18 @@ build_ruleset_json() {
           }
         }
       ],
-      bypass_actors: []
+      bypass_actors: [
+        {
+          actor_id: 0,
+          actor_type: "OrganizationAdmin",
+          bypass_mode: "always"
+        },
+        {
+          actor_id: 3167543,
+          actor_type: "Integration",
+          bypass_mode: "always"
+        }
+      ]
     }'
 }
 
