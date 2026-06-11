@@ -956,6 +956,11 @@ jobs:
           additional_permissions: |
             actions: read
             checks: read
+          # claude_args.--allowedTools replaces the action defaults — keep this
+          # list broad enough to cover interactive workflows (rebases, conflict
+          # resolution, gh CLI usage). Narrowing it has caused regressions.
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(grep:*),Bash(find:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(test:*),Edit,Write,Read,Grep,Glob,LS,MultiEdit,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillBash"
 
   # Automation mode: issue-triggered work — implement, open PR, review, and notify
   claude-issue:
@@ -980,7 +985,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           label_trigger: "claude"
