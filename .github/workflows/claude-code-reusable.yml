@@ -304,8 +304,14 @@ jobs:
             fi
           fi
           echo "number=$PR" >> "$GITHUB_OUTPUT"
-          echo "check_name=$CHECK_NAME" >> "$GITHUB_OUTPUT"
-          echo "details_url=$DETAILS_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "check_name<<EOF"
+            echo "$CHECK_NAME"
+            echo "EOF"
+            echo "details_url<<EOF"
+            echo "$DETAILS_URL"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Checkout repository
         if: steps.pr.outputs.number != ''
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -454,7 +460,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --state open \
             --json number,url,headRefName \
-            --jq --arg issue "$ISSUE" '.[] | select(.headRefName | startswith("claude/issue-" + $issue + "-")) | .url' \
+            | jq --arg issue "$ISSUE" -r '.[] | select(.headRefName | startswith("claude/issue-" + $issue + "-")) | .url' \
             | head -1)
 
           # Fallback: search PR body for "Closes #NNN"
