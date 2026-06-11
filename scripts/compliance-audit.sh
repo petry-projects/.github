@@ -437,6 +437,7 @@ check_rulesets() {
   fi
 
   check_ruleset_bypass_actors "$repo" "$default_branch" "$rulesets_json"
+  check_legacy_rulesets "$repo" "$default_branch" "$rulesets_json"
 }
 
 # ---------------------------------------------------------------------------
@@ -544,6 +545,107 @@ check_ruleset_bypass_actors() {
           "$std_ref"
       fi
     fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: Legacy / non-sanctioned rulesets on the default branch
+# ---------------------------------------------------------------------------
+# `pr-quality` and `code-quality` are the ONLY sanctioned rulesets
+# (standards/github-settings.md § Repository Rulesets). Classic
+# `protect-branches` rules and ad-hoc `main` rulesets are deprecated and MUST be
+# migrated into the two sanctioned rulesets and deleted. A leftover legacy
+# ruleset is drift: it duplicates protections, and — because GitHub evaluates
+# bypass per-ruleset — it is a second place every bypass actor must be kept in
+# sync (the exact trap that produced the inconsistent OrganizationAdmin /
+# RepositoryAdmin bypass state across the fleet).
+#
+# Deleting a legacy ruleset is only safe once every required status check it
+# carries is ALSO required by a sanctioned ruleset; otherwise deletion silently
+# drops a merge gate. This check computes that migration delta and reports it so
+# remediation is deterministic: "safe to delete" vs the exact checks to migrate
+# first.
+SANCTIONED_RULESETS=("pr-quality" "code-quality")
+
+check_legacy_rulesets() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local std_ref="standards/github-settings.md#repository-rulesets"
+
+  local ids
+  ids=$(echo "$rulesets_json" | jq -r '.[].id' 2>/dev/null || echo "")
+  [ -z "$ids" ] && return 0
+
+  # jq snippet: does a ruleset (full JSON on stdin) target the default branch?
+  # Kept identical to check_ruleset_bypass_actors so the two agree on scope.
+  local targets_jq='
+    ((.conditions.ref_name.include) // []) as $inc
+    | ((.conditions.ref_name.exclude) // []) as $exc
+    | (
+        (($inc | index("~DEFAULT_BRANCH")) != null)
+        or (($inc | index("~ALL")) != null)
+        or (($inc | index($db)) != null)
+      )
+      and (($exc | index("~DEFAULT_BRANCH")) == null)
+      and (($exc | index($db)) == null)
+  '
+
+  # Pass 1: fetch every default-branch ruleset once, caching name + JSON, and
+  # accumulate the set of status-check contexts required by the SANCTIONED
+  # rulesets (the coverage that will remain after a legacy ruleset is deleted).
+  local sanctioned_ctx=""        # newline-separated contexts
+  declare -A rs_cache=()         # rs_id -> full JSON (only default-branch ones)
+  declare -A rs_name_cache=()    # rs_id -> name
+  local rs_id rs targets rs_name
+  for rs_id in $ids; do
+    rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+    [ -z "$rs" ] && continue
+    targets=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" "$targets_jq" 2>/dev/null || echo "false")
+    [ "$targets" != "true" ] && continue
+
+    rs_name=$(echo "$rs" | jq -r '.name' 2>/dev/null || echo "ruleset-$rs_id")
+    rs_cache["$rs_id"]="$rs"
+    rs_name_cache["$rs_id"]="$rs_name"
+
+    if [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]]; then
+      local ctx
+      ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+      [ -n "$ctx" ] && sanctioned_ctx+="$ctx"$'\n'
+    fi
+  done
+
+  # Pass 2: flag every non-sanctioned default-branch ruleset and compute the
+  # set of required checks it carries that are NOT covered by the sanctioned
+  # rulesets — the checks that must be migrated before it is safe to delete.
+  for rs_id in "${!rs_cache[@]}"; do
+    rs_name="${rs_name_cache[$rs_id]}"
+    [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]] && continue
+
+    rs="${rs_cache[$rs_id]}"
+    local slug
+    slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="$rs_id"
+
+    local legacy_ctx uncovered=""
+    legacy_ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+    local c
+    while IFS= read -r c; do
+      [ -z "$c" ] && continue
+      if ! grep -qxF "$c" <<< "$sanctioned_ctx"; then
+        uncovered+="\`$c\` "
+      fi
+    done <<< "$legacy_ctx"
+
+    local migrate_note
+    if [ -n "$uncovered" ]; then
+      migrate_note="**Migrate before deleting** — these required checks are not yet required by \`pr-quality\` or \`code-quality\`, so deleting this ruleset would drop them as merge gates: ${uncovered}Add them to \`code-quality\` first, then delete this ruleset."
+    else
+      migrate_note="Every required check it carries is already required by a sanctioned ruleset, so it is **safe to delete** (e.g. \`gh api -X DELETE repos/$ORG/$repo/rulesets/$rs_id\`)."
+    fi
+
+    add_finding "$repo" "rulesets" "legacy-ruleset-$slug" "error" \
+      "Legacy ruleset \`$rs_name\` (id $rs_id) targets the default branch. Only \`pr-quality\` and \`code-quality\` are sanctioned; classic \`protect-branches\` / ad-hoc \`main\` rulesets are deprecated and must be migrated into the two sanctioned rulesets and removed (a duplicate ruleset is a second place every bypass actor must be kept in sync). $migrate_note" \
+      "$std_ref"
   done
 }
 

@@ -121,6 +121,19 @@ Rulesets are the primary enforcement mechanism for branch policies. All
 repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
+**`pr-quality` and `code-quality` are the only sanctioned rulesets.** Legacy
+`protect-branches` rulesets and ad-hoc `main` rulesets are deprecated: they
+duplicate protections and, because GitHub evaluates bypass eligibility per
+ruleset, they are a second place every bypass actor must be kept in sync (the
+trap that produced inconsistent `OrganizationAdmin` / `RepositoryAdmin` bypass
+state across the fleet). They MUST be migrated into the two sanctioned rulesets
+and removed. Deletion is only safe once every required status check the legacy
+ruleset carries is ALSO required by a sanctioned ruleset — otherwise deletion
+silently drops a merge gate. `check_legacy_rulesets()` in
+[`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh) flags each
+legacy ruleset and reports the exact migration delta (checks to move into
+`code-quality` first, or "safe to delete").
+
 ### Bypass Actors — Required on Every Ruleset Targeting `main`
 
 **The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
@@ -411,17 +424,31 @@ When creating a new repository in `petry-projects`:
 (check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
 last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 
-**Ruleset status (as of 2026-05-04):**
+**Ruleset bypass actors & legacy rulesets (as of 2026-06-10):** a full sweep
+(now enforced by `check_ruleset_bypass_actors()` and `check_legacy_rulesets()`)
+found `.github-private` fully compliant and every other repo carrying at least
+one finding — `code-quality` rulesets missing the `dependabot-automerge-petry`
+bypass, `pr-quality` rulesets granting `RepositoryAdmin` where `OrganizationAdmin`
+is required, and four deprecated legacy rulesets still active. Remediation is in
+progress; the table below tracks it.
 
-| Repository | `pr-quality` | `code-quality` | Notes |
-|------------|:---:|:---:|-------|
-| **.github** | ✅ | — | `pr-quality` added; `code-quality` not yet configured |
-| **bmad-bgreat-suite** | ✅ | ✅ | Both rulesets present; CodeQL check fixed (`CodeQL` not `Analyze (actions)`) |
-| **ContentTwin** | ✅ | ✅ | `dependabot-automerge-petry` bypass actor added; CodeQL check fixed |
-| **broodly** | ✅ | — | `code-quality` not yet configured |
-| **TalkTerm** | ✅ | ✅ | Both rulesets present; stale CI check names removed |
-| **markets** | ✅ | — | `code-quality` not yet configured |
-| **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
+| Repository | Bypass actors | Legacy ruleset to retire | Notes |
+|------------|:---:|---|-------|
+| **.github-private** | ✅ | — | Fully compliant |
+| **.github** | ⚠️ | `protect-branches` (safe to delete) | `code-quality` missing dependabot bypass; `protect-branches` uses RepositoryAdmin |
+| **bmad-bgreat-suite** | ⚠️ | `protect-branches` (safe to delete) | `code-quality` + `protect-branches` have empty bypass actors |
+| **ContentTwin** | ⚠️ | — | `code-quality` missing dependabot bypass; `pr-quality` uses RepositoryAdmin |
+| **broodly** | ⚠️ | — | `code-quality` missing dependabot bypass; `pr-quality` uses RepositoryAdmin, no dependabot |
+| **markets** | ⚠️ | — | `code-quality` empty; `pr-quality` uses RepositoryAdmin, no dependabot |
+| **TalkTerm** | ⚠️ | `main` (safe to delete) | `code-quality` missing dependabot bypass; `main` duplicates `pr-quality` |
+| **google-app-scripts** | ⚠️ | `protect-branches` (migrate `coverage` first) | `code-quality` empty; `protect-branches` requires `coverage`, not yet in `code-quality` |
+
+> **Remediation tooling:** `scripts/fix-ruleset-bypass.sh` (bypass actors,
+> least-destructive, dry-run capable) and `scripts/apply-rulesets.sh` (canonical
+> `pr-quality` / `code-quality`). Legacy rulesets are retired with
+> `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once their
+> migration delta is clear — except `google-app-scripts/protect-branches`, whose
+> `coverage` check must be added to `code-quality` before deletion.
 
 ---
 
