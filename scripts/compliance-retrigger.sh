@@ -4,7 +4,8 @@ set -euo pipefail
 #
 # Run hourly (see .github/workflows/compliance-retrigger.yml). The per-run
 # one-engagement-per-repo throttle means each repo gets at most one issue
-# re-triggered per hour, draining each repo's backlog steadily without bursts.
+# re-triggered per run (≈ one per hour on the scheduled cadence), draining
+# each repo's backlog steadily without bursts.
 #
 # What it does:
 #   Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
