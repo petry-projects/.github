@@ -134,6 +134,11 @@ silently drops a merge gate. `check_legacy_rulesets()` in
 legacy ruleset and reports the exact migration delta (checks to move into
 `code-quality` first, or "safe to delete").
 
+> **Remediating ruleset findings is a manual, admin-token procedure** —
+> `compliance-remediate.sh` skips the `rulesets` category. Follow the
+> [Ruleset Remediation Runbook](ruleset-remediation-runbook.md) (snapshot →
+> bypass actors → migrate-then-delete legacy → verify → rollback).
+
 ### Bypass Actors — Required on Every Ruleset Targeting `main`
 
 **The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
@@ -444,9 +449,10 @@ legacy rulesets still active. **All have been remediated.** A re-audit reports
 | **TalkTerm** | ✅ | retired | `code-quality` dependabot bypass added; redundant `main` ruleset deleted |
 | **google-app-scripts** | ✅ | retired | `coverage` migrated into `code-quality`, then `protect-branches` deleted; `code-quality` bypass actors added |
 
-> **Remediation tooling:** `scripts/fix-ruleset-bypass.sh` (bypass actors,
-> least-destructive, dry-run capable) and `scripts/apply-rulesets.sh` (canonical
-> `pr-quality` / `code-quality`). Legacy rulesets are retired with
+> **Remediation:** see the [Ruleset Remediation Runbook](ruleset-remediation-runbook.md).
+> Tooling: `scripts/fix-ruleset-bypass.sh` (bypass actors, least-destructive,
+> dry-run capable) and `scripts/apply-rulesets.sh` (canonical `pr-quality` /
+> `code-quality`). Legacy rulesets are retired with
 > `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once
 > `check_legacy_rulesets()` reports an empty migration delta.
 
