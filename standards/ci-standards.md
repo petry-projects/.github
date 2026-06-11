@@ -515,15 +515,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
+          # Full history so Claude can rebase / pull / resolve conflicts against main
+          # when the remote branch advances mid-run (e.g. auto-rebase merges).
+          fetch-depth: 0
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
             checks: read
+          # claude_args.--allowedTools replaces the action defaults — keep this
+          # list broad enough to cover interactive workflows (rebases, conflict
+          # resolution, gh CLI usage). Narrowing it has caused regressions.
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(grep:*),Bash(find:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(test:*),Edit,Write,Read,Grep,Glob,LS,MultiEdit,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillBash"
 
   # Automation mode: issue-triggered work — implement, open PR, review, and notify
   claude-issue:
@@ -548,7 +555,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           label_trigger: "claude"
@@ -557,7 +564,7 @@ jobs:
             actions: read
             checks: read
           claude_args: |
-            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
+            --allowedTools "Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
           prompt: |
             Implement a fix for issue #${{ github.event.issue.number }}.
 
@@ -1291,7 +1298,7 @@ All repos MUST align to the latest version of each action:
 | Action | Target Version | Repos Needing Update |
 |--------|---------------|---------------------|
 | **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
-| **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
+| **Claude Code Action** | v1.0.123 (`51ea8ea7`) | All repos should use the same pinned SHA |
 
 > **`github/codeql-action` is no longer pinned per repo** because the
 > standard no longer ships a `codeql.yml` workflow. GitHub manages the
