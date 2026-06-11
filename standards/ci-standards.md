@@ -362,55 +362,28 @@ fail, so a single transient CDN error no longer trips the workflow.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
-Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
+Secret detection via the gitleaks binary-install pattern. This job **must be added to the CI pipeline**
 for all organization repositories. The job scans commit history for hardcoded secrets,
 API keys, and other sensitive data.
-
-**Why a separate job?** Gitleaks requires a license key when scanning organization
-repositories (free for open-source). The job is part of the main `ci.yml` pipeline
-but documented separately to clarify the licensing requirement.
 
 **Standard configuration:** See the canonical job specification in
 [`push-protection.md` — Layer 3: CI Secret Scanning](push-protection.md#layer-3--ci-secret-scanning-secondary-defense).
 
-**Organization repos only — GITLEAKS_LICENSE requirement:**
+**No license required.** The canonical pattern installs the gitleaks binary directly and
+invokes `gitleaks detect --config .gitleaks.toml`. No `GITLEAKS_LICENSE` secret is needed —
+gitleaks is free for open-source and organization use when run via the binary.
 
-When adding the `secret-scan` job to an organization repository's `ci.yml`, you **must**
-pass the `GITLEAKS_LICENSE` secret to the gitleaks action:
-
-```yaml
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-```
-
-Without this environment variable, gitleaks will fail with "missing gitleaks license"
-when scanning in an organization context.
-
-**Required secrets:** `GITLEAKS_LICENSE` (org-level, organization repositories only)
-
-**License requirement:** Gitleaks is free for open-source, but organization scans
-require a valid license. Obtain a free license at [gitleaks.io](https://gitleaks.io).
-
-**License setup:**
-
-1. Create or log into your account at [gitleaks.io](https://gitleaks.io)
-2. Generate a free license key for your organization
-3. Add the license as the org-level secret `GITLEAKS_LICENSE`:
-
-   ```bash
-   gh secret set GITLEAKS_LICENSE --org petry-projects --body "<license-key>"
-   ```
-
-**For personal/user repos:** The `GITLEAKS_LICENSE` environment variable is optional.
-If omitted, gitleaks runs in open-source mode (free, no license needed).
+**Required artifact:** Every adopting repo MUST ship a `.gitleaks.toml` at root.
+Copy [`standards/gitleaks.toml`](gitleaks.toml) as the starting point and extend the
+`paths` allowlist for any repo-specific false-positive paths.
 
 **CI failure — common causes and fixes:**
 
 | Failure | Root cause | Fix |
 |---------|-----------|-----|
-| `missing gitleaks license` | License not passed to action | Ensure env includes `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` |
-| Secrets found | Legitimate secrets in the code | Use `.gitleaksignore` to allowlist false positives, or remove the secret |
+| `Error: Config file not found` | Missing `.gitleaks.toml` at repo root | Copy [`standards/gitleaks.toml`](gitleaks.toml) to `.gitleaks.toml` and commit it |
+| Secrets found (real credential) | An actual secret was committed | Remove the secret from history, rotate the credential immediately, then resolve the alert |
+| Secrets found (false positive) | A test fixture or doc triggers a rule | Add an `allowlist.paths` entry to `.gitleaks.toml` with a comment documenting the justification; do NOT add paths for real credentials |
 
 ### 5. Claude Code (`claude.yml`) — *Deprecated 2026-05*
 
@@ -1135,7 +1108,6 @@ All secrets required by the standard CI workflows are configured at the
 |--------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code Action authentication |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
-| `GITLEAKS_LICENSE` | Gitleaks secret scanning (organization repositories only) |
 | `APP_ID` | GitHub App ID for Dependabot auto-merge |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 
