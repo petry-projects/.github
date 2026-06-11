@@ -184,7 +184,12 @@ jobs:
         id: pr-meta
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "base_ref<<EOF"
+            echo "$BASE_REF"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Run Claude Code
         uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
         with:
@@ -303,8 +308,10 @@ jobs:
               PR=""
             fi
           fi
-          echo "number=$PR" >> "$GITHUB_OUTPUT"
           {
+            echo "number<<EOF"
+            echo "$PR"
+            echo "EOF"
             echo "check_name<<EOF"
             echo "$CHECK_NAME"
             echo "EOF"
