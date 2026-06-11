@@ -180,6 +180,11 @@ jobs:
         with:
           fetch-depth: 1
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Capture PR metadata
+        id: pr-meta
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
       - name: Run Claude Code
         uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
         with:
@@ -200,8 +205,8 @@ jobs:
             ### 1. Check out the PR branch and rebase onto latest main
             ```
             gh pr checkout ${{ github.event.pull_request.number }}
-            git fetch origin ${{ github.event.pull_request.base.ref }}
-            git rebase origin/${{ github.event.pull_request.base.ref }}
+            git fetch origin ${{ steps.pr-meta.outputs.base_ref }}
+            git rebase origin/${{ steps.pr-meta.outputs.base_ref }}
             git push --force-with-lease
             ```
             If the rebase has conflicts, resolve them, then `git rebase --continue` before pushing.
@@ -280,6 +285,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
           INITIAL_PR: ${{ github.event.check_run.pull_requests[0].number }}
           EVENT_HEAD_SHA: ${{ github.event.check_run.head_sha }}
+          CHECK_NAME: ${{ github.event.check_run.name }}
+          DETAILS_URL: ${{ github.event.check_run.details_url }}
         run: |
           PR="$INITIAL_PR"
           if [ -z "$PR" ]; then
@@ -297,6 +304,8 @@ jobs:
             fi
           fi
           echo "number=$PR" >> "$GITHUB_OUTPUT"
+          echo "check_name=$CHECK_NAME" >> "$GITHUB_OUTPUT"
+          echo "details_url=$DETAILS_URL" >> "$GITHUB_OUTPUT"
       - name: Checkout repository
         if: steps.pr.outputs.number != ''
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -390,13 +399,13 @@ jobs:
           # yamllint enable rule:line-length
           # yamllint disable rule:line-length
           prompt: |
-            CI check "${{ github.event.check_run.name }}" has failed on PR #${{ steps.pr.outputs.number }}.
+            CI check "${{ steps.pr.outputs.check_name }}" has failed on PR #${{ steps.pr.outputs.number }}.
 
             Check details:
-            - Check: ${{ github.event.check_run.name }}
+            - Check: ${{ steps.pr.outputs.check_name }}
             - Conclusion: ${{ github.event.check_run.conclusion }}
             - Head SHA: ${{ github.event.check_run.head_sha }}
-            - Details URL: ${{ github.event.check_run.details_url }}
+            - Details URL: ${{ steps.pr.outputs.details_url }}
 
             Please diagnose and fix the failure:
             1. Check out the PR branch: gh pr checkout ${{ steps.pr.outputs.number }}
