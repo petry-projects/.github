@@ -84,7 +84,7 @@ jobs:
     if: >-
       github.event_name != 'discussion' ||
       (github.event.discussion.category.slug == 'ideas' &&
-       github.event.discussion.user.login != 'github-actions[bot]')
+       github.event.discussion.user.type != 'Bot')
     # Permissions cascade from the calling job to the reusable workflow.
     # The reusable workflow's two jobs (gather-signals + analyze) need:
     #   - contents:      read   (checkout, file reads)
