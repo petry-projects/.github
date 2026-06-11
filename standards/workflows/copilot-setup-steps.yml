@@ -179,9 +179,9 @@ jobs:
       - name: Verify environment
         run: |
           echo "=== petry-projects Copilot cloud agent environment ==="
-          echo "Repository : ${{ github.repository }}"
-          echo "Ref        : ${{ github.ref }}"
-          echo "Runner     : ${{ runner.os }} / ${{ runner.arch }}"
+          echo "Repository : ${GITHUB_REPOSITORY}"
+          echo "Ref        : ${GITHUB_REF}"
+          echo "Runner     : ${RUNNER_OS} / ${RUNNER_ARCH}"
           echo ""
           echo "--- Installed tool versions ---"
           git   --version
