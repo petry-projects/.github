@@ -75,9 +75,15 @@ back by moving it back.
 
 1. **Develop & merge** the change to the reusable's `main` as normal (reviewed, CI-green).
 2. **Cut** an immutable release tag `<name>/vX.Y.Z` at the merged commit — the audit trail and rollback target; never moved or deleted.
-3. **Promote through concentric rings** — advance each ring's channel to the new `vX.Y.Z` from the innermost ring outward, moving to the next ring only after the inner one has run it healthy for a soak window (see [Staged promotion through concentric rings](#staged-promotion-through-concentric-rings) below). Each promotion is a single central tag move, gated to an authorized identity.
+3. **Promote through concentric rings** — advance each ring's channel to the new
+   `vX.Y.Z` from the innermost ring outward, moving to the next ring only after
+   the inner one has run it healthy for a soak window (see
+   [Staged promotion through concentric rings](#staged-promotion-through-concentric-rings)
+   below). Each promotion is a single central tag move, gated to an authorized identity.
 4. **`<name>/stable`** is the outermost ring and advances last — that is full-production rollout.
-5. **Roll back** (if a regression surfaces in any ring) by moving that ring's channel back to the prior `vX.Y.Z` — the same move in reverse; callers recover on their next run with no change on their side.
+5. **Roll back** (if a regression surfaces in any ring) by moving that ring's
+   channel back to the prior `vX.Y.Z` — the same move in reverse; callers recover
+   on their next run with no change on their side.
 
 Where a reusable also checks out its own scripts or prompts, thread an
 `agent_ref`-style input pinned to the same channel, so logic **and** code run at
