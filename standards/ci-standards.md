@@ -458,8 +458,7 @@ The workflow has five jobs:
   monitor CI, and tag the maintainer when ready for human review.
 - **`claude-ci-fix`** (CI failure response) — triggered by `workflow_run:
   completed` (failure) for named GitHub Actions workflows on open same-repo
-  PRs. Checks out the branch, reads the failure logs via `gh run view
-  --log-failed`, applies the minimal fix, pushes, and comments with a
+  PRs. Checks out the branch, reads the failure logs via `gh run view --log-failed`, applies the minimal fix, pushes, and comments with a
   summary. Requires the `workflow_run` trigger in the caller's `on:` block
   with the repo-specific list of monitored workflow names.
 - **`claude-fix-pr-reviews`** (bot review handler) — triggered by
@@ -496,7 +495,9 @@ on:
   issues:
     types: [labeled]
   workflow_run:           # enables claude-ci-fix — do not remove
-    workflows: [...]      # list CI workflow names this repo monitors (repo-specific)
+    workflows:
+      - CI                # replace with your repo's workflow names
+      - Build
     types: [completed]
 
 permissions: {}
