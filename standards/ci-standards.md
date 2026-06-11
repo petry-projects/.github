@@ -75,13 +75,52 @@ back by moving it back.
 
 1. **Develop & merge** the change to the reusable's `main` as normal (reviewed, CI-green).
 2. **Cut** an immutable release tag `<name>/vX.Y.Z` at the merged commit — the audit trail and rollback target; never moved or deleted.
-3. **Validate** that release on a candidate channel / canary ring (e.g. a `next` channel, or the reusable's own self-host duty) before it reaches production callers.
-4. **Promote** by moving `<name>/stable` to the validated `vX.Y.Z` — a single central tag move, gated to an authorized identity.
-5. **Roll back** (if a regression surfaces) by moving `<name>/stable` back to the prior `vX.Y.Z` — the same move in reverse; callers recover on their next run with no change on their side.
+3. **Promote through concentric rings** — advance each ring's channel to the new `vX.Y.Z` from the innermost ring outward, moving to the next ring only after the inner one has run it healthy for a soak window (see [Staged promotion through concentric rings](#staged-promotion-through-concentric-rings) below). Each promotion is a single central tag move, gated to an authorized identity.
+4. **`<name>/stable`** is the outermost ring and advances last — that is full-production rollout.
+5. **Roll back** (if a regression surfaces in any ring) by moving that ring's channel back to the prior `vX.Y.Z` — the same move in reverse; callers recover on their next run with no change on their side.
 
 Where a reusable also checks out its own scripts or prompts, thread an
 `agent_ref`-style input pinned to the same channel, so logic **and** code run at
 the one validated version.
+
+#### Staged promotion through concentric rings
+
+`stable` is not a single hop. A release reaches full production by passing
+through a series of **concentric rings** — channels ordered from the smallest
+blast radius to the whole fleet. A release is promoted **one ring at a time**,
+advancing to the next ring only after it has run healthy in the inner ring for a
+defined **soak window**:
+
+| Ring | Channel | Blast radius | Pinned by |
+|---|---|---|---|
+| 0 — canary | `<name>/next` | The reusable's **own self-host** duty (dogfood) | the host repo itself |
+| 1 | `<name>/ring1` | One low-traffic consumer | that consumer |
+| _n_ | `<name>/ring`_n_ | Progressively more consumers | those consumers |
+| Production | `<name>/stable` | The whole fleet | everyone else |
+
+How it works:
+
+- **One immutable release, many channels.** Cut `<name>/vX.Y.Z` once; promotion is moving each ring's channel forward to it, innermost ring first.
+- **Callers stay put; the release moves.** A caller pins exactly one ring's
+  channel (most pin `stable`) and is never edited — the *release* advances
+  through the rings, the *callers* don't. Which ring a repo sits in is a
+  deployment choice, set once.
+- **Soak + health gate.** A ring's channel advances to the new release only
+  after the inner ring has run it healthy for the soak window (no regressions,
+  error budget intact). A failure in any ring **stops promotion** — the outer
+  rings never receive the bad version.
+- **Bounded blast radius + fast rollback.** A regression that slips past an inner ring is contained to that ring and rolled back with one tag move, long before it could reach `stable`.
+
+Ring 0 is the reusable's **own self-host**: it dogfoods every release first, at
+zero external blast radius. This is also what breaks the self-host circular
+dependency — production callers keep running `stable` while the new version is
+exercised on `next`, so a broken candidate can never gate its own fix.
+
+> **Rollout status.** The `stable` channel and single-hop manual promotion are in
+> place today (Phase 1). The `next`/`ring`_n_ channels and automated,
+> soak-gated ring-by-ring promotion are the next phase — the model above is the
+> target the `stable` foundation is built for. A reusable with only `stable`
+> defined today promotes in one gated hop until its ring channels exist.
 
 **Migration.** This is the target for all reusable workflows; they adopt it
 incrementally. A reusable that has not yet published a `stable` channel keeps its
