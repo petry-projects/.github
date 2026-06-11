@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Install Scorecard CLI
         run: |
-<<<<<<< HEAD
-<<<<<<< HEAD
           SCORECARD_VERSION="v5.5.0"
           SCORECARD_SHA="83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8dff"
           curl -sLo scorecard.tar.gz "https://github.com/ossf/scorecard/releases/download/${SCORECARD_VERSION}/scorecard_5.5.0_linux_amd64.tar.gz"
@@ -26,24 +24,6 @@ jobs:
           tar xzf scorecard.tar.gz
           rm scorecard.tar.gz
           sudo mv scorecard /usr/local/bin/scorecard
-=======
-          SCORECARD_VERSION="v5.1.1"
-          SCORECARD_SHA="a894eb7390308069a49a3ace0f68dddf995cdfa1b6e7f8b2e1ea77de131e4962"
-          curl -sLo scorecard.tar.gz "https://github.com/ossf/scorecard/releases/download/${SCORECARD_VERSION}/scorecard_5.1.1_linux_amd64.tar.gz"
-          echo "${SCORECARD_SHA}  scorecard.tar.gz" | sha256sum -c -
-          tar xzf scorecard.tar.gz
-          rm scorecard.tar.gz
-          sudo mv scorecard-linux-amd64 /usr/local/bin/scorecard
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-          SCORECARD_VERSION="v5.5.0"
-          SCORECARD_SHA="83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8dff"
-          curl -sLo scorecard.tar.gz "https://github.com/ossf/scorecard/releases/download/${SCORECARD_VERSION}/scorecard_5.5.0_linux_amd64.tar.gz"
-          echo "${SCORECARD_SHA}  scorecard.tar.gz" | sha256sum -c -
-          tar xzf scorecard.tar.gz
-          rm scorecard.tar.gz
-          sudo mv scorecard /usr/local/bin/scorecard
->>>>>>> 6bebcf4 (fix: update scorecard version and binary name in org-scorecard workflow)
           chmod +x /usr/local/bin/scorecard
 
       - name: Run Scorecard across org
@@ -71,12 +51,6 @@ jobs:
             RESULT_FILE="$RESULTS_DIR/${REPO}.json"
 
             # Run scorecard
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
             # We capture stderr to a separate file to detect parsing errors (malformed workflows)
             ERROR_LOG="$RESULTS_DIR/${REPO}_error.log"
             if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2> "$ERROR_LOG"; then
@@ -94,7 +68,6 @@ jobs:
               fi
             else
               MALFORMED_WORKFLOW="false"
-<<<<<<< HEAD
             fi
 
             # Extract aggregate score
@@ -102,55 +75,7 @@ jobs:
                 AGG_SCORE="0"
             else
                 AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
-=======
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
-              echo "::warning::Failed to scan $ORG/$REPO"
-=======
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE" 2>&1; then
-              echo "::warning::Failed to scan $ORG/$REPO. Output:"
-              cat "$RESULT_FILE"
->>>>>>> bd8ad01 (debug: full output capture for scorecard)
-=======
-            if ! scorecard --repo="github.com/$ORG/$REPO" --format=json > "$RESULT_FILE"; then
-              echo "::warning::Failed to scan $ORG/$REPO"
->>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
-              echo "| $REPO | ERROR | Scan failed |" >> "$SUMMARY_FILE"
-              echo "::endgroup::"
-              continue
-=======
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
             fi
-
-<<<<<<< HEAD
-            # Debug: show the result file content
-            echo "--- Scorecard Output ---"
-            cat "$RESULT_FILE"
-            echo "--- End Scorecard Output ---"
-
-            # Check if RESULT_FILE is empty or invalid JSON
-            if [ ! -s "$RESULT_FILE" ] || ! jq -e . "$RESULT_FILE" >/dev/null 2>&1; then
-              echo "::warning::Invalid or empty JSON results for $ORG/$REPO"
-              echo "| $REPO | ERROR | Invalid results |" >> "$SUMMARY_FILE"
-              echo "::endgroup::"
-              continue
->>>>>>> e87f7b5 (debug: add logging and validation for scorecard results)
-            fi
-=======
-            # Extract aggregate score
-<<<<<<< HEAD
-<<<<<<< HEAD
-            AGG_SCORE=$(jq -r '.aggregate_score // "N/A"' "$RESULT_FILE")
->>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
-=======
-            AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
->>>>>>> 57c1c5e (fix: update aggregate score extraction key for scorecard v5.5.0)
-=======
-            if [ "$MALFORMED_WORKFLOW" = "true" ]; then
-                AGG_SCORE="0"
-            else
-                AGG_SCORE=$(jq -r '.score // "N/A"' "$RESULT_FILE")
-            fi
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
 
             # Ensure scorecard label exists
             gh label create scorecard --repo "$ORG/$REPO" --description "OpenSSF Scorecard finding" --color "d93f0b" --force 2>/dev/null || true
@@ -159,25 +84,13 @@ jobs:
             CLOSED_COUNT=0
             CREATED_COUNT=0
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
             if [ "$MALFORMED_WORKFLOW" = "true" ]; then
               # Handle malformed workflow finding
               CHECK_NAME="Malformed-Workflow"
               SCORE=0
               REASON="One or more GitHub workflow files could not be parsed as YAML (see scan logs for details)."
               DOC_URL="https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions"
-<<<<<<< HEAD
-<<<<<<< HEAD
 
-=======
-              
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
-=======
-
->>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
               # TDD: Re-use the existing issue logic by providing the variables it expects
               # We need to simulate a loop iteration or just run the logic once
               NUM_CHECKS=1
@@ -186,7 +99,6 @@ jobs:
               NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
             fi
 
-<<<<<<< HEAD
             for i in $(seq 0 $((NUM_CHECKS - 1))); do
               if [ "$MALFORMED_WORKFLOW" = "false" ]; then
                 ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
@@ -195,26 +107,6 @@ jobs:
                 REASON=$(echo "$ROW" | jq -r '.reason')
                 DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
               fi
-=======
-            # Process each check directly using jq to avoid large strings in shell loop
-            NUM_CHECKS=$(jq '.checks | length' "$RESULT_FILE")
-            for i in $(seq 0 $((NUM_CHECKS - 1))); do
-              ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
-              CHECK_NAME=$(echo "$ROW" | jq -r '.name')
-              SCORE=$(echo "$ROW" | jq -r '.score')
-              REASON=$(echo "$ROW" | jq -r '.reason')
-              DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
->>>>>>> b1b947e (fix: resolve jq parse error by iterating with index)
-=======
-            for i in $(seq 0 $((NUM_CHECKS - 1))); do
-              if [ "$MALFORMED_WORKFLOW" = "false" ]; then
-                ROW=$(jq -c ".checks[$i]" "$RESULT_FILE")
-                CHECK_NAME=$(echo "$ROW" | jq -r '.name')
-                SCORE=$(echo "$ROW" | jq -r '.score')
-                REASON=$(echo "$ROW" | jq -r '.reason')
-                DOC_URL=$(echo "$ROW" | jq -r '.documentation.url // "https://github.com/ossf/scorecard/blob/main/docs/checks.md"')
-              fi
->>>>>>> 9c9cdd3 (feat: harden scorecard workflow to report malformed YAML as findings)
 
               # Skip non-actionable checks
               if echo "$SKIP_CHECKS" | grep -q "$CHECK_NAME"; then

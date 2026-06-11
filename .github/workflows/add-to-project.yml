@@ -75,18 +75,7 @@ jobs:
     # Gate pull_request_target on trusted author to prevent fork PRs from
     # triggering a secret-bearing runner. Issues don't have this concern
     # (creators can't set labels they don't have permission for).
-<<<<<<< HEAD
-<<<<<<< HEAD
     if: ${{ github.event_name == 'issues' || (github.event_name == 'pull_request_target' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
-=======
-    if: >-
-      ${{ github.event_name == 'issues' ||
-          (github.event_name == 'pull_request_target' &&
-           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
->>>>>>> a30b59b (feat(workflows): add Initiatives project auto-add workflow (#388))
-=======
-    if: ${{ github.event_name == 'issues' || (github.event_name == 'pull_request_target' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) }}
->>>>>>> fba115e (fix(workflows): inline add-to-project if-condition (PRs were silently skipped) (#418))
     runs-on: ubuntu-latest
     permissions:
       contents: read

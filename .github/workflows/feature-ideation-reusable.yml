@@ -5,10 +5,6 @@
 # project_context — see standards/workflows/feature-ideation.yml for the
 # template stub and ci-standards.md §8 for the full standard.
 #
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 # Architecture:
 #   - All bash / jq / GraphQL parsing logic lives in
 #     .github/scripts/feature-ideation/ in THIS repo and is unit-tested
@@ -21,27 +17,12 @@
 #     writing real Discussions — every mutation is logged to a JSONL file
 #     and uploaded as an artifact.
 #
-<<<<<<< HEAD
 # Why a reusable workflow:
 #   - The 5-phase ideation pipeline (Market Research → Brainstorming → Party
 #     Mode → Adversarial → Publish) is universal. Tuning the pattern in one
 #     place propagates to every BMAD-enabled repo after the v1 tag is bumped
 #     and their next scheduled run executes. Repos tracking @main pick it up
 #     immediately on their next run.
-=======
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-# Why a reusable workflow:
-#   - The 5-phase ideation pipeline (Market Research → Brainstorming → Party
-#     Mode → Adversarial → Publish) is universal. Tuning the pattern in one
-<<<<<<< HEAD
-#     place propagates to every BMAD-enabled repo on next run.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-#     place propagates to every BMAD-enabled repo after the v1 tag is bumped
-#     and their next scheduled run executes. Repos tracking @main pick it up
-#     immediately on their next run.
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 #   - The two critical gotchas (github_token override, ANTHROPIC_MODEL env var)
 #     are baked in here so callers cannot accidentally regress them.
 #
@@ -78,10 +59,6 @@ on:
         required: false
         default: 60
         type: number
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
       dry_run:
         description: 'Skip Discussion mutations and log them to a JSONL artifact instead.'
         required: false
@@ -101,10 +78,6 @@ on:
         required: false
         default: 'v1'
         type: string
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
       sources_file:
         description: |
           Path (relative to repo root) of the repo-local reputable source list.
@@ -115,13 +88,6 @@ on:
         required: false
         default: '.github/feature-ideation-sources.md'
         type: string
-<<<<<<< HEAD
-=======
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: 'Claude Code OAuth token (org-level secret)'
@@ -140,15 +106,12 @@ jobs:
       issues: read
       pull-requests: read
       discussions: read
-<<<<<<< HEAD
-<<<<<<< HEAD
       actions: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout calling repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-<<<<<<< HEAD
         with:
           fetch-depth: 1
 
@@ -180,53 +143,6 @@ jobs:
 
       - name: Upload signals artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-=======
-=======
-      actions: read
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout calling repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-=======
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
-        with:
-          fetch-depth: 1
-
-      - name: Checkout feature-ideation tooling
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: petry-projects/.github
-          ref: ${{ inputs.tooling_ref }}
-          path: .feature-ideation-tooling
-          fetch-depth: 1
-
-      - name: Install Python jsonschema
-        run: pip install --quiet 'jsonschema>=4'
-
-      - name: Collect project signals
-        env:
-          REPO: ${{ github.repository }}
-          SIGNALS_OUTPUT: ${{ runner.temp }}/signals.json
-        run: |
-          set -euo pipefail
-          bash .feature-ideation-tooling/.github/scripts/feature-ideation/collect-signals.sh
-
-      - name: Validate signals.json against schema
-        run: |
-          set -euo pipefail
-          python3 .feature-ideation-tooling/.github/scripts/feature-ideation/validate-signals.py \
-            "${{ runner.temp }}/signals.json" \
-            .feature-ideation-tooling/.github/schemas/signals.schema.json
-
-      - name: Upload signals artifact
-<<<<<<< HEAD
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
->>>>>>> 9a694e5 (chore(deps): Bump actions/upload-artifact from 4.6.2 to 7.0.1 (#125))
         with:
           name: signals
           path: ${{ runner.temp }}/signals.json
@@ -245,11 +161,8 @@ jobs:
       discussions: write
       id-token: write
     steps:
-<<<<<<< HEAD
-<<<<<<< HEAD
       - name: Checkout calling repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-<<<<<<< HEAD
         with:
           fetch-depth: 1
 
@@ -263,32 +176,6 @@ jobs:
 
       - name: Download signals artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-=======
-      - name: Checkout repository
-=======
-      - name: Checkout calling repository
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-=======
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
-        with:
-          fetch-depth: 1
-
-      - name: Checkout feature-ideation tooling
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: petry-projects/.github
-          ref: ${{ inputs.tooling_ref }}
-          path: .feature-ideation-tooling
-          fetch-depth: 1
-
-      - name: Download signals artifact
-<<<<<<< HEAD
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
->>>>>>> aa1ffbe (chore(deps): Bump actions/download-artifact from 4.3.0 to 8.0.1 (#129))
         with:
           name: signals
           path: ${{ runner.temp }}
@@ -316,10 +203,6 @@ jobs:
           fi
 
       - name: Run Claude Code — BMAD Analyst
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 492f3eb (feat(feature-ideation): report estimated execution cost in step summary (#153))
         id: claude
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -332,41 +215,7 @@ jobs:
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
           SOURCES_FILE_PATH: ${{ inputs.sources_file }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
-=======
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
-          DRY_RUN_LOG: ${{ runner.temp }}/dry-run.jsonl
-          SIGNALS_PATH: ${{ runner.temp }}/signals.json
-          PROPOSALS_PATH: ${{ runner.temp }}/proposals.json
-          MATCH_PLAN_PATH: ${{ runner.temp }}/match-plan.json
-          TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
-          FOCUS_AREA: ${{ inputs.focus_area || '' }}
-          SOURCES_FILE_PATH: ${{ inputs.sources_file }}
-          RESEARCH_DEPTH: ${{ inputs.research_depth }}
-<<<<<<< HEAD
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
->>>>>>> 27c7738 (chore(deps): Bump anthropics/claude-code-action from 1.0.89 to 1.0.93 (#128))
-=======
-        uses: anthropics/claude-code-action@9db782c3a17ef2bfc274cd17411bc3e0a5ba1345 # v1.0.115
->>>>>>> ad4f23a (chore(deps): Bump anthropics/claude-code-action from 1.0.97 to 1.0.115 (#150))
-=======
-        uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
->>>>>>> dcf3caf (chore(deps): Bump anthropics/claude-code-action from 1.0.115 to 1.0.119 (#226))
-=======
-        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
->>>>>>> e5bb106 (chore(deps): Bump anthropics/claude-code-action from 1.0.119 to 1.0.123 (#305))
-=======
-        uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
->>>>>>> 21ea07e (chore(deps): Bump anthropics/claude-code-action from 1.0.123 to 1.0.133 (#349))
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # CRITICAL: pass the workflow's GITHUB_TOKEN explicitly so the
@@ -374,28 +223,12 @@ jobs:
           # this, the action uses its own GitHub App token (claude[bot]) which
           # lacks discussions:write and silently fails every mutation.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-          # Model selection goes through claude_args per the v1 action's
-          # documented interface. Opus 4.6 is the default — see inputs.model.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
           claude_args: |
             --model ${{ inputs.model }}
             --allowedTools Bash,Read,Glob,Grep,WebSearch,WebFetch
           prompt: |
             You are **Mary**, the BMAD Strategic Business Analyst, running as an automated
-<<<<<<< HEAD
-<<<<<<< HEAD
             weekly feature research and ideation agent for the ${{ github.repository }} project.
-=======
-            weekly feature research and ideation agent for the **${{ github.repository }}** project.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            weekly feature research and ideation agent for the ${{ github.repository }} project.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ## Thinking & Research Directive
 
@@ -422,8 +255,6 @@ jobs:
 
             ## Environment
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             All paths and toggles are passed via environment variables — read them at runtime
             with `printenv` or `$VAR_NAME`. Do NOT try to interpolate shell expressions in
             this prompt body; YAML does not expand them and you would receive literal text.
@@ -439,51 +270,14 @@ jobs:
 
             The current date is in `$SIGNALS_PATH` as `.scan_date` — read it from there
             when you need it for Discussion timestamps.
-=======
-            - Repository: ${{ github.repository }}
-            - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            - Focus area: ${{ inputs.focus_area || 'Open exploration' }}
-            - Research depth: ${{ inputs.research_depth }}
-
-            (The current date is in `signals.json` as `scan_date` — read it
-            from there when you need it for Discussion timestamps.)
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            All paths and toggles are passed via environment variables — read them at runtime
-            with `printenv` or `$VAR_NAME`. Do NOT try to interpolate shell expressions in
-            this prompt body; YAML does not expand them and you would receive literal text.
-
-            - `$SIGNALS_PATH`     — JSON file with this week's signals (schema-validated)
-            - `$PROPOSALS_PATH`   — where to write your proposals.json (you create this)
-            - `$MATCH_PLAN_PATH`  — where the matcher writes its decision plan
-            - `$TOOLING_DIR`      — path to `.github/scripts/feature-ideation/` (canonical scripts)
-            - `$DRY_RUN`          — "1" = mutations are logged to `$DRY_RUN_LOG`, not executed
-            - `$FOCUS_AREA`       — optional focus area (empty = open exploration)
-            - `$RESEARCH_DEPTH`   — quick | standard | deep
-            - `$GH_TOKEN`         — workflow token with `discussions: write`
-
-            The current date is in `$SIGNALS_PATH` as `.scan_date` — read it from there
-            when you need it for Discussion timestamps.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ## Phase 1: Load Context
 
             1. Read the project signals collected by the previous job:
                ```bash
-<<<<<<< HEAD
-<<<<<<< HEAD
                cat "$SIGNALS_PATH"
                ```
                The shape is pinned by `signals.schema.json` — every field is guaranteed present.
-=======
-               cat ${{ runner.temp }}/signals.json
-               ```
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-               cat "$SIGNALS_PATH"
-               ```
-               The shape is pinned by `signals.schema.json` — every field is guaranteed present.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             2. Discover and read planning artifacts. BMAD installations vary —
                use Glob to find them, then Read the ones that exist:
@@ -506,31 +300,16 @@ jobs:
                - TODO / FIXME / HACK comments — known gaps the team has flagged.
                - Files named `*config*`, `*settings*` — surfaces user-facing knobs.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
             5. **Read existing Ideas discussions from `$SIGNALS_PATH`** (`.ideas_discussions.items`).
                These are ideas already being tracked. The deterministic matcher in Phase 6 will
                decide which proposals are new vs updates — you do NOT need to do fuzzy matching
                in your head.
-<<<<<<< HEAD
-=======
-            5. **Read existing Ideas discussions from signals.** These are ideas already being
-               tracked. You will update them if you have new findings, or leave them alone.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ## Phase 2: Market Research Skill (Iterative Evidence Gathering)
 
             **Adopt the "Market Research" mindset.** Your sole job in this phase is to gather
             hard evidence — not to generate ideas yet. Be a detective, not a brainstormer.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
             ### Start from the repo-local Reputable Source List
 
             Before running open-ended web searches, **check for a repo-local source list**.
@@ -583,13 +362,6 @@ jobs:
             Using the **Project Context** above as your starting point and the
             source list as your seed, research the competitive landscape and
             emerging trends. Cover at minimum:
-<<<<<<< HEAD
-=======
-            Using the **Project Context** above as your starting point, research the
-            competitive landscape and emerging trends. Cover at minimum:
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 
             ### Competitive Landscape
             - What are competitors in this space shipping recently?
@@ -603,29 +375,12 @@ jobs:
             - Technology shifts that change what is feasible or affordable
 
             ### User Need Signals
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
             - Patterns in `.open_issues` and `.feature_requests`
             - Common pain points from `.bug_reports` that suggest UX gaps
             - What shipped recently (`.merged_prs_30d`) and what gaps remain
             - Discussion themes from `.ideas_discussions`
-<<<<<<< HEAD
 
             Adjust depth based on `$RESEARCH_DEPTH`:
-=======
-            - Patterns in open issues and feature requests
-            - Common pain points from bug reports that suggest UX gaps
-            - What shipped recently (merged PRs) and what gaps remain
-            - Community discussion themes
-
-            Adjust depth based on RESEARCH_DEPTH:
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-
-            Adjust depth based on `$RESEARCH_DEPTH`:
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
             - **quick**: Skim signals, 1-2 web searches, focus on low-hanging fruit
             - **standard**: Thorough signal analysis, 5-8 web searches, balanced exploration
             - **deep**: Exhaustive research, 10+ web searches, competitor deep dives, trend analysis
@@ -636,19 +391,8 @@ jobs:
 
             ## Phase 3: Brainstorming Skill (Divergent Ideation)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             **Switch to the "Brainstorming" mindset.** Generate as many ideas as possible —
             quantity over quality. Build on the evidence from Phase 2 but let your imagination run.
-=======
-            **Switch to the "Brainstorming" mindset.** Now generate as many ideas as possible —
-            quantity over quality. No idea is too wild at this stage. Build on the evidence
-            from Phase 2 but let your imagination run.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            **Switch to the "Brainstorming" mindset.** Generate as many ideas as possible —
-            quantity over quality. Build on the evidence from Phase 2 but let your imagination run.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             Generate **8-15 raw feature ideas** across these lenses:
             - What gaps do competitors leave that this project could fill?
@@ -659,8 +403,6 @@ jobs:
 
             For each raw idea, write a one-line description and note which evidence supports it.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             **Iterate:** Review your list. Combine weaker ideas. Spot research gaps and go
             back to Phase 2 for targeted searches if needed. Repeat until grounded and diverse.
 
@@ -676,45 +418,6 @@ jobs:
             3. **Ground:** "What is the minimum version that still delivers core value?"
             4. **Score:** For each refined idea, assess Feasibility / Impact / Urgency on
                a high/med/low scale.
-=======
-            **Iterate:** Review your list. Can you combine two weaker ideas into one stronger
-            idea? Did generating ideas reveal a research gap? If so, go back to Phase 2 for
-            a targeted search, then return here. Repeat until the ideas feel grounded and
-            diverse.
-=======
-            **Iterate:** Review your list. Combine weaker ideas. Spot research gaps and go
-            back to Phase 2 for targeted searches if needed. Repeat until grounded and diverse.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-
-            ## Phase 4: Party Mode Skill (Collaborative Refinement)
-
-            **Switch to the "Party Mode" mindset.** Imagine a room of enthusiastic product
-            people, engineers, and designers. Each person builds on the previous suggestion.
-
-            Take the top 5-8 ideas from Phase 3 and refine them collaboratively:
-
-<<<<<<< HEAD
-            1. **Amplify:** For each idea, ask "What if we went even further?" Push the idea
-               to its most ambitious form.
-            2. **Connect:** Look for synergies — can two ideas combine into something greater
-               than the sum of their parts?
-            3. **Ground:** For each amplified idea, ask "What is the minimum version that still
-               delivers the core value?" Find the sweet spot between ambition and feasibility.
-            4. **Score:** For each refined idea, assess:
-
-               | Dimension | Question |
-               |-----------|----------|
-               | **Feasibility** | Can we build this with the current stack? How much effort? |
-               | **Impact** | How many users does this serve? How much value does it add? |
-               | **Urgency** | Is the market moving here now? Is there competitive pressure? |
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            1. **Amplify:** "What if we went even further?"
-            2. **Connect:** Look for synergies — combine ideas into something greater.
-            3. **Ground:** "What is the minimum version that still delivers core value?"
-            4. **Score:** For each refined idea, assess Feasibility / Impact / Urgency on
-               a high/med/low scale.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             Select the **top 5 ideas** scoring high on at least 2 of 3 dimensions.
 
@@ -722,8 +425,6 @@ jobs:
 
             **Switch to the "Adversarial" mindset.** You are now a skeptical VP of Product,
             a resource-constrained engineering lead, and a demanding end-user — all at once.
-<<<<<<< HEAD
-<<<<<<< HEAD
             Tear these ideas apart. Only the survivors are worth proposing.
 
             For each top-5 idea, apply: **So what? Who else? At what cost? What breaks? Prove it.**
@@ -731,28 +432,10 @@ jobs:
             **After the adversarial pass, you should have 3-5 ROBUST and DEFENSIBLE proposals.**
             Each surviving idea must have:
             - At least one concrete market signal
-=======
-            Your job is to tear these ideas apart. Only the ones that survive are worth proposing.
-=======
-            Tear these ideas apart. Only the survivors are worth proposing.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-
-            For each top-5 idea, apply: **So what? Who else? At what cost? What breaks? Prove it.**
-
-            **After the adversarial pass, you should have 3-5 ROBUST and DEFENSIBLE proposals.**
-            Each surviving idea must have:
-<<<<<<< HEAD
-            - At least one concrete market signal (competitor move, user request, or trend)
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            - At least one concrete market signal
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
             - A clear user story explaining why someone would care
             - A feasible technical path grounded in the current architecture
             - A rebuttal to the strongest objection against it
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             Quality over quantity — fewer than 3 is fine if that is what survives.
 
             ## Phase 6: Write proposals.json + run the deterministic matcher
@@ -802,75 +485,12 @@ jobs:
             authenticate manually.
 
             Fetch the repository ID and the "Ideas" category ID:
-=======
-            If fewer than 3 ideas survive, that is fine — quality over quantity.
-            If a focus area was specified, weight proposals toward that area but don't
-            exclude other high-scoring discoveries.
-=======
-            Quality over quantity — fewer than 3 is fine if that is what survives.
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-
-            ## Phase 6: Write proposals.json + run the deterministic matcher
-
-            Write your surviving proposals to `$PROPOSALS_PATH` as a JSON array. Each entry
-            must include at minimum a `title` field (use the `💡 ` prefix). Recommended shape:
-
-<<<<<<< HEAD
-            Before creating or updating Discussions, you need the repository ID and the
-            "Ideas" discussion category ID.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            ```json
-            [
-              {
-                "title": "💡 Concise Idea Title",
-                "summary": "2-3 sentence description",
-                "market_signal": "What competitive or market trend supports this",
-                "user_signal": "Related issues / feedback / themes",
-                "technical_opportunity": "How architecture enables this",
-                "adversarial_objection": "Strongest objection",
-                "rebuttal": "Why the idea survives",
-                "feasibility": "high|med|low",
-                "impact": "high|med|low",
-                "urgency": "high|med|low",
-                "next_step": "Concrete action"
-              }
-            ]
-            ```
-
-            Then run the matcher. It uses normalized Jaccard similarity, so you do NOT
-            need to do any fuzzy matching yourself:
-
-            ```bash
-            bash "$TOOLING_DIR/match-discussions.sh" \
-              "$SIGNALS_PATH" \
-              "$PROPOSALS_PATH" \
-              > "$MATCH_PLAN_PATH"
-            ```
-
-            The output has two arrays:
-            - `.matched`        — proposals aligning with an existing Discussion (update path)
-            - `.new_candidates` — proposals with no existing match (create path)
-
-            Each `.matched` entry includes a `similarity` score and the matched discussion.
-
-            ## Phase 7: Resolve repository + category IDs
-
-            **Auth note:** All `gh` and `gh api` commands use the `GH_TOKEN` environment
-            variable (already set to the workflow's `GITHUB_TOKEN`), which has
-            `discussions: write` permission via the job-level grant. You do NOT need to
-            authenticate manually.
-
-            Fetch the repository ID and the "Ideas" category ID:
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ```bash
             gh api graphql -f query='
               query($repo: String!, $owner: String!) {
                 repository(name: $repo, owner: $owner) {
                   id
-<<<<<<< HEAD
-<<<<<<< HEAD
                   discussionCategories(first: 25) {
                     nodes { id name }
                   }
@@ -951,101 +571,10 @@ jobs:
             - **Use the 💡 prefix** in all idea Discussion titles.
 
             ## Discussion body template (new proposals)
-=======
-                  discussionCategories(first: 20) {
-=======
-                  discussionCategories(first: 25) {
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-                    nodes { id name }
-                  }
-                }
-              }' -f owner="${GITHUB_REPOSITORY%%/*}" \
-                 -f repo="${GITHUB_REPOSITORY##*/}"
-            ```
-
-            Save the repository ID and the "Ideas" category ID. If "Ideas" does not exist,
-            fall back to "General". If neither exists, write an error to step summary and
-            skip Phase 8.
-
-            ## Phase 8: Execute the plan via discussion-mutations.sh
-
-            Source the mutation helpers and call them per the match plan. The helpers
-            automatically honor `$DRY_RUN` — when `$DRY_RUN=1` they log a JSONL entry to
-            `$DRY_RUN_LOG` instead of calling GitHub.
-
-            ```bash
-            source "$TOOLING_DIR/discussion-mutations.sh"
-            ```
-
-<<<<<<< HEAD
-            **New Discussion body format:**
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            ### For each entry in `.new_candidates` from `$MATCH_PLAN_PATH`
-
-            Build the body using the template at the bottom of this prompt, then:
-
-            ```bash
-            create_discussion "$REPO_ID" "$CAT_ID" "$TITLE" "$BODY"
-            ```
-
-            Then add the `enhancement` label if your repo has one (resolve the label ID
-            first; skip silently if it doesn't exist):
-
-            ```bash
-            add_label_to_discussion "$DISCUSSION_ID" "$LABEL_ID"
-            ```
-
-            ### For each entry in `.matched` with genuinely new information
-
-            ```bash
-            comment_on_discussion "$DISCUSSION_ID" "$UPDATE_BODY"
-            ```
-
-            **Only post updates if there is genuinely new information.** No empty updates.
-
-            ### Retirement recommendations
-
-            If research shows a previously proposed idea is no longer viable, post a final
-            comment recommending closure (do NOT close the Discussion — only recommend):
-
-            ```bash
-            comment_on_discussion "$DISCUSSION_ID" "$RETIREMENT_BODY"
-            ```
-
-            ## Phase 9: Step Summary
-
-            Write to `$GITHUB_STEP_SUMMARY` a markdown table summarizing:
-            - New ideas proposed (with similarity scores from `$MATCH_PLAN_PATH`)
-            - Existing ideas updated (link to the comment)
-            - Ideas reviewed with no update needed
-            - Top 2-3 market trend bullets
-            - **If `$DRY_RUN=1`,** append the contents of `$DRY_RUN_LOG` (formatted) so
-              reviewers can audit what would have been written.
-
-            ## Rules
-
-            - **Do NOT create issues or PRs.** Output goes to Discussions only.
-            - **Do NOT implement code.** Research and ideation only.
-            - **Max 5 new Discussions per run.** Quality over quantity.
-            - **Always go through the deterministic matcher** in Phase 6 — never invent
-              your own fuzzy match logic.
-            - **Always go through `discussion-mutations.sh`** — never call createDiscussion
-              or addDiscussionComment GraphQL mutations directly. The helpers handle DRY_RUN.
-            - **Ground every proposal in evidence** from the signals file or your research.
-            - **Be specific about next steps.**
-            - **Respect the project's architecture** documented in AGENTS.md and planning
-              artifacts.
-            - **Use the 💡 prefix** in all idea Discussion titles.
-
-            ## Discussion body template (new proposals)
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ```markdown
             ## Summary
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             <2-3 sentence description>
 
             ## Market Signal
@@ -1059,29 +588,6 @@ jobs:
             ## Technical Opportunity
 
             <How current architecture enables this — cite ports/interfaces>
-=======
-            <2-3 sentence description of the feature idea>
-=======
-            <2-3 sentence description>
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-
-            ## Market Signal
-
-            <Competitive or market trend>
-
-            ## User Signal
-
-            <Related issues / feedback themes>
-
-            ## Technical Opportunity
-
-<<<<<<< HEAD
-            <How the current architecture enables or supports this — reference specific
-            interfaces, abstractions, or extension points from the codebase>
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            <How current architecture enables this — cite ports/interfaces>
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ## Assessment
 
@@ -1098,8 +604,6 @@ jobs:
 
             ## Suggested Next Step
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             <Concrete action>
             ```
 
@@ -1111,32 +615,6 @@ jobs:
             ### What Changed
 
             <New signals since last update — be specific>
-=======
-            <Concrete action: "Create a product brief", "Spike on X", "Discuss with team", etc.>
-
-            ---
-            *Proposed by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
-            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
-=======
-            <Concrete action>
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-            ```
-
-            ## Discussion comment template (updates)
-
-            ```markdown
-            ## Weekly Update
-
-            ### What Changed
-
-<<<<<<< HEAD
-            <New market signals, competitive moves, technology developments, or
-            user feedback since the last update. Be specific about what's new —
-            don't repeat the original proposal.>
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            <New signals since last update — be specific>
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
             ### Updated Assessment
 
@@ -1148,8 +626,6 @@ jobs:
 
             ### Recommendation
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             <Advance / keep watching / retire — and why>
             ```
 
@@ -1187,122 +663,3 @@ jobs:
           path: ${{ runner.temp }}/dry-run.jsonl
           if-no-files-found: ignore
           retention-days: 7
-=======
-            <Should this idea be advanced, kept watching, or retired? Why?>
-
-            ---
-            *Updated by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
-            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
-            ```
-
-            **Important:** Only add an update comment if there is genuinely new information.
-            If nothing has changed for an existing idea, skip it — don't post "no updates" comments.
-
-            ### If an existing idea should be retired
-
-            If research shows a previously proposed idea is no longer viable (market shifted,
-            already implemented, superseded by another approach), add a final comment
-            recommending closure:
-
-            ```markdown
-            ## Retirement Recommendation — <DATE>
-
-            **Recommendation:** Close this proposal.
-
-            **Reason:** <Why the idea is no longer viable or relevant>
-
-            <Details on what changed>
-
-            ---
-            *Reviewed by the [BMAD Analyst (Mary)](/${{ github.repository }}/actions/workflows/feature-ideation.yml) on <DATE>.*
-            ```
-
-            Do NOT close the Discussion — only recommend closure for human decision.
-
-            ## Phase 8: Step Summary
-
-            Write to $GITHUB_STEP_SUMMARY:
-
-            ```markdown
-            ## Feature Research & Ideation — <DATE>
-
-            **Focus:** <area or "Open exploration">
-            **Research depth:** <quick|standard|deep>
-
-            ### New Ideas Proposed
-            | Discussion | Title | Feasibility | Impact | Urgency |
-            |------------|-------|-------------|--------|---------|
-            | #N | 💡 ... | ... | ... | ... |
-
-            ### Existing Ideas Updated
-            | Discussion | Title | Key Change |
-            |------------|-------|------------|
-            | #N | 💡 ... | <what's new> |
-
-            ### Ideas Reviewed — No Update Needed
-            | Discussion | Title | Reason |
-            |------------|-------|--------|
-            | #N | 💡 ... | <no new signal> |
-
-            ### Market & Trend Summary
-            <2-3 bullet points on the most notable trends this week>
-
-            ---
-            *[Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
-            ```
-
-            ## Rules
-
-            - **Do NOT create issues or PRs.** Output goes to Discussion threads only.
-            - **Do NOT implement code.** This is research and ideation only.
-            - **Max 5 new Discussions per run.** Fewer is fine — quality over quantity.
-            - **Only propose ideas scoring high on 2+ dimensions** (feasibility/impact/urgency).
-            - **One Discussion per idea.** Never create duplicates — always check existing first.
-            - **Only comment on existing Discussions when there is new information.** No empty updates.
-            - **Ground proposals in evidence.** Every proposal must cite at least one market signal,
-              user signal, or technical opportunity — not just abstract ideas.
-            - **Be specific about next steps.** Each proposal should suggest a concrete action
-              (product brief, spike, discussion, etc.) not just "we should consider this."
-            - **Respect the project's architecture.** Proposals should be compatible with the
-              patterns documented in AGENTS.md and the planning artifacts.
-            - **Use the 💡 prefix** in all idea Discussion titles for easy identification.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-            <Advance / keep watching / retire — and why>
-            ```
-
-      - name: Report execution cost
-        if: always()
-        env:
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-        run: |
-          set -euo pipefail
-          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -f "$EXECUTION_FILE" ]; then
-            echo "No execution file — skipping cost report." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          cost=$(jq '[.[] | select(.type == "result") | .total_cost_usd // 0] | add // 0' "$EXECUTION_FILE")
-          turns=$(jq '[.[] | select(.type == "result") | .num_turns // 0] | add // 0' "$EXECUTION_FILE")
-          duration_s=$(jq '[.[] | select(.type == "result") | .duration_ms // 0] | add // 0 | . / 1000' "$EXECUTION_FILE")
-          {
-            echo ""
-            echo "## Execution Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            printf "| Estimated cost | \$%s USD |\n" "$cost"
-            echo "| Turns | $turns |"
-            printf "| Duration | %ss |\n" "$duration_s"
-            echo ""
-            echo "> Cost is an SDK-side estimate based on model pricing. It reflects token consumption but does not represent a direct billing charge (OAuth subscription)."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload dry-run log (if present)
-        if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: dry-run-log
-          path: ${{ runner.temp }}/dry-run.jsonl
-          if-no-files-found: ignore
-          retention-days: 7
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))

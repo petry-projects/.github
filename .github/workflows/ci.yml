@@ -12,15 +12,7 @@ on:
 permissions: {}
 
 concurrency:
-<<<<<<< HEAD
-<<<<<<< HEAD
   group: ci-${{ github.ref }}-${{ github.sha }}
-=======
-  group: ci-${{ github.ref }}
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-  group: ci-${{ github.ref }}-${{ github.sha }}
->>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
   cancel-in-progress: true
 
 jobs:
@@ -30,8 +22,6 @@ jobs:
     permissions:
       contents: read
     steps:
-<<<<<<< HEAD
-<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Lint Markdown
@@ -45,22 +35,6 @@ jobs:
       # the `Lint` status check (referenced by branch protection) is unchanged.
       - name: Lint YAML
         if: always()
-<<<<<<< HEAD
-=======
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-=======
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
-
-      - name: Lint Markdown
-        uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
-        with:
-          globs: '**/*.md'
-
-      - name: Lint YAML
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
->>>>>>> e79ae53 (feat: implement issue #329 — [Fleet Monitor] petry-projects/.github — ci.yml (#423))
         run: |
           pip install --quiet yamllint
           yamllint -c <(cat <<'YAMLLINTRC'
@@ -77,14 +51,7 @@ jobs:
           ) .github/workflows/ standards/workflows/ standards/dependabot/
 
       - name: Lint GitHub Actions
-<<<<<<< HEAD
-<<<<<<< HEAD
         if: always()
-=======
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-        if: always()
->>>>>>> e79ae53 (feat: implement issue #329 — [Fleet Monitor] petry-projects/.github — ci.yml (#423))
         run: |
           # Install actionlint via verified download (pinned version + checksum)
           ACTIONLINT_VERSION="1.7.7"
@@ -105,10 +72,6 @@ jobs:
     permissions:
       contents: read
     steps:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run ShellCheck
@@ -119,23 +82,6 @@ jobs:
           shell_files=(scripts/**/*.sh)
           if [ ${#shell_files[@]} -gt 0 ]; then
             shellcheck --severity=warning -x "${shell_files[@]}"
-=======
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Run ShellCheck
-        run: |
-<<<<<<< HEAD
-          if compgen -G "scripts/*.sh" > /dev/null; then
-            shellcheck --severity=warning scripts/*.sh
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-          # Recurse so subdirectories like scripts/lib/ (sourceable libraries)
-          # are linted too. -x follows `# shellcheck source=...` directives.
-          shopt -s globstar nullglob
-          shell_files=(scripts/**/*.sh)
-          if [ ${#shell_files[@]} -gt 0 ]; then
-            shellcheck --severity=warning -x "${shell_files[@]}"
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
           else
             echo "No shell scripts found — skipping"
           fi
@@ -146,51 +92,29 @@ jobs:
     permissions:
       contents: read
     steps:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-=======
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-<<<<<<< HEAD
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
->>>>>>> 9c429ba (chore(deps): Bump actions/setup-node from 6.3.0 to 6.4.0 (#162))
         with:
           node-version: '20'
 
       - name: Run AgentShield
         run: |
           npx ecc-agentshield scan --path . --format json --min-severity high
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 6f46503 (fix(ci): secret-scan job + dtolnay SHA pin (.github repo — compliance #276) (#277))
 
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
     steps:
       - name: Checkout (full history)
-        # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-        # Look up current SHA: gh api repos/actions/checkout/git/refs/tags/v6.0.2 --jq '.object.sha'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
-<<<<<<< HEAD
       - name: Install gitleaks
         env:
-<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_linux_x64.tar.gz' --output /tmp/gitleaks.tar.gz
@@ -200,36 +124,3 @@ jobs:
 
       - name: Run gitleaks
         run: gitleaks detect --source . --redact --verbose --exit-code 1
-=======
->>>>>>> 1f9db97 (feat: add full CI pipeline for .github repo (#15))
-=======
-          GITLEAKS_VERSION: "8.30.1"
-        run: |
-          # Checksum kept in the shell run block (not as a YAML env var) to avoid
-          # SonarCloud flagging hex strings in env: sections as Security Hotspots.
-          gitleaks_checksum="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
-          install_dir="${RUNNER_TEMP}/gitleaks-bin"
-          mkdir -p "${install_dir}"
-          wget -q "${url}" -O /tmp/gitleaks.tar.gz
-          echo "${gitleaks_checksum}  /tmp/gitleaks.tar.gz" | sha256sum -c
-          tar -xzf /tmp/gitleaks.tar.gz -C "${install_dir}" gitleaks
-          chmod +x "${install_dir}/gitleaks"
-          echo "${install_dir}" >> "${GITHUB_PATH}"
-
-      - name: Run gitleaks
-        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
->>>>>>> 6f46503 (fix(ci): secret-scan job + dtolnay SHA pin (.github repo — compliance #276) (#277))
-=======
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-<<<<<<< HEAD
->>>>>>> e4c1475 (feat: implement issue #299 — Compliance audit — 2026-05-15 (#336))
-=======
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_ARGS: detect --source . --redact --verbose --exit-code 1
->>>>>>> 62516a7 (fix(compliance): 2026-05-11 audit findings for .github repo (#243))

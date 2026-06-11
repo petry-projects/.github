@@ -58,10 +58,6 @@ main() {
   local discussion_limit="${DISCUSSION_LIMIT:-100}"
   local output_path="${SIGNALS_OUTPUT:-./signals.json}"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   # Validate that limit overrides are positive integers before forwarding to
   # GraphQL — a value like `ISSUE_LIMIT=foo` would cause an opaque downstream
   # failure instead of a clean usage error. Caught by CodeRabbit review on
@@ -83,30 +79,12 @@ main() {
   # and extra path parts (e.g. "org//repo", "/repo", "org/repo/extra").
   # Caught by CodeRabbit review on PR petry-projects/.github#85.
   if [[ ! $REPO =~ ^[^/]+/[^/]+$ ]]; then
-<<<<<<< HEAD
     printf '[collect-signals] REPO must be in owner/name format, got: %s\n' "$REPO" >&2
     return 64
   fi
   local owner repo_name
   owner="${REPO%%/*}"
   repo_name="${REPO##*/}"
-=======
-  local owner repo_name
-  owner="${REPO%%/*}"
-  repo_name="${REPO##*/}"
-  if [ "$owner" = "$REPO" ] || [ -z "$repo_name" ]; then
-    printf '[collect-signals] REPO must be in owner/name format, got: %s\n' "$REPO" >&2
-    return 64
-  fi
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
-    printf '[collect-signals] REPO must be in owner/name format, got: %s\n' "$REPO" >&2
-    return 64
-  fi
-  local owner repo_name
-  owner="${REPO%%/*}"
-  repo_name="${REPO##*/}"
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 
   local thirty_days_ago
   thirty_days_ago=$(date_days_ago 30)

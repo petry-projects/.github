@@ -22,9 +22,6 @@
 # Failure modes handled gracefully:
 #   - without `workflows` permission (403): posts an idempotent comment asking
 #     the author to rebase manually (sentinel: <!-- auto-rebase-blocked -->)
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   - merge conflict (422): posts an idempotent comment noting that dev-lead will
 #     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
 #     triggers the rebase intent in dev-lead.yml
@@ -34,44 +31,14 @@
 # issue_comment workflow runs (GitHub limitation). When the PAT is absent the
 # sentinel is still posted but dev-lead will not be scheduled.
 # No auto-merge logic.
-=======
-#   - merge conflict (422): posts an idempotent comment asking the author to
-#     resolve conflicts (sentinel: <!-- auto-rebase-conflict -->)
-#
-# No secrets required — uses github.token only. No auto-merge logic.
->>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
-=======
-#   - merge conflict (422): posts an idempotent comment noting that Claude will
-=======
-#   - merge conflict (422): posts an idempotent comment noting that dev-lead will
->>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
-#     attempt an agentic rebase (sentinel: <!-- auto-rebase-conflict -->), which
-#     triggers the rebase intent in dev-lead.yml
-#
-# Secrets: GH_PAT_WORKFLOWS is optional but required for the rebase sentinel
-# to trigger dev-lead. Sentinel comments posted with GITHUB_TOKEN do not fire
-# issue_comment workflow runs (GitHub limitation). When the PAT is absent the
-# sentinel is still posted but dev-lead will not be scheduled.
-# No auto-merge logic.
->>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
 name: Auto-rebase non-Dependabot PRs (Reusable)
 
 on:
   workflow_call:
-<<<<<<< HEAD
-<<<<<<< HEAD
     secrets:
       GH_PAT_WORKFLOWS:
         description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false
-=======
->>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
-=======
-    secrets:
-      GH_PAT_WORKFLOWS:
-        description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
-        required: false
->>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
 
 jobs:
   auto-rebase:
@@ -82,17 +49,8 @@ jobs:
     steps:
       - name: Update behind non-Dependabot PRs
         env:
-<<<<<<< HEAD
-<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
           HAS_PAT: ${{ secrets.GH_PAT_WORKFLOWS != '' }}
-=======
-          GH_TOKEN: ${{ github.token }}
->>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
-=======
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
-          HAS_PAT: ${{ secrets.GH_PAT_WORKFLOWS != '' }}
->>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
           REPO: ${{ github.repository }}
         run: |
           # Find open non-Dependabot PRs from the same repo (exclude forks)
@@ -151,9 +109,6 @@ jobs:
                   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
                 # Merge conflict — post the sentinel to trigger dev-lead rebase.
                 # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
                 #
@@ -188,53 +143,6 @@ jobs:
                     CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
                     CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
                   fi
-=======
-                # Merge conflict — ask the author to resolve it.
-=======
-                # Merge conflict — post the sentinel to trigger claude-rebase.
->>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
-=======
-                # Merge conflict — post the sentinel to trigger dev-lead rebase.
->>>>>>> 66c4866 (chore: remove claude-code-reusable.yml and update auto-rebase references)
-                # gh api surfaces the GitHub API error JSON: {"message":"merge conflict",...}
-                #
-                # Re-trigger strategy: embed the current BASE_BRANCH HEAD SHA in
-                # the sentinel so we can detect whether the base has moved. If an
-                # existing sentinel already carries the same SHA, skip delete+repost
-                # (avoiding cancellation of an in-flight dev-lead rebase run). Only
-                # delete and re-post when the base HEAD has changed (new conflict).
-                BASE_SHA=$(gh api "repos/$REPO/git/ref/heads/$BASE_BRANCH" --jq '.object.sha')
-                SENTINEL_PREFIX="<!-- auto-rebase-conflict:"
-                SENTINEL="${SENTINEL_PREFIX}${BASE_SHA} -->"
-                SAME_SHA_COUNT=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL\")) | .databaseId] | length")
-                if [[ "$SAME_SHA_COUNT" -gt 0 ]]; then
-                  echo "  Sentinel already posted for base SHA $BASE_SHA, skipping to avoid cancelling active rebase"
-                else
-                  OLD_COMMENT_IDS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                    --json comments --jq "[.comments[] | select(.body | contains(\"$SENTINEL_PREFIX\")) | .databaseId] | .[]")
-                  for OLD_ID in $OLD_COMMENT_IDS; do
-                    echo "  Deleting stale sentinel comment $OLD_ID"
-                    gh api "repos/$REPO/issues/comments/$OLD_ID" -X DELETE || true
-                  done
-                  echo "  Posting conflict resolution request"
-                  CONFLICT_BODY="$SENTINEL"
-                  CONFLICT_BODY+=$'\n'"**Auto-rebase failed — merge conflict** — this branch has conflicts"
-<<<<<<< HEAD
-                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved manually."
-                  CONFLICT_BODY+=$'\n\n'"Please resolve the conflicts and push:"
->>>>>>> 126c144 (feat: add auto-rebase workflow for non-Dependabot PRs)
-=======
-                  CONFLICT_BODY+=" with \`$BASE_BRANCH\` that must be resolved."
-                  if [[ "$HAS_PAT" == "true" ]]; then
-                    CONFLICT_BODY+=$'\n\n'"dev-lead will attempt to resolve this automatically. If it cannot, a"
-                    CONFLICT_BODY+=" follow-up comment will explain what needs manual attention."
-                    CONFLICT_BODY+=$'\n\n'"To resolve manually instead:"
-                  else
-                    CONFLICT_BODY+=$'\n\n'"Please resolve this manually"
-                    CONFLICT_BODY+=" (automatic resolution requires \`GH_PAT_WORKFLOWS\` to be configured):"
-                  fi
->>>>>>> 865cf10 (feat(auto-rebase): add claude-rebase agentic fallback for merge conflicts (#281))
                   CONFLICT_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                   CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
                   CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"

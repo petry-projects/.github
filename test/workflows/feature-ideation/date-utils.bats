@@ -15,20 +15,10 @@ setup() {
 }
 
 @test "date_days_ago: 0 returns today" {
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   # Use the helper function rather than the raw system `date` call so the test
   # validates behaviour consistently on both GNU and BSD systems.
   # Caught by CodeRabbit review on PR petry-projects/.github#85.
   today=$(date_today)
-<<<<<<< HEAD
-=======
-  today=$(date -u +%Y-%m-%d)
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
   run date_days_ago 0
   [ "$status" -eq 0 ]
   [ "$output" = "$today" ]

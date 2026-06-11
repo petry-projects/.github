@@ -1,30 +1,11 @@
 # CODEOWNERS
 # Each line is a pattern followed by one or more owners.
 # Owners are matched in order, last matching pattern wins.
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 6bce134 (chore: standardize CODEOWNERS on @petry-projects/org-leads team (#192))
 #
 # Standard: use the @petry-projects/org-leads team for all code owner
 # assignments instead of listing individuals or bot accounts directly.
 # This keeps CODEOWNERS files stable and centralizes membership management.
 # See: standards/codeowners-standard.md
-<<<<<<< HEAD
 
 # Default catch-all — org-leads own everything
 * @petry-projects/org-leads
-=======
-
-# Default owner for all files
-<<<<<<< HEAD
-* @don-petry
->>>>>>> 265f6dc (feat: add CODEOWNERS file for code owner review enforcement)
-=======
-* @don-petry @petry-projects-pr-review-agent @dependabot-automerge-petry
->>>>>>> b25bf5c (chore: add bot accounts to CODEOWNERS + define org standard)
-=======
-
-# Default catch-all — org-leads own everything
-* @petry-projects/org-leads
->>>>>>> 6bce134 (chore: standardize CODEOWNERS on @petry-projects/org-leads team (#192))

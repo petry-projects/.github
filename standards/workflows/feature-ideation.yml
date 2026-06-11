@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/feature-ideation.yml
 # Standard:        petry-projects/.github/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
@@ -20,11 +16,6 @@
 #     the central repo. The change will propagate everywhere on next run.
 # ─────────────────────────────────────────────────────────────────────────────
 #
-<<<<<<< HEAD
-=======
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
 # Feature Ideation workflow stub — for BMAD Method-enabled repos.
 #
 # This is a thin caller for the org-wide reusable workflow at
@@ -37,10 +28,6 @@
 #   2. Replace the `project_context` value with a 3-5 sentence description
 #      of your project, its target users, and the competitive landscape Mary
 #      should research. This is the only required customisation.
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 #   3. (Optional) Copy standards/feature-ideation-sources.md from
 #      petry-projects/.github to .github/feature-ideation-sources.md in your
 #      repo and trim/extend it for your project. Mary uses YOUR copy — not the
@@ -50,29 +37,13 @@
 #   4. (Optional) Adjust the schedule cron if Friday morning UTC doesn't suit.
 #   5. Ensure GitHub Discussions is enabled with an "Ideas" category.
 #   6. Confirm the org-level secret CLAUDE_CODE_OAUTH_TOKEN is accessible.
-<<<<<<< HEAD
-=======
-#   3. (Optional) Adjust the schedule cron if Friday morning UTC doesn't suit.
-#   4. Ensure GitHub Discussions is enabled with an "Ideas" category.
-#   5. Confirm the org-level secret CLAUDE_CODE_OAUTH_TOKEN is accessible.
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
 #
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
 name: Feature Research & Ideation (BMAD Analyst)
 
 on:
   schedule:
-<<<<<<< HEAD
-<<<<<<< HEAD
     - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
-=======
-    - cron: '0 7 * * 5'   # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-    - cron: '0 7 * * 5' # Friday 07:00 UTC (3 AM EDT / 2 AM EST)
->>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
   workflow_dispatch:
     inputs:
       focus_area:
@@ -88,20 +59,11 @@ on:
           - quick
           - standard
           - deep
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
       dry_run:
         description: 'Skip Discussion mutations and log them to a JSONL artifact instead. Use this on a fork to smoke-test before going live.'
         required: false
         default: false
         type: boolean
-<<<<<<< HEAD
-=======
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 
 permissions: {}
 
@@ -113,51 +75,20 @@ jobs:
   ideate:
     # Permissions cascade from the calling job to the reusable workflow.
     # The reusable workflow's two jobs (gather-signals + analyze) need:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     #   - contents:      read   (checkout, file reads)
     #   - issues:        read   (signal collection)
     #   - pull-requests: read   (signal collection)
     #   - discussions:   write  (CRITICAL — create/update Discussion threads)
     #   - id-token:      write  (claude-code-action OIDC for GitHub App token)
     #   - actions:       read   (feed checkpoint — last successful run query)
-<<<<<<< HEAD
-=======
-    #   - contents:    read   (checkout, file reads)
-    #   - issues:      read   (signal collection)
-    #   - pull-requests: read (signal collection)
-    #   - discussions: write  (CRITICAL — create/update Discussion threads)
-    #   - id-token:    write  (claude-code-action OIDC for GitHub App token)
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
     permissions:
       contents: read
       issues: read
       pull-requests: read
       discussions: write
       id-token: write
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
       actions: read
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d # v1
-=======
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@main
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@v1
->>>>>>> 6ba1b56 (feat(workflows): pin reusable callers to @v1 and document tier model (#88))
-=======
-      actions: read
-<<<<<<< HEAD
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ae9709f4466dec60a5733c9e7487f69dcd004e05 # v1
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
-=======
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d # v1
->>>>>>> bc4474f (chore: update feature-ideation uses: SHA to v1 (ee22b42) (#149))
     with:
       # === CUSTOMISE THIS PER REPO — the only required edit ===
       # Replace this paragraph with a 3-5 sentence description of your project,
@@ -167,10 +98,6 @@ jobs:
         TODO: Replace this with a description of the project and its market.
         Example: "ProjectX is a [type of product] for [target user]. Competitors
         include A, B, C. Key emerging trends in this space: X, Y, Z."
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ee22b42 (feat(feature-ideation): add curated reputable source list for Mary (#102))
       # === OPTIONAL: repo-local reputable source list ===
       # Copy standards/feature-ideation-sources.md from petry-projects/.github
       # to .github/feature-ideation-sources.md and customise it. The reusable
@@ -180,12 +107,5 @@ jobs:
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
       dry_run: ${{ inputs.dry_run || false }}
-<<<<<<< HEAD
-=======
-      focus_area: ${{ inputs.focus_area || '' }}
-      research_depth: ${{ inputs.research_depth || 'standard' }}
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -5,26 +5,12 @@
 #   standards/ci-standards.md
 #   standards/dependabot-policy.md
 #   standards/github-settings.md
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   standards/push-protection.md
 #
 # Outputs:
 #   $REPORT_DIR/findings.json      — machine-readable findings
 #   $REPORT_DIR/summary.md         — human-readable report
 #   $REPORT_DIR/issue-counts.json  — issue management counts (added/existing/removed)
-<<<<<<< HEAD
-=======
-=======
-#   standards/push-protection.md
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
-#
-# Outputs:
-#   $REPORT_DIR/findings.json   — machine-readable findings
-#   $REPORT_DIR/summary.md      — human-readable report
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
 #
 # Environment variables:
 #   GH_TOKEN        — GitHub token with repo/org scope (required)
@@ -47,50 +33,15 @@ CREATE_ISSUES="${CREATE_ISSUES:-true}"
 
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
-<<<<<<< HEAD
-<<<<<<< HEAD
 ISSUES_FILE="$REPORT_DIR/issues.json"
 ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
-<<<<<<< HEAD
-=======
-ISSUES_FILE="$REPORT_DIR/issues.json"
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
 
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
 ISSUES_EXISTING=0
 ISSUES_REMOVED=0
-<<<<<<< HEAD
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-=======
 ISSUES_RETRIGGERED=0
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-# Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
-ISSUES_ADDED=0
-ISSUES_EXISTING=0
-ISSUES_REMOVED=0
-ISSUES_RETRIGGERED=0
-=======
-REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
-=======
-REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
->>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
-# Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
-# configured via GitHub-managed default setup (Settings → Code security →
-# Code scanning), not a per-repo workflow file. The check_codeql_default_setup
-# function below verifies the API state and treats stray codeql.yml files
-# as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9dc05c4 (chore(dev-lead): deprecate claude.yml in ci-standards, promote dev-lead.yml (#301))
 REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
@@ -98,8 +49,6 @@ REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml 
 # function below verifies the API state and treats stray codeql.yml files
 # as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
 
-=======
->>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
 # name:hex-color:description (color without leading #)
 REQUIRED_LABEL_SPECS=(
   "security:d93f0b:Security-related PRs and issues"
@@ -110,17 +59,6 @@ REQUIRED_LABEL_SPECS=(
   "documentation:0075ca:Documentation changes"
   "in-progress:fbca04:An agent is actively working this issue"
 )
-<<<<<<< HEAD
-
-# App IDs whose auto_trigger_checks must be disabled org-wide.
-# 1236702 = Claude (anthropics/claude-code-action)
-# 347564  = CodeRabbit
-CHECK_SUITE_APP_IDS=(1236702 347564)
-=======
-REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation in-progress)
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
->>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
 
 # App IDs whose auto_trigger_checks must be disabled org-wide.
 # 1236702 = Claude (anthropics/claude-code-action)
@@ -133,26 +71,6 @@ REQUIRED_SETTINGS_BOOL=(
   "has_wiki:false:warning:Wiki should be disabled — documentation lives in the repo"
   "has_issues:true:error:Issue tracking must be enabled"
   "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
-=======
-
-REQUIRED_WORKFLOWS=(ci.yml codeql.yml sonarcloud.yml claude.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml)
-
-REQUIRED_LABELS=(security dependencies scorecard bug enhancement documentation)
-
-REQUIRED_SETTINGS_BOOL=(
-<<<<<<< HEAD
-  "allow_auto_merge:true:Allow auto-merge must be enabled for Dependabot workflow"
-  "delete_branch_on_merge:true:Automatically delete head branches must be enabled"
-  "has_wiki:false:Wiki should be disabled — documentation lives in the repo"
-  "has_issues:true:Issue tracking must be enabled"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  "allow_auto_merge:true:warning:Allow auto-merge must be enabled for Dependabot workflow"
-  "delete_branch_on_merge:true:warning:Automatically delete head branches must be enabled"
-  "has_wiki:false:warning:Wiki should be disabled — documentation lives in the repo"
-  "has_issues:true:error:Issue tracking must be enabled"
-  "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 )
 
 # ---------------------------------------------------------------------------
@@ -183,10 +101,6 @@ log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
 # escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
 # This ensures that version tags (e.g. v2.1) and reusable basenames are treated
 # as literal strings even if they contain regex metacharacters.
@@ -194,11 +108,6 @@ escape_ere() {
   printf '%s' "$1" | sed 's/[][\.^$*+?(){}|\\/{}]/\\&/g'
 }
 
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
@@ -215,10 +124,6 @@ gh_api() {
   return 1
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 # Source the shared push-protection library — provides pp_run_all_checks()
 # and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
 # add_finding() are defined, since the lib's check functions call them.
@@ -226,22 +131,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
 # Shared dev-lead retrigger helpers — dl_dev_lead_active() and
 # dl_cycle_trigger_label(). Used to re-engage dev-lead on persistent findings.
 # shellcheck source=lib/dev-lead-retrigger.sh
 . "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
 
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -253,24 +147,10 @@ detect_ecosystems() {
   local tree
   tree=$(gh_api "repos/$ORG/$repo/git/trees/HEAD?recursive=1" --jq '.tree[].path' 2>/dev/null || echo "")
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   if grep -qE '(^|/)package\.json$' <<< "$tree"; then
     ECOSYSTEMS+=("npm")
   fi
   if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
-=======
-  if echo "$tree" | grep -qE '(^|/)package\.json$'; then
-    ECOSYSTEMS+=("npm")
-  fi
-  if echo "$tree" | grep -qE '(^|/)pnpm-lock\.yaml$'; then
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  if grep -qE '(^|/)package\.json$' <<< "$tree"; then
-    ECOSYSTEMS+=("npm")
-  fi
-  if grep -qE '(^|/)pnpm-lock\.yaml$' <<< "$tree"; then
->>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
     # Override npm with pnpm if lock file present, or add pnpm directly
     if [[ " ${ECOSYSTEMS[*]} " == *" npm "* ]]; then
       ECOSYSTEMS=("${ECOSYSTEMS[@]/npm/pnpm}")
@@ -278,8 +158,6 @@ detect_ecosystems() {
       ECOSYSTEMS+=("pnpm")
     fi
   fi
-<<<<<<< HEAD
-<<<<<<< HEAD
   if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
     ECOSYSTEMS+=("go")
   fi
@@ -301,43 +179,6 @@ detect_ecosystems() {
   if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
     ECOSYSTEMS+=("bmad-method")
   fi
-=======
-  if echo "$tree" | grep -qE '(^|/)go\.mod$'; then
-=======
-  if grep -qE '(^|/)go\.mod$' <<< "$tree"; then
->>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
-    ECOSYSTEMS+=("go")
-  fi
-  if grep -qE '(^|/)Cargo\.toml$' <<< "$tree"; then
-    ECOSYSTEMS+=("rust")
-  fi
-  if grep -qE '(^|/)(pyproject\.toml|requirements\.txt)$' <<< "$tree"; then
-    ECOSYSTEMS+=("python")
-  fi
-  if grep -qE '\.tf$' <<< "$tree"; then
-    ECOSYSTEMS+=("terraform")
-  fi
-  if grep -qE '\.github/workflows/.*\.ya?ml$' <<< "$tree"; then
-    ECOSYSTEMS+=("github-actions")
-  fi
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  if echo "$tree" | grep -qE '(^|/)_bmad/'; then
-=======
-  # BMAD Method: detected via either the active install dir (`_bmad/`) or
-  # the planning artifacts output dir (`_bmad-output/`). Repos may have one,
-  # the other, or both depending on the BMAD workflow stage.
-<<<<<<< HEAD
-  if echo "$tree" | grep -qE '(^|/)_bmad(-output)?/'; then
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
-=======
-  if grep -qE '(^|/)_bmad(-output)?/' <<< "$tree"; then
->>>>>>> fea867c (fix(compliance-audit): replace echo|grep -q pipes with here-strings in detect_ecosystems (#249))
-    ECOSYSTEMS+=("bmad-method")
-  fi
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
@@ -353,10 +194,6 @@ check_required_workflows() {
         "standards/ci-standards.md#required-workflows"
     fi
   done
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 
   # Conditional: bmad-method repos must have feature-ideation workflow
   if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
@@ -366,11 +203,6 @@ check_required_workflows() {
         "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
     fi
   fi
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
@@ -397,27 +229,10 @@ check_action_pinning() {
     # Find uses: directives that are NOT SHA-pinned
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
-<<<<<<< HEAD
-<<<<<<< HEAD
     # Exclude $ORG/.github reusable workflow refs — these use tag refs
     # (@v1, @v2, @main) by design per ci-standards.md#action-pinning-policy
     local unpinned
     unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE "uses:[[:space:]]+$ORG/\\.github(-private)?/\\.github/workflows/" || true)
-=======
-    local unpinned
-<<<<<<< HEAD
-    unpinned=$(echo "$decoded" | grep -E '^\s*-?\s*uses:\s+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' || true)
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
-=======
-    # Exclude internal reusable workflow calls to petry-projects/.github and
-    # petry-projects/.github-private — per ci-standards.md#action-pinning-policy,
-    # these use deliberate tag refs (@v1, @v2, @main) and are explicitly exempt.
-    local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE 'uses:[[:space:]]+petry-projects/(\.github|\.github-private)/' || true)
->>>>>>> e4c1475 (feat: implement issue #299 — Compliance audit — 2026-05-15 (#336))
 
     if [ -n "$unpinned" ]; then
       local count
@@ -432,9 +247,6 @@ check_action_pinning() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 # Check: Reusable workflow path syntax
 # ---------------------------------------------------------------------------
 # NOTE: The correct pattern IS petry-projects/.github/.github/workflows/...
@@ -451,29 +263,6 @@ check_reusable_workflow_paths() {
 }
 
 # ---------------------------------------------------------------------------
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-# Check: Reusable workflow path syntax (no duplicate .github/ segments)
-=======
-# Check: Reusable workflow path syntax
->>>>>>> 3951a35 (fix(compliance): disable false positive reusable-workflow-path-duplicate-github check (#165))
-# ---------------------------------------------------------------------------
-# NOTE: The correct pattern IS petry-projects/.github/.github/workflows/...
-# because the first .github is the repository name, and the second .github
-# is the directory path within that repository. This check is disabled as
-# a known false positive per petry-projects/.github standards.
-#
-# Reference: https://docs.github.com/en/actions/using-workflows/reusing-workflows
-# Example: uses: petry-projects/.github/.github/workflows/claude-code-reusable.yml@v1
-check_reusable_workflow_paths() {
-  local repo="$1"
-  # This check is intentionally disabled — the double .github/ pattern is correct
-  return 0
-}
-
-# ---------------------------------------------------------------------------
->>>>>>> 956b396 (fix: correct reusable workflow path syntax (remove duplicate .github) (#154))
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -493,25 +282,14 @@ check_dependabot_config() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
   # Check github-actions ecosystem entry exists
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
   if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
-=======
-  if ! echo "$decoded" | grep -q 'package-ecosystem:.*"github-actions"'; then
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  # Accept both double-quoted ("github-actions") and single-quoted ('github-actions') YAML values.
-  if ! echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"github-actions\"|'github-actions')"; then
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-github-actions-ecosystem" "error" \
       "Dependabot config missing \`github-actions\` ecosystem entry" \
       "standards/dependabot-policy.md#github-actions-all-repos"
   fi
 
   # Check that app ecosystem entries use open-pull-requests-limit: 0
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Extract ecosystem blocks and check limits.
   # Accept both double-quoted and single-quoted YAML string values.
   for eco in npm pip gomod cargo terraform; do
@@ -520,23 +298,6 @@ check_dependabot_config() {
       # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
       local block
       block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
-=======
-  # Extract ecosystem blocks and check limits
-=======
-  # Extract ecosystem blocks and check limits.
-  # Accept both double-quoted and single-quoted YAML string values.
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
-  for eco in npm pip gomod cargo terraform; do
-    if echo "$decoded" | grep -qE "package-ecosystem:[[:space:]]*(\"$eco\"|'$eco')"; then
-      # Check if this ecosystem has limit: 0
-      # Simple heuristic: find the ecosystem line and look for limit in the next ~10 lines
-      local block
-<<<<<<< HEAD
-      block=$(echo "$decoded" | awk "/package-ecosystem:.*\"$eco\"/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/\"$eco\"/) exit}" | head -15)
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-      block=$(echo "$decoded" | awk "/package-ecosystem:.*(\"$eco\"|'$eco')/{found=1} found{print; if(/package-ecosystem:/ && NR>1 && !/(\"$eco\"|'$eco')/) exit}" | head -15)
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
       local limit
       limit=$(echo "$block" | grep 'open-pull-requests-limit:' | head -1 | grep -oE '[0-9]+' || echo "")
       if [ -n "$limit" ] && [ "$limit" != "0" ]; then
@@ -547,33 +308,14 @@ check_dependabot_config() {
     fi
   done
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Check for required labels in dependabot config.
   # Accept both double-quoted and single-quoted YAML string values.
   if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
-=======
-  # Check for required labels in dependabot config
-  if ! echo "$decoded" | grep -q '"security"'; then
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  # Check for required labels in dependabot config.
-  # Accept both double-quoted and single-quoted YAML string values.
-  if ! echo "$decoded" | grep -qE '("security"|'"'"'security'"'"')'; then
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-security-label" "warning" \
       "Dependabot config missing \`security\` label on updates" \
       "standards/dependabot-policy.md#policy"
   fi
-<<<<<<< HEAD
-<<<<<<< HEAD
   if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
-=======
-  if ! echo "$decoded" | grep -q '"dependencies"'; then
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  if ! echo "$decoded" | grep -qE '("dependencies"|'"'"'dependencies'"'"')'; then
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     add_finding "$repo" "dependabot" "missing-dependencies-label" "warning" \
       "Dependabot config missing \`dependencies\` label on updates" \
       "standards/dependabot-policy.md#policy"
@@ -585,23 +327,10 @@ check_dependabot_config() {
 # ---------------------------------------------------------------------------
 check_repo_settings() {
   local repo="$1"
-<<<<<<< HEAD
-<<<<<<< HEAD
   local repo_json="$2"
 
   local settings
   settings=$(echo "$repo_json" | jq '{
-=======
-
-  local settings
-  settings=$(gh_api "repos/$ORG/$repo" --jq '{
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  local repo_json="$2"
-
-  local settings
-  settings=$(echo "$repo_json" | jq '{
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     has_wiki: .has_wiki,
@@ -614,27 +343,11 @@ check_repo_settings() {
 
   # Boolean settings checks
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
-<<<<<<< HEAD
-<<<<<<< HEAD
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
     actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
-=======
-    IFS=':' read -r key expected detail <<< "$entry"
-    local actual
-    actual=$(echo "$settings" | jq -r ".$key // \"null\"")
-    if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "settings" "$key" "warning" \
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    IFS=':' read -r key expected severity detail <<< "$entry"
-    local actual
-    actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
-    if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "settings" "$key" "$severity" \
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
         "standards/github-settings.md#repository-settings--standard-defaults"
     fi
@@ -642,35 +355,13 @@ check_repo_settings() {
 
   # Default branch
   local default_branch
-<<<<<<< HEAD
-<<<<<<< HEAD
   default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
-=======
-  default_branch=$(echo "$settings" | jq -r '.default_branch')
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
->>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$default_branch" != "main" ]; then
     add_finding "$repo" "settings" "default-branch" "error" \
       "Default branch is \`$default_branch\`, should be \`main\`" \
       "standards/github-settings.md#general"
   fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  # Discussions
-  local has_discussions
-  has_discussions=$(echo "$settings" | jq -r '.has_discussions')
-  if [ "$has_discussions" != "true" ]; then
-    add_finding "$repo" "settings" "has-discussions" "warning" \
-      "Discussions should be enabled for community engagement" \
-      "standards/github-settings.md#general"
-  fi
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> e1cf1d8 (feat: require GitHub Discussions on all repos (#53))
 }
 
 # ---------------------------------------------------------------------------
@@ -682,8 +373,6 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
     IFS=':' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
@@ -706,37 +395,6 @@ check_labels() {
             "standards/github-settings.md#labels--standard-set"
         fi
       fi
-=======
-  for label in "${REQUIRED_LABELS[@]}"; do
-    if ! echo "$existing_labels" | grep -qx "$label"; then
-      add_finding "$repo" "labels" "missing-label-$label" "warning" \
-        "Required label \`$label\` is missing" \
-        "standards/github-settings.md#labels--standard-set"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
-    IFS=':' read -r label color description <<< "$spec"
-    if ! echo "$existing_labels" | grep -qx "$label"; then
-      if [ "$DRY_RUN" = "true" ]; then
-        add_finding "$repo" "labels" "missing-label-$label" "warning" \
-          "Required label \`$label\` is missing" \
-          "standards/github-settings.md#labels--standard-set"
-      else
-        info "Auto-creating missing label '$label' on $repo"
-        if gh label create "$label" \
-            --repo "$ORG/$repo" \
-            --color "$color" \
-            --description "$description" \
-            --force 2>/dev/null; then
-          info "Label '$label' created successfully on $repo"
-        else
-          warn "Failed to create label '$label' on $repo — filing finding for manual remediation"
-          add_finding "$repo" "labels" "missing-label-$label" "warning" \
-            "Required label \`$label\` is missing and could not be auto-created" \
-            "standards/github-settings.md#labels--standard-set"
-        fi
-      fi
->>>>>>> 92c3a85 (fix: auto-create missing required labels during compliance audit (#79))
     fi
   done
 }
@@ -771,8 +429,6 @@ check_codeowners() {
 
   # CODEOWNERS can be in root, .github/, or docs/
   local found=false
-<<<<<<< HEAD
-<<<<<<< HEAD
   local codeowners_content=""
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
     # Use || echo "" so a 404 is non-fatal under set -euo pipefail
@@ -781,54 +437,23 @@ check_codeowners() {
     if [ -n "$content" ]; then
       found=true
       codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
-=======
-=======
-  local codeowners_content=""
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
-  for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
-    # Use || echo "" so a 404 is non-fatal under set -euo pipefail
-    local content
-    content=$(gh_api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null || echo "")
-    if [ -n "$content" ]; then
-      found=true
-<<<<<<< HEAD
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-      codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
       break
     fi
   done
 
   if [ "$found" = false ]; then
-<<<<<<< HEAD
-<<<<<<< HEAD
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
       "standards/codeowners-standard.md"
-=======
-    add_finding "$repo" "settings" "missing-codeowners" "error" \
-      "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
-<<<<<<< HEAD
-      "standards/github-settings.md#codeowners-standard"
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
-=======
-      "standards/codeowners-standard.md"
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
     return
   fi
 
   # Extract non-comment, non-blank owner lines for accurate matching.
   # Each such line has the form: <pattern> <owner1> [<owner2> ...]
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
   # Standard (codeowners-standard.md):
   #   1. @petry-projects/org-leads MUST be the FIRST owner on every line.
   #   2. Additional teams (@petry-projects/<slug>) are allowed.
   #   3. Individual users (@username without "/") are forbidden.
-<<<<<<< HEAD
   local owner_lines
   owner_lines=$(echo "$codeowners_content" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')
 
@@ -880,74 +505,6 @@ check_codeowners() {
     add_finding "$repo" "settings" "codeowners-no-catchall" "warning" \
       "CODEOWNERS has no default \`*\` catch-all pattern — files not matched by a path rule will have no owner and \`require_code_owner_review\` will not apply to them" \
       "standards/codeowners-standard.md"
-=======
-    add_finding "$repo" "settings" "missing-codeowners" "warning" \
-      "No \`CODEOWNERS\` file found — recommended for code owner review enforcement" \
-      "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  # We check that every owner line includes both required bot accounts.
-=======
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
-  local owner_lines
-  owner_lines=$(echo "$codeowners_content" | grep -v '^\s*#' | grep -v '^\s*$')
-
-  if [ -z "$owner_lines" ]; then
-    add_finding "$repo" "settings" "codeowners-empty" "error" \
-      "CODEOWNERS file has no owner lines (only comments/blank)" \
-      "standards/codeowners-standard.md"
-    return
-  fi
-
-<<<<<<< HEAD
-  if [ "${#missing_bots[@]}" -gt 0 ]; then
-    add_finding "$repo" "settings" "codeowners-missing-bots" "error" \
-      "CODEOWNERS is missing required bot accounts on owner lines: ${missing_bots[*]} — bot approvals will not satisfy require_code_owner_review" \
-      "standards/github-settings.md#codeowners-standard"
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
-=======
-  # Rule 1: @petry-projects/org-leads MUST be the first owner on every line
-  # (the first whitespace-separated token after the pattern).
-  local bad_first_owner=""
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    # awk $2 = first owner token after the pattern
-    local first_owner
-    first_owner=$(echo "$line" | awk '{print $2}')
-    if [ "$first_owner" != "@petry-projects/org-leads" ]; then
-      bad_first_owner="$line"
-      break
-    fi
-  done <<< "$owner_lines"
-  if [ -n "$bad_first_owner" ]; then
-    add_finding "$repo" "settings" "codeowners-org-leads-not-first" "error" \
-      "CODEOWNERS owner lines must list \`@petry-projects/org-leads\` as the FIRST owner. Offending line: \`$bad_first_owner\`" \
-      "standards/codeowners-standard.md"
-  fi
-
-  # Rule 3: no individual users — every owner token must be a team (contain "/").
-  # Collect owner tokens from all lines (everything starting with @).
-  local individual_owners
-  individual_owners=$(echo "$owner_lines" \
-    | tr ' \t' '\n' \
-    | grep -E '^@' \
-    | grep -vE '^@[^/]+/' \
-    | sort -u || true)
-  if [ -n "$individual_owners" ]; then
-    local joined
-    joined=$(echo "$individual_owners" | tr '\n' ' ')
-    add_finding "$repo" "settings" "codeowners-individual-users" "error" \
-      "CODEOWNERS contains forbidden individual user owners: ${joined% } — only teams (@petry-projects/<slug>) are allowed; manage membership via teams" \
-      "standards/codeowners-standard.md"
-  fi
-
-  # Advisory: a catch-all `*` pattern should exist so files unmatched by any
-  # path-specific rule still have an owner.
-  if ! echo "$owner_lines" | awk '{print $1}' | grep -qxF '*'; then
-    add_finding "$repo" "settings" "codeowners-no-catchall" "warning" \
-      "CODEOWNERS has no default \`*\` catch-all pattern — files not matched by a path rule will have no owner and \`require_code_owner_review\` will not apply to them" \
-      "standards/codeowners-standard.md"
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
   fi
 }
 
@@ -968,10 +525,6 @@ check_sonarcloud() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # Check: CodeQL default setup is configured (and no stray codeql.yml exists)
 #
 # After petry-projects/.github#103, CodeQL is configured via GitHub's
@@ -992,10 +545,6 @@ check_sonarcloud() {
 check_codeql_default_setup() {
   local repo="$1"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> c7104f4 (fix(compliance-audit): handle 403 permission errors in CodeQL default setup check (#221))
   # Query the default-setup state.
   # IMPORTANT: Do NOT use the gh_api() retry wrapper here. When gh api gets a
   # 403 it outputs the error JSON body to stdout before exiting non-zero. The
@@ -1007,7 +556,6 @@ check_codeql_default_setup() {
   local raw_response=""
   local api_ok=0
   raw_response=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" 2>/dev/null) || api_ok=$?
-<<<<<<< HEAD
 
   if [ "$api_ok" -ne 0 ]; then
     # Distinguish a 403 permission error from other failures (404, 500, …).
@@ -1034,48 +582,6 @@ check_codeql_default_setup() {
         "CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
         "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
     fi
-=======
-  # Query the default-setup state. The endpoint returns 200 with a JSON body
-  # describing the state, OR a 4xx if the repo has no code scanning capability
-  # (e.g. private without GHAS, archived). Treat any non-"configured" state
-  # as a finding so the audit surfaces what needs remediation.
-  local state
-  state=$(gh_api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>/dev/null || echo "")
-=======
->>>>>>> c7104f4 (fix(compliance-audit): handle 403 permission errors in CodeQL default setup check (#221))
-
-  if [ "$api_ok" -ne 0 ]; then
-    # Distinguish a 403 permission error from other failures (404, 500, …).
-    # The gh api error body contains `"status": "403"` (a JSON string) for
-    # "Resource not accessible by personal access token" responses.
-    if echo "$raw_response" | jq -e '.status == "403"' > /dev/null 2>&1; then
-      # ORG_SCORECARD_TOKEN lacks the security_events scope required by this
-      # endpoint. We cannot determine the CodeQL default-setup state, so we
-      # skip without adding a finding — a 403 from the audit token must not be
-      # misreported as "not configured". To verify state manually run:
-      #   gh api repos/$ORG/$repo/code-scanning/default-setup
-      # with a token that carries security_events (or repo-admin) scope.
-      info "  CodeQL default setup check skipped for $repo — audit token lacks required permissions (403)"
-    else
-      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
-        "CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
-        "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
-    fi
-  else
-    local state
-    state=$(echo "$raw_response" | jq -r '.state // ""')
-    if [ "$state" != "configured" ]; then
-      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
-        "CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
-        "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
-    fi
-<<<<<<< HEAD
-    add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
-      "$detail" \
-      "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
-=======
->>>>>>> c7104f4 (fix(compliance-audit): handle 403 permission errors in CodeQL default setup check (#221))
   fi
 
   # Stray workflow check: any codeql.yml under .github/workflows is drift.
@@ -1087,11 +593,6 @@ check_codeql_default_setup() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # Check: Workflow permissions follow least-privilege
 # ---------------------------------------------------------------------------
 check_workflow_permissions() {
@@ -1111,10 +612,6 @@ check_workflow_permissions() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Skip reusable workflows (workflow_call-only triggers).
     # Their permissions are controlled entirely by the caller workflow, so
     # requiring a top-level permissions: block here would be redundant and
@@ -1124,11 +621,6 @@ check_workflow_permissions() {
       continue
     fi
 
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Check if the workflow has a top-level permissions key
     # Single-job workflows may define permissions at job level instead
     if ! echo "$decoded" | grep -qE '^permissions:'; then
@@ -1147,11 +639,6 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
 # Check: claude.yml jobs both have a checkout step
 # ---------------------------------------------------------------------------
 check_claude_workflow_checkout() {
@@ -1181,10 +668,6 @@ check_claude_workflow_checkout() {
         "standards/workflows/claude.yml"
     fi
   done
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e945246 (fix(claude-ci-fix): resolve PR via API when check_run payload is empty)
 
   # Verify the check_run trigger is present — without it the claude-ci-fix job
   # in the reusable can never fire to diagnose and fix CI failures on PRs.
@@ -1196,10 +679,6 @@ check_claude_workflow_checkout() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
 # Check: ci.yml uses SHA-scoped concurrency group
 #
 # Per-ref concurrency groups (`ci-${{ github.ref }}`) with cancel-in-progress
@@ -1233,8 +712,6 @@ check_ci_concurrency() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
 # Check: Tier 1 centralized workflows must be thin caller stubs pinned to the
 # canonical version tag for their reusable.
 #
@@ -1249,30 +726,6 @@ check_ci_concurrency() {
 # its own workflows by @main during release prep.
 #
 # Array format: "workflow-filename:expected-reusable-basename:version-tag"
-=======
-=======
->>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
-# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
-=======
-# Check: Tier 1 centralized workflows must be thin caller stubs pinned to the
-# canonical version tag for their reusable.
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
-#
-# For each workflow that the org has centralized into a reusable workflow,
-# verify the downstream repo's copy is a stub that delegates via:
-#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@<version>
-#
-# This prevents drift: a repo that copies the inline pre-centralization
-# version (or pins to @main, or pins to a non-canonical tag) is flagged so
-# it can be re-synced from the standard. The central .github repo itself is
-# exempt because it owns the reusables and may legitimately reference
-# its own workflows by @main during release prep.
-<<<<<<< HEAD
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-#
-# Array format: "workflow-filename:expected-reusable-basename:version-tag"
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
 # ---------------------------------------------------------------------------
 check_centralized_workflow_stubs() {
   local repo="$1"
@@ -1281,8 +734,6 @@ check_centralized_workflow_stubs() {
   # own reusables by @main; skip the stub check for it.
   [ "$repo" = ".github" ] && return
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   # workflow-filename:expected-reusable-basename:version-tag
   # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
   # the private petry-projects/.github-private repo and is pinned @main (not a
@@ -1296,36 +747,6 @@ check_centralized_workflow_stubs() {
     "agent-shield.yml:agent-shield-reusable:v1"
     "feature-ideation.yml:feature-ideation-reusable:v1"
     "pr-review-mention.yml:pr-review-mention-reusable:v2"
-=======
-  # workflow-filename:expected-reusable-basename
-  local centralized=(
-    "dev-lead.yml:dev-lead-reusable"
-    "auto-rebase.yml:auto-rebase-reusable"
-    "dependency-audit.yml:dependency-audit-reusable"
-    "dependabot-automerge.yml:dependabot-automerge-reusable"
-    "dependabot-rebase.yml:dependabot-rebase-reusable"
-    "agent-shield.yml:agent-shield-reusable"
-    "feature-ideation.yml:feature-ideation-reusable"
-<<<<<<< HEAD
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-    "pr-review-mention.yml:pr-review-mention-reusable"
->>>>>>> a2b3b46 (feat: make pr-review-mention an org standard (#237))
-=======
-  # workflow-filename:expected-reusable-basename:version-tag
-  # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
-  # the private petry-projects/.github-private repo and is pinned @main (not a
-  # .github @v1 tag), so it doesn't fit this check's .github/@version model. It
-  # is validated by check_dev_lead_stub() below.
-  local centralized=(
-    "auto-rebase.yml:auto-rebase-reusable:v1"
-    "dependency-audit.yml:dependency-audit-reusable:v1"
-    "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
-    "dependabot-rebase.yml:dependabot-rebase-reusable:v1"
-    "agent-shield.yml:agent-shield-reusable:v1"
-    "feature-ideation.yml:feature-ideation-reusable:v1"
-    "pr-review-mention.yml:pr-review-mention-reusable:v2"
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -1334,23 +755,10 @@ check_centralized_workflow_stubs() {
   workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
   [ -z "$workflow_list" ] && return
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   local entry wf reusable version
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable version <<< "$entry"
     [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
-=======
-  local entry wf reusable
-  for entry in "${centralized[@]}"; do
-    IFS=':' read -r wf reusable <<< "$entry"
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-  local entry wf reusable version
-  for entry in "${centralized[@]}"; do
-    IFS=':' read -r wf reusable version <<< "$entry"
-    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
@@ -1368,8 +776,6 @@ check_centralized_workflow_stubs() {
     [ -z "$decoded" ] && continue
 
     # Required pattern: a non-comment line whose `uses:` value is exactly
-<<<<<<< HEAD
-<<<<<<< HEAD
     # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
     # Anchor to start-of-line + optional indent so a `# uses: ...` comment
     # cannot satisfy the check.
@@ -1380,41 +786,12 @@ check_centralized_workflow_stubs() {
 
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
       continue  # stub is correctly pinned to the canonical version — compliant
-=======
-    # petry-projects/.github/.github/workflows/<reusable>.yml@v1
-=======
-    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
-    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
-    # cannot satisfy the check.
-    local esc_reusable esc_version
-    esc_reusable=$(escape_ere "$reusable")
-    esc_version=$(escape_ere "$version")
-    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
-
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
-<<<<<<< HEAD
-      continue  # stub is correctly pinned to @v1 — compliant
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-      continue  # stub is correctly pinned to the canonical version — compliant
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
     fi
 
     # Determine why it's non-compliant for a more actionable message.
     local why
-<<<<<<< HEAD
-<<<<<<< HEAD
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to \`@${version}\` (org standard)"
-=======
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@v1\` (org standard)"
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -1422,23 +799,12 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-<<<<<<< HEAD
-<<<<<<< HEAD
       "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
-=======
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@v1\`." \
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
->>>>>>> 0765a60 (fix(compliance): track per-workflow version tags in stub checker (#302))
       "standards/ci-standards.md#centralization-tiers"
   done
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 # Check: dev-lead.yml caller stub conforms to the centralized contract
 #
 # Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
@@ -1448,16 +814,6 @@ check_centralized_workflow_stubs() {
 # in three ways this check catches (all root causes of petry-projects/.github#402):
 #
 #   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@dev-lead/stable.
-=======
-# Check: dev-lead.yml caller stub conforms to the centralized contract
-#
-# Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
-# @main, and its concurrency + permissions are owned centrally (see
-# standards/ci-standards.md#dev-lead-agent). A stub drifts — and breaks — in
-# three ways this check catches (all root causes of petry-projects/.github#402):
-#
-#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@main.
->>>>>>> f3d43d2 (feat(compliance): dedicated dev-lead stub check (pin/concurrency/permissions) (#405))
 #   2. Local concurrency block: per-stub concurrency drifts and cancels issue
 #      pickups; concurrency is owned by the reusable (per-issue/per-PR lanes).
 #   3. Missing `statuses: read`: the reusable requests it since #435, so without
@@ -1477,7 +833,6 @@ check_dev_lead_stub() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
   [ -z "$decoded" ] && return
 
-<<<<<<< HEAD
   # 1) Canonical pin (non-comment `uses:` line, exact ref) — the moving
   #    dev-lead/stable channel tag (self-host channel model).
   if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/stable([[:space:]]|$)"; then
@@ -1495,27 +850,13 @@ check_dev_lead_stub() {
   fi
 
   # 3) No per-stub concurrency block — concurrency is owned by the reusable.
-=======
-  # 1) Canonical pin (non-comment `uses:` line, exact ref).
-  if ! echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@main([[:space:]]|$)"; then
-    add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
-      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
-      "standards/ci-standards.md#dev-lead-agent"
-  fi
-
-  # 2) No per-stub concurrency block — concurrency is owned by the reusable.
->>>>>>> f3d43d2 (feat(compliance): dedicated dev-lead stub check (pin/concurrency/permissions) (#405))
   if echo "$decoded" | grep -qE "^concurrency:"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
       "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
-<<<<<<< HEAD
   # 4) Caller permissions must grant `statuses: read`.
-=======
-  # 3) Caller permissions must grant `statuses: read`.
->>>>>>> f3d43d2 (feat(compliance): dedicated dev-lead stub check (pin/concurrency/permissions) (#405))
   if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
       "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
@@ -1524,11 +865,6 @@ check_dev_lead_stub() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
-=======
->>>>>>> f3d43d2 (feat(compliance): dedicated dev-lead stub check (pin/concurrency/permissions) (#405))
 # Check: required-status-check rulesets reference current names
 #
 # After centralizing workflows into reusables (#87, #88), GitHub composes
@@ -1649,18 +985,6 @@ check_centralized_check_names() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-=======
-}
-
-# ---------------------------------------------------------------------------
->>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
-=======
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
->>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -1707,21 +1031,11 @@ check_agents_md() {
     local decoded
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
     # Accept two forms of reference:
     #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
     #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
     # Both are treated as references to the org-level standards file.
     if ! echo "$decoded" | grep -qE '(\.github/AGENTS\.md|petry-projects/\.github/blob/.+/AGENTS\.md)'; then
-<<<<<<< HEAD
-=======
-    if ! echo "$decoded" | grep -qE '\.github/AGENTS\.md'; then
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-=======
->>>>>>> 7bdbb81 (fix(compliance-audit): eliminate false positives + apply API-based fixes (#120))
       add_finding "$repo" "standards" "agents-md-missing-org-ref" "error" \
         "\`AGENTS.md\` does not reference the org-level \`.github/AGENTS.md\` standards" \
         "AGENTS.md"
@@ -1730,11 +1044,6 @@ check_agents_md() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 # Check: copilot-setup-steps.yml exists
 # ---------------------------------------------------------------------------
 # Every repo should have a copilot-setup-steps.yml to pre-install tools and
@@ -1795,15 +1104,7 @@ for raw in lines:
         child_indent = indent
 
     # Match the exact required direct child key (quoted or unquoted YAML key)
-<<<<<<< HEAD
-<<<<<<< HEAD
     if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
-=======
-    if child_indent is not None and indent == child_indent and re.match(r'^["\']?copilot-setup-steps["\']?:[ ]*(#.*)?$', line):
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
-=======
-    if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
->>>>>>> 3f861e1 (fix(compliance-audit): correct regex quote escaping to resolve syntax error on line 1039)
         found = True
         break
 
@@ -1879,11 +1180,6 @@ check_copilot_instructions() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
-=======
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
 # Check: check-suite auto-trigger disabled for Claude and CodeRabbit
 # ---------------------------------------------------------------------------
 check_check_suite_prefs() {
@@ -1918,13 +1214,6 @@ check_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Issue management
 # ---------------------------------------------------------------------------
 ensure_audit_label() {
@@ -1934,50 +1223,11 @@ ensure_audit_label() {
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   gh label create "dev-lead" \
     --repo "$ORG/$repo" \
     --description "For dev-lead agent pickup" \
     --color "8B5CF6" \
     --force 2>/dev/null || true
-}
-
-# Create all required labels (idempotent — uses --force to update if present)
-ensure_required_labels() {
-  local repo="$1"
-  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
-    "in-progress|fbca04|An agent is actively working this issue"
-  )
-
-  for config in "${label_configs[@]}"; do
-    IFS='|' read -r name color description <<< "$config"
-    gh label create "$name" \
-      --repo "$ORG/$repo" \
-      --description "$description" \
-      --color "$color" \
-      --force 2>/dev/null || true
-  done
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  gh label create "claude" \
-=======
-  gh label create "dev-lead" \
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
-    --repo "$ORG/$repo" \
-    --description "For dev-lead agent pickup" \
-    --color "8B5CF6" \
-    --force 2>/dev/null || true
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
 }
 
 # Create all required labels (idempotent — uses --force to update if present)
@@ -2022,17 +1272,8 @@ create_issue_for_finding() {
     2>/dev/null | head -1 || echo "")
 
   if [ -n "$existing" ]; then
-<<<<<<< HEAD
-<<<<<<< HEAD
     # Update existing issue with a comment; only count as existing if the update succeeds
     local update_ok=true
-=======
-    # Update existing issue with a comment
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    # Update existing issue with a comment; only count as existing if the update succeeds
-    local update_ok=true
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
     gh issue comment "$existing" --repo "$ORG/$repo" \
       --body "**Weekly Compliance Audit** ($(date -u +%Y-%m-%d))
 
@@ -2040,8 +1281,6 @@ This finding is still open.
 
 **Detail:** $detail
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 **Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || update_ok=false
     if [ "$update_ok" = "true" ]; then
       info "Updated existing issue #$existing in $repo for: $check"
@@ -2119,73 +1358,6 @@ See the [full standards documentation](https://github.com/${ORG}/.github/tree/ma
       ;;
   esac
 
-=======
-**Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || true
-    # Ensure claude label is present on pre-existing issues
-=======
-**Standard:** [$standard_ref](https://github.com/$ORG/.github/blob/main/$standard_ref)" 2>/dev/null || update_ok=false
-    # Ensure claude label is present on pre-existing issues regardless
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "claude" 2>/dev/null || true
-    if [ "$update_ok" = "true" ]; then
-      info "Updated existing issue #$existing in $repo for: $check"
-      ISSUES_EXISTING=$((ISSUES_EXISTING + 1))
-    else
-      warn "Failed to update existing issue #$existing in $repo for: $check"
-    fi
-    # Record existing issue for umbrella
-    jq --null-input \
-      --arg repo "$repo" \
-      --arg category "$category" \
-      --arg check "$check" \
-      --arg severity "$severity" \
-      --arg number "$existing" \
-      --arg url "https://github.com/$ORG/$repo/issues/$existing" \
-      '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
-      >> "$ISSUES_FILE"
-    return
-  fi
-
-<<<<<<< HEAD
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  # Category-specific remediation instructions
-  local remediation_steps
-  case "$category" in
-    settings)
-      remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` with a token that has admin access to the repository (requires a classic PAT with \`repo\` scope or equivalent):
-
-\`\`\`bash
-GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
-\`\`\`
-
-This script applies all standard settings defined in \`standards/github-settings.md\` in one pass.
-For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}\`"
-      ;;
-    workflows)
-      remediation_steps="Copy the relevant workflow template from \`standards/workflows/\` verbatim — do not generate from scratch:
-
-\`\`\`bash
-gh api repos/${ORG}/.github/contents/standards/workflows/<template>.yml --jq '.content' | base64 -d > .github/workflows/<template>.yml
-\`\`\`
-
-Available templates: \`agent-shield.yml\`, \`claude.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
-      ;;
-    labels)
-      remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` — it applies standard labels alongside settings:
-
-\`\`\`bash
-GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
-\`\`\`"
-      ;;
-    *)
-      remediation_steps="Please review the linked standard and bring this repository into compliance.
-
-See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance."
-      ;;
-  esac
-
->>>>>>> 4edc666 (fix: enable allow_auto_merge and improve compliance audit remediation guidance (#244))
   # Build issue body — variable values are safe (from our own check logic + GitHub API)
   local body="## Compliance Finding
 
@@ -2203,71 +1375,23 @@ ${detail}
 
 ## Remediation
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ${remediation_steps}
-=======
-Please review the linked standard and bring this repository into compliance.
-
-See the [full standards documentation](https://github.com/${ORG}/.github/tree/main/standards) for implementation guidance.
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-${remediation_steps}
->>>>>>> 4edc666 (fix: enable allow_auto_merge and improve compliance audit remediation guidance (#244))
 
 ---
 *This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
 
   local issue_url
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
-  issue_url=$(gh issue create --repo "$ORG/$repo" \
-    --title "$search_title" \
-    --label "$AUDIT_LABEL" \
-<<<<<<< HEAD
-    --label "dev-lead" \
-=======
-  issue_url=$(gh issue create --repo "$ORG/$repo" \
-    --title "$search_title" \
-    --label "$AUDIT_LABEL" \
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    --label "claude" \
->>>>>>> b9fe8f7 (fix: add claude label to compliance audit issues)
-=======
-  # Individual finding issues get compliance-audit label only — NOT the claude label.
-  # The umbrella issue (created separately) gets the claude label to trigger one coordinated agent run.
-  issue_url=$(gh issue create --repo "$ORG/$repo" \
-    --title "$search_title" \
-    --label "$AUDIT_LABEL" \
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
-  # Individual finding issues get both compliance-audit and claude labels so agents can pick them up.
-  issue_url=$(gh issue create --repo "$ORG/$repo" \
-    --title "$search_title" \
-    --label "$AUDIT_LABEL" \
-    --label "claude" \
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
   # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$AUDIT_LABEL" \
     --label "dev-lead" \
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
     local new_issue
     new_issue=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
     info "Created issue #$new_issue in $repo for: $check ($issue_url)"
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
     ISSUES_ADDED=$((ISSUES_ADDED + 1))
 
     # Record created issue for umbrella
@@ -2277,40 +1401,16 @@ ${remediation_steps}
         --arg category "$category" \
         --arg check "$check" \
         --arg severity "$severity" \
-<<<<<<< HEAD
         --arg number "$new_issue" \
         --arg url "$issue_url" \
         '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
         >> "$ISSUES_FILE"
-=======
-
-    # Record created issue for umbrella
-    if [ -n "$new_issue" ]; then
-<<<<<<< HEAD
-      gh issue edit "$new_issue" --repo "$ORG/$repo" --add-assignee "app/claude" 2>/dev/null || true
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-      jq --null-input \
-        --arg repo "$repo" \
-        --arg category "$category" \
-        --arg check "$check" \
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-        --arg number "$new_issue" \
-        --arg url "$issue_url" \
-        '{repo:$repo,category:$category,check:$check,severity:$severity,number:$number,url:$url}' \
-        >> "$ISSUES_FILE"
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
     fi
   else
     warn "Failed to create issue in $repo for: $check"
   fi
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 create_umbrella_issue() {
   local audit_date
   audit_date=$(date -u +%Y-%m-%d)
@@ -2343,28 +1443,13 @@ create_umbrella_issue() {
   # Each group: category_keys|display_name|remediation_script
   local groups=(
     "settings|Repository Settings|apply-repo-settings.sh"
-<<<<<<< HEAD
-<<<<<<< HEAD
     "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
-=======
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
-    "push-protection|Push Protection & Secret Scanning|apply-repo-settings.sh (security_and_analysis) + per-repo ci.yml and .gitignore"
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
-<<<<<<< HEAD
-<<<<<<< HEAD
     "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
-=======
-    "standards|CLAUDE.md / AGENTS.md References|per-repo doc updates"
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
-    "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
   )
 
   local body
@@ -2440,15 +1525,7 @@ Findings are grouped by remediation category. Address each category together to 
   umbrella_url=$(gh issue create --repo "$ORG/.github" \
     --title "$title" \
     --label "$AUDIT_LABEL" \
-<<<<<<< HEAD
-<<<<<<< HEAD
     --label "dev-lead" \
-=======
-    --label "claude" \
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
-    --label "dev-lead" \
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$umbrella_url" ]; then
@@ -2458,11 +1535,6 @@ Findings are grouped by remediation category. Address each category together to 
   fi
 }
 
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 close_resolved_issues() {
   local repo="$1"
 
@@ -2489,10 +1561,6 @@ close_resolved_issues() {
 
     # If this check is no longer in findings, close the issue
     if ! echo "$current_checks" | grep -qx "$check_name"; then
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
       if gh issue close "$issue_num" --repo "$ORG/$repo" \
           --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
           2>/dev/null; then
@@ -2501,15 +1569,6 @@ close_resolved_issues() {
       else
         warn "Failed to close resolved issue #$issue_num in $repo: $issue_title"
       fi
-<<<<<<< HEAD
-=======
-      gh issue close "$issue_num" --repo "$ORG/$repo" \
-        --comment "Resolved! This check is now passing as of $(date -u +%Y-%m-%d). Closing automatically." \
-        2>/dev/null || true
-      info "Closed resolved issue #$issue_num in $repo: $issue_title"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
     fi
   done <<< "$open_issues"
 }
@@ -2539,41 +1598,18 @@ generate_summary() {
 | Errors (must fix) | $error_count |
 | Warnings (should fix) | $warning_count |
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 HEREDOC
 
   if [ "$total_findings" -eq 0 ]; then
-=======
-## Findings by Repository
-
-HEREDOC
-
-  # Group findings by repo
-  local repos_with_findings
-  repos_with_findings=$(jq -r '[.[].repo] | unique[]' "$FINDINGS_FILE")
-
-  if [ -z "$repos_with_findings" ]; then
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-HEREDOC
-
-  if [ "$total_findings" -eq 0 ]; then
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
     echo "All repositories are fully compliant! No findings." >> "$SUMMARY_FILE"
     return
   fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
   # ── Findings by Check Type ──────────────────────────────────────────────────
   # Group by check name (not repo) to surface cross-repo patterns at a glance.
   # Errors first, then warnings; within each severity sorted by category then check.
   cat >> "$SUMMARY_FILE" <<'HEREDOC'
 ## Findings by Check Type
-<<<<<<< HEAD
 
 | Check | Severity | Category | Repos Affected |
 |-------|----------|----------|----------------|
@@ -2617,98 +1653,17 @@ HEREDOC
   # ── Category breakdown ───────────────────────────────────────────────────────
   cat >> "$SUMMARY_FILE" <<'HEREDOC'
 
-=======
-  for repo in $repos_with_findings; do
-    local repo_findings
-    repo_findings=$(jq -r --arg repo "$repo" \
-      '.[] | select(.repo == $repo) | "| `\(.severity)` | \(.category) | \(.check) | \(.detail) |"' \
-      "$FINDINGS_FILE")
-
-    local repo_count
-    repo_count=$(jq --arg repo "$repo" '[.[] | select(.repo == $repo)] | length' "$FINDINGS_FILE")
-
-    cat >> "$SUMMARY_FILE" <<HEREDOC
-### [$repo](https://github.com/$ORG/$repo) — $repo_count finding(s)
-
-| Severity | Category | Check | Detail |
-|----------|----------|-------|--------|
-$repo_findings
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-
-| Check | Severity | Category | Repos Affected |
-|-------|----------|----------|----------------|
-HEREDOC
-
-<<<<<<< HEAD
-  # Category breakdown
-  cat >> "$SUMMARY_FILE" <<HEREDOC
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  jq -r --arg org "$ORG" '
-    group_by(.check)
-    | map({
-        check:      .[0].check,
-        category:   .[0].category,
-        severity:   .[0].severity,
-        repos:      [.[].repo]
-      })
-    | sort_by([(if .severity == "error" then 0 else 1 end), .category, .check])
-    | .[]
-    | "| `\(.check)` | `\(.severity)` | \(.category) | \(.repos | map("[`" + . + "`](https://github.com/" + $org + "/" + . + ")") | join(", ")) |"
-  ' "$FINDINGS_FILE" >> "$SUMMARY_FILE"
-
-  # ── Per-Repo Scorecard ───────────────────────────────────────────────────────
-  cat >> "$SUMMARY_FILE" <<'HEREDOC'
-
-## Per-Repo Scorecard
-
-| Repo | Errors | Warnings | Total |
-|------|--------|----------|-------|
-HEREDOC
-
-  jq -r --arg org "$ORG" '
-    group_by(.repo)
-    | map({
-        repo:     .[0].repo,
-        errors:   ([.[] | select(.severity == "error")]   | length),
-        warnings: ([.[] | select(.severity == "warning")] | length),
-        total:    length
-      })
-    | sort_by(-.total)
-    | .[]
-    | "| [**\(.repo)**](https://github.com/" + $org + "/" + .repo + ") | \(.errors) | \(.warnings) | **\(.total)** |"
-  ' "$FINDINGS_FILE" >> "$SUMMARY_FILE"
-
-  # ── Category breakdown ───────────────────────────────────────────────────────
-  cat >> "$SUMMARY_FILE" <<'HEREDOC'
-
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
 ## Findings by Category
 
 HEREDOC
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
-=======
-  for category in ci-workflows action-pinning dependabot settings labels rulesets; do
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  for category in ci-workflows action-pinning dependabot settings labels rulesets standards; do
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-=======
-  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
       echo "- **$category:** $cat_count finding(s)" >> "$SUMMARY_FILE"
     fi
   done
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Footer appended by main() after issue links are added
 }
 
@@ -2812,126 +1767,12 @@ HEREDOC
   done <<< "$checks_ordered"
 
   rm -f "$pr_data_file"
-=======
-=======
-  # Footer appended by main() after issue links are added
-}
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-
-# ---------------------------------------------------------------------------
-# Issue & PR link summary (appended after issue creation)
-# ---------------------------------------------------------------------------
-append_issue_pr_links() {
-  [ -s "$ISSUES_FILE" ] || return
-
-  # Collect open PRs per affected repo (one GraphQL call per repo) to find
-  # those whose closingIssuesReferences include one of our compliance issues.
-  local pr_data_file
-  pr_data_file=$(mktemp)
-  echo '[]' > "$pr_data_file"
-
-  local repos_in_issues
-  repos_in_issues=$(jq -rn '[inputs | .repo] | unique[]' "$ISSUES_FILE" 2>/dev/null || echo "")
-
-  for repo in $repos_in_issues; do
-    local repo_prs
-    repo_prs=$(gh api graphql \
-      -f owner="$ORG" -f name="$repo" \
-      -f query='query($owner:String!,$name:String!){
-        repository(owner:$owner,name:$name){
-          pullRequests(states:OPEN,first:100){
-            nodes{
-              number url
-              closingIssuesReferences(first:10){nodes{number}}
-            }
-          }
-        }
-      }' 2>/dev/null \
-      | jq --arg repo "$repo" '[
-          .data.repository.pullRequests.nodes[] | {
-            repo:      $repo,
-            pr_number: .number,
-            pr_url:    .url,
-            closes:    [.closingIssuesReferences.nodes[].number]
-          }
-        ]' 2>/dev/null || echo '[]')
-
-    jq -n \
-      --argjson existing "$(cat "$pr_data_file")" \
-      --argjson new_prs "$repo_prs" \
-      '$existing + $new_prs' > "$pr_data_file.tmp" \
-      && mv "$pr_data_file.tmp" "$pr_data_file"
-  done
-
-  cat >> "$SUMMARY_FILE" <<'HEREDOC'
-
-## Issues & Related PRs
-
-Grouped by compliance check type. Each entry links to the GitHub Issue for the
-finding in each affected repo; **Related PRs** shows open pull requests that
-close that issue.
-
-HEREDOC
-<<<<<<< HEAD
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-
-  # Iterate checks in severity then alphabetical order
-  local checks_ordered
-  checks_ordered=$(jq -rn '[inputs]
-    | group_by(.check)
-    | map({check: .[0].check, severity: .[0].severity})
-    | sort_by([(if .severity == "error" then 0 else 1 end), .check])
-    | .[].check
-  ' "$ISSUES_FILE" 2>/dev/null || echo "")
-
-  while IFS= read -r check; do
-    [ -z "$check" ] && continue
-
-    local check_issues severity category issue_count
-    check_issues=$(jq -cn --arg c "$check" '[inputs | select(.check == $c)] | sort_by(.repo)' "$ISSUES_FILE")
-    severity=$(jq -r '.[0].severity' <<< "$check_issues")
-    category=$(jq -r '.[0].category' <<< "$check_issues")
-    issue_count=$(jq 'length' <<< "$check_issues")
-
-    printf '\n### `%s`\n' "$check" >> "$SUMMARY_FILE"
-    printf '**Severity:** `%s` | **Category:** %s | **%d repo(s) affected**\n\n' \
-      "$severity" "$category" "$issue_count" >> "$SUMMARY_FILE"
-    printf '| Repo | Issue | Related PRs |\n' >> "$SUMMARY_FILE"
-    printf '|------|-------|-------------|\n' >> "$SUMMARY_FILE"
-
-    while IFS= read -r issue_entry; do
-      local repo issue_num issue_url pr_links
-      repo=$(jq -r '.repo'    <<< "$issue_entry")
-      issue_num=$(jq -r '.number' <<< "$issue_entry")
-      issue_url=$(jq -r '.url'    <<< "$issue_entry")
-
-      pr_links=$(jq -r \
-        --arg repo "$repo" \
-        --argjson inum "$issue_num" \
-        '[.[] | select(.repo == $repo and (.closes | map(. == $inum) | any))
-          | "[#\(.pr_number)](\(.pr_url))"]
-        | if length > 0 then join(", ") else "—" end' \
-        "$pr_data_file")
-
-      printf '| [%s](https://github.com/%s/%s) | [#%s](%s) | %s |\n' \
-        "$repo" "$ORG" "$repo" "$issue_num" "$issue_url" "$pr_links" \
-        >> "$SUMMARY_FILE"
-    done < <(jq -c '.[]' <<< "$check_issues")
-  done <<< "$checks_ordered"
-
-  rm -f "$pr_data_file"
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eba7ea0 (fix: add GH_TOKEN preflight check to compliance-audit.sh (#60))
   # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
   if [ -z "${GH_TOKEN:-}" ]; then
     echo "::error::GH_TOKEN is not set. Ensure ORG_SCORECARD_TOKEN secret is configured and passed as an env var to this step." \
@@ -2940,41 +1781,17 @@ main() {
   fi
   if ! gh auth status >/dev/null 2>&1; then
     echo "::error::gh auth failed — GH_TOKEN is set but authentication did not succeed." \
-<<<<<<< HEAD
-<<<<<<< HEAD
       "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has repository permissions: 'Administration: Read-only', 'Metadata: Read-only', 'Contents: Read-only', 'Issues: Read and write'; and organization permission: 'Metadata: Read-only' (required to list repositories)." >&2
     exit 1
   fi
 
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-      "Check that ORG_SCORECARD_TOKEN is valid and has repo + read:org scopes." >&2
-=======
-      "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has repository permissions: 'Administration: Read-only', 'Metadata: Read-only', 'Contents: Read-only', 'Issues: Read and write'; and organization permission: 'Metadata: Read-only' (required to list repositories)." >&2
->>>>>>> 7289c1c (docs: document fine-grained token scopes for ORG_SCORECARD_TOKEN (#248))
-    exit 1
-  fi
-
->>>>>>> eba7ea0 (fix: add GH_TOKEN preflight check to compliance-audit.sh (#60))
   info "Starting compliance audit for $ORG"
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
   : > "$ISSUES_FILE"
-=======
-  # Initialize findings file
-  echo "[]" > "$FINDINGS_FILE"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-  # Initialize findings and issues tracking files
-  echo "[]" > "$FINDINGS_FILE"
-  : > "$ISSUES_FILE"
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
 
   # Get all non-archived repos in the org
   local repos
@@ -2989,17 +1806,6 @@ main() {
   local repo_count=0
 
   for repo in $repos; do
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-    # Skip the .github config repo itself (different compliance criteria)
-    if [ "$repo" = ".github" ]; then
-      continue
-    fi
-
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
     repo_count=$((repo_count + 1))
     log "Auditing $ORG/$repo"
 
@@ -3010,10 +1816,6 @@ main() {
       info "Detected ecosystems: ${ECOSYSTEMS[*]}"
     fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch full repo JSON once and share with settings/push-protection checks
     local repo_json
     repo_json=$(gh_api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
@@ -3025,89 +1827,28 @@ main() {
       continue
     fi
 
-<<<<<<< HEAD
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_reusable_workflow_paths "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
-=======
-    check_required_workflows "$repo"
-    check_action_pinning "$repo"
-    check_dependabot_config "$repo"
-    check_repo_settings "$repo"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    check_required_workflows "$repo"
-    check_action_pinning "$repo"
-    check_reusable_workflow_paths "$repo"
-    check_dependabot_config "$repo"
-    check_repo_settings "$repo" "$repo_json"
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     check_labels "$repo"
     check_rulesets "$repo"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
     # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
-=======
-    check_claude_workflow_checkout "$repo"
->>>>>>> 803cc69 (fix(ci): change concurrency group to per-SHA to prevent HEAD commits from missing CI runs (#247))
-=======
-    # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
->>>>>>> 9dc05c4 (chore(dev-lead): deprecate claude.yml in ci-standards, promote dev-lead.yml (#301))
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> f3d43d2 (feat(compliance): dedicated dev-lead stub check (pin/concurrency/permissions) (#405))
     check_dev_lead_stub "$repo"
     check_centralized_check_names "$repo"
-=======
-    check_claude_workflow_checkout "$repo"
-<<<<<<< HEAD
->>>>>>> 35e788c (fix: add claude.yml template + checkout audit check (#63))
-=======
-    check_centralized_workflow_stubs "$repo"
->>>>>>> 67cb057 (feat(compliance-audit): detect non-stub centralized workflow copies (#89))
-=======
-    check_centralized_check_names "$repo"
->>>>>>> 99bd596 (feat(compliance-audit): detect stale required-check names in rulesets (#96))
     check_claude_md "$repo"
     check_agents_md "$repo"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
     check_copilot_setup_steps "$repo"
     check_copilot_instructions "$repo"
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
-=======
-    check_copilot_setup_steps "$repo"
-    check_copilot_instructions "$repo"
->>>>>>> 525c3af (feat(copilot): add org-wide Copilot custom instruction files and compliance enforcement)
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
-=======
-    check_workflow_permissions "$repo"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-    check_claude_md "$repo"
-    check_agents_md "$repo"
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-=======
-    pp_run_all_checks "$repo"
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 
     log_end
   done
@@ -3122,20 +1863,8 @@ main() {
     info "Managing issues..."
 
     for repo in $repos; do
-<<<<<<< HEAD
-<<<<<<< HEAD
       ensure_audit_label "$repo"
       ensure_required_labels "$repo"
-<<<<<<< HEAD
-=======
-      [ "$repo" = ".github" ] && continue
-
-=======
->>>>>>> b23b0c7 (feat: audit .github repo and add CLAUDE.md/AGENTS.md checks (#14))
-      ensure_audit_label "$repo"
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 
       # Create issues for new findings (process substitution avoids subshell)
       while IFS= read -r finding; do
@@ -3153,8 +1882,6 @@ main() {
       # Close issues for resolved findings
       close_resolved_issues "$repo"
     done
-<<<<<<< HEAD
-<<<<<<< HEAD
 
     # Create one umbrella issue per audit run grouping all findings by remediation category.
     # Both individual issues and the umbrella get the `dev-lead` label for agent pickup.
@@ -3163,42 +1890,14 @@ main() {
     # Append per-check issue links and related open PRs to the step summary
     info "Fetching linked PRs for issue summary..."
     append_issue_pr_links
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
-
-    # Create one umbrella issue per audit run grouping all findings by remediation category.
-    # Both individual issues and the umbrella get the `claude` label for agent pickup.
-    create_umbrella_issue
-<<<<<<< HEAD
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
-=======
-
-    # Append per-check issue links and related open PRs to the step summary
-    info "Fetching linked PRs for issue summary..."
-    append_issue_pr_links
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
   else
     info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
   fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   # Write issue-management counts and append to summary (conditional on issue management running)
   if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
     printf '{"added":%d,"existing":%d,"removed":%d,"retriggered":%d}\n' \
       "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" "$ISSUES_RETRIGGERED" > "$ISSUE_COUNTS_FILE"
-=======
-  # Write issue-management counts and append to summary (conditional on issue management running)
-  if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
-<<<<<<< HEAD
-    printf '{"added":%d,"existing":%d,"removed":%d}\n' \
-      "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" > "$ISSUE_COUNTS_FILE"
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-=======
-    printf '{"added":%d,"existing":%d,"removed":%d,"retriggered":%d}\n' \
-      "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" "$ISSUES_RETRIGGERED" > "$ISSUE_COUNTS_FILE"
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
     cat >> "$SUMMARY_FILE" <<HEREDOC
 
 ## Issue Management
@@ -3207,26 +1906,11 @@ main() {
 |--------|-------|
 | Added (new) | $ISSUES_ADDED |
 | Existing (updated) | $ISSUES_EXISTING |
-<<<<<<< HEAD
-<<<<<<< HEAD
 | Re-triggered (dev-lead re-engaged) | $ISSUES_RETRIGGERED |
 | Removed (resolved) | $ISSUES_REMOVED |
 HEREDOC
   else
     printf '{"added":0,"existing":0,"removed":0,"retriggered":0}\n' > "$ISSUE_COUNTS_FILE"
-=======
-| Removed (resolved) | $ISSUES_REMOVED |
-HEREDOC
-  else
-    printf '{"added":0,"existing":0,"removed":0}\n' > "$ISSUE_COUNTS_FILE"
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
-=======
-| Re-triggered (dev-lead re-engaged) | $ISSUES_RETRIGGERED |
-| Removed (resolved) | $ISSUES_REMOVED |
-HEREDOC
-  else
-    printf '{"added":0,"existing":0,"removed":0,"retriggered":0}\n' > "$ISSUE_COUNTS_FILE"
->>>>>>> e1f6b5d (feat(compliance): migrate dev-lead trigger label claude→dev-lead + re-trigger persistent findings (#400))
     cat >> "$SUMMARY_FILE" <<HEREDOC
 
 ## Issue Management
@@ -3242,11 +1926,6 @@ HEREDOC
 *Generated by the [weekly compliance audit](https://github.com/$ORG/.github/blob/main/.github/workflows/compliance-audit.yml) on $(date -u "+%Y-%m-%d %H:%M UTC").*
 HEREDOC
 
-<<<<<<< HEAD
-=======
->>>>>>> d584a51 (feat: add weekly compliance audit workflow (#12))
-=======
->>>>>>> 7601f5a (feat(compliance-audit): add added/existing/removed issue count summary (#255))
   # Output report paths
   echo "findings=$FINDINGS_FILE"
   echo "summary=$SUMMARY_FILE"

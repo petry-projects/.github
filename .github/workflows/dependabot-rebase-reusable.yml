@@ -12,18 +12,12 @@
 # are actually met.
 #
 # Solution: after every push to main (typically a merged PR), this workflow:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b51e2ed (fix: use update-branch API with APP_TOKEN; trust GitHub mergeable state)
 #   1. Calls the GitHub update-branch API with the APP_TOKEN on behind
 #      Dependabot PRs. This adds a merge commit from main onto the PR branch,
 #      bringing it up to date. CI triggers normally because the APP_TOKEN is
 #      a GitHub App installation token — NOT the repository's GITHUB_TOKEN,
 #      which is the only token subject to GitHub's recursive-trigger guard.
 #   2. Merges any Dependabot PR that is up-to-date and passing required CI.
-<<<<<<< HEAD
 #
 # Why update-branch with APP_TOKEN (not GITHUB_TOKEN or @dependabot rebase):
 #   - GITHUB_TOKEN: GitHub's recursive-trigger guard prevents events from
@@ -45,44 +39,6 @@
 # workflow's re-approval.
 #
 # Required org/repo secrets (passed explicitly by caller via secrets: mapping):
-=======
-#   1. Updates behind Dependabot PRs using the merge method (not rebase)
-#   2. Merges any Dependabot PR that is up-to-date, approved, and passing CI
-=======
-#   1. Posts "@dependabot rebase" on behind Dependabot PRs so Dependabot
-#      updates the branch with its own identity — this triggers CI normally.
-#      (Using the API update-branch endpoint with GITHUB_TOKEN does NOT
-#      trigger CI workflow runs due to GitHub's recursive-trigger guard.)
-#   2. Merges any Dependabot PR that is up-to-date, approved, and passing CI.
->>>>>>> 3ac78a9 (fix: use @dependabot rebase instead of update-branch to trigger CI (#191))
-=======
->>>>>>> b51e2ed (fix: use update-branch API with APP_TOKEN; trust GitHub mergeable state)
-#
-# Why update-branch with APP_TOKEN (not GITHUB_TOKEN or @dependabot rebase):
-#   - GITHUB_TOKEN: GitHub's recursive-trigger guard prevents events from
-#     GITHUB_TOKEN from creating new workflow runs, so CI never runs.
-#   - @dependabot rebase: Dependabot only processes this command from user
-#     accounts with push access. GitHub App bots (even with contents:write)
-#     are rejected with "Sorry, only users with push access can use that
-#     command."
-#   - APP_TOKEN: A GitHub App installation token is treated as a distinct
-#     identity. Pushes via APP_TOKEN trigger CI workflow runs normally and
-#     are not subject to the GITHUB_TOKEN recursive-trigger guard.
-#
-# Note: update-branch uses the merge method (default), which adds a merge
-# commit on top of the PR branch rather than force-pushing. This preserves
-# Dependabot's original commits as parents. The automerge workflow may fail
-# its dependabot/fetch-metadata verification step (since the latest commit
-# is not from Dependabot), but this is safe — the rebase workflow merges
-# directly via the APP_TOKEN bypass actor and does not rely on the automerge
-# workflow's re-approval.
-#
-<<<<<<< HEAD
-# Required org/repo secrets (passed via `secrets: inherit` from caller):
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-# Required org/repo secrets (passed explicitly by caller via secrets: mapping):
->>>>>>> b6ebc53 (fix: update reusable workflow header comment — secrets explicitly passed, not inherited (#189))
 #   APP_ID         — GitHub App ID with contents:write and pull-requests:write
 #   APP_PRIVATE_KEY — GitHub App private key
 name: Dependabot update and merge (Reusable)
@@ -101,20 +57,7 @@ jobs:
   update-and-merge:
     runs-on: ubuntu-latest
     permissions:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
       pull-requests: write
-=======
-      contents: read
-      pull-requests: read
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-      contents: write   # needed for update-branch (may touch .github/workflows/)
-=======
->>>>>>> 3ac78a9 (fix: use @dependabot rebase instead of update-branch to trigger CI (#191))
-      pull-requests: write
->>>>>>> f5c167c (fix(dependabot-rebase): use GITHUB_TOKEN for update-branch to fix HTTP 403 on workflow files)
     steps:
       - name: Check app secrets
         env:
@@ -127,41 +70,15 @@ jobs:
 
       - name: Generate app token
         id: app-token
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-=======
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
->>>>>>> 6fb5846 (chore(deps): Bump actions/create-github-app-token from 3.0.0 to 3.1.1 (#126))
-=======
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
->>>>>>> e126978 (chore(deps): Bump actions/create-github-app-token from 3.1.1 to 3.2.0 (#307))
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Update and merge Dependabot PRs
         env:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
-=======
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GITHUB_TOKEN for update-branch (has workflows permission)
-          APP_TOKEN: ${{ steps.app-token.outputs.token }}  # app token reserved for approvals
->>>>>>> f5c167c (fix(dependabot-rebase): use GITHUB_TOKEN for update-branch to fix HTTP 403 on workflow files)
-=======
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_TOKEN: ${{ steps.app-token.outputs.token }}
->>>>>>> 3ac78a9 (fix: use @dependabot rebase instead of update-branch to trigger CI (#191))
           REPO: ${{ github.repository }}
         run: |
           # Find open Dependabot PRs
@@ -177,10 +94,6 @@ jobs:
           MERGED=false
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9cebcf7 (fix(dependabot-rebase): handle 404 from compare API — skip PR when branch not found)
             # Branch may be transiently unavailable (race: PR list fetched before
             # branch delete propagates). Skip gracefully instead of crashing.
             if ! BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
@@ -217,43 +130,6 @@ jobs:
             else
               echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — checking if merge-ready"
             fi
-=======
-            BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
-              --jq '.behind_by')
-
-            if [[ "$BEHIND" -gt 0 ]]; then
-              echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind — updating branch"
-
-              # Use APP_TOKEN (not GITHUB_TOKEN) to update the branch.
-              # APP_TOKEN is a GitHub App installation token and is NOT subject
-              # to the GITHUB_TOKEN recursive-trigger guard — CI runs normally.
-              # The merge method (default) adds a merge commit from main,
-              # preserving Dependabot's original commits.
-              if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/update-branch" \
-                -X PUT 2>/dev/null; then
-                echo "  Updated branch for PR #$PR_NUMBER"
-                continue  # wait for CI on updated branch before merging
-              fi
-
-<<<<<<< HEAD
-            echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — checking if merge-ready"
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-              # update-branch failed (e.g. App lacks 'workflows' permission when
-              # main contains workflow file changes, or there is a merge conflict).
-              # Fall through to the direct merge attempt. The bypass actor
-              # (bypass_mode: always) can call the merge API directly when the
-              # branch is behind, provided:
-              #   - The PR's own CI has already passed, AND
-              #   - strict_required_status_checks_policy is false for this repo.
-              # If strict up-to-date checking IS enforced (strict: true), this
-              # fallback will also fail — granting the App the 'workflows'
-              # permission so update-branch succeeds is the correct fix.
-              echo "  Warning: could not update branch for PR #$PR_NUMBER — will attempt direct merge"
-            else
-              echo "PR #$PR_NUMBER ($HEAD_REF) is up to date — checking if merge-ready"
-            fi
->>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
 
             # Skip if we already merged one (strict mode means others are now behind)
             if [[ "$MERGED" == "true" ]]; then
@@ -270,11 +146,6 @@ jobs:
               continue
             fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b51e2ed (fix: use update-branch API with APP_TOKEN; trust GitHub mergeable state)
             # Trust GitHub's MERGEABLE state: it already accounts for all
             # REQUIRED status checks, review rules, and branch-up-to-date.
             # Non-required checks (e.g. gitleaks false positives) that happen
@@ -291,74 +162,18 @@ jobs:
             # mid-CI when GitHub reports MERGEABLE based on a previous run.
             CHECKS_PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
               --json statusCheckRollup | \
-<<<<<<< HEAD
               jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
-=======
-            # Check if all required checks pass (look at overall rollup)
-            CHECKS_PASS=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-              --json statusCheckRollup \
-              --jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED") | .conclusion] | all(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED")')
-
-            CHECKS_PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-              --json statusCheckRollup \
-              --jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-            # Check the status check rollup. We need:
-            #   - at least one completed check (so an empty rollup is NOT
-            #     vacuously "passing"), and
-            #   - every completed check is SUCCESS / NEUTRAL / SKIPPED, and
-            #   - zero checks still pending.
-            ROLLUP=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup)
-            CHECKS_COMPLETED=$(echo "$ROLLUP" | \
-              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED")] | length')
-            CHECKS_PASS=$(echo "$ROLLUP" | \
-              jq '[.statusCheckRollup[]? | select(.name != null and .status == "COMPLETED") | .conclusion] | all(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED")')
-            CHECKS_PENDING=$(echo "$ROLLUP" | \
-=======
->>>>>>> b51e2ed (fix: use update-branch API with APP_TOKEN; trust GitHub mergeable state)
-              jq '[.statusCheckRollup[]? | select(.name != null and .status != "COMPLETED")] | length')
->>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
 
             if [[ "$CHECKS_PENDING" -gt 0 ]]; then
               echo "  Skipping — $CHECKS_PENDING check(s) still pending"
               continue
             fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             echo "  All required checks pass — merging PR #$PR_NUMBER"
             # Use app token for merge so the resulting push to main is attributed to the
             # app bot — this triggers the workflow again via push event, enabling the
             # self-sustaining chain that serializes Dependabot PR merges one at a time.
             if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
-=======
-=======
-            if [[ "$CHECKS_COMPLETED" -eq 0 ]]; then
-              echo "  Skipping — no completed status checks (cannot confirm safety)"
-              continue
-            fi
-
->>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
-            if [[ "$CHECKS_PASS" != "true" ]]; then
-              echo "  Skipping — some checks failed"
-              continue
-            fi
-
-            echo "  All checks pass — merging PR #$PR_NUMBER"
-<<<<<<< HEAD
-            if gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-=======
-            echo "  All required checks pass — merging PR #$PR_NUMBER"
->>>>>>> b51e2ed (fix: use update-branch API with APP_TOKEN; trust GitHub mergeable state)
-            # Use app token for merge so the resulting push to main is attributed to the
-            # app bot — this triggers the workflow again via push event, enabling the
-            # self-sustaining chain that serializes Dependabot PR merges one at a time.
-            if GH_TOKEN="$APP_TOKEN" gh api "repos/$REPO/pulls/$PR_NUMBER/merge" \
->>>>>>> f5c167c (fix(dependabot-rebase): use GITHUB_TOKEN for update-branch to fix HTTP 403 on workflow files)
               -X PUT -f merge_method=squash \
               --silent; then
               echo "  Merged PR #$PR_NUMBER"

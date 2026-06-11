@@ -14,10 +14,6 @@ Every repository MUST have:
 | `CLAUDE.md` | Project-level instructions for Claude Code | error if missing |
 | `AGENTS.md` | Development standards for AI agents | error if missing |
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 0bba481 (docs: document OIDC immutability constraint and exempt claude.yml from SHA pinning (#159))
 ## Compliance Exemptions — Files Agents Must Not Modify
 
 The following files are structurally immutable. Agents must not open PRs that
@@ -35,11 +31,6 @@ These files must be adopted verbatim from `standards/workflows/` and updated
 only by merging a standards PR from `petry-projects/.github`, which propagates
 to all repos via the `@v1` tag bump.
 
-<<<<<<< HEAD
-=======
->>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
-=======
->>>>>>> 0bba481 (docs: document OIDC immutability constraint and exempt claude.yml from SHA pinning (#159))
 ### CLAUDE.md Requirements
 
 - MUST reference `AGENTS.md` for development standards
@@ -118,10 +109,6 @@ on agent configuration files.
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))
 
 ## BMAD Method Workflows
 
@@ -135,8 +122,3 @@ for the full standard, including the multi-skill ideation pipeline and the
 critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
 log-secret hygiene). The template is at
 [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
-<<<<<<< HEAD
-=======
->>>>>>> a7a0fbf (feat: add AgentShield CI standard and agent-shield.yml workflow template (#25))
-=======
->>>>>>> 17c1adb (Add Feature Ideation workflow as standard for BMAD-enabled repos (#81))

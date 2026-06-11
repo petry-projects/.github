@@ -15,41 +15,14 @@ security posture than chasing every minor/patch release.
 2. **Version updates weekly** for GitHub Actions, since pinned action versions do not
    affect application stability and staying current reduces CI attack surface.
 3. **Labels** `security` and `dependencies` on every Dependabot PR for filtering and audit.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
 4. **Auto-merge** after all CI checks pass, approving and merging eligible PRs.
    Approvals come from members of the `@petry-projects/org-leads` team listed
    in every repo's `CODEOWNERS` file (see
    [codeowners-standard.md](codeowners-standard.md)), so they satisfy
    `require_code_owner_review` without any bypass. Eligible updates:
-<<<<<<< HEAD
    - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
    - **App ecosystems**: patch and minor security updates only (major requires human review)
    - **Indirect (transitive) dependencies**: all updates regardless of version bump
-=======
-4. **Auto-merge** security patches and minor updates after all CI checks pass, using a
-   GitHub App token to satisfy branch protection (CODEOWNERS review bypass for bot PRs).
->>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
-=======
-4. **Auto-merge** after all CI checks pass, using a GitHub App token to satisfy
-   branch protection (CODEOWNERS review bypass for bot PRs). Eligible updates:
-=======
-4. **Auto-merge** after all CI checks pass, using a GitHub App token to approve
-   and merge eligible PRs. Both bot accounts (`dependabot-automerge-petry` and
-   `petry-projects-pr-review-agent`) are listed as code owners in every repo's
-   `CODEOWNERS` file so their approvals satisfy `require_code_owner_review`
-   without any bypass. Eligible updates:
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
-=======
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
-   - **GitHub Actions**: all version bumps including major (SHA-pinned, no runtime impact)
-   - **App ecosystems**: patch and minor security updates only (major requires human review)
-   - **Indirect (transitive) dependencies**: all updates regardless of version bump
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
    Uses `gh pr merge --auto` to wait for required checks before merging.
 5. **Vulnerability audit CI check** runs on every PR and push to `main`, failing the
    build if any dependency has a known advisory. This is a required status check.
@@ -65,35 +38,14 @@ security posture than chasing every minor/patch release.
 
 ## Configuration Files
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 Each repository must have the following baseline files:
-=======
-Each repository must have:
->>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
-=======
-Each repository must have the following baseline files:
->>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
 
 | File | Purpose |
 |------|---------|
 | `.github/dependabot.yml` | Dependabot config scoped to the repo's ecosystems |
 | `.github/workflows/dependabot-automerge.yml` | Auto-approve + squash-merge security PRs |
 | `.github/workflows/dependency-audit.yml` | CI check — fail on known vulnerabilities |
-<<<<<<< HEAD
-<<<<<<< HEAD
 | `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
-
-The `dependabot-rebase.yml` is required for all repos using the `code-quality`
-ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
-each merge to `main` leaves remaining Dependabot PRs behind and they stall
-indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
-not when a branch merely falls behind.
-=======
->>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
-=======
-| `.github/workflows/dependabot-rebase.yml` | Keep Dependabot PRs up-to-date and merge them serially |
->>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 
 The `dependabot-rebase.yml` is required for all repos using the `code-quality`
 ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
@@ -200,8 +152,6 @@ relevant ecosystem entries into a single `dependabot.yml`. See
 See [`workflows/dependabot-automerge.yml`](workflows/dependabot-automerge.yml).
 
 Behavior:
-<<<<<<< HEAD
-<<<<<<< HEAD
 
 - Triggers on `pull_request_target` from `dependabot[bot]`
 - Fetches Dependabot metadata to determine update type and ecosystem
@@ -209,7 +159,6 @@ Behavior:
   major, since actions are SHA-pinned and CI catches breaking interface changes
 - For **app ecosystems**: approves **patch** and **minor** updates (and indirect
   dependency updates); **major** updates are left for human review
-<<<<<<< HEAD
 - Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
 
 ## Update and Merge Behind PRs Workflow
@@ -226,7 +175,6 @@ merges indefinitely.
 
 This workflow fires on every push to `main` (and can be triggered manually via
 `workflow_dispatch` to flush the queue) and:
-<<<<<<< HEAD
 
 1. **Updates behind PRs** — calls the GitHub `update-branch` API with the
    **APP_TOKEN** on any Dependabot PR that is behind `main`. This adds a merge
@@ -339,130 +287,6 @@ To re-trigger fresh approvals after a CODEOWNERS change, use the manual rebase
 command above — each new Dependabot push causes the automerge workflow to fire
 and submit a fresh approval.
 
-=======
-=======
-
->>>>>>> 788df7d (fix: resolve all markdown lint violations and enable enforced rules (#24))
-- Triggers on `pull_request_target` from `dependabot[bot]`
-- Fetches Dependabot metadata to determine update type
-- For **patch** and **minor** updates (and indirect dependency updates):
-  approves the PR and enables auto-merge (waits for all required CI checks)
-- **Major** updates are left for human review
-=======
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
-- Uses `gh pr merge --auto --squash` so the merge only happens after CI passes
-
-<<<<<<< HEAD
->>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
-=======
-## Update and Merge Behind PRs Workflow
-
-See [`workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml).
-
-When branch protection requires branches to be up-to-date (`strict: true`),
-merging one Dependabot PR makes the others fall behind. Dependabot only rebases
-PRs on its scheduled run (weekly) or when there are merge conflicts — not when
-a PR merely falls behind `main`. Additionally, GitHub's auto-merge (`--auto`)
-may not trigger when rulesets cause `mergeable_state` to report "blocked" even
-when all requirements are met. Together, these issues stall Dependabot PR
-merges indefinitely.
-
-This workflow fires on every push to `main` and:
-=======
->>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
-
-1. **Updates behind PRs** — calls the GitHub `update-branch` API with the
-   **APP_TOKEN** on any Dependabot PR that is behind `main`. This adds a merge
-   commit from `main` onto the PR branch. CI triggers normally because the
-   APP_TOKEN is a GitHub App installation token, not `GITHUB_TOKEN`.
-2. **Merges ready PRs** — directly merges any Dependabot PR that is up-to-date,
-   has auto-merge enabled, and is `MERGEABLE` with no pending checks.
-
-Using the app token for merges ensures each merge triggers a new push to `main`,
-creating a self-sustaining chain that serializes Dependabot PR merges.
-
-**Why `update-branch` with APP_TOKEN (not `GITHUB_TOKEN` or `@dependabot rebase`):**
-
-- **`GITHUB_TOKEN`** is subject to GitHub's recursive-trigger guard — events it
-  causes do not create new workflow runs. Calling `update-branch` with
-  `GITHUB_TOKEN` pushes to the PR branch but CI never runs, so the PR stays
-  blocked indefinitely.
-
-- **`@dependabot rebase`** only works when posted by a *user account* with push
-  access. GitHub App bots are rejected even if their installation has
-  `contents: write` — Dependabot replies "Sorry, only users with push access can
-  use that command." This makes bot-posted `@dependabot rebase` unusable for
-  automation.
-
-- **APP_TOKEN** (a GitHub App installation token) is treated as a distinct
-  identity and is **not** subject to the `GITHUB_TOKEN` recursive-trigger guard.
-  Pushes via APP_TOKEN trigger CI workflow runs normally.
-
-**Merge-readiness check:** The workflow checks GitHub's native `mergeable` state
-(`MERGEABLE`) rather than inspecting every individual check conclusion. This is
-correct because `mergeable` already accounts for all *required* status checks —
-non-required checks that happen to fail (e.g. a gitleaks false positive) do not
-block the merge. An additional guard ensures no checks are still `IN_PROGRESS`
-before merging.
-
-<<<<<<< HEAD
->>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
-=======
-### Caller Stub Format
-
-The repo-level `dependabot-rebase.yml` is a thin caller stub. It must use
-**explicit secrets** (not `secrets: inherit`) and **write permissions**:
-
-```yaml
-jobs:
-  dependabot-rebase:
-    permissions:
-      pull-requests: write # call update-branch API on behind PRs and merge when ready
-    uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@b51e2edf830ea085be0277bcf3174c7b3ec8f958 # v1
-    secrets:
-      APP_ID: ${{ secrets.APP_ID }}
-      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-```
-
-> **Why not `secrets: inherit`?** GitHub reusable workflows receive no more
-> permissions than the calling job grants them. A caller with `permissions: read`
-> prevents the reusable from making any write API calls — branch updates and
-> merges silently fail. Additionally, `secrets: inherit` with mismatched
-> permission levels can cause `startup_failure` on the reusable job. Always use
-> explicit secrets and grant write permissions.
-
-To manually flush the Dependabot PR queue after fixing a stalled pipeline:
-
-```bash
-gh workflow run dependabot-rebase.yml --repo petry-projects/<repo>
-```
-
-### Manual Rebase (Break-Glass)
-
-If the automated chain stalls and a Dependabot PR is stuck behind `main`, any
-user with push access can unblock it by posting `@dependabot rebase` directly:
-
-```bash
-# Post @dependabot rebase as a user with push access (not a bot):
-gh pr list --repo petry-projects/<repo> --label dependencies --json number \
-  --jq '.[].number' | xargs -I{} gh pr comment {} --repo petry-projects/<repo> \
-  --body "@dependabot rebase"
-```
-
-This must be run as a human user (e.g. `gh auth status` should show your account,
-not a bot). Dependabot ignores the command from GitHub App bot accounts.
-
-### CODEOWNERS Approval Timing
-
-GitHub evaluates code owner status **at the time an approval is submitted**, not
-retroactively. If `CODEOWNERS` is updated (e.g., bot accounts are added), existing
-approvals from those accounts on open PRs are not retroactively credited.
-
-To re-trigger fresh approvals after a CODEOWNERS change, use the manual rebase
-command above — each new Dependabot push causes the automerge workflow to fire
-and submit a fresh approval.
-
->>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 ## Vulnerability Audit CI Check
 
 See [`workflows/dependency-audit.yml`](workflows/dependency-audit.yml).
@@ -485,18 +309,10 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
 1. Copy the appropriate `dependabot.yml` template to `.github/dependabot.yml`,
    adjusting `directory` paths as needed.
 2. Add `workflows/dependabot-automerge.yml` to `.github/workflows/`.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
 3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` (required for
    all repos using the `code-quality` ruleset with `require_branches_to_be_up_to_date: true`).
    Copy verbatim from [`standards/workflows/dependabot-rebase.yml`](workflows/dependabot-rebase.yml)
    — do **not** modify the secrets block or permissions.
-<<<<<<< HEAD
 
    > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
    > The correct solution for CODEOWNERS enforcement is to list the
@@ -512,7 +328,6 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    installed-app settings.
 
 6. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
-<<<<<<< HEAD
    **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
    not per-repo. The caller stubs pass these explicitly via:
 
@@ -543,102 +358,3 @@ The workflow fails if any known vulnerability is found, blocking the PR from mer
    (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
    they're conditional on lockfile presence and report `SKIPPED` when absent,
    and a required-but-skipped check fails the merge gate.
-=======
-3. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-4. Ensure the repository has the GitHub App secrets (`APP_ID`, `APP_PRIVATE_KEY`)
-   configured for auto-merge.
-5. Create the `security` and `dependencies` labels in the repository if they
-   don't already exist.
-6. Add `dependency-audit` as a required status check in branch protection rules.
->>>>>>> 79d2c36 (docs: Dependabot security-only update standards (#9))
-=======
-3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/`.
-=======
-3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` **only if the
-   repo enforces strict required-status-checks** (i.e., "branches must be up
-   to date before merging" is on, either via the new ruleset system's
-   `strict_required_status_checks_policy: true` or classic branch protection's
-   `required_status_checks.strict: true`). If strict checks are off, the
-   rebase workflow is unnecessary because Dependabot PRs that fall behind can
-   merge as-is — adding it just creates churn and failure noise.
->>>>>>> ae9709f (docs(dependabot): App secrets at org level + rebase workflow optional for non-strict repos (#97))
-=======
-3. Add `workflows/dependabot-rebase.yml` to `.github/workflows/` if the repo
-<<<<<<< HEAD
-   enforces **either** of the following:
-   - **Strict required-status-checks** (`strict_required_status_checks_policy: true`
-     or classic branch protection `required_status_checks.strict: true`) — without
-     this workflow, Dependabot PRs fall behind after each merge and stall.
-   - **CODEOWNERS review requirement** (`require_code_owner_review: true`) — GitHub's
-     auto-merge mechanism does not apply ruleset bypass actors at merge time, so the
-     App token approval does not satisfy the CODEOWNERS gate. The rebase workflow's
-     direct `gh api .../merge` call does apply the bypass, allowing the App to merge
-     without a human CODEOWNERS review.
-   If neither condition applies, the rebase workflow is unnecessary.
->>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
-=======
-   enforces **strict required-status-checks** (`strict_required_status_checks_policy: true`
-   or classic branch protection `required_status_checks.strict: true`) — without
-   this workflow, Dependabot PRs fall behind after each merge to `main` and stall.
-   If the repo does not use strict status checks, the rebase workflow is unnecessary.
-=======
->>>>>>> 177e3d7 (docs: update standards with Dependabot auto-merge learnings (#187))
-
-   > **Note:** The rebase workflow is **not** required for `require_code_owner_review`.
-<<<<<<< HEAD
-   > The correct solution for CODEOWNERS enforcement is to list the bot accounts
-   > (`@dependabot-automerge-petry`, `@petry-projects-pr-review-agent`) as owners
-   > in every CODEOWNERS pattern — see the
-   > [CODEOWNERS Standard](github-settings.md#codeowners-standard). The earlier
-   > approach of using `gh api .../merge` as a bypass was fragile and has been
-   > superseded.
->>>>>>> eb93d09 (docs: apply learnings from CODEOWNERS auto-merge fix)
-=======
-   > The correct solution for CODEOWNERS enforcement is to list the
-   > `@petry-projects/org-leads` team in every CODEOWNERS pattern — see the
-   > [CODEOWNERS Standard](codeowners-standard.md). The earlier approach of
-   > using `gh api .../merge` as a bypass was fragile and has been superseded.
->>>>>>> bc338c0 (chore: finalize CODEOWNERS standard as Required + add enforcement (#193))
-4. Add `workflows/dependency-audit.yml` to `.github/workflows/`.
-5. **GitHub App secrets** — `APP_ID` and `APP_PRIVATE_KEY` are managed at the
-=======
->>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
-   **organization level** (`gh secret set <name> --org petry-projects --visibility all`),
-   not per-repo. The caller stubs pass these explicitly via:
-
-   ```yaml
-   secrets:
-     APP_ID: ${{ secrets.APP_ID }}
-     APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-   ```
-
-   Per-repo `APP_ID` / `APP_PRIVATE_KEY` settings are deprecated drift — once the org
-   secrets are confirmed in place, delete any per-repo copies so there's a
-   single source of truth and rotations propagate everywhere.
-
-   **Verify before deleting per-repo copies.** Run
-
-   ```bash
-   gh secret list --org petry-projects | grep -E '^(APP_ID|APP_PRIVATE_KEY)\s'
-   ```
-
-   to confirm both org-level secrets exist with `visibility: all`. Only after
-   both secrets are confirmed should you run `gh secret delete APP_ID --repo <repo>`
-   to clean up per-repo copies — otherwise `gh pr review` calls fail with
-   `Secret APP_ID is required`.
-7. Create the `security` and `dependencies` labels in the repository if they
-   don't already exist.
-<<<<<<< HEAD
-<<<<<<< HEAD
-7. Add `dependency-audit` as a required status check in branch protection rules.
->>>>>>> d690c66 (feat: add dependabot-rebase workflow standard (#52))
-=======
-7. Add `dependency-audit / Detect ecosystems` as a required status check in
-=======
-8. Add `dependency-audit / Detect ecosystems` as a required status check in
->>>>>>> 0cb4bba (fix(dependabot): fix automerge stall — bypass fallback, schedule trigger, standards enforcement)
-   branch protection rules. Do **not** require the per-ecosystem audit jobs
-   (`npm audit`, `govulncheck`, `cargo audit`, `pip-audit`, `pnpm audit`) —
-   they're conditional on lockfile presence and report `SKIPPED` when absent,
-   and a required-but-skipped check fails the merge gate.
->>>>>>> ae9709f (docs(dependabot): App secrets at org level + rebase workflow optional for non-strict repos (#97))

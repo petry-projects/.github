@@ -158,10 +158,6 @@ YML
   run bash "$LINTER" "${TT_TMP}/v1-clean.yml"
   [ "$status" -eq 0 ]
 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 
 # ---------------------------------------------------------------------------
 # Exit-code precedence: file errors (2) must not be downgraded by later lint
@@ -216,8 +212,3 @@ YML
   run bash "$LINTER" "${TT_TMP}/nested-expr.yml"
   [ "$status" -eq 0 ]
 }
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))

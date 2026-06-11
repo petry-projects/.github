@@ -192,10 +192,6 @@ build_proposals() {
   [ "$status" -eq 0 ]
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 @test "match: malformed JSON in signals file exits non-zero" {
   # Caught by CodeRabbit review on PR petry-projects/.github#85.
   printf 'not valid json' >"${TT_TMP}/signals.json"
@@ -212,11 +208,6 @@ build_proposals() {
   [ "$status" -ne 0 ]
 }
 
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 @test "match: idempotent re-run of same proposals against existing matches yields all-matched" {
   # Simulates the R6 idempotency case: run 1 created Discussions, run 2
   # finds them and should NOT propose duplicates.

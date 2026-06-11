@@ -49,22 +49,11 @@ compose_signals() {
   for input in "$open_issues" "$closed_issues" "$ideas_discussions" "$releases" \
                "$merged_prs" "$feature_requests" "$bug_reports" "$truncation_warnings"; do
     idx=$((idx + 1))
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
     # Require a JSON array, not just valid JSON. Objects/strings/nulls accepted
     # by `jq -e .` would silently produce wrong counts (key count, char count).
     # Caught by CodeRabbit review on PR petry-projects/.github#85.
     if ! printf '%s' "$input" | jq -e 'type == "array"' >/dev/null 2>&1; then
       printf '[compose-signals] arg #%d must be a JSON array: %s\n' "$idx" "${input:0:120}" >&2
-<<<<<<< HEAD
-=======
-    if ! printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
-      printf '[compose-signals] arg #%d is not valid JSON: %s\n' "$idx" "${input:0:120}" >&2
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
       return 65  # EX_DATAERR
     fi
   done

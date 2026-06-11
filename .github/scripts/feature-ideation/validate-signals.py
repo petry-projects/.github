@@ -53,22 +53,12 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
         signals = json.loads(signals_path.read_text(encoding="utf-8"))
     except OSError as exc:
         # File read errors (permissions, I/O) must also exit 2. Caught by
         # CodeRabbit review on PR petry-projects/.github#85.
         sys.stderr.write(f"[validate-signals] cannot read {signals_path}: {exc}\n")
         return 2
-<<<<<<< HEAD
-=======
-        signals = json.loads(signals_path.read_text())
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
     except json.JSONDecodeError as exc:
         # Per the docstring contract, exit 2 means usage / file error and
         # exit 1 means schema validation error. A malformed signals file
@@ -78,20 +68,10 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except OSError as exc:
         sys.stderr.write(f"[validate-signals] cannot read schema {schema_path}: {exc}\n")
         return 2
-<<<<<<< HEAD
-=======
-        schema = json.loads(schema_path.read_text())
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
     except json.JSONDecodeError as exc:
         sys.stderr.write(f"[validate-signals] invalid schema JSON: {exc}\n")
         return 2
@@ -107,15 +87,7 @@ def main(argv: list[str]) -> int:
     format_checker = FormatChecker()
 
     @format_checker.checks("date-time", raises=(ValueError, TypeError))
-<<<<<<< HEAD
-<<<<<<< HEAD
     def _check_date_time(instance) -> bool:  # noqa: ANN001 — jsonschema callback signature
-=======
-    def _check_date_time(instance):  # noqa: ANN001 — jsonschema callback signature
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
-    def _check_date_time(instance) -> bool:  # noqa: ANN001 — jsonschema callback signature
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
         if not isinstance(instance, str):
             return True  # non-strings handled by `type` keyword, not format
         # Must look like a date-time, not just any string. Require at least

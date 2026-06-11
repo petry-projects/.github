@@ -389,18 +389,4 @@ private.yml
 # ============================================================================
 # End of petry-projects secrets baseline
 # ============================================================================
-<<<<<<< HEAD
-<<<<<<< HEAD
 .dev-lead/
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-.dev-lead/
->>>>>>> e292471 (feat: implement issue #251 — Compliance: secret_scanning_ai_detection (#327))
-=======
-.dev-lead/
->>>>>>> 7289c1c (docs: document fine-grained token scopes for ORG_SCORECARD_TOKEN (#248))
-=======
->>>>>>> 39f159c (feat: add compliance-remediate.sh — close the audit -> auto-fix -> PR loop (#220))

@@ -222,10 +222,6 @@ teardown() {
     run gh_safe_graphql_input '{"query":"q","variables":{}}'
   [ "$status" -ne 0 ]
 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))
 
 # ---------------------------------------------------------------------------
 # gh stub — self-tests for stub defensive behaviour
@@ -237,8 +233,3 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"not found"* ]]
 }
-<<<<<<< HEAD
-=======
->>>>>>> 55e268d (fix(compliance-audit): add claude label to individual finding issues (#121))
-=======
->>>>>>> 767bfec (fix(feature-ideation): address Copilot + CodeRabbit review on PR #85 (18 fixes, 17 new tests) (#85))

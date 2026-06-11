@@ -4,24 +4,10 @@
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md
 #
 # Auto-approves and enables auto-merge for Dependabot PRs that are:
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   - GitHub Actions updates (any version bump, including major)
 #   - Security updates for any ecosystem (patch or minor)
 #   - Indirect (transitive) dependency updates
 # Major version updates for non-Actions ecosystems are left for human review.
-=======
-#   - GitHub Actions updates (patch or minor version bumps)
-#   - Security updates for any ecosystem (patch or minor)
-#   - Indirect (transitive) dependency updates
-# Major version updates are always left for human review.
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-#   - GitHub Actions updates (any version bump, including major)
-#   - Security updates for any ecosystem (patch or minor)
-#   - Indirect (transitive) dependency updates
-# Major version updates for non-Actions ecosystems are left for human review.
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
 # Uses --auto so the merge waits for all required CI checks to pass.
 #
 # Safety model: application ecosystems use open-pull-requests-limit: 0 in
@@ -54,15 +40,7 @@ jobs:
     steps:
       - name: Dependabot metadata
         id: metadata
-<<<<<<< HEAD
-<<<<<<< HEAD
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v2
-=======
-        uses: dependabot/fetch-metadata@ffa630c65fa7e0ecfa0625b5ceda64399aea1b36 # v2
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v2
->>>>>>> d66737b (chore(deps): Bump dependabot/fetch-metadata from 3.0.0 to 3.1.0 (#161))
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           skip-commit-verification: true
@@ -74,18 +52,10 @@ jobs:
           DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
           ECOSYSTEM="${{ steps.metadata.outputs.package-ecosystem }}"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
           # GitHub Actions are SHA-pinned and don't affect app runtime,
           # so all version bumps (including major) are eligible.
           # App ecosystem PRs can only exist as security updates (limit: 0)
           # and must be patch/minor/indirect — major requires human review.
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> f0bd05f (fix(dependabot): use correct ecosystem value github_actions (underscore) (#138))
           if [[ "$ECOSYSTEM" != "github_actions" && \
                 "$UPDATE_TYPE" != "version-update:semver-patch" && \
                 "$UPDATE_TYPE" != "version-update:semver-minor" && \
@@ -95,26 +65,6 @@ jobs:
             exit 0
           fi
 
-=======
-          # Must be patch, minor, or indirect
-          if [[ "$UPDATE_TYPE" != "version-update:semver-patch" && \
-=======
-          if [[ "$ECOSYSTEM" != "github-actions" && \
-                "$UPDATE_TYPE" != "version-update:semver-patch" && \
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
-                "$UPDATE_TYPE" != "version-update:semver-minor" && \
-                "$DEP_TYPE" != "indirect" ]]; then
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping: major update for $ECOSYSTEM requires human review"
-            exit 0
-          fi
-
-<<<<<<< HEAD
-          # GitHub Actions version updates are always eligible
-          # App ecosystem PRs can only exist as security updates (limit: 0)
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
->>>>>>> 7a155df (feat(dependabot): auto-merge major GitHub Actions updates (#137))
           echo "eligible=true" >> "$GITHUB_OUTPUT"
           echo "Auto-merge eligible: ecosystem=$ECOSYSTEM update=$UPDATE_TYPE"
 
@@ -131,19 +81,7 @@ jobs:
       - name: Generate app token
         if: steps.eligible.outputs.eligible == 'true'
         id: app-token
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-=======
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
->>>>>>> 6fb5846 (chore(deps): Bump actions/create-github-app-token from 3.0.0 to 3.1.1 (#126))
-=======
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
->>>>>>> e126978 (chore(deps): Bump actions/create-github-app-token from 3.1.1 to 3.2.0 (#307))
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}

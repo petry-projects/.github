@@ -47,15 +47,7 @@ jobs:
     name: AgentShield
     runs-on: ubuntu-latest
     steps:
-<<<<<<< HEAD
-<<<<<<< HEAD
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-=======
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
->>>>>>> bd27978 (chore(deps): Bump actions/checkout from 6.0.2 to 6.0.3 (#408))
 
       # --- Deep security scan via AgentShield CLI ---
       # Uses ecc-agentshield (https://github.com/affaan-m/agentshield)
@@ -120,8 +112,6 @@ jobs:
               continue
             fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
             # Allow optional leading whitespace so indented YAML keys
             # (e.g. under a `metadata:` parent) are recognised.
             if ! echo "$frontmatter" | grep -qE '^[[:space:]]*name:'; then
@@ -129,22 +119,6 @@ jobs:
               status=1
             fi
             if ! echo "$frontmatter" | grep -qE '^[[:space:]]*description:'; then
-=======
-            if ! echo "$frontmatter" | grep -q '^name:'; then
-              echo "::error file=$file::Missing 'name' field"
-              status=1
-            fi
-            if ! echo "$frontmatter" | grep -q '^description:'; then
->>>>>>> 9524890 (feat(workflows): centralize standards via reusable workflows (#87))
-=======
-            # Allow optional leading whitespace so indented YAML keys
-            # (e.g. under a `metadata:` parent) are recognised.
-            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*name:'; then
-              echo "::error file=$file::Missing 'name' field"
-              status=1
-            fi
-            if ! echo "$frontmatter" | grep -qE '^[[:space:]]*description:'; then
->>>>>>> 4964c4e (fix(workflows): address CodeRabbit suggestions deferred from #87 (#93))
               echo "::error file=$file::Missing 'description' field"
               status=1
             fi

@@ -100,38 +100,17 @@ compliance audit checks these flags via `GET /repos/{owner}/{repo}`:
 Apply per repo via:
 
 ```bash
-<<<<<<< HEAD
-<<<<<<< HEAD
 gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
 {
   "security_and_analysis": {
-=======
-gh api -X PATCH "repos/petry-projects/<repo>" \
-  -F security_and_analysis='{
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-gh api -X PATCH "repos/petry-projects/<repo>" --input - <<'JSON'
-{
-  "security_and_analysis": {
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     "secret_scanning": {"status": "enabled"},
     "secret_scanning_push_protection": {"status": "enabled"},
     "secret_scanning_ai_detection": {"status": "enabled"},
     "secret_scanning_non_provider_patterns": {"status": "enabled"},
     "dependabot_security_updates": {"status": "enabled"}
-<<<<<<< HEAD
-<<<<<<< HEAD
   }
 }
 JSON
-=======
-  }'
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-  }
-}
-JSON
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
 ```
 
 `scripts/apply-repo-settings.sh` MUST enforce these values alongside the
@@ -148,30 +127,12 @@ weekly audit. See [Application](#application-to-a-repository) below.
 The org MUST configure the following custom patterns in addition to the
 provider-supplied ones:
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 | Pattern name | Pattern (illustrative) | Rationale |
 |--------------|------------------------|-----------|
 | `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
 | `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
 | `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
 | `generic-high-entropy` | `(?:_TOKEN\|_SECRET\|_KEY)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{32,}` | Catches untyped long strings in YAML and `.env` files |
-=======
-| Pattern name | Regex (illustrative) | Rationale |
-|--------------|----------------------|-----------|
-| `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
-| `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
-| `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
-| `generic-high-entropy` | High-entropy strings assigned to `*_TOKEN`, `*_SECRET`, `*_KEY` env vars | Catches untyped long strings in YAML and `.env` files |
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-| Pattern name | Pattern (illustrative) | Rationale |
-|--------------|------------------------|-----------|
-| `petry-internal-webhook` | `https://hooks\.petry-projects\.internal/[A-Za-z0-9/_-]{20,}` | Internal webhook URLs |
-| `claude-oauth-token` | `sk-ant-oat01-[A-Za-z0-9_-]{40,}` | Anthropic OAuth tokens |
-| `gha-pat-scoped` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs (provider pattern supplements) |
-| `generic-high-entropy` | `(?:_TOKEN\|_SECRET\|_KEY)\s*[:=]\s*["']?[A-Za-z0-9/+=_-]{32,}` | Catches untyped long strings in YAML and `.env` files |
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
 Custom patterns are configured at **Org settings → Code security → Secret
 scanning → Custom patterns**. Each new pattern MUST be dry-run against all
@@ -255,10 +216,6 @@ secret-scan:
   runs-on: ubuntu-latest
   permissions:
     contents: read
-<<<<<<< HEAD
-=======
-    security-events: write
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
   steps:
     - name: Checkout (full history)
       # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
@@ -267,7 +224,6 @@ secret-scan:
       with:
         fetch-depth: 0
 
-<<<<<<< HEAD
     - name: Install gitleaks
       # Download the pre-built binary and verify its SHA256 checksum.
       # To upgrade: download the new checksums.txt from the gitleaks release page,
@@ -291,19 +247,6 @@ secret-scan:
 > add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to the `env:` block
 > alongside `GITHUB_TOKEN`.
 
-=======
-    - name: Run gitleaks
-      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
-      # then dereference if it points at an annotated tag.
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-      with:
-        args: detect --source . --redact --verbose --exit-code 1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 The job MUST:
 
 - Use `fetch-depth: 0` so the full git history is scanned, not just the
@@ -485,25 +428,13 @@ both at once:
 | `non_provider_patterns_enabled` | warning | `security_and_analysis.secret_scanning_non_provider_patterns.status == "enabled"` |
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
-<<<<<<< HEAD
-<<<<<<< HEAD
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
-=======
-| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks` |
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-| `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
 | `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 
 Findings are reported as GitHub Issues labeled `security` + `compliance-audit`
 per the existing audit flow.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
 ### Token scope requirement
 
 The `security_and_analysis` field in `GET /repos/{owner}/{repo}` is only
@@ -526,11 +457,6 @@ Secrets → Actions. **To enforce required settings:** run
 Note: running the apply script configures settings but does not grant the
 audit token the visibility it needs — both steps may be needed.
 
-<<<<<<< HEAD
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
->>>>>>> 89ccedd (fix(push-protection): use alerts API proxy when security_and_analysis is unreadable (#224))
 ---
 
 ## Related Standards

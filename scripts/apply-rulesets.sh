@@ -5,19 +5,8 @@
 #   standards/github-settings.md#repository-rulesets
 #
 # Rulesets managed:
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   pr-quality    — pull request review requirements and merge policy
 #   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Claude Code)
-<<<<<<< HEAD
-=======
-=======
-#   pr-quality    — pull request review requirements and merge policy
->>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL, Claude Code)
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -89,10 +78,6 @@ detect_required_checks() {
     fi
   fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
   # --- CodeQL (GitHub-managed default setup) ---
   # CodeQL is no longer driven by a per-repo workflow file. We probe the
   # default-setup API: if the state is "configured", GitHub publishes results
@@ -145,81 +130,19 @@ detect_required_checks() {
   # dependabot-rebase runs only on push to main, neither of which are
   # regular contributor PRs.
   # feature-ideation runs on a schedule, never on PRs, so also not required.
-=======
-  # --- CodeQL ---
-  if echo "$workflows" | grep -qx "codeql.yml"; then
-    local cq_wf_name
-    cq_wf_name=$(workflow_name "codeql.yml")
-    if [ -n "$cq_wf_name" ]; then
-      # CodeQL uses "Analyze" or "Analyze (<language>)" as job names;
-      # add the generic "Analyze" and language-specific variants below
-      checks+=("$cq_wf_name / Analyze")
-    else
-      checks+=("Analyze")
-    fi
-  fi
-
-  # --- Tier 1 centralized workflows ---
-  # Caller-job-ids are fixed by the canonical stubs in
-  # standards/workflows/, so the resulting reusable check names
-  # (<caller-job-id> / <reusable-job-id-or-name>) are known constants.
-  # See standards/ci-standards.md#centralization-tiers
-  #
-  # NOTE: claude-code / claude is intentionally NOT added as a required
-  # check. claude-code-action's GitHub App refuses to mint a token for
-  # any PR that touches workflow files, which would deadlock every
-  # workflow-modifying PR. The check is still useful for review feedback
-  # on normal PRs, but it must not be a merge gate.
-  if echo "$workflows" | grep -qx "agent-shield.yml"; then
-    checks+=("agent-shield / AgentShield")
-  fi
-<<<<<<< HEAD
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
-  if echo "$workflows" | grep -qx "dependency-audit.yml"; then
-    # Only the detect job runs unconditionally; per-ecosystem audit jobs
-    # (npm audit, govulncheck, cargo audit, pip-audit, pnpm audit) are
-    # gated on lockfile presence and report SKIPPED when absent. A
-    # required-but-skipped check fails the gate, so we cannot require
-    # the per-ecosystem jobs.
-    checks+=("dependency-audit / Detect ecosystems")
-  fi
-  # dependabot-automerge / dependabot-rebase are intentionally NOT
-  # required: dependabot-automerge runs only on dependabot[bot] PRs and
-  # dependabot-rebase runs only on push to main, neither of which are
-  # regular contributor PRs.
-  # feature-ideation runs on a schedule, never on PRs, so also not required.
->>>>>>> 07ca6ff (fix(apply-rulesets): use Tier 1 reusable check names (#94))
 
   # --- CI Pipeline ---
   if echo "$workflows" | grep -qx "ci.yml"; then
     local ci_wf_name
     ci_wf_name=$(workflow_name "ci.yml")
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch ci.yml content once; used for first-job detection and secret-scan check below
     local ci_content ci_decoded
     ci_content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
       --jq '.content' 2>/dev/null || echo "")
     ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
-<<<<<<< HEAD
     # Fetch the first job name from ci.yml
     local ci_job_name
     ci_job_name=$(echo "$ci_decoded" \
-=======
-    # Fetch the first job name from ci.yml
-    local ci_job_name
-    ci_job_name=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
-      --jq '.content' 2>/dev/null \
-      | base64 -d 2>/dev/null \
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
-    # Fetch the first job name from ci.yml
-    local ci_job_name
-    ci_job_name=$(echo "$ci_decoded" \
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
       | awk '
           /^jobs:/ { in_jobs=1; found=0; next }
           in_jobs && /^  [a-zA-Z0-9_-]+:/ && !found {
@@ -238,20 +161,11 @@ detect_required_checks() {
     else
       checks+=("$ci_job_name")
     fi
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
 
     # --- Secret scan (gitleaks) — included when ci.yml contains the gitleaks action ---
     if echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
       checks+=("Secret scan (gitleaks)")
     fi
-<<<<<<< HEAD
-=======
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
   fi
 
   # Output as newline-separated list (guard against empty array with set -u)
@@ -259,10 +173,6 @@ detect_required_checks() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 # Build the pr-quality ruleset JSON payload
 # ---------------------------------------------------------------------------
 build_pr_quality_ruleset_json() {
@@ -308,12 +218,6 @@ build_pr_quality_ruleset_json() {
 
 # ---------------------------------------------------------------------------
 # Build the code-quality ruleset JSON payload
-<<<<<<< HEAD
-=======
-# Build the ruleset JSON payload
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
->>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
 # ---------------------------------------------------------------------------
 build_ruleset_json() {
   local name="$1"
@@ -362,10 +266,6 @@ apply_rulesets() {
   local existing_rulesets
   existing_rulesets=$(gh api "repos/$ORG/$repo/rulesets" 2>/dev/null || echo "[]")
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
   # --- pr-quality ruleset ---
   local pr_quality_id
   pr_quality_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "pr-quality") | .id' 2>/dev/null || echo "")
@@ -392,11 +292,6 @@ apply_rulesets() {
     ok "  pr-quality ruleset created for $ORG/$repo"
   fi
 
-<<<<<<< HEAD
-=======
->>>>>>> ef98a60 (feat: add apply-rulesets.sh to create code-quality ruleset (#71))
-=======
->>>>>>> 1c778b6 (feat: add pr-quality ruleset support to apply-rulesets.sh)
   # --- code-quality ruleset ---
   local existing_id
   existing_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "code-quality") | .id' 2>/dev/null || echo "")

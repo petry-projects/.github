@@ -3,14 +3,7 @@
 #
 # Companion script to compliance-audit.sh. Applies the settings defined in:
 #   standards/github-settings.md#repository-settings--standard-defaults
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   standards/push-protection.md#required-repo-level-settings
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-#   standards/push-protection.md#required-repo-level-settings
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -23,51 +16,27 @@
 #   DRY_RUN=true GH_TOKEN=<admin-token> ./scripts/apply-repo-settings.sh <repo-name>
 #
 # Requirements:
-<<<<<<< HEAD
-<<<<<<< HEAD
 #   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-#   - Bash 4+ (uses associative arrays — macOS ships Bash 3.2; use GitHub Actions or brew install bash)
->>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 #   - GH_TOKEN must have admin:repo scope (or be an admin of the org)
 #   - gh CLI must be installed
 
 set -euo pipefail
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
   echo "[ERROR] Bash 4+ required (associative arrays). Found: $BASH_VERSION" >&2
   echo "        On macOS: brew install bash, then run with /opt/homebrew/bin/bash" >&2
   exit 1
 fi
 
-<<<<<<< HEAD
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
->>>>>>> db1f90d (docs: update compliance status and add bash 4+ requirement (#73))
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 skip()  { echo "[SKIP]  $*"; }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # App IDs whose auto_trigger_checks must be disabled — these apps create
 # orphaned "queued" suites on every push that are never completed, permanently
 # blocking GitHub auto-merge.
@@ -75,25 +44,12 @@ skip()  { echo "[SKIP]  $*"; }
 # 347564  = CodeRabbit
 CHECK_SUITE_APP_IDS=(1236702 347564)
 
-<<<<<<< HEAD
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Source the shared push-protection library — provides
 # pp_apply_security_and_analysis() and the PP_REQUIRED_SA_SETTINGS list.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
-<<<<<<< HEAD
-=======
-err()   { echo "[ERROR] $*" >&2; }
-skip()  { echo "[SKIP]  $*"; }
-
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
 usage() {
   echo "Usage: $0 <repo-name>"
   echo "       $0 --all"
@@ -104,10 +60,6 @@ usage() {
   exit 1
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
 apply_labels() {
   local repo="$1"
   info "Applying standard labels to $ORG/$repo ..."
@@ -120,14 +72,7 @@ apply_labels() {
     "bug|d73a4a|Bug reports"
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
-<<<<<<< HEAD
-<<<<<<< HEAD
     "in-progress|fbca04|An agent is actively working this issue"
-=======
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
-=======
-    "in-progress|fbca04|An agent is actively working this issue"
->>>>>>> 6ce0e96 (feat: prevent duplicate agent PRs via in-progress labels and umbrella issues (#76))
   )
 
   for config in "${label_configs[@]}"; do
@@ -144,7 +89,6 @@ apply_labels() {
   done
 }
 
-<<<<<<< HEAD
 apply_settings() {
   local repo="$1"
   local repo_json="$2"
@@ -153,81 +97,31 @@ apply_settings() {
   # Extract current settings from the pre-fetched repo JSON
   local current
   current=$(echo "$repo_json" | jq '{
-=======
-=======
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
-apply_settings() {
-  local repo="$1"
-  local repo_json="$2"
-  info "Applying standard settings to $ORG/$repo ..."
-
-  # Extract current settings from the pre-fetched repo JSON
-  local current
-<<<<<<< HEAD
-  current=$(gh api "repos/$ORG/$repo" --jq '{
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-  current=$(echo "$repo_json" | jq '{
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     allow_auto_merge: .allow_auto_merge,
     delete_branch_on_merge: .delete_branch_on_merge,
     allow_squash_merge: .allow_squash_merge,
     allow_merge_commit: .allow_merge_commit,
     allow_rebase_merge: .allow_rebase_merge,
-<<<<<<< HEAD
-<<<<<<< HEAD
     has_discussions: .has_discussions,
     has_issues: .has_issues,
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-    has_discussions: .has_discussions,
-    has_issues: .has_issues,
->>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
     squash_merge_commit_title: .squash_merge_commit_title,
     squash_merge_commit_message: .squash_merge_commit_message
   }' 2>/dev/null || echo "{}")
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
     err "Could not parse settings for $ORG/$repo"
     return 1
   fi
 
   # Standard settings from standards/github-settings.md#repository-settings--standard-defaults
-=======
-  if [ "$current" = "{}" ]; then
-    err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
-=======
-  if [ "$current" = "{}" ] || [ "$current" = "null" ]; then
-    err "Could not parse settings for $ORG/$repo"
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
-    return 1
-  fi
-
-<<<<<<< HEAD
-  # Standard settings from standards/github-settings.md#merge-settings
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-  # Standard settings from standards/github-settings.md#repository-settings--standard-defaults
->>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
   declare -A EXPECTED=(
     [allow_auto_merge]="true"
     [delete_branch_on_merge]="true"
     [allow_squash_merge]="true"
     [allow_merge_commit]="true"
     [allow_rebase_merge]="true"
-<<<<<<< HEAD
-<<<<<<< HEAD
     [has_discussions]="true"
     [has_issues]="true"
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-    [has_discussions]="true"
-    [has_issues]="true"
->>>>>>> c6a3104 (fix: add has_discussions and has_issues to apply-repo-settings.sh (#59))
   )
 
   local needs_patch=false
@@ -235,15 +129,7 @@ apply_settings() {
 
   for key in "${!EXPECTED[@]}"; do
     local actual
-<<<<<<< HEAD
-<<<<<<< HEAD
     actual=$(printf '%s' "$current" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
-=======
-    actual=$(echo "$current" | jq -r ".$key // \"null\"")
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-    actual=$(printf '%s' "$current" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
->>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
     local expected="${EXPECTED[$key]}"
 
     if [ "$actual" != "$expected" ]; then
@@ -257,15 +143,7 @@ apply_settings() {
 
   # Check string settings separately (jq -f flag for strings)
   local squash_title
-<<<<<<< HEAD
-<<<<<<< HEAD
   squash_title=$(printf '%s' "$current" | jq -r '.squash_merge_commit_title // "null"')
-=======
-  squash_title=$(echo "$current" | jq -r '.squash_merge_commit_title // "null"')
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-  squash_title=$(printf '%s' "$current" | jq -r '.squash_merge_commit_title // "null"')
->>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$squash_title" != "PR_TITLE" ]; then
     info "  squash_merge_commit_title: $squash_title → PR_TITLE"
     needs_patch=true
@@ -275,15 +153,7 @@ apply_settings() {
   fi
 
   local squash_msg
-<<<<<<< HEAD
-<<<<<<< HEAD
   squash_msg=$(printf '%s' "$current" | jq -r '.squash_merge_commit_message // "null"')
-=======
-  squash_msg=$(echo "$current" | jq -r '.squash_merge_commit_message // "null"')
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-  squash_msg=$(printf '%s' "$current" | jq -r '.squash_merge_commit_message // "null"')
->>>>>>> 916302f (fix(compliance-audit): use null-safe jq for boolean settings checks (#131))
   if [ "$squash_msg" != "COMMIT_MESSAGES" ]; then
     info "  squash_merge_commit_message: $squash_msg → COMMIT_MESSAGES"
     needs_patch=true
@@ -307,10 +177,6 @@ apply_settings() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
 # apply_codeql_default_setup — enable GitHub-managed CodeQL default setup
 #
 # Per standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup,
@@ -369,10 +235,6 @@ apply_codeql_default_setup() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # apply_check_suite_prefs — disable auto-trigger check suites for Claude and
 # CodeRabbit. Without this, GitHub auto-creates "queued" suites on every push
 # that are never completed, permanently blocking auto-merge.
@@ -381,10 +243,6 @@ apply_check_suite_prefs() {
   local repo="$1"
   info "Configuring check-suite auto-trigger preferences for $ORG/$repo ..."
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 9d0e5c9 (feat: implement issue #373 — Compliance: check-suite-auto-trigger-1236702 (#425))
   # GET 404s when prefs have never been set — treat as needing PATCH, don't bail.
   local prefs all_disabled=true
   if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
@@ -400,32 +258,8 @@ apply_check_suite_prefs() {
   else
     info "  Could not read current prefs (will apply PATCH anyway). Response: $prefs"
     all_disabled=false
-<<<<<<< HEAD
   fi
 
-=======
-  local prefs
-  if ! prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
-    err "  Could not read check-suite preferences for $repo. API response: $prefs"
-    return 1
-  fi
-
-  local all_disabled=true
-  for app_id in "${CHECK_SUITE_APP_IDS[@]}"; do
-    local setting
-    setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
-      '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
-    # "missing" means the app has never run in this repo — no orphaned suite possible, skip
-    if [ "$setting" != "false" ] && [ "$setting" != "missing" ]; then
-      all_disabled=false
-    fi
-  done
-
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
-=======
-  fi
-
->>>>>>> 9d0e5c9 (feat: implement issue #373 — Compliance: check-suite-auto-trigger-1236702 (#425))
   if [ "$all_disabled" = true ]; then
     ok "$ORG/$repo check-suite prefs already correct"
     return 0
@@ -452,13 +286,6 @@ apply_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 # Main
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -483,10 +310,6 @@ if [ "$1" = "--all" ]; then
 
   failed=0
   for repo in $repos; do
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
     # Fetch full repo JSON once and share across functions
     repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
     if [ "$repo_json" = "{}" ]; then
@@ -498,25 +321,8 @@ if [ "$1" = "--all" ]; then
     apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
     apply_labels "$repo"
     pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
-<<<<<<< HEAD
-<<<<<<< HEAD
     apply_codeql_default_setup "$repo" || failed=$((failed + 1))
     apply_check_suite_prefs "$repo" || failed=$((failed + 1))
-<<<<<<< HEAD
-=======
-    apply_settings "$repo" || failed=$((failed + 1))
-<<<<<<< HEAD
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-    apply_labels "$repo"
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
   done
 
   if [ "$failed" -gt 0 ]; then
@@ -526,10 +332,6 @@ if [ "$1" = "--all" ]; then
 
   ok "All repos processed successfully"
 else
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> eaa792d (Add org-wide push protection standard (#134))
   repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
   if [ "$repo_json" = "{}" ]; then
     err "Could not fetch settings for $ORG/$1 — check token permissions and repo name"
@@ -539,23 +341,6 @@ else
   apply_settings "$1" "$repo_json"
   apply_labels "$1"
   pp_apply_security_and_analysis "$1"
-<<<<<<< HEAD
-<<<<<<< HEAD
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
-<<<<<<< HEAD
-=======
-  apply_settings "$1"
-<<<<<<< HEAD
->>>>>>> c1957b4 (feat: add apply-repo-settings.sh to remediate compliance findings (#56))
-=======
-  apply_labels "$1"
->>>>>>> 36274b8 (fix: auto-create required labels during compliance audit (#67))
-=======
->>>>>>> d1ac0ee (docs(standards): propose push protection standard (#95))
-=======
-  apply_codeql_default_setup "$1"
->>>>>>> a3e9658 (Replace per-repo CodeQL workflows with GitHub default setup (#103))
-=======
->>>>>>> d23e834 (fix: disable Claude + CodeRabbit auto-trigger check suites to unblock auto-merge (#195))
 fi
