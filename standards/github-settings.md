@@ -121,6 +121,24 @@ Rulesets are the primary enforcement mechanism for branch policies. All
 repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
+**`pr-quality` and `code-quality` are the only sanctioned rulesets.** Legacy
+`protect-branches` rulesets and ad-hoc `main` rulesets are deprecated: they
+duplicate protections and, because GitHub evaluates bypass eligibility per
+ruleset, they are a second place every bypass actor must be kept in sync (the
+trap that produced inconsistent `OrganizationAdmin` / `RepositoryAdmin` bypass
+state across the fleet). They MUST be migrated into the two sanctioned rulesets
+and removed. Deletion is only safe once every required status check the legacy
+ruleset carries is ALSO required by a sanctioned ruleset — otherwise deletion
+silently drops a merge gate. `check_legacy_rulesets()` in
+[`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh) flags each
+legacy ruleset and reports the exact migration delta (checks to move into
+`code-quality` first, or "safe to delete").
+
+> **Remediating ruleset findings is a manual, admin-token procedure** —
+> `compliance-remediate.sh` skips the `rulesets` category. Follow the
+> [Ruleset Remediation Runbook](ruleset-remediation-runbook.md) (snapshot →
+> bypass actors → migrate-then-delete legacy → verify → rollback).
+
 ### Bypass Actors — Required on Every Ruleset Targeting `main`
 
 **The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
@@ -140,30 +158,30 @@ bypass actor *opens* the PR. Dependabot opens its own PRs, so the
 rejected. `always` mode is safe here because the rebase workflow explicitly
 verifies CI pass and `MERGEABLE` state before calling the merge API.
 
-**API snippet to add the bypass actor to an existing ruleset:**
+**Remediation — `scripts/fix-ruleset-bypass.sh`:** normalizes bypass actors on
+**every** ruleset targeting the default branch (including legacy
+`protect-branches` / `main` rulesets that `apply-rulesets.sh` does not manage).
+Existing actors are preserved; the two required actors are added/normalized to
+`bypass_mode: always`. Dry-run emits ready-to-PUT payloads for review without
+mutating live rulesets:
 
 ```bash
-# Get current ruleset (capture bypass_actors and rules arrays)
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id>
+# Preview payloads for one repo (or --all):
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh <repo> --dry-run
 
-# PUT the full ruleset back, adding actor_id 3167543 to bypass_actors
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id> \
-  -X PUT --input ruleset.json
-# where ruleset.json adds {"actor_id": 3167543, "actor_type": "Integration", "bypass_mode": "always"}
-# to the existing bypass_actors array alongside all existing rules and conditions.
+# Apply:
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh --all
 ```
 
-**Compliance check:** verify all rulesets on all repos have the bypass actor:
+> `apply-rulesets.sh` full-replaces `pr-quality` / `code-quality` with the two
+> canonical bypass actors. `fix-ruleset-bypass.sh` is the least-destructive,
+> any-ruleset complement used to remediate audit findings.
 
-```bash
-for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 1000); do
-  for rs_id in $(gh api "repos/petry-projects/$repo/rulesets" --jq '.[].id' 2>/dev/null); do
-    rs=$(gh api "repos/petry-projects/$repo/rulesets/$rs_id" 2>/dev/null)
-    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0')
-    [[ "$missing" == "true" ]] && echo "MISSING: $repo / $(echo "$rs" | jq -r '.name')"
-  done
-done
-```
+**Compliance check:** enforced automatically by the weekly audit —
+`check_ruleset_bypass_actors()` in [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)
+verifies that every ruleset targeting the default branch grants `bypass_mode:
+always` to both required actors, and flags the `Repository admin` role
+(`RepositoryRole` id 5) as a non-conforming substitute for `OrganizationAdmin`.
 
 ### `pr-quality` — Standard Ruleset (All Repositories)
 
@@ -411,17 +429,32 @@ When creating a new repository in `petry-projects`:
 (check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
 last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
 
-**Ruleset status (as of 2026-05-04):**
+**Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
+sweep (now enforced by `check_ruleset_bypass_actors()` and
+`check_legacy_rulesets()`) found `.github-private` already compliant and every
+other repo carrying findings — `code-quality` rulesets missing the
+`dependabot-automerge-petry` bypass, `pr-quality` rulesets granting
+`RepositoryAdmin` where `OrganizationAdmin` is required, and four deprecated
+legacy rulesets still active. **All have been remediated.** A re-audit reports
+**zero ruleset findings** across the fleet.
 
-| Repository | `pr-quality` | `code-quality` | Notes |
+| Repository | Bypass actors | Legacy ruleset | Action taken |
 |------------|:---:|:---:|-------|
-| **.github** | ✅ | — | `pr-quality` added; `code-quality` not yet configured |
-| **bmad-bgreat-suite** | ✅ | ✅ | Both rulesets present; CodeQL check fixed (`CodeQL` not `Analyze (actions)`) |
-| **ContentTwin** | ✅ | ✅ | `dependabot-automerge-petry` bypass actor added; CodeQL check fixed |
-| **broodly** | ✅ | — | `code-quality` not yet configured |
-| **TalkTerm** | ✅ | ✅ | Both rulesets present; stale CI check names removed |
-| **markets** | ✅ | — | `code-quality` not yet configured |
-| **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
+| **.github-private** | ✅ | — | Already compliant |
+| **.github** | ✅ | retired | `code-quality` dependabot bypass added; `protect-branches` deleted |
+| **bmad-bgreat-suite** | ✅ | retired | `code-quality` bypass actors added; `protect-branches` deleted |
+| **ContentTwin** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin added |
+| **broodly** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin + dependabot added |
+| **markets** | ✅ | — | `code-quality` bypass actors added; `pr-quality` OrganizationAdmin + dependabot added |
+| **TalkTerm** | ✅ | retired | `code-quality` dependabot bypass added; redundant `main` ruleset deleted |
+| **google-app-scripts** | ✅ | retired | `coverage` migrated into `code-quality`, then `protect-branches` deleted; `code-quality` bypass actors added |
+
+> **Remediation:** see the [Ruleset Remediation Runbook](ruleset-remediation-runbook.md).
+> Tooling: `scripts/fix-ruleset-bypass.sh` (bypass actors, least-destructive,
+> dry-run capable) and `scripts/apply-rulesets.sh` (canonical `pr-quality` /
+> `code-quality`). Legacy rulesets are retired with
+> `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once
+> `check_legacy_rulesets()` reports an empty migration delta.
 
 ---
 
