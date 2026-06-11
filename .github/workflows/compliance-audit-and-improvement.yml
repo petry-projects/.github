@@ -4,7 +4,7 @@
 # Job 3: Claude analyzes both datasets in six phases:
 #   Phase 1-3: Load data, categorize findings, research root causes.
 #   Phase 4: Evaluate against industry best practices & emerging capabilities.
-#   Phase 5: Create actionable issues per repo (dev-lead label for agent pickup).
+#   Phase 5: Create actionable issues per repo (claude label for agent pickup).
 #   Phase 6: Summary report.
 # Standard: https://github.com/${{ github.repository_owner }}/.github/tree/main/standards
 name: Org Standards Compliance Audit
@@ -52,11 +52,10 @@ jobs:
       repos_with_findings: ${{ steps.audit.outputs.repos_with_findings }}
       issues_added: ${{ steps.audit.outputs.issues_added }}
       issues_existing: ${{ steps.audit.outputs.issues_existing }}
-      issues_retriggered: ${{ steps.audit.outputs.issues_retriggered }}
       issues_removed: ${{ steps.audit.outputs.issues_removed }}
     steps:
       - name: Checkout .github repo
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run compliance audit
         id: audit
@@ -84,14 +83,12 @@ jobs:
           if [ -f "$COUNTS_FILE" ]; then
             ISSUES_ADDED=$(jq '.added' "$COUNTS_FILE")
             ISSUES_EXISTING=$(jq '.existing' "$COUNTS_FILE")
-            ISSUES_RETRIGGERED=$(jq '.retriggered // 0' "$COUNTS_FILE")
             ISSUES_REMOVED=$(jq '.removed' "$COUNTS_FILE")
           else
-            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_RETRIGGERED=0; ISSUES_REMOVED=0
+            ISSUES_ADDED=0; ISSUES_EXISTING=0; ISSUES_REMOVED=0
           fi
           echo "issues_added=$ISSUES_ADDED" >> "$GITHUB_OUTPUT"
           echo "issues_existing=$ISSUES_EXISTING" >> "$GITHUB_OUTPUT"
-          echo "issues_retriggered=$ISSUES_RETRIGGERED" >> "$GITHUB_OUTPUT"
           echo "issues_removed=$ISSUES_REMOVED" >> "$GITHUB_OUTPUT"
 
       - name: Write step summary
@@ -276,7 +273,7 @@ jobs:
 
   # -----------------------------------------------------------------------
   # Job 3: Combined analysis — Claude reviews both datasets
-  # Creates actionable issues in the appropriate repo with the dev-lead label.
+  # Creates actionable issues in the appropriate repo with the claude label.
   # -----------------------------------------------------------------------
   analyze:
     name: Analyze & Create Issues (Claude)
@@ -290,7 +287,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout .github repo
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download compliance audit report
         if: needs.audit.result == 'success'
@@ -310,7 +307,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_SCORECARD_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-        uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
@@ -335,7 +332,6 @@ jobs:
             - Repos with findings: ${{ needs.audit.outputs.repos_with_findings }}
             - Issues added (new): ${{ needs.audit.outputs.issues_added }}
             - Issues existing (updated): ${{ needs.audit.outputs.issues_existing }}
-            - Issues re-triggered (dev-lead re-engaged on persistent findings): ${{ needs.audit.outputs.issues_retriggered }}
             - Issues removed (resolved): ${{ needs.audit.outputs.issues_removed }}
 
             ### Health Survey (runtime telemetry)
@@ -449,7 +445,7 @@ jobs:
             exclusively **proposed new or improved standards** for the org. For each top
             opportunity (max 2-3), create a standards proposal issue in `${{ github.repository_owner }}/.github`:
             - Title: `Standards: <concise description of the proposed standard>`
-            - Labels: `dev-lead,enhancement`
+            - Labels: `claude,enhancement`
             - Body must include:
               - **Proposed Standard** — the specific policy, workflow, or configuration to adopt
               - **Rationale** — why this matters, linked to the feasibility/impact/urgency assessment
@@ -465,10 +461,10 @@ jobs:
             - Issues affecting multiple repos or org-wide concerns go in `${{ github.repository_owner }}/.github`
             - Standards improvement proposals go in `${{ github.repository_owner }}/.github`
 
-            **IMPORTANT: Every issue MUST have the `dev-lead` label** so it gets picked up for implementation.
-            Ensure the `dev-lead` label exists in the target repo before creating the issue:
+            **IMPORTANT: Every issue MUST have the `claude` label** so it gets picked up for implementation.
+            Ensure the `claude` label exists in the target repo before creating the issue:
             ```bash
-            gh label create dev-lead --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For dev-lead agent pickup" 2>/dev/null || true
+            gh label create claude --repo ${{ github.repository_owner }}/<repo> --color "8B5CF6" --description "For Claude agent pickup" 2>/dev/null || true
             ```
 
             Additional labels by type: `bug`, `security`, `ci`, `automation`, `enhancement`, `documentation`
@@ -481,7 +477,7 @@ jobs:
             ```bash
             gh issue create --repo ${{ github.repository_owner }}/<target-repo> \
               --title "<severity prefix>: <concise title>" \
-              --label "dev-lead,<other-labels>" \
+              --label "claude,<other-labels>" \
               --body "<structured body>"
             ```
 
@@ -517,9 +513,9 @@ jobs:
               per-repo issues; your job is to identify systemic patterns and create higher-level
               issues for them.
             - If a similar issue exists, add a comment with latest findings instead
-            - When commenting on existing issues, also ensure the `dev-lead` label is present:
+            - When commenting on existing issues, also ensure the `claude` label is present:
               ```bash
-              gh issue edit <number> --repo ${{ github.repository_owner }}/<repo> --add-label dev-lead
+              gh issue edit <number> --repo ${{ github.repository_owner }}/<repo> --add-label claude
               ```
 
             **Before writing the Phase 6 summary**, gather linked PR data for all issues you
@@ -560,7 +556,6 @@ jobs:
             |--------|-------|
             | Added (new) | ${{ needs.audit.outputs.issues_added }} |
             | Existing (updated) | ${{ needs.audit.outputs.issues_existing }} |
-            | Re-triggered (dev-lead re-engaged) | ${{ needs.audit.outputs.issues_retriggered }} |
             | Removed (resolved) | ${{ needs.audit.outputs.issues_removed }} |
 
             Group by compliance issue type — one subsection per distinct check/finding type,
@@ -602,9 +597,9 @@ jobs:
             ## Rules
 
             - **Do not fix code or push changes.** Analysis and issue creation only.
-            - **Do not close or modify existing issues** beyond adding the `dev-lead` label.
+            - **Do not close or modify existing issues** beyond adding the `claude` label.
             - **Do not create PRs.** Only create issues with actionable recommendations.
-            - **Every issue gets the `dev-lead` label.** No exceptions.
+            - **Every issue gets the `claude` label.** No exceptions.
             - **Repo-specific issues go in that repo.** Org-wide issues go in `.github`.
             - **Be specific.** Include run IDs, URLs, and exact error messages.
             - **Deduplicate aggressively.** One well-written issue beats five vague ones.

@@ -94,13 +94,8 @@ jobs:
           MERGED=false
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
-            # Branch may be transiently unavailable (race: PR list fetched before
-            # branch delete propagates). Skip gracefully instead of crashing.
-            if ! BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
-              --jq '.behind_by' 2>/dev/null); then
-              echo "  Skipping PR #$PR_NUMBER — branch $HEAD_REF not found, skipping"
-              continue
-            fi
+            BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
+              --jq '.behind_by')
 
             if [[ "$BEHIND" -gt 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind — updating branch"
