@@ -136,7 +136,7 @@ First full application of this runbook. Re-audit afterward reported **zero
 ruleset findings** across all 8 repos.
 
 - **Bypass actors normalized** on every default-branch ruleset (`OrganizationAdmin`
-  + dependabot app, both `always`). `.github-private` was already compliant.
+  and dependabot app, both `always`). `.github-private` was already compliant.
 - **Legacy rulesets retired:** `.github/protect-branches`,
   `bmad-bgreat-suite/protect-branches`, `TalkTerm/main`, and
   `google-app-scripts/protect-branches` (after migrating its `coverage` check
