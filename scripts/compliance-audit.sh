@@ -841,14 +841,22 @@ check_dev_lead_stub() {
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
-  # 2) No per-stub concurrency block — concurrency is owned by the reusable.
+  # 2) agent_ref must be threaded through to pin the same channel inside the
+  #    reusable's own script/prompt checkout (prevents split-brain on promotion).
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/stable([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/stable\` so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 3) No per-stub concurrency block — concurrency is owned by the reusable.
   if echo "$decoded" | grep -qE "^concurrency:"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
       "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
-  # 3) Caller permissions must grant `statuses: read`.
+  # 4) Caller permissions must grant `statuses: read`.
   if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
       "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
