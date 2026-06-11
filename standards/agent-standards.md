@@ -24,7 +24,6 @@ if an existing agent-created PR touches them, close it without merging.
 
 | File | Reason |
 |------|--------|
-| `.github/workflows/claude.yml` | Anthropic OIDC invariant — any diff from the default branch causes `401 Workflow validation failed`; Claude Code cannot run on that PR |
 | `.github/workflows/agent-shield.yml` | Security boundary — agents are not permitted to weaken security scanning; changes require explicit human review |
 
 These files must be adopted verbatim from `standards/workflows/` and updated
