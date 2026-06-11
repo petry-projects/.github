@@ -64,6 +64,10 @@ on:
         required: false
         default: false
         type: boolean
+  # Auto-enhance a freshly-created idea: when a new Discussion is opened in the
+  # Ideas category, the analyst researches and refines it in single-idea mode.
+  discussion:
+    types: [created]
 
 permissions: {}
 
@@ -73,6 +77,14 @@ concurrency:
 
 jobs:
   ideate:
+    # On the `discussion` trigger, only run for new ideas in the Ideas category
+    # and skip the bot's own creations (avoids re-enhancing scheduled output;
+    # enhancement posts a comment, which does not re-fire `discussion: created`).
+    # Schedule/dispatch runs are unaffected by this guard.
+    if: >-
+      github.event_name != 'discussion' ||
+      (github.event.discussion.category.slug == 'ideas' &&
+       github.event.discussion.user.login != 'github-actions[bot]')
     # Permissions cascade from the calling job to the reusable workflow.
     # The reusable workflow's two jobs (gather-signals + analyze) need:
     #   - contents:      read   (checkout, file reads)
@@ -90,6 +102,10 @@ jobs:
       actions: read
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d # v1
     with:
+      # On the `discussion: created` trigger this carries the new Discussion's
+      # number → the reusable runs single-idea enhancement mode. Empty on
+      # schedule/dispatch → normal scan. Do not edit this line.
+      target_discussion: ${{ github.event.discussion.number }}
       # === CUSTOMISE THIS PER REPO — the only required edit ===
       # Replace this paragraph with a 3-5 sentence description of your project,
       # its target users, and the competitive landscape. The more specific you
