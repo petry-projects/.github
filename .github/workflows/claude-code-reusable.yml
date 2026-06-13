@@ -155,6 +155,116 @@ jobs:
             actions: read
             checks: read
 
+  # Automation mode: bot review-comment responder — address all open threads, fix CI, repeat
+  claude-fix-review-comments:
+    if: >-
+      github.event_name == 'pull_request_review_comment' &&
+      github.event.comment.user.login != 'claude[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJson('["coderabbitai[bot]","Copilot","copilot-pull-request-reviewer[bot]","gemini-code-assist[bot]"]'), github.event.comment.user.login)
+    concurrency:
+      group: claude-review-comments-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Capture PR metadata
+        id: pr-meta
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          {
+            echo "base_ref<<EOF"
+            echo "$BASE_REF"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@476e359e6203e73dad705c8b322e333fabbd7416 # v1.0.119
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          # yamllint disable rule:line-length
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          # yamllint enable rule:line-length
+          # yamllint disable rule:line-length
+          prompt: |
+            A reviewer has left a comment on PR #${{ github.event.pull_request.number }} (${{ github.event.pull_request.html_url }}).
+
+            Your job: work through ALL open (unresolved) review threads on this PR and bring it to a passing, fully-reviewed state. Repeat the cycle below until CI is green and every addressable thread is resolved.
+
+            ## Cycle
+
+            ### 1. Check out the PR branch and rebase onto latest main
+            ```
+            gh pr checkout ${{ github.event.pull_request.number }}
+            git fetch origin ${{ steps.pr-meta.outputs.base_ref }}
+            git rebase origin/${{ steps.pr-meta.outputs.base_ref }}
+            git push --force-with-lease
+            ```
+            If the rebase has conflicts, resolve them, then `git rebase --continue` before pushing.
+
+            ### 2. Fetch all open review threads (collect node IDs — you need them to resolve threads later)
+            ```
+            gh api graphql -f query='query { repository(owner:"${{ github.repository_owner }}", name:"${{ github.event.repository.name }}") { pullRequest(number:${{ github.event.pull_request.number }}) { reviewThreads(first:250) { nodes { id isResolved comments(first:10) { nodes { path line body author { login } } } } } } } }'
+            ```
+
+            ### 3. Address each unresolved thread
+            For each thread where `isResolved` is false:
+            - Read the comment body and understand the concern.
+            - Apply the appropriate fix to the file. If the reviewer included a `suggestion` block, apply it unless you have a clear reason not to.
+            - If a comment needs a human decision (architectural choice, ambiguous requirement), reply to the thread explaining what decision is needed and skip resolving it — leave it unresolved for the human.
+
+            ### 4. Commit and push all fixes in one commit
+            ```
+            git config user.name "claude[bot]"
+            git config user.email "claude[bot]@users.noreply.github.com"
+            git add -A
+            git diff --cached --quiet || git commit -m "fix: address review comments"
+            git push
+            ```
+            If there are no staged changes (all open threads needed human input), skip the commit and push.
+
+            ### 5. Resolve each thread you addressed via GraphQL (use the node IDs from step 2)
+            ```
+            gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_NODE_ID"}) { thread { isResolved } } }'
+            ```
+            Replace THREAD_NODE_ID with the actual `id` value for each thread.
+
+            ### 6. Wait for CI and fix any failures
+            ```
+            gh pr checks ${{ github.event.pull_request.number }} --watch --interval 30
+            ```
+            If any check fails:
+            - Read the logs: `gh run view <run-id> --log-failed`
+            - Fix the issue, commit, push, and loop back to step 6.
+            - Do NOT give up after a single CI failure — keep fixing until all checks pass.
+
+            ### 7. Check for newly opened threads
+            After pushing, re-run step 2 to check for any new review threads created in response to your changes. Address them if present.
+
+            ### 8. Post a summary comment on the PR
+            When CI is green and all addressable threads are resolved, post a comment summarising:
+            - What changes were made and why
+            - Which review threads were resolved
+            - Any threads left unresolved and why they need human input
+          # yamllint enable rule:line-length
+          additional_permissions: |
+            actions: read
+            checks: read
+
   # Automation mode: CI failure response — diagnose and fix failing checks on PRs
   claude-ci-fix:
     if: >-
@@ -203,7 +313,7 @@ jobs:
           token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
       - name: Run Claude Code
         if: steps.pr.outputs.number != ''
-        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
+        uses: anthropics/claude-code-action@905d4eb99ab3d43143d74fb0dcae537f29ac330a # v1.0.97
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
@@ -213,13 +323,13 @@ jobs:
           # yamllint enable rule:line-length
           # yamllint disable rule:line-length
           prompt: |
-            CI check "${{ github.event.check_run.name }}" has failed on PR #${{ steps.pr.outputs.number }}.
+            CI check "${{ steps.pr.outputs.check_name }}" has failed on PR #${{ steps.pr.outputs.number }}.
 
             Check details:
-            - Check: ${{ github.event.check_run.name }}
+            - Check: ${{ steps.pr.outputs.check_name }}
             - Conclusion: ${{ github.event.check_run.conclusion }}
             - Head SHA: ${{ github.event.check_run.head_sha }}
-            - Details URL: ${{ github.event.check_run.details_url }}
+            - Details URL: ${{ steps.pr.outputs.details_url }}
 
             Please diagnose and fix the failure:
             1. Check out the PR branch: gh pr checkout ${{ steps.pr.outputs.number }}
@@ -268,11 +378,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --state open \
             --json number,url,headRefName \
-            --jq ".[] | select(.headRefName | startswith(\"claude/issue-${ISSUE}-\")) | .url" \
+            | jq --arg issue "$ISSUE" -r '.[] | select(.headRefName | startswith("claude/issue-" + $issue + "-")) | .url' \
             | head -1)
 
           # Fallback: search PR body for "Closes #NNN"
-          if [ -z "$PR_URL" ]; then
+          if [ -z "$PR_URL" ] && [ "$ISSUE" -gt 0 ] 2>/dev/null; then
             PR_URL=$(gh pr list \
               --repo "$GITHUB_REPOSITORY" \
               --state open \
@@ -281,7 +391,7 @@ jobs:
               --jq '.[0].url' 2>/dev/null || true)
           fi
 
-          if [ -n "$PR_URL" ]; then
+          if [ -n "$PR_URL" ] && [ "$ISSUE" -gt 0 ] 2>/dev/null; then
             echo "existing_pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
             gh issue comment "$ISSUE" \
               --repo "$GITHUB_REPOSITORY" \
