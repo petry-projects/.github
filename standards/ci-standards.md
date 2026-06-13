@@ -1388,33 +1388,51 @@ incorrect pinned one.
 
 ### Exception: Internal Reusable Workflow References
 
-Calls to first-party `petry-projects/*` reusable workflows are **exempt from
-SHA-pinning** — they are refs to workflows the org owns, not third-party
-actions. Per [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel),
-pin them to the reusable's moving `stable` channel tag (a reusable still being
-migrated keeps its current canonical tag in the interim). Never `@main`, never a
-SHA.
+First-party `petry-projects/*` reusable workflows are not third-party actions,
+so they are not subject to the same blanket SHA-pinning requirement. However,
+the correct reference style differs by which repo hosts the reusable:
+
+**`.github` org reusables** (e.g., `auto-rebase-reusable.yml`,
+`dependency-audit-reusable.yml`): SHA-pinned references are **preferred**
+because SonarCloud flags mutable tag refs as a supply-chain risk. The canonical
+version tag (e.g., `@v1`) is still **accepted** for backwards compatibility.
+Never `@main`.
 
 ```yaml
-# CORRECT — pin a reusable workflow to its moving `stable` channel tag (pin once)
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@<name>/stable
+# PREFERRED — SHA-pinned, satisfies SonarCloud supply-chain gate
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@126c1441ee9cf040f2ce3ef0eda85d459b82f8e9 # v1
+
+# ACCEPTED — mutable version tag; backwards-compatible, accepted by the compliance audit
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1
 
 # WRONG — a branch ref has no version boundary; a bad commit is instantly live for all callers
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@main
-
-# WRONG — do not SHA-pin first-party reusable workflow refs (and a frozen pin needs a per-caller edit to roll out)
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@main
 ```
 
-**Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
-the default branch. Anthropic's OIDC token endpoint validates that the
-workflow file on a PR branch is identical to the default branch — any diff
-causes `401 Workflow validation failed` and the agent cannot run on that PR.
+**`.github-private` reusables** (e.g., `dev-lead-reusable.yml`): Use the
+`dev-lead/stable` channel tag — never `@main`, never a SHA.
 
-The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
-deliberately (bumped only on backward-compatible releases) and are not subject
-to tag-force-push risk because the org controls the tag. **Do not open
-compliance PRs to pin these references.**
+```yaml
+# CORRECT — pin to the moving stable channel tag
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable
+
+# WRONG — a branch ref has no version boundary; a bad commit is instantly live for all callers
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
+
+# WRONG — SHA-pinning creates a diff from main, failing Anthropic OIDC validation (see below)
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+```
+
+**Why no SHA-pin for `.github-private` reusables:** Pinning the `uses:` line in
+a Tier 1 caller stub creates a diff from the default branch. Anthropic's OIDC
+token endpoint validates that the workflow file on a PR branch is identical to
+the default branch — any diff causes `401 Workflow validation failed` and the
+agent cannot run on that PR.
+
+The `dev-lead/stable` channel tag on `petry-projects/.github-private` is managed
+deliberately (advanced only on validated releases) and is not subject to
+tag-force-push risk because the org controls the tag. **Do not open compliance
+PRs to SHA-pin these references.**
 
 > **SonarCloud agrees via a scoped exemption, not a blanket disable.**
 > SonarCloud's external `githubactions:S7637` gate doesn't know about this
