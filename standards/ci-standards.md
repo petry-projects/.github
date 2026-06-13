@@ -440,15 +440,15 @@ The template has been removed; see [Migration from `claude.yml`](#migration-from
 > only change this file. See also [Action Pinning Policy](#action-pinning-policy)
 > for the reusable workflow ref exemption.
 >
-> **All three jobs require a checkout step.** The `claude` job (PR reviews), the
-> `claude-issue` job (issue automation), and the `claude-ci-fix` job (CI failure
-> response) each need `actions/checkout` **before** the `claude-code-action` step.
+> **All jobs require a checkout step.** The `claude`, `claude-issue`,
+> `claude-ci-fix`, `claude-fix-pr-reviews`, and `claude-fix-bot-comments`
+> jobs each need `actions/checkout` **before** the `claude-code-action` step.
 > Without it, `claude-code-action` cannot read `CLAUDE.md` or `AGENTS.md` and
 > will error on every trigger. The weekly compliance audit
 > (`check_claude_workflow_checkout`) detects repos missing the checkout step or
-> the `check_run` trigger and creates a labeled issue to drive remediation.
+> the `workflow_run` trigger and creates a labeled issue to drive remediation.
 
-The workflow has three jobs:
+The workflow has five jobs:
 
 - **`claude`** (interactive mode) — reviews PRs and responds to `@claude`
   mentions in comments. No `prompt` input; runs in interactive mode.
@@ -456,13 +456,20 @@ The workflow has three jobs:
   applied to an issue. Uses a `prompt` to drive the full lifecycle:
   implement the fix, create a PR, self-review, resolve review comments,
   monitor CI, and tag the maintainer when ready for human review.
-- **`claude-ci-fix`** (CI failure response) — triggered by `check_run:
-  completed` when a non-Claude check fails on an open PR. Looks up the
-  associated PR (falling back to the GitHub API when the webhook payload
-  omits `pull_requests`), checks out the branch, reads the failure logs,
-  applies the minimal fix, pushes, and comments with a summary. Requires
-  the `check_run` trigger in the caller's `on:` block — the compliance audit
-  verifies this is present.
+- **`claude-ci-fix`** (CI failure response) — triggered by `workflow_run:
+  completed` (failure) for named GitHub Actions workflows on open same-repo
+  PRs. Checks out the branch, reads the failure logs via `gh run view --log-failed`, applies the minimal fix, pushes, and comments with a
+  summary. Requires the `workflow_run` trigger in the caller's `on:` block
+  with the repo-specific list of monitored workflow names.
+- **`claude-fix-pr-reviews`** (bot review handler) — triggered by
+  `pull_request_review: submitted` from trusted AI reviewer bots (Copilot,
+  Gemini, CodeRabbit) with state `COMMENTED` or `CHANGES_REQUESTED`. Follows
+  the same fix-threads cycle as `claude-fix-review-comments`.
+- **`claude-fix-bot-comments`** (bot comment handler) — triggered by
+  `issue_comment: created` on PRs from trusted external CI tools
+  (SonarCloud, CodeRabbit). These bots have `author_association: NONE`, so
+  the `claude` job's guard skips them; `allowed_bots` bypasses that check
+  for the named bots only.
 
 **Billing:** This workflow uses Anthropic credits via `CLAUDE_CODE_OAUTH_TOKEN`,
 not GitHub Copilot premium requests. This is distinct from the "Assign to Agent"
@@ -481,11 +488,16 @@ on:
     types: [opened, reopened, synchronize]
   issue_comment:
     types: [created]
+  pull_request_review:    # enables claude-fix-pr-reviews — do not remove
+    types: [submitted]
   pull_request_review_comment:
     types: [created]
   issues:
     types: [labeled]
-  check_run:          # enables claude-ci-fix — do not remove
+  workflow_run:           # enables claude-ci-fix — do not remove
+    workflows:
+      - CI                # replace with your repo's workflow names
+      - Build
     types: [completed]
 
 permissions: {}
@@ -583,6 +595,160 @@ jobs:
             5. When CI is green, all actionable review comments are resolved,
                and the PR is ready, read the CODEOWNERS file and leave a
                comment tagging the relevant code owners to review and merge.
+
+  # Automation mode: CI failure response — diagnose and fix failing CI checks on PRs.
+  # Triggered by workflow_run (the caller's on.workflow_run.workflows lists which
+  # workflows to monitor — replace the example names with your repo's actual workflow names).
+  claude-ci-fix:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out') &&
+      github.event.workflow_run.pull_requests[0] != null &&
+      github.event.workflow_run.pull_requests[0].head.repo.full_name == github.repository
+    concurrency:
+      group: claude-ci-fix-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          prompt: |
+            CI workflow "${{ github.event.workflow_run.name }}" failed on PR #${{ github.event.workflow_run.pull_requests[0].number }}.
+
+            Run details:
+            - Workflow: ${{ github.event.workflow_run.name }}
+            - Conclusion: ${{ github.event.workflow_run.conclusion }}
+            - Head SHA: ${{ github.event.workflow_run.head_sha }}
+            - Run URL: ${{ github.event.workflow_run.html_url }}
+
+            Please diagnose and fix the failure:
+            1. Check out the PR branch: gh pr checkout ${{ github.event.workflow_run.pull_requests[0].number }}
+            2. Read the failure logs: gh run view ${{ github.event.workflow_run.id }} --log-failed
+            3. Read the relevant source files and understand the root cause.
+            4. Apply the minimal fix needed to address the reported issues.
+            5. Commit and push the fix to the PR branch.
+            6. Leave a concise comment on PR #${{ github.event.workflow_run.pull_requests[0].number }} explaining what you found and what you changed.
+
+  # Automation mode: top-level PR review handler — address COMMENTED/CHANGES_REQUESTED reviews
+  # from trusted AI reviewer bots (Copilot, Gemini, CodeRabbit).
+  claude-fix-pr-reviews:
+    if: >-
+      github.event_name == 'pull_request_review' &&
+      github.event.review.state != 'APPROVED' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(
+        fromJson('["Copilot","copilot-pull-request-reviewer[bot]","gemini-code-assist[bot]","coderabbitai[bot]"]'),
+        github.event.review.user.login
+      )
+    concurrency:
+      group: claude-fix-pr-reviews-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          allowed_bots: "Copilot,copilot-pull-request-reviewer[bot],gemini-code-assist[bot],coderabbitai[bot]"
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh run view:*),Bash(gh run list:*),Bash(gh run watch:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          prompt: |
+            ${{ github.event.review.user.login }} submitted a PR review on PR #${{ github.event.pull_request.number }} (${{ github.event.pull_request.html_url }}).
+
+            Review state: ${{ github.event.review.state }}
+            Review body:
+            ${{ github.event.review.body }}
+
+            Your job: address all open (unresolved) review threads on this PR and bring it to a passing, fully-reviewed state. Repeat this cycle until CI is green and all addressable threads are resolved:
+            (1) `gh pr checkout ${{ github.event.pull_request.number }}` then rebase onto `${{ github.event.pull_request.base.ref }}`,
+            (2) fetch open threads via GraphQL,
+            (3) apply fixes to referenced files,
+            (4) commit and push as claude[bot],
+            (5) resolve addressed threads via GraphQL mutation,
+            (6) wait for CI with `gh pr checks --watch`,
+            (7) fix any failures and loop back.
+            Post a summary comment when done.
+
+  # Automation mode: bot comment handler — respond to issue_comment events from trusted external
+  # CI/quality tools (SonarCloud, CodeRabbit) posted on PRs.
+  claude-fix-bot-comments:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.comment.user.login != 'claude[bot]' &&
+      contains(
+        fromJson('["sonarcloud[bot]","sonarqubecloud[bot]","coderabbitai[bot]"]'),
+        github.event.comment.user.login
+      )
+    concurrency:
+      group: claude-fix-bot-comment-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          allowed_bots: "sonarcloud[bot],sonarqubecloud[bot],coderabbitai[bot]"
+          claude_args: |
+            --allowedTools "Bash(gh pr checkout:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api:*),Bash(git*:*),Edit,Write"
+          prompt: |
+            ${{ github.event.comment.user.login }} posted the following comment on PR #${{ github.event.issue.number }}:
+
+            ---
+            ${{ github.event.comment.body }}
+            ---
+
+            Your job: check out the PR branch, diagnose the reported issues, apply minimal fixes, commit, push, and leave a comment summarising what you changed.
+
+            Start by checking out the PR: `gh pr checkout ${{ github.event.issue.number }}`
 ```
 
 *Historical secrets: `CLAUDE_CODE_OAUTH_TOKEN`*
