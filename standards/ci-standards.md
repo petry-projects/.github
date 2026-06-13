@@ -778,6 +778,15 @@ feature proposals as GitHub Discussions in the **Ideas** category. Each proposal
 is a separate Discussion, updated by subsequent runs as the market and project
 evolve.
 
+**Triggers:** the weekly `schedule`, manual `workflow_dispatch`, **and
+`discussion: created`**. On the discussion trigger, the stub passes
+`target_discussion: ${{ github.event.discussion.number }}`, putting the reusable
+in **single-idea enhancement mode**: it researches and refines that one new idea
+and posts a single enhancement comment, rather than running the broad scan. A
+job-level `if` restricts this to new Discussions in the **Ideas** category and
+skips the bot's own creations; enhancement is a comment (which does not re-fire
+`created`), so there is no trigger loop.
+
 **The pipeline (the reason this workflow exists):**
 
 | Phase | Skill | Purpose |
