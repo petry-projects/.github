@@ -64,6 +64,16 @@ on:
         required: false
         default: false
         type: boolean
+      target_discussion:
+        description: |
+          When set to a Discussion number, run in SINGLE-IDEA ENHANCEMENT mode:
+          research and refine that one Discussion and post a single enhancement
+          comment to it, instead of the broad scheduled scan. Empty (default) =
+          normal scheduled/dispatch ideation. Set by the caller from
+          `github.event.discussion.number` on the `discussion: created` trigger.
+        required: false
+        default: ''
+        type: string
       tooling_ref:
         description: |
           Ref of petry-projects/.github to source the feature-ideation scripts from.
@@ -213,6 +223,7 @@ jobs:
           MATCH_PLAN_PATH: ${{ runner.temp }}/match-plan.json
           TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
+          TARGET_DISCUSSION: ${{ inputs.target_discussion || '' }}
           SOURCES_FILE_PATH: ${{ inputs.sources_file }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
@@ -265,11 +276,41 @@ jobs:
             - `$TOOLING_DIR`      — path to `.github/scripts/feature-ideation/` (canonical scripts)
             - `$DRY_RUN`          — "1" = mutations are logged to `$DRY_RUN_LOG`, not executed
             - `$FOCUS_AREA`       — optional focus area (empty = open exploration)
+            - `$TARGET_DISCUSSION`— if non-empty, a Discussion number to enhance (single-idea mode)
             - `$RESEARCH_DEPTH`   — quick | standard | deep
             - `$GH_TOKEN`         — workflow token with `discussions: write`
 
             The current date is in `$SIGNALS_PATH` as `.scan_date` — read it from there
             when you need it for Discussion timestamps.
+
+            ## Mode selection (read `$TARGET_DISCUSSION` first)
+
+            **If `$TARGET_DISCUSSION` is non-empty**, run in **single-idea enhancement
+            mode** and SKIP the broad scheduled scan:
+
+            1. Read that one Discussion (title, body, and any existing comments) via the
+               GraphQL API with `$GH_TOKEN`, e.g.:
+               ```bash
+               gh api graphql -f query='{repository(owner:"OWNER",name:"REPO"){discussion(number:NUM){id title body category{slug} comments(first:50){nodes{author{login} body}}}}}'
+               ```
+               (Derive OWNER/REPO from `${{ github.repository }}`, NUM from `$TARGET_DISCUSSION`.)
+            2. Do focused Phase 2–4 research **on that idea only** (market scan, prior art,
+               competitive landscape, feasibility) at `$RESEARCH_DEPTH` depth, applying the
+               same adversarial rigor.
+            3. Produce ONE enhancement that ADDS to the idea — do not restate it. Include:
+               sharper problem framing, prior art / competitive signal, a small options
+               table with trade-offs, risks/unknowns, a phased validation/pilot path, and
+               concrete success metrics. Be additive and specific; cite sources.
+            4. Post it as a **single comment** on that Discussion via
+               `comment_on_discussion "$DISCUSSION_ID" "$BODY"` (the Phase-8 helper).
+               Do **NOT** create new Discussions, run the matcher, or comment on anything
+               else. If the Discussion is not in the `ideas` category, exit without posting.
+            5. Idempotency: if a prior comment already carries the marker
+               `<!-- feature-ideation:enhanced -->`, do nothing. Otherwise begin your comment
+               with that exact HTML marker so re-runs are safe.
+
+            **If `$TARGET_DISCUSSION` is empty**, ignore this section and run the normal
+            scheduled ideation below.
 
             ## Phase 1: Load Context
 
