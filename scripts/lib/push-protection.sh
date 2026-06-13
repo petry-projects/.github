@@ -42,8 +42,8 @@
 PP_REQUIRED_SA_SETTINGS=(
   "secret_scanning:enabled:error:Secret scanning must be enabled"
   "secret_scanning_push_protection:enabled:error:Secret scanning push protection must be enabled"
-  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled"
-  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled"
+  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled (requires GitHub Copilot subscription; absent means the feature is unavailable for the current org plan)"
+  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled (requires GitHub Advanced Security)"
   "dependabot_security_updates:enabled:warning:Dependabot security updates should be enabled"
 )
 
@@ -115,7 +115,34 @@ pp_apply_security_and_analysis() {
   full_payload=$(echo "$payload" | jq '{security_and_analysis: .}')
 
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
-    ok "$ORG/$repo security_and_analysis updated successfully"
+    ok "$ORG/$repo security_and_analysis PATCH accepted"
+
+    # Verify each patched key was actually applied. Some settings (e.g.
+    # secret_scanning_ai_detection, secret_scanning_non_provider_patterns)
+    # require GitHub Advanced Security or a Copilot subscription; the API
+    # accepts the PATCH (HTTP 200) but silently ignores keys that the org
+    # plan does not support. Re-fetch and warn for any key still not applied.
+    local post_patch post_actuals
+    post_patch=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
+    post_actuals=$(echo "$post_patch" | jq -r 'to_entries | .[] | "\(.key):\(.value.status? // "null")"' 2>/dev/null || echo "")
+
+    local -A actuals
+    while IFS=':' read -r k v; do
+      if [ -n "$k" ]; then
+        actuals["$k"]="$v"
+      fi
+    done <<< "$post_actuals"
+
+    local post_entry post_key post_expected post_actual
+    for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
+      IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
+      post_actual="${actuals[$post_key]:-null}"
+      if [ "$post_actual" != "$post_expected" ]; then
+        warn "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
+      else
+        ok "  $post_key: $post_actual (verified)"
+      fi
+    done
   else
     err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
     return 1
@@ -171,11 +198,19 @@ pp_check_security_and_analysis() {
   for entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     actual=$(echo "$sa" | jq -r ".\"$key\".status // \"null\"")
-    if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "push-protection" "$key" "$severity" \
-        "$detail (current: \`$actual\`, expected: \`$expected\`)" \
-        "$PP_STANDARD_REF#required-repo-level-settings"
+    if [ "$actual" = "$expected" ]; then
+      continue
     fi
+    # A null/absent status for a warning-severity setting means the feature is
+    # unavailable for the current org plan — skip rather than creating a
+    # non-actionable compliance finding that cannot be remediated without a
+    # plan upgrade.
+    if [ "$severity" = "warning" ] && [ "$actual" = "null" ]; then
+      continue
+    fi
+    add_finding "$repo" "push-protection" "$key" "$severity" \
+      "$detail (current: \`$actual\`, expected: \`$expected\`)" \
+      "$PP_STANDARD_REF#required-repo-level-settings"
   done
 }
 
