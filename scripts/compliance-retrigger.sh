@@ -2,7 +2,10 @@
 set -euo pipefail
 # compliance-retrigger.sh — Re-trigger stale compliance-audit issues.
 #
-# Run daily (see .github/workflows/compliance-retrigger.yml).
+# Run hourly (see .github/workflows/compliance-retrigger.yml). The per-run
+# one-engagement-per-repo throttle means each repo gets at most one issue
+# re-triggered per run (≈ one per hour on the scheduled cadence), draining
+# each repo's backlog steadily without bursts.
 #
 # What it does:
 #   Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
@@ -13,7 +16,7 @@ set -euo pipefail
 #      Throttling: at most ONE issue per repo is engaged per run (shared across
 #      the primary and legacy-label sweeps), and a repo already active (open PR
 #      or in-progress issue) is skipped.  Issues are processed oldest-first, so
-#      the most-stuck finding in each repo is the one re-engaged; the daily
+#      the most-stuck finding in each repo is the one re-engaged; the hourly
 #      cadence drains the rest of each repo's backlog one at a time.  This keeps
 #      concurrent dev-lead runs in any single repo to one, avoiding the rebase
 #      storms and token exhaustion a fleet-wide burst would cause.
@@ -169,7 +172,7 @@ retrigger_stale_issues() {
 
     # Take the repo's slot for this run regardless of cycle outcome, so a
     # transient failure cannot let a second issue in the same repo fire and
-    # reintroduce burst behaviour. The next daily sweep retries this repo.
+    # reintroduce burst behaviour. The next hourly sweep retries this repo.
     REPO_ENGAGED[$repo]=1
     info "Re-triggering $repo#$number: $title (created $created_at)"
     if dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"; then
