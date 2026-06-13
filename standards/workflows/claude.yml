@@ -6,8 +6,11 @@
 # AGENTS — READ BEFORE EDITING:
 #   • This file is a THIN CALLER STUB. All Claude Code logic, the prompt,
 #     allowedTools, and trigger gating live in the reusable workflow above.
-#   • You MAY change: nothing in this file in normal use. Adopt verbatim.
-#   • You MUST NOT change: trigger events, job permissions, the `uses:` line,
+#   • You MAY change: only `on.workflow_run.workflows` entries to match this
+#     repo's CI workflow `name:` values. Adopt everything else verbatim.
+#     WARNING: if you leave the placeholder names unchanged, claude-ci-fix will
+#     never fire — GitHub only triggers workflow_run for the names listed here.
+#   • You MUST NOT change: trigger event types, job permissions, the `uses:` line,
 #     or `secrets: inherit`. These are required for the reusable to work.
 #   • If you need different behaviour, open a PR against the reusable in the
 #     central repo. The change will propagate everywhere on next run.

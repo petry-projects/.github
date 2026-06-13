@@ -26,8 +26,7 @@ jobs:
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
         github.event.comment.user.login != 'claude[bot]' &&
-        (contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
-          contains(fromJson('["coderabbitai[bot]","Copilot"]'), github.event.comment.user.login)))
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

@@ -1342,7 +1342,7 @@ check_copilot_instructions() {
     --jq '.content' 2>/dev/null || echo "")
 
   if [ -z "$content" ]; then
-    add_finding "$repo" "standards" "missing-copilot-instructions" "error" \
+    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
       "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
       "standards/copilot-instructions-standard.md"
     return
