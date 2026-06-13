@@ -94,6 +94,8 @@ jobs:
           prompt: |
             A reviewer has left a comment on PR #${{ github.event.pull_request.number }} (${{ github.event.pull_request.html_url }}).
 
+            **Note:** This automation requires `GH_PAT_WORKFLOWS` secret to be configured for CI results after pushing. Without it, GitHub suppresses CI runs for GITHUB_TOKEN pushes, causing CI waits to fail silently.
+
             Your job: work through ALL open (unresolved) review threads on this PR and bring it to a passing, fully-reviewed state. Repeat the cycle below until CI is green and every addressable thread is resolved.
 
             ## Cycle
