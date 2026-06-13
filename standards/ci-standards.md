@@ -640,8 +640,8 @@ jobs:
             - Run URL: ${{ github.event.workflow_run.html_url }}
 
             Please diagnose and fix the failure:
-            1. Check out the PR branch: gh pr checkout ${{ github.event.workflow_run.pull_requests[0].number }}
-            2. Read the failure logs: gh run view ${{ github.event.workflow_run.id }} --log-failed
+            1. Check out the PR branch: `gh pr checkout ${{ github.event.workflow_run.pull_requests[0].number }}`
+            2. Read the failure logs: `gh run view ${{ github.event.workflow_run.id }} --log-failed`
             3. Read the relevant source files and understand the root cause.
             4. Apply the minimal fix needed to address the reported issues.
             5. Commit and push the fix to the PR branch.
