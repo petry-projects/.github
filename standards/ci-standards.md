@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: …/<name>-reusable.yml@<name>/stable` — the reusable's moving `stable` channel tag ([Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)). Reusables not yet migrated to a channel keep their current canonical pin in the interim; `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh` enforces the expected pin per reusable. | The matching `*-reusable.yml` (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable; a release is cut and promoted by moving the channel tag, never by editing callers. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: …/<name>-reusable.yml@<name>/stable` — the reusable's moving `stable` channel tag ([Reusable workflow versioning](#reusable-workflow-versioning--current-and-target-models)). Reusables not yet migrated to a channel keep their current canonical pin in the interim; `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh` enforces the expected pin per reusable. | The matching `*-reusable.yml` (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable; a release is cut and promoted by moving the channel tag, never by editing callers. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -52,7 +52,8 @@ channel tag** model where every caller pins to it **once** —
 rather than editing every caller repo. This is the long-term target for all reusable workflows.
 The `dev-lead` reusable (in the private repo) already uses the channel model: `@dev-lead/stable`.
 
-**Why the `stable` channel model.** It is a *moving* tag that always points at the current known-good release. Callers pin it once and are never edited again; a release is rolled out by moving the tag centrally and rolled back by moving it back.
+**Why the `stable` channel model.** It is a *moving* tag that always points at the current known-good release.
+Callers pin it once and are never edited again; a release is rolled out by moving the tag centrally and rolled back by moving it back.
 
 **Why not `@main` (a branch).** `@main` has no version boundary: the instant a
 commit lands on the reusable's default branch it is live for every caller at
@@ -1691,7 +1692,7 @@ centrally so they cannot drift per repo:
   — and passes `with: { agent_ref: dev-lead/stable }` so dev-lead's own
   scripts/prompts checkout runs at the same pinned channel (it defaults to `main`
   when omitted). This is the org reusable-workflow versioning standard; see
-  [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)
+  [Reusable workflow versioning](#reusable-workflow-versioning--current-and-target-models)
   for the policy, benefits, and release process.
 - **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
   set that the reusable requests**:
