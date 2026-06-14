@@ -785,9 +785,9 @@ Without it the sentinel comment still appears but no automatic resolution will r
 Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
 
 **Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub
-delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml` with a SHA-pinned reference
-(e.g. `@126c1441ee9cf040f2ce3ef0eda85d459b82f8e9 # v1`). The `@v1` mutable tag is still accepted for backwards compatibility
-but SHA-pinned references are preferred to satisfy SonarCloud's supply-chain security gate.
+delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml` with the exact SHA-pinned reference
+(`@126c1441ee9cf040f2ce3ef0eda85d459b82f8e9 # v1`). A downstream stub referencing `@v1` is non-compliant;
+update by copying `standards/workflows/auto-rebase.yml` verbatim.
 
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
