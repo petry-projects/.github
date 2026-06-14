@@ -52,6 +52,7 @@ PP_REQUIRED_SA_SETTINGS=(
 PP_PLAN_GATED_KEYS=(
   "secret_scanning_ai_detection"
   "secret_scanning_non_provider_patterns"
+  "dependabot_security_updates"
 )
 
 # Minimum entries that every repo's .gitignore MUST contain. Every repo
