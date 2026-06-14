@@ -175,11 +175,6 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
-documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
-for the template.
-
-In addition, BMAD Method-enabled repositories MUST also include the conditional
 [Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.

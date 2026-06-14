@@ -110,8 +110,8 @@ jobs:
             ### 1. Check out the PR branch and rebase onto latest main
             ```
             gh pr checkout ${{ github.event.pull_request.number }}
-            git fetch origin ${{ steps.pr-meta.outputs.base_ref }}
-            git rebase origin/${{ steps.pr-meta.outputs.base_ref }}
+            git fetch origin "${{ steps.pr-meta.outputs.base_ref }}"
+            git rebase "origin/${{ steps.pr-meta.outputs.base_ref }}"
             git push --force-with-lease
             ```
             If the rebase has conflicts, resolve them, then `git rebase --continue` before pushing.
@@ -288,7 +288,7 @@ jobs:
             PR_URL=$(gh pr list \
               --repo "$GITHUB_REPOSITORY" \
               --state open \
-              --search "Closes #${ISSUE} in:body" \
+              --search "Closes #$(printf '%d' "$ISSUE") in:body" \
               --json url \
               --jq '.[0].url' 2>/dev/null || true)
           fi

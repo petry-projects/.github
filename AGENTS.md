@@ -999,6 +999,7 @@ Add worktree directories to the project's `.gitignore`:
 ### Coordination Checklist (for humans orchestrating multiple agents)
 
 Before launching parallel agents, verify:
+
 - [ ] Each agent has a distinct story/task assignment
 - [ ] No two agents will modify the same files
 - [ ] Shared dependencies (lockfiles, generated types) are up to date on the default branch before agents start
