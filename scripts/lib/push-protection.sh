@@ -47,6 +47,13 @@ PP_REQUIRED_SA_SETTINGS=(
   "dependabot_security_updates:enabled:warning:Dependabot security updates should be enabled"
 )
 
+# Plan-gated keys that cannot be configured without a plan upgrade. A null/absent
+# status for these keys is not actionable and should not generate a finding.
+PP_PLAN_GATED_KEYS=(
+  "secret_scanning_ai_detection"
+  "secret_scanning_non_provider_patterns"
+)
+
 # Minimum entries that every repo's .gitignore MUST contain. Every repo
 # starting from the org baseline at /.gitignore satisfies these by default.
 PP_REQUIRED_GITIGNORE_PATTERNS=(
@@ -138,7 +145,7 @@ pp_apply_security_and_analysis() {
       IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
       post_actual="${actuals[$post_key]:-null}"
       if [ "$post_actual" != "$post_expected" ]; then
-        warn "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
+        info "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
       else
         ok "  $post_key: $post_actual (verified)"
       fi
@@ -194,18 +201,24 @@ pp_check_security_and_analysis() {
     return
   fi
 
-  local entry key expected severity detail actual
+  local entry key expected severity detail actual is_plan_gated
   for entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     actual=$(echo "$sa" | jq -r ".\"$key\".status // \"null\"")
     if [ "$actual" = "$expected" ]; then
       continue
     fi
-    # A null/absent status for a warning-severity setting means the feature is
-    # unavailable for the current org plan — skip rather than creating a
-    # non-actionable compliance finding that cannot be remediated without a
-    # plan upgrade.
-    if [ "$severity" = "warning" ] && [ "$actual" = "null" ]; then
+    # A null/absent status for a plan-gated key means the feature is unavailable
+    # for the current org plan — skip rather than creating a non-actionable
+    # compliance finding that cannot be remediated without a plan upgrade.
+    is_plan_gated=false
+    for plan_key in "${PP_PLAN_GATED_KEYS[@]}"; do
+      if [ "$key" = "$plan_key" ]; then
+        is_plan_gated=true
+        break
+      fi
+    done
+    if [ "$is_plan_gated" = true ] && [ "$actual" = "null" ]; then
       continue
     fi
     add_finding "$repo" "push-protection" "$key" "$severity" \
