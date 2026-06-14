@@ -33,15 +33,26 @@ file with that header, **stop and read the header first** — if the change
 isn't allowed by the contract, the right move is a PR against the central
 reusable, not a local edit.
 
-### Reusable workflow versioning — the `stable` channel
+### Reusable workflow versioning — current and target models
 
-**Standard.** Every reusable workflow is versioned by a **moving `stable`
-channel tag**, and every caller pins to it **once** —
-`uses: …/<name>-reusable.yml@<name>/stable`. A caller must **never** pin a
-reusable to `@main` (a branch) and **never** to a frozen `@vX.Y.Z` (a version).
-This applies to **every** reusable workflow regardless of which repo hosts it
-(public or private) or which repo calls it (a downstream consumer or the
-reusable's own self-host duty).
+**Current pinning policy.** Tier 1 reusable workflows are pinned in one of two forms:
+
+1. **SHA-pinned** (preferred when possible) — `uses: …/<name>-reusable.yml@<40-hex-SHA> # comment`
+   - Immutable; satisfies SonarCloud and other security gates that require commit-level pinning.
+   - Used by: `auto-rebase`, `agent-shield`, `feature-ideation`, `dependabot-rebase`.
+2. **Version-tag-pinned** — `uses: …/<name>-reusable.yml@<version>` (e.g., `@v1`, `@v2`)
+   - Allowed for backwards compatibility; callers are edited when a new major version is released.
+   - Used by: `dependabot-automerge`, `dependency-audit`, `pr-review-mention`.
+
+Callers **must never** pin a reusable to `@main` (a branch) — branches have no version boundary and allow untested changes to go live instantly.
+
+**Target model — the `stable` channel (future).** This org is migrating to a **moving `stable`
+channel tag** model where every caller pins to it **once** —
+`uses: …/<name>-reusable.yml@<name>/stable`. A release is rolled out by **moving the tag centrally**
+rather than editing every caller repo. This is the long-term target for all reusable workflows.
+The `dev-lead` reusable (in the private repo) already uses the channel model: `@dev-lead/stable`.
+
+**Why the `stable` channel model.** It is a *moving* tag that always points at the current known-good release. Callers pin it once and are never edited again; a release is rolled out by moving the tag centrally and rolled back by moving it back.
 
 **Why not `@main` (a branch).** `@main` has no version boundary: the instant a
 commit lands on the reusable's default branch it is live for every caller at
@@ -51,15 +62,10 @@ PRs) it is worse: a broken change becomes the very version that must approve its
 own fix, so the fix is gated by the breakage — a circular dependency that fails
 closed.
 
-**Why not a frozen `@vX.Y.Z` (a version).** A bare version pin is immutable, so
+**Why not a frozen `@vX.Y.Z` (a version)?** A bare version pin is immutable, so
 rolling out a change means **editing every caller** to the new tag: a fan-out PR
 per release, a partially-migrated fleet in between, and security fixes that wait
-behind that churn.
-
-**The `stable` channel gets both right.** It is a *moving* tag that always
-points at the current known-good release. Callers pin it once and are never
-edited again; a release is rolled out by **moving the tag centrally** and rolled
-back by moving it back.
+behind that churn. The `stable` channel avoids this by using a moving tag.
 
 **Benefits.**
 
