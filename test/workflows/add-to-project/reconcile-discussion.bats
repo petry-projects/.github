@@ -243,6 +243,42 @@ assert_invocation_count() {
 }
 
 # ---------------------------------------------------------------------------
+# Env-driven category (#415 §3): IDEAS_CATEGORY selects the tracked category
+# ---------------------------------------------------------------------------
+
+@test "IDEAS_CATEGORY override: discussion in the configured category is added as a draft" {
+  export IDEAS_CATEGORY="Proposals"
+  local page="${TT_TMP}/page1.json"
+  write_items_page "$page" false "" "[Discussion #1] unrelated"
+  local script="${TT_TMP}/script.txt"
+  {
+    gh_script_line 0 "$page" "-"   # find
+    gh_script_line 0 "-" "-"       # add
+  } >"$script"
+  export GH_STUB_SCRIPT="$script"
+
+  run reconcile_discussion 42 "Great idea" "https://example.invalid/d/42" "Proposals"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Adding discussion #42 as draft"* ]]
+  assert_invocation_count 2
+  assert_last_invocation_contains "addProjectV2DraftIssue" "Auto-added from Proposals-category"
+}
+
+@test "IDEAS_CATEGORY override: the default 'Ideas' is no longer tracked" {
+  export IDEAS_CATEGORY="Proposals"
+  local page="${TT_TMP}/page1.json"
+  write_items_page "$page" false "" "[Discussion #1] unrelated"
+  local script="${TT_TMP}/script.txt"
+  gh_script_line 0 "$page" "-" >"$script"
+  export GH_STUB_SCRIPT="$script"
+
+  run reconcile_discussion 42 "Title" "https://example.invalid/d/42" "Ideas"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not tracked"* ]]
+  assert_invocation_count 1
+}
+
+# ---------------------------------------------------------------------------
 # Title prefix matching — no false positives, plus multi-match warning
 # ---------------------------------------------------------------------------
 

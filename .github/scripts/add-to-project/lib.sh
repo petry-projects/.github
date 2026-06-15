@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# lib.sh — shared helpers for the add-to-project scripts.
+#
+# This is the "designed once" mechanism called for in
+# petry-projects/.github#415: a single paginated project-item lookup
+# (find_project_item) parameterized by a match predicate, plus the
+# add / draft / delete mutations and the env guard. Both
+# add-issue-or-pr.sh and reconcile-discussion.sh source this file so the
+# reconcile machinery lives in one place rather than once per content type.
+#
+# Required env (checked by _atp_require_env):
+#   PROJECT_ID            ProjectV2 node ID of the Initiatives project
+#   GH_TOKEN              Token with org Projects: Read+write
+#
+# Optional env:
+#   PROJECT_URL           Logged in human-readable messages only
+#   PAGE_SIZE             Items fetched per GraphQL page (default 100)
+
+set -euo pipefail
+
+_atp_require_env() {
+  if [ -z "${PROJECT_ID:-}" ]; then
+    printf '[%s] PROJECT_ID env var is required\n' "$1" >&2
+    return 64
+  fi
+  if [ -z "${GH_TOKEN:-}" ]; then
+    printf '::error::[%s] GH_TOKEN is empty. INITIATIVES_APP_ID / INITIATIVES_APP_PRIVATE_KEY are likely unset or stale. See petry-projects/.github#387.\n' "$1" >&2
+    return 64
+  fi
+}
+
+# find_project_item <kind> <value>
+#   kind=title-prefix  → match items whose content.title startswith <value>
+#   kind=content-id    → match items whose content.id equals <value>
+#
+# Echoes the matching ProjectV2Item id (the first, if several match), or an
+# empty string if none. Exit 0 on success; 64 on bad args; 75 when the
+# project node comes back null (wrong PROJECT_ID / scope drift / archived) —
+# failing loudly rather than treating it as an empty result and letting the
+# caller add duplicates. Lookup is paginated so the project can grow past
+# the first page without silently missing matches.
+find_project_item() {
+  if [ "$#" -ne 2 ]; then
+    printf '[find_project_item] expected 2 args (kind value), got %d\n' "$#" >&2
+    return 64
+  fi
+  local kind="$1"
+  local value="$2"
+  local page_size="${PAGE_SIZE:-100}"
+
+  local sel noun
+  case "${kind}" in
+    title-prefix)
+      sel='.content.title != null and (.content.title | startswith($val))'
+      noun='drafts match prefix'
+      ;;
+    content-id)
+      sel='.content.id != null and (.content.id == $val)'
+      noun='items match content-id'
+      ;;
+    *)
+      printf '[find_project_item] unknown match kind %q (want title-prefix|content-id)\n' "${kind}" >&2
+      return 64
+      ;;
+  esac
+
+  # Cursor is a nullable String so a single query body handles both first
+  # and subsequent pages. We omit the variable on the first call via shell
+  # expansion below rather than coercing a literal "null".
+  local cursor=""
+
+  while true; do
+    local json
+    # shellcheck disable=SC2016  # $projectId/$pageSize/$cursor are GraphQL variables
+    if [ -n "${cursor}" ]; then
+      json=$(gh api graphql \
+        -F projectId="${PROJECT_ID}" \
+        -F pageSize="${page_size}" \
+        -F cursor="${cursor}" \
+        -f query='query($projectId:ID!, $pageSize:Int!, $cursor:String!){
+          node(id:$projectId){
+            ... on ProjectV2 {
+              items(first:$pageSize, after:$cursor){
+                pageInfo { endCursor hasNextPage }
+                nodes {
+                  id
+                  content {
+                    ... on DraftIssue { title }
+                    ... on Issue       { id title }
+                    ... on PullRequest { id title }
+                  }
+                }
+              }
+            }
+          }
+        }')
+    else
+      # shellcheck disable=SC2016
+      json=$(gh api graphql \
+        -F projectId="${PROJECT_ID}" \
+        -F pageSize="${page_size}" \
+        -f query='query($projectId:ID!, $pageSize:Int!){
+          node(id:$projectId){
+            ... on ProjectV2 {
+              items(first:$pageSize){
+                pageInfo { endCursor hasNextPage }
+                nodes {
+                  id
+                  content {
+                    ... on DraftIssue { title }
+                    ... on Issue       { id title }
+                    ... on PullRequest { id title }
+                  }
+                }
+              }
+            }
+          }
+        }')
+    fi
+
+    if [ "$(printf '%s' "${json}" | jq -r '.data.node')" = "null" ]; then
+      printf '[find_project_item] GraphQL returned data.node:null. PROJECT_ID=%s — token may lack access, or the project was deleted.\n' "${PROJECT_ID}" >&2
+      return 75
+    fi
+
+    # Parse match + page info in ONE jq invocation. `first(...)` emits at
+    # most one id and exits cleanly even when many candidates match (avoids
+    # SIGPIPE from `| head -n 1` under pipefail).
+    local parsed match has_next end_cursor match_count
+    parsed=$(printf '%s' "${json}" | jq -r --arg val "${value}" '
+        (.data.node.items.nodes
+          | map(select('"${sel}"'))
+        ) as $matches
+        | "match=" + (first($matches[].id) // ""),
+          "count=" + ($matches | length | tostring),
+          "next="  + (.data.node.items.pageInfo.hasNextPage | tostring),
+          "end="   + (.data.node.items.pageInfo.endCursor // "")
+      ')
+
+    match=$(printf '%s' "${parsed}" | awk -F= '/^match=/ {sub(/^match=/, ""); print; exit}')
+    match_count=$(printf '%s' "${parsed}" | awk -F= '/^count=/ {sub(/^count=/, ""); print; exit}')
+    has_next=$(printf '%s' "${parsed}"   | awk -F= '/^next=/  {sub(/^next=/, "");  print; exit}')
+    end_cursor=$(printf '%s' "${parsed}" | awk -F= '/^end=/   {sub(/^end=/, "");   print; exit}')
+
+    if [ -n "${match}" ]; then
+      if [ "${match_count}" != "1" ]; then
+        # Multi-match on a single page indicates inconsistent state (manual
+        # drafts shadowing automation). Warn so an operator can clean up,
+        # but proceed with the first match so the state machine progresses.
+        printf '[find_project_item] WARNING: %s %s %q. Returning first; reconcile may delete the wrong one.\n' \
+          "${match_count}" "${noun}" "${value}" >&2
+      fi
+      printf '%s' "${match}"
+      return 0
+    fi
+
+    if [ "${has_next}" != "true" ]; then
+      return 0
+    fi
+    cursor="${end_cursor}"
+  done
+}
+
+add_content_to_project() {
+  if [ "$#" -ne 1 ]; then
+    printf '[add_content_to_project] expected 1 arg (content_node_id), got %d\n' "$#" >&2
+    return 64
+  fi
+  local content_node_id="$1"
+
+  # addProjectV2ItemById is idempotent: adding content already on the board
+  # returns the existing item, so the add path needs no find-first dedup.
+  # shellcheck disable=SC2016  # $projectId/$contentId are GraphQL variables
+  gh api graphql \
+    -F projectId="${PROJECT_ID}" \
+    -F contentId="${content_node_id}" \
+    -f query='mutation($projectId:ID!,$contentId:ID!){
+      addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){
+        item { id }
+      }
+    }' >/dev/null
+}
+
+add_draft_item() {
+  if [ "$#" -ne 2 ]; then
+    printf '[add_draft_item] expected 2 args (title body), got %d\n' "$#" >&2
+    return 64
+  fi
+  local title="$1"
+  local body="$2"
+
+  # shellcheck disable=SC2016  # $projectId/$title/$body are GraphQL variables
+  gh api graphql \
+    -F projectId="${PROJECT_ID}" \
+    -F title="${title}" \
+    -F body="${body}" \
+    -f query='mutation($projectId:ID!,$title:String!,$body:String!){
+      addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){
+        projectItem { id }
+      }
+    }' >/dev/null
+}
+
+delete_project_item() {
+  if [ "$#" -ne 1 ]; then
+    printf '[delete_project_item] expected 1 arg (item_id), got %d\n' "$#" >&2
+    return 64
+  fi
+  local item_id="$1"
+
+  # Be idempotent on redelivered webhooks / racing runs: a "Could not
+  # resolve" error from a no-longer-present item is the desired final state,
+  # not a real failure. Capture stderr to inspect.
+  local out
+  if ! out=$(gh api graphql \
+    -F projectId="${PROJECT_ID}" \
+    -F itemId="${item_id}" \
+    -f query='mutation($projectId:ID!,$itemId:ID!){
+      deleteProjectV2Item(input:{projectId:$projectId,itemId:$itemId}){
+        deletedItemId
+      }
+    }' 2>&1); then
+    if printf '%s' "${out}" | grep -q -e 'Could not resolve to a node' -e 'not found'; then
+      printf '[delete_project_item] item %s was already gone (idempotent path)\n' "${item_id}" >&2
+      return 0
+    fi
+    printf '%s\n' "${out}" >&2
+    return 1
+  fi
+}
