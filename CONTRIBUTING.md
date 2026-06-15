@@ -22,7 +22,9 @@ Self-healing, Auto-rebase, Model fallback, Tooling, and Compliance program.
 ### What gets added automatically
 
 The [`add-to-project.yml`](./.github/workflows/add-to-project.yml) workflow
-adds items to the board automatically:
+(a thin caller for the shared
+[`add-to-project-reusable.yml`](./.github/workflows/add-to-project-reusable.yml))
+keeps the board in sync automatically:
 
 | Item type | Rule |
 |---|---|
@@ -30,13 +32,31 @@ adds items to the board automatically:
 | Pull requests | Labeled `dev-lead` **and** none of the excluded labels below _(see fork-PR exception)_ |
 | Discussions | Created in (or moved into) the **Ideas** category — added as draft items |
 
-> **Fork-PR exception:** The `add-to-project` workflow uses `pull_request_target`
-> and gates on the PR author's association being `OWNER`, `MEMBER`, or
-> `COLLABORATOR`. PRs from external contributors (`FIRST_TIMER` or `CONTRIBUTOR`
-> author association) are **skipped** even when a maintainer applies the
-> `dev-lead` label, because the gate evaluates the *author's* association, not
-> the labeler's. Workaround: manually add such PRs from the
-> [Projects UI](https://github.com/orgs/petry-projects/projects/1).
+It **reconciles** rather than only adds: if an item that was on the board
+stops qualifying — `dev-lead` removed, or an excluded label added — its
+project item is removed automatically (the issue/PR analogue of the
+discussion category cleanup).
+
+### Adopting in another repo
+
+The board spans the org. To wire a second repo in, copy
+[`standards/workflows/add-to-project.yml`](./standards/workflows/add-to-project.yml)
+to `.github/workflows/add-to-project.yml` in that repo — it's a thin caller
+pinned to the `add-to-project/stable` channel of the reusable. The repo must
+be included in the `petry-projects-planner` app installation (see token
+requirement below). The gate labels and Ideas category are reusable
+**inputs** (`required_label`, `excluded_labels`, `ideas_category`), so a repo
+can tune them without forking the logic.
+
+> **Fork-PR exception:** The `add-to-project` workflow uses `pull_request_target`,
+> which carries the app secret, so it gates fork PRs: a PR is eligible when it
+> is **same-repo** (`head.repo.fork == false`) **or** its author's association
+> is `OWNER`, `MEMBER`, or `COLLABORATOR`. A PR from an **external fork by an
+> untrusted author** is still **skipped** even when a maintainer applies the
+> `dev-lead` label, because the `if:` gate can't safely evaluate the *labeler*.
+> Workaround: manually add such PRs from the
+> [Projects UI](https://github.com/orgs/petry-projects/projects/1). Tracked as
+> [#415](https://github.com/petry-projects/.github/issues/415) §4.
 
 ### Noise gate — excluded labels
 
