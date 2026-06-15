@@ -424,7 +424,7 @@ OUTPUT CONTRACT
 PROMPT
 
 # ── Generate Report ───────────────────────────────────────────────────────────
-# --disallowedTools: block all action tools so Claude cannot act on untrusted PR/issue content
+# --tools "": block all action tools so Claude cannot act on untrusted PR/issue content
 # --output-format json: capture the full final result as JSON and extract the text with jq.
 #   In text mode, output preceding disallowed tool call attempts is silently dropped; json
 #   mode always includes the complete response in .result regardless of tool call filtering.
@@ -432,9 +432,9 @@ PROMPT
 # Pipe prompt via stdin rather than a shell argument to avoid ARG_MAX (~1MB) with large orgs
 REPORT_JSON="$DATA_DIR/report.json"
 echo "Generating report with Claude..." >&2
-claude -p \
+env -u GH_TOKEN claude -p \
   --output-format json \
-  --disallowedTools "Bash,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite,NotebookEdit" \
+  --tools "" \
   < "$DATA_DIR/prompt.txt" > "$REPORT_JSON"
 echo "JSON lines: $(wc -l < "$REPORT_JSON")" >&2
 echo "JSON first 600 chars:" >&2
@@ -445,5 +445,13 @@ if ! jq -e '(.result // "") | type == "string" and length > 0' "$REPORT_JSON" > 
   cat "$REPORT_JSON" >&2
   exit 1
 fi
+
+# Validate that the report contains required sections
+RESULT=$(jq -r '.result' "$REPORT_JSON")
+if ! echo "$RESULT" | grep -q "@org-leads" || ! echo "$RESULT" | grep -q "^#"; then
+  echo "ERROR: report is missing required sections or headers" >&2
+  exit 1
+fi
+
 jq '{stop_reason,num_turns,total_cost_usd,result_len:((.result//"")|length),result_start:((.result//"")|.[0:120])}' "$REPORT_JSON" >&2 || true
 jq -r '.result' "$REPORT_JSON"

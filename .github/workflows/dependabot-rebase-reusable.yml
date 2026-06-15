@@ -95,7 +95,10 @@ jobs:
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
             BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
-              --jq '.behind_by')
+              --jq '.behind_by' 2>/dev/null) || {
+              echo "Warning: Failed to check if PR #$PR_NUMBER is behind main — skipping"
+              continue
+            }
 
             if [[ "$BEHIND" -gt 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind — updating branch"

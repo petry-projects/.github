@@ -21,14 +21,6 @@ set -euo pipefail
 #      concurrent dev-lead runs in any single repo to one, avoiding the rebase
 #      storms and token exhaustion a fleet-wide burst would cause.
 #
-#      Throttling: at most ONE issue per repo is engaged per run (shared across
-#      the primary and legacy-label sweeps), and a repo already active (open PR
-#      or in-progress issue) is skipped.  Issues are processed oldest-first, so
-#      the most-stuck finding in each repo is the one re-engaged; the daily
-#      cadence drains the rest of each repo's backlog one at a time.  This keeps
-#      concurrent dev-lead runs in any single repo to one, avoiding the rebase
-#      storms and token exhaustion a fleet-wide burst would cause.
-#
 # Why re-trigger instead of relying on the original event?
 #   GitHub only fires issues:labeled once per label application.  If dev-lead
 #   had a transient failure at that moment (template error, git-identity bug,
@@ -52,14 +44,6 @@ TRIGGER_LABEL="${TRIGGER_LABEL:-claude}"
 ISSUES_RETRIGGERED=0
 ISSUES_SKIPPED=0
 ISSUES_DEFERRED=0
-
-# Repos that already have an in-flight dev-lead engagement THIS run — either an
-# issue we re-triggered or one we found already active. At most one engagement
-# per repo per run keeps concurrent dev-lead runs in a single repo to one,
-# avoiding rebase storms and token exhaustion from a fleet-wide burst. Shared
-# across BOTH the primary and legacy-label sweeps so the per-repo budget covers
-# every path that could engage dev-lead.
-declare -A REPO_ENGAGED=()
 
 # Repos that already have an in-flight dev-lead engagement THIS run — either an
 # issue we re-triggered or one we found already active. At most one engagement
@@ -105,8 +89,8 @@ cycle_label() {
     info "[dry-run] would cycle '$TRIGGER_LABEL' on $repo#$issue"
     return 0
   fi
-  gh api -X DELETE "repos/$ORG/$repo/issues/$issue/labels/$TRIGGER_LABEL" 2>/dev/null || true
-  gh api -X POST "repos/$ORG/$repo/issues/$issue/labels" \
+  gh_api -X DELETE "repos/$ORG/$repo/issues/$issue/labels/$TRIGGER_LABEL" 2>/dev/null || true
+  gh_api -X POST "repos/$ORG/$repo/issues/$issue/labels" \
     --field "labels[]=$TRIGGER_LABEL" >/dev/null
 }
 
