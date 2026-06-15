@@ -1176,6 +1176,273 @@ check_centralized_check_names() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
+#
+# For each workflow that the org has centralized into a reusable workflow,
+# verify the downstream repo's copy is a stub that delegates via:
+#   uses: petry-projects/.github/.github/workflows/<reusable>.yml@<version>
+#
+# This prevents drift: a repo that copies the inline pre-centralization
+# version (or pins to @main, or pins to a non-canonical tag) is flagged so
+# it can be re-synced from the standard. The central .github repo itself is
+# exempt because it owns the reusables and may legitimately reference
+# its own workflows by @main during release prep.
+#
+# Array format: "workflow-filename:expected-reusable-basename:version-tag"
+# ---------------------------------------------------------------------------
+check_centralized_workflow_stubs() {
+  local repo="$1"
+
+  # The .github repo is the source of truth and is allowed to reference its
+  # own reusables by @main; skip the stub check for it.
+  [ "$repo" = ".github" ] && return
+
+  # workflow-filename:expected-reusable-basename:version-tag
+  local centralized=(
+    "auto-rebase.yml:auto-rebase-reusable:v1"
+    "dependency-audit.yml:dependency-audit-reusable:v1"
+    "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
+    "dependabot-rebase.yml:dependabot-rebase-reusable:v1"
+    "agent-shield.yml:agent-shield-reusable:v1"
+    "feature-ideation.yml:feature-ideation-reusable:v1"
+    "pr-review-mention.yml:pr-review-mention-reusable:v2"
+  )
+
+  # List the repo's workflow directory once instead of probing each file.
+  # If the listing fails (no workflows dir), there's nothing to check.
+  local workflow_list
+  workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  [ -z "$workflow_list" ] && return
+
+  local entry wf reusable version
+  for entry in "${centralized[@]}"; do
+    IFS=':' read -r wf reusable version <<< "$entry"
+    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
+
+    # Skip workflows that don't exist in this repo. Required workflows are
+    # checked separately by check_required_workflows; conditional ones
+    # (dependabot-rebase, feature-ideation) are intentionally optional.
+    if ! echo "$workflow_list" | grep -qxF "$wf"; then
+      continue
+    fi
+
+    local content
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+
+    local decoded
+    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$decoded" ] && continue
+
+    # Required pattern: a non-comment line whose `uses:` value is exactly
+    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
+    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
+    # cannot satisfy the check.
+    local esc_reusable esc_version
+    esc_reusable=$(escape_ere "$reusable")
+    esc_version=$(escape_ere "$version")
+    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
+
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
+      continue  # stub is correctly pinned to the canonical version — compliant
+    fi
+
+    # Determine why it's non-compliant for a more actionable message.
+    local why
+    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
+      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
+    elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
+      why="references the reusable but the \`uses:\` line does not match the canonical stub"
+    else
+      why="is an inline copy instead of a thin caller stub — re-sync from \`standards/workflows/${wf}\`"
+    fi
+
+    add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
+      "standards/ci-standards.md#centralization-tiers"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: dev-lead.yml caller stub conforms to the centralized contract
+#
+# Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
+# @main, and its concurrency + permissions are owned centrally (see
+# standards/ci-standards.md#dev-lead-agent). A stub drifts — and breaks — in
+# three ways this check catches (all root causes of petry-projects/.github#402):
+#
+#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@dev-lead/stable.
+#   2. Local concurrency block: per-stub concurrency drifts and cancels issue
+#      pickups; concurrency is owned by the reusable (per-issue/per-PR lanes).
+#   3. Missing `statuses: read`: the reusable requests it since #435, so without
+#      it every run fails at startup (startup_failure) with no runtime error.
+# ---------------------------------------------------------------------------
+check_dev_lead_stub() {
+  local repo="$1"
+
+  # .github holds the template (exercised by the reusable's own CI) and
+  # .github-private runs the workflow inline rather than as a caller stub.
+  [ "$repo" = ".github" ] && return
+  [ "$repo" = ".github-private" ] && return
+
+  local content decoded
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/dev-lead.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # repo hasn't adopted dev-lead — nothing to check
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # 1) Canonical pin (non-comment `uses:` line, exact ref) — the moving
+  #    dev-lead/stable channel tag (self-host channel model).
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/stable([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 2) agent_ref must be threaded through to pin the same channel inside the
+  #    reusable's own script/prompt checkout (prevents split-brain on promotion).
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/stable([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/stable\` so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 3) No per-stub concurrency block — concurrency is owned by the reusable.
+  if echo "$decoded" | grep -qE "^concurrency:"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
+      "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 4) Caller permissions must grant `statuses: read`.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
+      "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: required-status-check rulesets reference current names
+#
+# After centralizing workflows into reusables (#87, #88), GitHub composes
+# check names as `<caller-job-id> / <reusable-job-id-or-name>`. Repos
+# that updated their workflow files but didn't update their rulesets
+# are silently broken — the merge gate references a name that no
+# longer exists, so it can never be satisfied.
+#
+# Inspects both the new ruleset system and classic branch protection.
+# Flags two distinct problems:
+#   1. Stale pre-centralization name (e.g. `claude`, `AgentShield`)
+#      → emit "stale-required-check-<old-name>"
+#   2. `claude-code / claude` listed as required
+#      → emit "required-claude-code-check-broken" because that check
+#        is structurally incompatible with workflow-modifying PRs
+#        (claude-code-action's app-token validation refuses to mint
+#        a token whenever the PR diff includes any workflow file)
+# ---------------------------------------------------------------------------
+check_centralized_check_names() {
+  local repo="$1"
+
+  # The .github repo owns the reusables; its own ruleset is allowed to
+  # reference whatever check names it likes.
+  [ "$repo" = ".github" ] && return
+
+  # Map from stale name → current canonical name. Used for the rename
+  # remediation message. The remediation here is "rename in the
+  # ruleset" because both the old and new names refer to a check that
+  # CAN be required (it runs on PRs and reports a definitive result).
+  #
+  # NOTE: `claude` and `claude-issue` are deliberately NOT in this map.
+  # The post-centralization equivalents are `claude-code / claude` and
+  # `claude-code / claude-issue`, but those checks are themselves
+  # incompatible with workflow-modifying PRs (claude-code-action's app
+  # token validation refuses to mint a token for any PR whose diff
+  # includes a workflow file, so the check fails on every workflow PR
+  # and the merge gate becomes a deadlock). The remediation for the
+  # `claude*` cases is therefore "remove from required checks", not
+  # "rename" — handled below as a separate finding so the message
+  # never recommends a name that creates a new deadlock.
+  local renames=(
+    "AgentShield:agent-shield / AgentShield"
+    "Detect ecosystems:dependency-audit / Detect ecosystems"
+  )
+
+  # Patterns for required checks that are structurally broken and
+  # should be removed (not renamed). Matched as either:
+  #   - the bare legacy name ("claude" / "claude-issue"), or
+  #   - any reusable-workflow check whose suffix is "/ claude" or
+  #     "/ claude-issue", regardless of caller-job-id prefix
+  #     (so a custom caller named e.g. "Claude Code / claude" is
+  #     also caught, not just the canonical "claude-code / claude").
+  #
+  # The match is computed against each context line below.
+
+  # Collect every required-status-check context from every source.
+  # Sources: (1) every active ruleset, (2) classic branch protection.
+  local contexts=""
+
+  # Source 1: rulesets that apply to main
+  local ruleset_contexts
+  ruleset_contexts=$(gh_api "repos/$ORG/$repo/rules/branches/main" \
+    --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' 2>/dev/null || echo "")
+  contexts+="$ruleset_contexts"$'\n'
+
+  # Source 2: classic branch protection (may not exist)
+  local classic_contexts
+  classic_contexts=$(gh_api "repos/$ORG/$repo/branches/main/protection/required_status_checks" \
+    --jq '.contexts[]' 2>/dev/null || echo "")
+  contexts+="$classic_contexts"
+
+  [ -z "$(echo "$contexts" | tr -d '[:space:]')" ] && return
+
+  # Check 1: stale pre-centralization names that have a safe rename
+  local entry old new
+  for entry in "${renames[@]}"; do
+    IFS=':' read -r old new <<< "$entry"
+    if echo "$contexts" | grep -qxF "$old"; then
+      add_finding "$repo" "rulesets" "stale-required-check-${old// /-}" "error" \
+        "Required-status-check ruleset references the stale check name \`$old\`. After workflow centralization (petry-projects/.github#87) this check is published as \`$new\`. Update the ruleset (and any classic branch protection) to use the new name." \
+        "standards/ci-standards.md#centralization-tiers"
+    fi
+  done
+
+  # Check 2: claude-* checks (legacy or post-centralization) listed as
+  # required. These cannot be made compliant by renaming because the
+  # post-centralization name is itself broken — the only safe action
+  # is to remove the check from required-status-checks entirely.
+  #
+  # We classify each context line by suffix so any caller-job-id prefix
+  # is caught (e.g. "claude-code / claude", "Claude Code / claude",
+  # "review-claude / claude" all match).
+  local context match_type
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    match_type=""
+    case "$context" in
+      "claude")              match_type="claude" ;;
+      "claude-issue")        match_type="claude-issue" ;;
+      *"/ claude")           match_type="claude" ;;
+      *"/ claude-issue")     match_type="claude-issue" ;;
+      *) continue ;;
+    esac
+
+    # Stable check id per match type so findings don't churn across
+    # audit runs from variations in caller-job-id prefixes.
+    local check_id
+    if [ "$match_type" = "claude-issue" ]; then
+      check_id="required-claude-issue-check-broken"
+    else
+      check_id="required-claude-check-broken"
+    fi
+
+    add_finding "$repo" "rulesets" "$check_id" "error" \
+      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+      "standards/ci-standards.md#centralization-tiers"
+  done <<< "$contexts"
+}
+
+# ---------------------------------------------------------------------------
 # Check: CLAUDE.md exists and references AGENTS.md
 # ---------------------------------------------------------------------------
 check_claude_md() {
@@ -1419,6 +1686,53 @@ ensure_audit_label() {
     --description "For dev-lead agent pickup" \
     --color "8B5CF6" \
     --force 2>/dev/null || true
+}
+
+# Create all required labels (idempotent — uses --force to update if present)
+ensure_required_labels() {
+  local repo="$1"
+  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
+    "in-progress|fbca04|An agent is actively working this issue"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
+}
+
+# Create all required labels (idempotent — uses --force to update if present)
+ensure_required_labels() {
+  local repo="$1"
+  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
 }
 
 # Create all required labels (idempotent — uses --force to update if present)
