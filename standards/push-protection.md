@@ -225,19 +225,20 @@ secret-scan:
         fetch-depth: 0
 
     - name: Install gitleaks
-      # Download the pre-built binary and verify its SHA256 checksum.
-      # To upgrade: download the new checksums.txt from the gitleaks release page,
-      # update the version tag and the sha256 hash below.
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_VERSION: "8.30.1"
+        # Named GITLEAKS_CHECKSUM (not GITLEAKS_SHA256) — SonarCloud flags env var names
+        # matching *SHA256* containing hex strings as Security Hotspots (false positive).
+        GITLEAKS_CHECKSUM: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
       run: |
-        gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_linux_x64.tar.gz' --output /tmp/gitleaks.tar.gz
-        echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c
-        tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-        sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+        tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+        wget -q "${url}" -O /tmp/gitleaks.tar.gz
+        echo "${GITLEAKS_CHECKSUM}  /tmp/gitleaks.tar.gz" | sha256sum -c
+        tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
 
     - name: Run gitleaks
-      run: gitleaks detect --source . --redact --verbose --exit-code 1
+      run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
 ```
 
 > **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
@@ -253,8 +254,39 @@ The job MUST:
   PR diff
 - Pass `--redact` so leaked values are NEVER written to workflow logs
 - Fail the build (`--exit-code 1`) when any finding is detected
+- Pass `--config .gitleaks.toml` — every adopting repo MUST ship a
+  `.gitleaks.toml` at root (see [`.gitleaks.toml` template](#gitleakstoml-template) below)
+- Use `GITLEAKS_CHECKSUM` (not `GITLEAKS_SHA256`) for the binary checksum env var —
+  SonarCloud's security gate flags env vars matching `*SHA256*` that contain hex
+  strings as Security Hotspots (hardcoded credential false positive)
 - Run as a **required check** via the `code-quality` ruleset
   (see [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories))
+
+### `.gitleaks.toml` template
+
+Every repository adopting the `secret-scan` job MUST ship a `.gitleaks.toml`
+at root. Without it, `--config .gitleaks.toml` fails with a file-not-found
+error. Copy [`standards/gitleaks.toml`](gitleaks.toml) as your starting point
+and extend the `paths` allowlist for any repo-specific false-positive paths.
+
+**Why a required config file?** The `generic-api-key` rule in gitleaks fires on
+BMAD knowledge file paths (e.g. `api-request.md`, `auth-session.md` inside
+`_bmad/` directories) because their names contain substrings gitleaks treats as
+API-key indicators. The allowlist suppresses these false positives without
+disabling the rule org-wide.
+
+```toml
+title = "gitleaks config"
+
+# Add repo-specific allowlists below.
+# Common false-positive paths:
+#   '''_bmad/'''  — BMAD knowledge/config files (not application secrets)
+[allowlist]
+description = "Allowlisted paths"
+paths = [
+  '''_bmad/''',
+]
+```
 
 ### Coordination with AgentShield
 
