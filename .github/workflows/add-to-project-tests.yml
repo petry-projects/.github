@@ -4,6 +4,7 @@ name: Add to Project Tests
 #
 # Triggered on any PR that touches:
 #   - .github/workflows/add-to-project.yml
+#   - .github/workflows/add-to-project-reusable.yml
 #   - .github/workflows/add-to-project-tests.yml
 #   - .github/scripts/add-to-project/**
 #   - test/workflows/add-to-project/**
@@ -18,6 +19,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/add-to-project.yml'
+      - '.github/workflows/add-to-project-reusable.yml'
       - '.github/workflows/add-to-project-tests.yml'
       - '.github/scripts/add-to-project/**'
       - 'test/workflows/add-to-project/**'
@@ -26,6 +28,7 @@ on:
       - main
     paths:
       - '.github/workflows/add-to-project.yml'
+      - '.github/workflows/add-to-project-reusable.yml'
       - '.github/workflows/add-to-project-tests.yml'
       - '.github/scripts/add-to-project/**'
       - 'test/workflows/add-to-project/**'
