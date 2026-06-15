@@ -36,7 +36,11 @@ write_items_page() {
   local titles_json='[]'
   for t in "$@"; do
     local id_suffix
-    id_suffix=$(printf '%s' "$t" | sha256sum | cut -c1-10)
+    if command -v sha256sum >/dev/null 2>&1; then
+      id_suffix=$(printf '%s' "$t" | sha256sum | cut -c1-10)
+    else
+      id_suffix=$(printf '%s' "$t" | shasum -a 256 | cut -c1-10)
+    fi
     titles_json=$(jq --arg t "$t" --arg id "PVTI_${id_suffix}" \
       '. + [{id: $id, content: {title: $t}}]' <<<"$titles_json")
   done

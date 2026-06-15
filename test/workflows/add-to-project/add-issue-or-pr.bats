@@ -35,7 +35,11 @@ write_content_page() {
   local nodes='[]'
   for cid in "$@"; do
     local id_suffix
-    id_suffix=$(printf '%s' "$cid" | sha256sum | cut -c1-10)
+    if command -v sha256sum >/dev/null 2>&1; then
+      id_suffix=$(printf '%s' "$cid" | sha256sum | cut -c1-10)
+    else
+      id_suffix=$(printf '%s' "$cid" | shasum -a 256 | cut -c1-10)
+    fi
     nodes=$(jq --arg cid "$cid" --arg id "PVTI_${id_suffix}" \
       '. + [{id: $id, content: {id: $cid, title: ("item " + $cid)}}]' <<<"$nodes")
   done

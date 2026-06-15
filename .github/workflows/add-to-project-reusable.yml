@@ -93,12 +93,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout add-to-project scripts
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v5.0.0
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: petry-projects/.github
           ref: ${{ inputs.agent_ref }}
           path: .add-to-project-src
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Mint App installation token
         id: app-token
@@ -129,12 +130,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout add-to-project scripts
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v5.0.0
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: petry-projects/.github
           ref: ${{ inputs.agent_ref }}
           path: .add-to-project-src
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Mint App installation token
         id: app-token
