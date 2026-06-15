@@ -298,6 +298,14 @@ assert_last_invocation_contains() {
   [ "$status" -eq 1 ]
 }
 
+@test "evaluate_noise_gate: empty EXCLUDED_LABELS disables exclusions entirely" {
+  # An explicitly empty value (not unset) means "no exclusions" — the
+  # ${VAR-default} form respects it instead of falling back to the default set.
+  export EXCLUDED_LABELS=""
+  run evaluate_noise_gate "$(labels_of dev-lead compliance-audit)"
+  [ "$status" -eq 0 ]
+}
+
 @test "evaluate_noise_gate: EXCLUDED_LABELS override replaces the default exclusions" {
   export EXCLUDED_LABELS="wontfix, spam"
   # compliance-audit is no longer excluded under the override → qualifies

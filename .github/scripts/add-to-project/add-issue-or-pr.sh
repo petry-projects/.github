@@ -55,11 +55,15 @@ evaluate_noise_gate() {
   fi
 
   local required="${REQUIRED_LABEL:-dev-lead}"
-  local excluded_raw="${EXCLUDED_LABELS:-compliance-audit,health-check,fleet-tracker,daily-report}"
+  # Use ${VAR-default} (no colon): an unset EXCLUDED_LABELS falls back to the
+  # default set, but an explicitly empty value means "no exclusions" so a repo
+  # can opt out entirely.
+  local excluded_raw="${EXCLUDED_LABELS-compliance-audit,health-check,fleet-tracker,daily-report}"
   # Split the comma-separated excluded list into a JSON array (trim blanks,
-  # drop empties) so the gate stays declarative in one jq invocation.
+  # drop empties) so the gate stays declarative in one jq invocation. `-Rs`
+  # slurps the whole input so an empty string yields [] rather than no output.
   local excluded_json
-  excluded_json=$(printf '%s' "${excluded_raw}" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))')
+  excluded_json=$(printf '%s' "${excluded_raw}" | jq -Rs 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))')
 
   # Excluded labels must not appear together with the required label. Run in
   # ONE jq invocation rather than spawning per-label so we stay cheap and

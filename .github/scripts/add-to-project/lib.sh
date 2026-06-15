@@ -48,14 +48,12 @@ find_project_item() {
   local value="$2"
   local page_size="${PAGE_SIZE:-100}"
 
-  local sel noun
+  local noun
   case "${kind}" in
     title-prefix)
-      sel='.content.title != null and (.content.title | startswith($val))'
       noun='drafts match prefix'
       ;;
     content-id)
-      sel='.content.id != null and (.content.id == $val)'
       noun='items match content-id'
       ;;
     *)
@@ -123,13 +121,25 @@ find_project_item() {
       return 75
     fi
 
-    # Parse match + page info in ONE jq invocation. `first(...)` emits at
-    # most one id and exits cleanly even when many candidates match (avoids
-    # SIGPIPE from `| head -n 1` under pipefail).
-    local parsed match has_next end_cursor match_count
-    parsed=$(printf '%s' "${json}" | jq -r --arg val "${value}" '
+    # Parse match + page info in ONE jq invocation. The predicate is passed
+    # to jq as $kind so the filter stays fully static (no shell interpolation).
+    # `first(...)` emits at most one id and exits cleanly even when many
+    # candidates match (avoids SIGPIPE from `| head -n 1` under pipefail).
+    local parsed line match="" match_count=0 has_next="false" end_cursor=""
+    parsed=$(printf '%s' "${json}" | jq -r \
+      --arg kind "${kind}" \
+      --arg val "${value}" \
+      '
         (.data.node.items.nodes
-          | map(select('"${sel}"'))
+          | map(select(
+              if $kind == "title-prefix" then
+                .content.title != null and (.content.title | startswith($val))
+              elif $kind == "content-id" then
+                .content.id != null and (.content.id == $val)
+              else
+                false
+              end
+            ))
         ) as $matches
         | "match=" + (first($matches[].id) // ""),
           "count=" + ($matches | length | tostring),
@@ -137,10 +147,17 @@ find_project_item() {
           "end="   + (.data.node.items.pageInfo.endCursor // "")
       ')
 
-    match=$(printf '%s' "${parsed}" | awk -F= '/^match=/ {sub(/^match=/, ""); print; exit}')
-    match_count=$(printf '%s' "${parsed}" | awk -F= '/^count=/ {sub(/^count=/, ""); print; exit}')
-    has_next=$(printf '%s' "${parsed}"   | awk -F= '/^next=/  {sub(/^next=/, "");  print; exit}')
-    end_cursor=$(printf '%s' "${parsed}" | awk -F= '/^end=/   {sub(/^end=/, "");   print; exit}')
+    # Read the four labelled lines without spawning a subshell per field.
+    # `${line#prefix=}` strips only the leading key, so cursor values that
+    # themselves contain '=' (base64 padding) survive intact.
+    while IFS= read -r line; do
+      case "${line}" in
+        match=*) match="${line#match=}" ;;
+        count=*) match_count="${line#count=}" ;;
+        next=*)  has_next="${line#next=}" ;;
+        end=*)   end_cursor="${line#end=}" ;;
+      esac
+    done <<< "${parsed}"
 
     if [ -n "${match}" ]; then
       if [ "${match_count}" != "1" ]; then
