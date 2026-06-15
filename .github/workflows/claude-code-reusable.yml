@@ -209,8 +209,10 @@ jobs:
               PR=""
             fi
           fi
-          echo "number=$PR" >> "$GITHUB_OUTPUT"
           {
+            echo "number<<EOF"
+            echo "$PR"
+            echo "EOF"
             echo "check_name<<EOF"
             echo "$CHECK_NAME"
             echo "EOF"
@@ -305,7 +307,11 @@ jobs:
           fi
 
           if [ -n "$PR_URL" ] && [ "$ISSUE" -gt 0 ] 2>/dev/null; then
-            echo "existing_pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+            {
+              echo "existing_pr_url<<EOF"
+              echo "$PR_URL"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
             gh issue comment "$ISSUE" \
               --repo "$GITHUB_REPOSITORY" \
               --body "An open PR already addresses this issue: $PR_URL — skipping new Claude run to avoid duplicates."
