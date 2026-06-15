@@ -118,7 +118,11 @@ jobs:
 
             ### 2. Fetch all open review threads (collect node IDs — you need them to resolve threads later)
             ```
-            gh api graphql -f query='query { repository(owner:"${{ github.repository_owner }}", name:"${{ github.event.repository.name }}") { pullRequest(number:${{ github.event.pull_request.number }}) { reviewThreads(first:250) { nodes { id isResolved comments(first:10) { nodes { path line body author { login } } } } } } } }'
+            gh api graphql \
+              -F owner='${{ github.repository_owner }}' \
+              -F name='${{ github.event.repository.name }}' \
+              -F number=${{ github.event.pull_request.number }} \
+              -f query='query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first:250) { nodes { id isResolved comments(first:10) { nodes { path line body author { login } } } } } } } }'
             ```
 
             ### 3. Address each unresolved thread
@@ -248,7 +252,7 @@ jobs:
 
             Please diagnose and fix the failure:
             1. Check out the PR branch: gh pr checkout ${{ steps.pr.outputs.number }}
-            2. Read the failure details — visit the details URL or use `gh run list --commit ${{ github.event.check_run.head_sha }}` and `gh run view` to read the logs. For SonarCloud or external check services, inspect the PR annotations via `gh api repos/${{ github.repository }}/check-runs/${{ github.event.check_run.id }}/annotations?per_page=100`.
+            2. Read the failure details — visit the details URL or use `gh run list --commit ${{ github.event.check_run.head_sha }}` and `gh run view` to read the logs. For SonarCloud or external check services, inspect the PR annotations via `gh api "repos/${{ github.repository }}/check-runs/${{ github.event.check_run.id }}/annotations?per_page=100"`.
             3. Read the relevant source files and understand the root cause.
             4. Apply the minimal fix needed to address the reported issues.
             5. Commit and push the fix to the PR branch.
