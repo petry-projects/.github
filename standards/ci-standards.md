@@ -638,12 +638,31 @@ A copy-paste ready template is available at [`standards/workflows/auto-rebase.ym
 On each run the workflow:
 
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
-2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+2. Keeps only the PRs that are **eligible** under the `eligibility` input (see below),
+   then for each eligible PR that is behind the base branch, calls
+   `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+   The `merge` method is used (never `rebase`) so existing approvals are not invalidated.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
 4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
    (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
    job in `claude-code-reusable.yml` to automatically resolve the conflict.
    If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
+
+**Eligibility (fan-out restriction):** Updating *every* behind PR generates a large
+volume of redundant branch-update CI runs, most re-staled before review. The reusable
+therefore gates updates on a tunable `eligibility` input:
+
+| `eligibility` | Updates a behind PR when… |
+|---------------|---------------------------|
+| `review-ready` (default) | the PR is **non-draft** AND (it has a **current `APPROVED` review** OR carries the `ready_label`, default `auto-rebase:ready`) |
+| `all` | always — restores the original unrestricted fan-out |
+
+Approval is determined from the **actual review states** (latest decision review per
+reviewer wins; a later `CHANGES_REQUESTED`/`DISMISSED` cancels an earlier `APPROVED`),
+**not** `reviewDecision`, which is `null` on repos without required reviews. The
+predicate lives in `.github/scripts/auto-rebase/lib/eligibility.sh` and is unit-tested
+via bats; new modes (e.g. a future "front-of-queue N") can be added there and selected
+through the `eligibility` input with no change to the workflow file.
 
 **Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** —
 comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation).
