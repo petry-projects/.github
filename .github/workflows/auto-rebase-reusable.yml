@@ -90,6 +90,7 @@ jobs:
           ref: ${{ inputs.tooling_ref }}
           path: .auto-rebase-tooling
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Update behind non-Dependabot PRs
         env:
@@ -125,7 +126,7 @@ jobs:
             else
               HAS_LABEL=false
             fi
-            if gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" | auto_rebase_has_current_approval; then
+            if gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" | jq -s 'add | .' | auto_rebase_has_current_approval; then
               IS_APPROVED=true
             else
               IS_APPROVED=false

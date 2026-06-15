@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: auto-rebase-tests-${{ github.ref }}-${{ github.sha }}
+  group: auto-rebase-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
