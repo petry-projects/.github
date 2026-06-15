@@ -21,12 +21,10 @@
 auto_rebase_has_current_approval() {
   local result
   result=$(jq -r '
-    [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
-    | group_by(.user.login)
-    | map(.[-1].state)
+    reduce (.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")) as $r ({}; .[$r.user.login] = $r.state)
     | any(. == "APPROVED")
   ')
-  [ "$result" = "true" ]
+  [[ "$result" == "true" ]]
 }
 
 # auto_rebase_has_ready_label LABEL
@@ -35,7 +33,7 @@ auto_rebase_has_current_approval() {
 auto_rebase_has_ready_label() {
   local label="$1" present
   present=$(jq -r --arg L "$label" 'any(.[]; .name == $L)')
-  [ "$present" = "true" ]
+  [[ "$present" == "true" ]]
 }
 
 # auto_rebase_pr_eligible MODE IS_DRAFT IS_APPROVED HAS_LABEL
@@ -55,8 +53,8 @@ auto_rebase_pr_eligible() {
       return 0
       ;;
     review-ready)
-      [ "$is_draft" = "true" ] && return 1
-      if [ "$is_approved" = "true" ] || [ "$has_label" = "true" ]; then
+      [[ "$is_draft" == "true" ]] && return 1
+      if [[ "$is_approved" == "true" || "$has_label" == "true" ]]; then
         return 0
       fi
       return 1
