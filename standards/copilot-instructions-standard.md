@@ -92,6 +92,10 @@ only document what differs or adds detail.
 A repo-level `copilot-instructions.md` MUST include the following sections. Keep the file to
 approximately two pages — concise, specific, and actionable.
 
+The `## Org Standards` section MUST list every language-specific `.instructions.md` file deployed
+to `.github/instructions/` in that repo, each with a one-line scope description. This makes the
+path-specific files discoverable without requiring contributors to browse the directory.
+
 ---
 
 ```markdown
@@ -147,7 +151,19 @@ apply.]
 ## Org Standards
 
 See [petry-projects/.github — AGENTS.md](https://github.com/petry-projects/.github/blob/main/AGENTS.md)
-for full development standards.
+for org-wide development standards.
+
+**Language-specific instructions** (applied automatically by Copilot when you open matching file types):
+
+- [TypeScript / TSX](instructions/typescript.instructions.md) — [strict config, branded types, DDD/CQRS, pino, React/Electron as applicable]
+- [JavaScript](instructions/javascript.instructions.md) — [style, JSDoc, error handling]
+- [Go](instructions/go.instructions.md) — [naming, gofmt, slog, error wrapping, concurrency, testing]
+- [Shell](instructions/shell.instructions.md) — [safety flags, ShellCheck, quoting, error handling]
+- [Python](instructions/python.instructions.md) — [black/ruff, type annotations, structlog, pytest]
+- [Terraform](instructions/terraform.instructions.md) — [fmt, tflint, security scanning, state management]
+
+_List only the files actually deployed to `.github/instructions/` for this repo.
+Omit this block entirely if no language instruction files were deployed._
 ```
 
 ---
@@ -162,6 +178,7 @@ for full development standards.
 - Coverage thresholds and testing tools specific to this repo
 - Architecture patterns unique to this repo (e.g., Electron IPC conventions, GAS extraction pattern)
 - Any rule that overrides or refines the org-level defaults
+- Links to every language-specific `.instructions.md` file deployed to `.github/instructions/`, each with a one-line scope description (list only files that are actually present)
 
 **Do NOT include in repo-level instructions:**
 
@@ -169,6 +186,7 @@ for full development standards.
 - Rules already covered in language-specific `.instructions.md` files
 - Content already documented in `AGENTS.md`
 - Secrets, API keys, credentials, or example tokens with real values
+- Links to language instruction files that were not deployed to this repo's `.github/instructions/`
 
 ## Content Quality Rules
 
@@ -186,13 +204,14 @@ for full development standards.
 ## Compliance
 
 The weekly compliance audit (`scripts/compliance-audit.sh`) enforces this standard
-automatically. Two `warning`-severity checks run against every repository in the org:
+automatically. Four `warning`-severity checks run against every repository in the org:
 
 | Check ID | Trigger | Remediation |
 |----------|---------|-------------|
 | `missing-copilot-instructions` | `.github/copilot-instructions.md` is absent | Copy the template below and fill in the repo-specific sections |
 | `copilot-instructions-missing-tech-stack` | File exists but `## Tech Stack` section is absent | Add the section — list runtimes, frameworks, and major library versions |
 | `copilot-instructions-missing-local-dev-commands` | File exists but `## Local Dev Commands` section is absent | Add the section — include exact install, dev-run, test, lint, and typecheck commands |
+| `copilot-instructions-missing-language-links` | Files exist in `.github/instructions/` but are not listed in `## Org Standards` | Ensure files in `.github/instructions/` are listed in `## Org Standards` and that each listed link resolves to the correct relative path (no broken links) |
 
 Findings are reported as `warning` (not `error`) because the org-level baseline in
 `petry-projects/.github` ensures minimum Copilot guidance even without a repo-level file.
