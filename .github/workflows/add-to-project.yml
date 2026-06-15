@@ -58,4 +58,8 @@ jobs:
       project_id: PVT_kwDOD2inqs4BZq3-
       project_url: https://github.com/orgs/petry-projects/projects/1
       agent_ref: ${{ github.sha }}
-    secrets: inherit
+    # Pass only the secrets the reusable declares (least privilege; avoids
+    # `secrets: inherit` handing the reusable every org secret).
+    secrets:
+      INITIATIVES_APP_ID: ${{ secrets.INITIATIVES_APP_ID }}
+      INITIATIVES_APP_PRIVATE_KEY: ${{ secrets.INITIATIVES_APP_PRIVATE_KEY }}
