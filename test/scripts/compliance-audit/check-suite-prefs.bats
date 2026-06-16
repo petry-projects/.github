@@ -35,8 +35,8 @@ CLAUDE_APP_ID=1236702
 # ---------------------------------------------------------------------------
 _audit_compliant() {
   local prefs="$1" app_id="$2" setting
-  setting=$(echo "$prefs" | jq -r --argjson id "$app_id" \
-    '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"')
+  setting=$(jq -r --argjson id "$app_id" \
+    '.preferences.auto_trigger_checks // [] | map(select(.app_id == $id)) | first | .setting // "missing"' <<< "$prefs")
   [ "$setting" = "missing" ] && return 0
   [ "$setting" = "false" ] && return 0
   return 1
