@@ -662,13 +662,20 @@ check_codeowners() {
   local codeowners_content=""
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
     # Use || echo "" so a 404 is non-fatal under set -euo pipefail
-    local content
+    local content decoded
     content=$(gh_api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null || echo "")
-    if [ -n "$content" ]; then
-      found=true
-      codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
-      break
-    fi
+    [ -n "$content" ] || continue
+    # The contents API always returns the file body as base64. On a 404,
+    # `gh api` prints the error body (e.g. `{"message":"Not Found",...}`) to
+    # stdout, which is NOT base64 — so if decoding fails, skip this path
+    # rather than treating the error JSON as owner lines. The old
+    # `base64 -d || echo "$content"` fallback leaked that error body in as a
+    # fake owner line, producing bogus codeowners-org-leads-not-first findings.
+    decoded=$(echo "$content" | base64 -d 2>/dev/null) || continue
+    [ -n "$decoded" ] || continue
+    found=true
+    codeowners_content="$decoded"
+    break
   done
 
   if [ "$found" = false ]; then
