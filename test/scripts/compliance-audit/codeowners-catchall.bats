@@ -19,8 +19,8 @@ bats_require_minimum_version 1.5.0
 # ---------------------------------------------------------------------------
 _has_catchall() {
   local content="$1" owner_lines
-  owner_lines=$(echo "$content" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')
-  echo "$owner_lines" | awk '{print $1}' | grep -qxF '*'
+  owner_lines=$(printf '%s\n' "$content" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')
+  printf '%s\n' "$owner_lines" | awk '{print $1}' | grep -qxF '*'
 }
 
 # Repo root, derived from this test file's location (test/scripts/compliance-audit).
