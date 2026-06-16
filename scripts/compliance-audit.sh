@@ -671,7 +671,7 @@ check_codeowners() {
     # rather than treating the error JSON as owner lines. The old
     # `base64 -d || echo "$content"` fallback leaked that error body in as a
     # fake owner line, producing bogus codeowners-org-leads-not-first findings.
-    decoded=$(echo "$content" | base64 -d 2>/dev/null) || continue
+    decoded=$(printf '%s' "$content" | base64 -d 2>/dev/null) || continue
     [ -n "$decoded" ] || continue
     found=true
     codeowners_content="$decoded"
