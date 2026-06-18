@@ -103,8 +103,16 @@ is_skipped_repo() {
 # SKIP_OVERRIDES — lets a self-managed repo receive one stub while staying
 # exempt from the rest.
 repo_opts_into() {
-  local repo="$1" workflow="$2" r
-  for r in ${SKIP_OVERRIDES[$workflow]:-}; do
+  local repo="$1" workflow="$2"
+  local opt_in="${SKIP_OVERRIDES[$workflow]:-}"
+  [[ -z "$opt_in" ]] && return 1
+
+  # Split the space-separated opt-in list into an array (read -r -a avoids the
+  # pathname expansion an unquoted expansion would be subject to).
+  local -a allowed_repos
+  read -r -a allowed_repos <<< "$opt_in"
+  local r
+  for r in "${allowed_repos[@]}"; do
     [[ "$repo" == "$r" ]] && return 0
   done
   return 1
@@ -220,6 +228,22 @@ fi
 log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
 
 for repo in "${REPOS[@]}"; do
+  # Fully-exempt repos (no per-workflow opt-in) skip with a single log line
+  # instead of one per workflow.
+  if is_skipped_repo "$repo"; then
+    opts_in_any=false
+    for w in "${WORKFLOWS[@]}"; do
+      if repo_opts_into "$repo" "$w"; then
+        opts_in_any=true
+        break
+      fi
+    done
+    if [[ "$opts_in_any" == "false" ]]; then
+      skip "$repo (exempt)"
+      continue
+    fi
+  fi
+
   for workflow in "${WORKFLOWS[@]}"; do
     if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
       skip "$repo/$workflow (exempt)"
