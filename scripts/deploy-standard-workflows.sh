@@ -29,8 +29,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STANDARDS_DIR="$REPO_ROOT/standards/workflows"
 
-# Repos to never touch.
+# Repos exempt from blanket standard-workflow deployment.
+#   .github         — self-host source of truth; its own callers use local refs
+#                     (e.g. add-to-project.yml pins ./.github/...), which a
+#                     channel-pinned stub must never overwrite.
+#   .github-private — self-manages its workflow fleet (dev-lead runs inline, etc).
+# A repo here may still opt into a *specific* workflow via SKIP_OVERRIDES below.
 SKIP_REPOS=(".github" ".github-private")
+
+# Per-workflow opt-ins for otherwise-skipped repos. Keyed by workflow filename;
+# value is a space-separated list of SKIP_REPOS that should still receive it.
+# .github-private participates in the org Initiatives board, so it receives the
+# add-to-project.yml caller (the org board is a single shared target — the stub
+# is identical for every repo) while staying exempt from all other stubs.
+declare -A SKIP_OVERRIDES=(
+  ["add-to-project.yml"]=".github-private"
+)
 
 # Workflows deployable from standards/workflows/<name> verbatim.
 # Excludes ci.yml, sonarcloud.yml (tech-stack-specific) and
@@ -43,6 +57,7 @@ DEPLOYABLE_WORKFLOWS=(
   dependabot-automerge.yml
   dependabot-rebase.yml
   dependency-audit.yml
+  add-to-project.yml
 )
 
 # ---------------------------------------------------------------------------
@@ -80,6 +95,17 @@ is_skipped_repo() {
   local repo="$1" s
   for s in "${SKIP_REPOS[@]}"; do
     [[ "$repo" == "$s" ]] && return 0
+  done
+  return 1
+}
+
+# True if a normally-skipped repo has opted into this specific workflow via
+# SKIP_OVERRIDES — lets a self-managed repo receive one stub while staying
+# exempt from the rest.
+repo_opts_into() {
+  local repo="$1" workflow="$2" r
+  for r in ${SKIP_OVERRIDES[$workflow]:-}; do
+    [[ "$repo" == "$r" ]] && return 0
   done
   return 1
 }
@@ -194,12 +220,11 @@ fi
 log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
 
 for repo in "${REPOS[@]}"; do
-  if is_skipped_repo "$repo"; then
-    skip "$repo (exempt)"
-    continue
-  fi
-
   for workflow in "${WORKFLOWS[@]}"; do
+    if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
+      skip "$repo/$workflow (exempt)"
+      continue
+    fi
     deploy_workflow_to_repo "$repo" "$workflow"
   done
 done
