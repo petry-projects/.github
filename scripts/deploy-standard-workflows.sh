@@ -1,33 +1,49 @@
 #!/usr/bin/env bash
-# deploy-standard-workflows.sh — Push org-standard workflow stubs to all repos.
+# deploy-standard-workflows.sh — Deploy org-standard workflow stubs to all repos.
 #
-# Reads canonical stubs from standards/workflows/ and upserts them into every
-# repo in the petry-projects org via the GitHub Contents API.  Only workflows
-# that have a template in standards/workflows/ AND appear in the
-# DEPLOYABLE_WORKFLOWS list below are eligible for deployment — tech-stack-
-# specific workflows (ci.yml, sonarcloud.yml) must be set up manually.
+# Reads canonical stubs from standards/workflows/ and deploys them into every
+# repo in the petry-projects org by opening a pull request per repo (via the
+# shared scripts/lib/standards-deploy.sh primitive). Only workflows that have a
+# template in standards/workflows/ AND appear in the DEPLOYABLE_WORKFLOWS list
+# below are eligible — tech-stack-specific workflows (ci.yml, sonarcloud.yml)
+# must be set up manually.
+#
+# Deployment is PR-based, never a direct push to the default branch: a direct
+# Contents-API push is rejected (HTTP 409) on repos whose ruleset enforces
+# required status checks, and bypasses review/CI on the repos where it would
+# succeed. Opening a PR works uniformly on protected and unprotected repos and
+# leaves an auditable, CI-gated record. The PRs are labeled `standards-sync` and
+# left for the normal review/auto-merge pipeline — this script never merges and
+# never uses --admin. See petry-projects/.github#478.
 #
 # Usage:
 #   deploy-standard-workflows.sh [options]
 #
 # Options:
-#   --dry-run              Print planned actions without making any changes.
+#   --dry-run              Print planned actions without opening any PRs.
 #   --workflow <name.yml>  Deploy only this workflow (default: all deployable).
 #   --repo <name>          Target a single repo instead of all org repos.
 #   --force                Re-deploy even if the file looks correct (re-syncs).
 #
 # Requirements:
-#   GH_TOKEN (or gh auth login) with repo scope.
+#   GH_TOKEN (or gh auth login) with repo scope (branch + PR creation).
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/standards-deploy.sh
+source "$SCRIPT_DIR/lib/standards-deploy.sh"
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 ORG="petry-projects"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STANDARDS_DIR="$REPO_ROOT/standards/workflows"
+
+# Branch prefix + label for the PRs this script opens.
+SYNC_BRANCH_PREFIX="standards-sync"
+SYNC_LABEL="standards-sync"
 
 # Repos exempt from blanket standard-workflow deployment.
 #   .github         — self-host source of truth; its own callers use local refs
@@ -75,7 +91,7 @@ while [[ $# -gt 0 ]]; do
     --workflow)  TARGET_WORKFLOW="$2"; shift 2 ;;
     --repo)      TARGET_REPO="$2";     shift 2 ;;
     -h|--help)
-      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -141,24 +157,11 @@ is_already_compliant() {
   echo "$existing_content" | grep -qF "$expected_uses"
 }
 
-# Upsert a file via the GitHub Contents API. Handles both create and update.
-upsert_file() {
-  local repo="$1" path="$2" template_path="$3" sha="$4"
-  # Use base64 with line-wrap disabled; -w 0 (GNU) falls back to -b 0 (BSD/macOS).
-  local encoded
-  encoded=$(base64 -w 0 "$template_path" 2>/dev/null || base64 -b 0 "$template_path")
-
-  local commit_msg="chore: sync org-standard ${path##*/} stub from petry-projects/.github"
-
-  local extra_args=()
-  [[ -n "$sha" ]] && extra_args+=(--raw-field "sha=$sha")
-
-  gh api "repos/$ORG/$repo/contents/$path" \
-    --method PUT \
-    --raw-field message="$commit_msg" \
-    --raw-field "content=$encoded" \
-    "${extra_args[@]}" \
-    --silent
+# Build the PR body for a stub deployment.
+pr_body_for() {
+  local workflow="$1"
+  printf 'Syncs the org-standard `%s` workflow stub from `%s/.github` (`standards/workflows/%s`), deployed verbatim.\n\nOpened by `scripts/deploy-standard-workflows.sh`; the stub is a thin caller and all behaviour lives in the reusable. See `standards/ci-standards.md`.\n\nThis PR is labeled `%s` and left for the normal review/auto-merge pipeline — the deploy script never merges directly.\n' \
+    "$workflow" "$ORG" "$workflow" "$SYNC_LABEL"
 }
 
 # ---------------------------------------------------------------------------
@@ -184,30 +187,34 @@ deploy_workflow_to_repo() {
     return
   fi
 
+  local branch="${SYNC_BRANCH_PREFIX}/${workflow%.yml}"
+  local title="chore: sync org-standard ${workflow} stub from ${ORG}/.github"
+
   if [[ "$DRY_RUN" == "true" ]]; then
     if [[ -n "$existing_sha" ]]; then
-      dry "Would update $repo/$target_path (non-compliant stub)"
+      dry "Would open PR to update $repo/$target_path (branch $branch)"
     else
-      dry "Would create $repo/$target_path"
+      dry "Would open PR to create $repo/$target_path (branch $branch)"
     fi
     return
   fi
 
-  if upsert_file "$repo" "$target_path" "$template" "$existing_sha"; then
-    if [[ -n "$existing_sha" ]]; then
-      ok "Updated $repo/$target_path"
-    else
-      ok "Created $repo/$target_path"
-    fi
-  else
-    err "Failed to upsert $repo/$target_path"
-  fi
+  local outcome
+  outcome=$(sd_deploy_via_pr "$ORG/$repo" "$target_path" "$template" \
+    "$branch" "$SYNC_LABEL" "$title" "$(pr_body_for "$workflow")") || true
+
+  case "$outcome" in
+    "OPENED "*)       ok   "$repo/$target_path — opened ${outcome#OPENED }" ;;
+    "SKIP_PR_OPEN "*) skip "$repo/$target_path — PR #${outcome#SKIP_PR_OPEN } already open" ;;
+    "FAILED "*)       err  "$repo/$target_path — ${outcome#FAILED }" ;;
+    *)                err  "$repo/$target_path — unexpected outcome: ${outcome:-<none>}" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
-[[ "$DRY_RUN" == "true" ]] && log "DRY RUN — no files will be written"
+[[ "$DRY_RUN" == "true" ]] && log "DRY RUN — no PRs will be opened"
 
 # Resolve target repos using pagination (handles orgs with >100 repos).
 declare -a REPOS
