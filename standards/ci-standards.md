@@ -163,6 +163,39 @@ gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
   --jq '.content' | base64 -d > .github/workflows/<file>.yml
 ```
 
+### Deploying & syncing stubs
+
+**Standard.** Caller stubs are deployed and re-synced to consumer repos **via
+pull requests**, never by pushing directly to a repo's default branch.
+`scripts/deploy-standard-workflows.sh` is the canonical mechanism: for each
+target repo it creates a `standards-sync/<workflow>` branch off the default
+branch, writes the verbatim template onto it, and opens a PR labeled
+`standards-sync` (creating the label if the repo lacks it). It **never merges and
+never uses `--admin`** — the opened PRs run the repo's own CI and are landed by
+the normal review/auto-merge pipeline. The shared primitive lives in
+`scripts/lib/standards-deploy.sh` (`sd_deploy_via_pr`).
+
+**Why a PR, not a direct push.** A direct Contents-API push to the default
+branch is rejected (HTTP 409 `Required status check … expected`) on any repo
+whose ruleset enforces required status checks — the Contents API does **not**
+honor the org-admin ruleset bypass. It also skips review and CI on the repos
+where it *would* succeed. A PR works uniformly on protected and unprotected
+repos, runs CI against the change (e.g. AgentShield scans the new workflow), and
+leaves an auditable record. (Background: [#478](https://github.com/petry-projects/.github/issues/478).)
+
+```bash
+# Plan only — opens nothing:
+scripts/deploy-standard-workflows.sh --dry-run [--workflow <name>.yml] [--repo <name>]
+# Open the standards-sync PRs:
+scripts/deploy-standard-workflows.sh [--workflow <name>.yml] [--repo <name>] [--force]
+```
+
+The script is idempotent: it skips a repo whose stub already pins the template's
+`uses:` ref, and skips opening a second PR when a `standards-sync` one is already
+open for that workflow. Deployment never edits a caller's `uses:`/`agent_ref`
+pins by hand — a release is rolled out by moving the channel tag (see
+[Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
+
 ---
 
 ## Required Workflows

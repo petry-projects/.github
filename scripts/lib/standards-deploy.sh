@@ -100,7 +100,16 @@ sd_deploy_via_pr() {
     return 1
   fi
 
-  # 5. Open the PR.
+  # 5. Ensure the label exists, then open the PR. `gh pr create --label` fails
+  #    outright if the label is absent, and consumer repos do not carry the
+  #    standards-sync label by default. Create-if-missing (no --force, so an
+  #    existing curated label is never clobbered); ignore the "already exists"
+  #    error.
+  gh label create "$label" --repo "$repo" \
+    --color ededed \
+    --description "Org-standard workflow stub synced from ${repo%%/*}/.github" \
+    >/dev/null 2>&1 || true
+
   local pr_url
   pr_url=$(gh pr create --repo "$repo" --head "$branch" --base "$default_branch" \
     --title "$title" --body "$body" --label "$label" 2>/dev/null || true)

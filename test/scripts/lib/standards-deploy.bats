@@ -94,6 +94,19 @@ deploy() {
   grep -q -- '--label standards-sync' "$GH_CALLS"
 }
 
+# Regression: consumer repos don't carry the standards-sync label, and
+# `gh pr create --label` fails outright if it's absent — so the lib must ensure
+# the label exists, before the PR is created. (petry-projects/.github#480.)
+@test "ensures the label exists before opening the PR" {
+  run deploy
+  [ "$status" -eq 0 ]
+  grep -q 'gh label create standards-sync --repo petry-projects/markets' "$GH_CALLS"
+  local label_line prc_line
+  label_line=$(grep -n 'gh label create' "$GH_CALLS" | head -1 | cut -d: -f1)
+  prc_line=$(grep -n 'gh pr create' "$GH_CALLS" | head -1 | cut -d: -f1)
+  [ "$label_line" -lt "$prc_line" ]
+}
+
 # ---------------------------------------------------------------------------
 # Idempotency: an open PR already exists → skip, no mutations
 # ---------------------------------------------------------------------------
