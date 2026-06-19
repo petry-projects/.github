@@ -554,8 +554,10 @@ deploy_repo() {
   branch="${SYNC_BRANCH_PREFIX}/workflows-$(date -u +%Y%m%d)"
   local title="chore: sync ${n} org-standard workflow stub(s) from ${ORG}/.github"
 
-  local branch="${SYNC_BRANCH_PREFIX}/${workflow%.yml}"
-  local title="chore: sync org-standard ${workflow} stub from ${ORG}/.github"
+  local n="${#names[@]}" list branch
+  list=$(IFS=', '; echo "${names[*]}")
+  branch="${SYNC_BRANCH_PREFIX}/workflows-$(date -u +%Y%m%d)"
+  local title="chore: sync ${n} org-standard workflow stub(s) from ${ORG}/.github"
 
   if [[ "$DRY_RUN" == "true" ]]; then
     local i
