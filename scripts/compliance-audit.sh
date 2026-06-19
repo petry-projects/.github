@@ -941,7 +941,7 @@ stub_pin_acceptable() {
   [ -n "$legacy_csv" ] && IFS=',' read -r -a legacy_arr <<< "$legacy_csv"
 
   local alt="" r
-  for r in "$canonical" "${legacy_arr[@]}"; do
+  for r in "$canonical" ${legacy_arr[@]+"${legacy_arr[@]}"}; do
     [ -z "$r" ] && continue
     alt+="${alt:+|}$(escape_ere "$r")"
   done
