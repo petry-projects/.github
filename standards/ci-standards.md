@@ -1417,6 +1417,31 @@ dev-lead workflow itself, so the agent doesn't pile commits onto its own infra
 change — add the **`dev-lead:hands-off`** label; the classifier then skips every
 event on it.
 
+### Failed issue implementations: visibility & bounded auto-retry
+
+When a labeled-issue implementation fails at the engine step **before a PR
+exists** (e.g. a transient timeout — `124` — or a one-off engine error), the
+agent no longer fails silently (petry-projects/.github-private#781):
+
+- The failure is classified (`rate-limited` / `missing-binary` / `engine-error`)
+  and surfaced **on the issue** with the cause, a run deep-link, and a redacted
+  tail of the session output — plus a machine-readable marker
+  `<!-- dev-lead-issue <N> status=<failed|rate-limited> attempt=<K> … -->`.
+- The scheduled `dev-lead-retry` cron scans open `dev-lead`-labelled issues for
+  that marker and re-dispatches a **`dev-lead-issue-retry`** `repository_dispatch`
+  (honouring any rate-limit `reset=` window), up to **3 attempts**. A consumer's
+  caller stub must therefore list `dev-lead-issue-retry` in
+  `on.repository_dispatch.types` (the template does — see [Adopting](#adopting-the-dev-lead-agent)).
+- After 3 attempts — or immediately for a deterministic `missing-binary` infra
+  failure — the agent labels the issue **`dev-lead:needs-human`** and stops
+  retrying it. The cron skips any issue carrying that label. Remove the label
+  (and re-apply `dev-lead`) to re-engage.
+
+The cron's three `repository_dispatch` retry types — `dev-lead-ci-failure`,
+`dev-lead-reviews-retry`, and `dev-lead-issue-retry` — are all centrally owned in
+`dev-lead-reusable.yml` (issue retries route to the issue lane via
+`client_payload.issue_number`).
+
 ### Adopting the Dev-Lead Agent
 
 1. Copy `standards/workflows/dev-lead.yml` verbatim to `.github/workflows/dev-lead.yml` in your repo.
@@ -1443,7 +1468,7 @@ failed-run log line against the table below and act in the indicated repo.
 
 | Log signature in failing run | Root cause | Where to fix |
 |------------------------------|-----------|--------------|
-| `Process completed with exit code 124` after a long-running `dispatch` step | Engine call timed out inside the reusable | `petry-projects/.github-private` — engine timeout / step-level `timeout-minutes` in `dev-lead-reusable.yml` |
+| `Process completed with exit code 124` after a long-running `dispatch` step | Engine call timed out inside the reusable (per-tier `timeout`). For a **labeled-issue** run this now posts a cause-bearing marker and is auto-retried up to 3× before escalating to `dev-lead:needs-human` (see [Failed issue implementations](#failed-issue-implementations-visibility--bounded-auto-retry)) | `petry-projects/.github-private` — engine timeout / step-level `timeout-minutes` in `dev-lead-reusable.yml` |
 | `_ApiError ... code:429 ... Resource has been exhausted` / `RetryableQuotaError` | `GOOGLE_API_KEY` project is out of quota or prepayment credits | Google AI Studio billing for the project backing `GOOGLE_API_KEY`; until refilled, the Gemini step of the engine-fallback cascade will keep failing |
 | `Error: Classic Personal Access Tokens (ghp_) are not supported by Copilot` | `GH_PAT` is a Classic PAT and the engine cascade fell through to Copilot | Rotate `GH_PAT` to a fine-grained PAT at the org-secret level |
 | `startup_failure` with no step logs | Stub is missing a permission the reusable now requests | Update **the template** in `standards/workflows/dev-lead.yml` and every adopting stub *before* the reusable starts requesting the scope (see [Concurrency, pinning, and the permission contract](#concurrency-pinning-and-the-permission-contract)) |
