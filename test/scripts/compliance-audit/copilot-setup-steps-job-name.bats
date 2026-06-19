@@ -94,6 +94,15 @@ YAML
   [ "$status" -eq 0 ]
 }
 
+@test "single-quoted job key is recognised" {
+  run _has_job <<'YAML'
+jobs:
+  'copilot-setup-steps':
+    runs-on: ubuntu-latest
+YAML
+  [ "$status" -eq 0 ]
+}
+
 @test "job is recognised even when it is not the first job" {
   run _has_job <<'YAML'
 jobs:
