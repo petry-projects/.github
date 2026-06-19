@@ -1427,7 +1427,7 @@ agent no longer fails silently (petry-projects/.github-private#781):
   and surfaced **on the issue** with the cause, a run deep-link, and a redacted
   tail of the session output — plus a machine-readable marker
   `<!-- dev-lead-issue <N> status=<failed|rate-limited> attempt=<K> … -->`.
-- The scheduled `dev-lead-retry` cron scans open `dev-lead`-labelled issues for
+- The scheduled `dev-lead-retry` cron scans open `dev-lead`-labeled issues for
   that marker and re-dispatches a **`dev-lead-issue-retry`** `repository_dispatch`
   (honouring any rate-limit `reset=` window), up to **3 attempts**. A consumer's
   caller stub must therefore list `dev-lead-issue-retry` in
