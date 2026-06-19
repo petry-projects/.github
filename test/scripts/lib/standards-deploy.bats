@@ -87,11 +87,35 @@ deploy() {
 @test "happy path makes the full create call sequence" {
   run deploy
   [ "$status" -eq 0 ]
-  grep -q 'gh pr list --repo petry-projects/markets --head standards-sync/add-to-project' "$GH_CALLS"
+  grep -q 'gh pr list --repo petry-projects/markets --label standards-sync' "$GH_CALLS"
   grep -q 'gh api repos/petry-projects/markets/git/refs --method POST' "$GH_CALLS"
   grep -q 'gh api repos/petry-projects/markets/contents/.github/workflows/add-to-project.yml --method PUT' "$GH_CALLS"
   grep -q 'gh pr create --repo petry-projects/markets --head standards-sync/add-to-project --base main' "$GH_CALLS"
   grep -q -- '--label standards-sync' "$GH_CALLS"
+}
+
+# The multi-file primitive: two stubs deploy as a single PR (two PUTs, one
+# pr create) — the per-repo batching used by the fleet re-sync.
+@test "deploys multiple files in a single PR" {
+  local f2="${TT_TMP}/dependency-audit.yml"
+  printf 'name: stub2\non: [push]\n' > "$f2"
+  run sd_deploy_files_via_pr "petry-projects/markets" "standards-sync/workflows" \
+    "standards-sync" "chore: sync 2 stubs" "body" \
+    ".github/workflows/add-to-project.yml" "$LOCAL_FILE" \
+    ".github/workflows/dependency-audit.yml" "$f2"
+  [ "$status" -eq 0 ]
+  [ "$output" = "OPENED https://github.com/o/r/pull/1" ]
+  grep -q 'contents/.github/workflows/add-to-project.yml --method PUT' "$GH_CALLS"
+  grep -q 'contents/.github/workflows/dependency-audit.yml --method PUT' "$GH_CALLS"
+  # exactly one PR opened for the batch
+  [ "$(grep -c 'gh pr create' "$GH_CALLS")" -eq 1 ]
+}
+
+@test "rejects an odd number of file arguments" {
+  run sd_deploy_files_via_pr "petry-projects/markets" "b" "l" "t" "body" \
+    ".github/workflows/only-a-path.yml"
+  [ "$status" -ne 0 ]
+  [ "$output" = "FAILED bad-file-args" ]
 }
 
 # Regression: consumer repos don't carry the standards-sync label, and

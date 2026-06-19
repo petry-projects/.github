@@ -157,57 +157,78 @@ is_already_compliant() {
   echo "$existing_content" | grep -qF "$expected_uses"
 }
 
-# Build the PR body for a stub deployment.
-pr_body_for() {
-  local workflow="$1"
-  printf 'Syncs the org-standard `%s` workflow stub from `%s/.github` (`standards/workflows/%s`), deployed verbatim.\n\nOpened by `scripts/deploy-standard-workflows.sh`; the stub is a thin caller and all behaviour lives in the reusable. See `standards/ci-standards.md`.\n\nThis PR is labeled `%s` and left for the normal review/auto-merge pipeline — the deploy script never merges directly.\n' \
-    "$workflow" "$ORG" "$workflow" "$SYNC_LABEL"
+# Build the PR body for a batched stub deployment (one PR per repo).
+batch_pr_body() {
+  local w lines=""
+  for w in "$@"; do lines+="- \`${w}\`"$'\n'; done
+  printf 'Syncs the following org-standard workflow stub(s) from `%s/.github` (`standards/workflows/`), deployed verbatim:\n\n%s\nOpened by `scripts/deploy-standard-workflows.sh`. Stubs are thin callers; all behaviour lives in the reusables. See `standards/ci-standards.md`. Labeled `%s` and left for the normal review/auto-merge pipeline — the deploy script never merges directly.\n' \
+    "$ORG" "$lines" "$SYNC_LABEL"
 }
 
 # ---------------------------------------------------------------------------
-# Main deploy logic for a single workflow in a single repo
+# Deploy all drifted stubs for a single repo as ONE batched standards-sync PR.
 # ---------------------------------------------------------------------------
-deploy_workflow_to_repo() {
-  local repo="$1" workflow="$2"
-  local template="$STANDARDS_DIR/$workflow"
-  local target_path=".github/workflows/$workflow"
+deploy_repo() {
+  local repo="$1"
 
-  if [[ ! -f "$template" ]]; then
-    err "No template at $template — skipping $workflow for $repo"
-    return
+  # Fully-exempt repos (no per-workflow opt-in) skip with a single log line.
+  if is_skipped_repo "$repo"; then
+    local opts_in_any=false w
+    for w in "${WORKFLOWS[@]}"; do
+      if repo_opts_into "$repo" "$w"; then opts_in_any=true; break; fi
+    done
+    if [[ "$opts_in_any" == "false" ]]; then skip "$repo (exempt)"; return; fi
   fi
 
-  local raw existing_sha existing_content
-  raw=$(fetch_existing "$repo" "$target_path")
-  existing_sha="${raw%%$'\t'*}"
-  existing_content="${raw#*$'\t'}"
+  # Collect the drifted stubs for this repo (path/template pairs + names).
+  local -a paths=() templates=() names=()
+  local workflow template target_path raw existing_sha existing_content
+  for workflow in "${WORKFLOWS[@]}"; do
+    if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
+      skip "$repo/$workflow (exempt)"
+      continue
+    fi
+    template="$STANDARDS_DIR/$workflow"
+    target_path=".github/workflows/$workflow"
+    if [[ ! -f "$template" ]]; then
+      err "No template at $template — skipping $workflow for $repo"
+      continue
+    fi
+    raw=$(fetch_existing "$repo" "$target_path")
+    existing_sha="${raw%%$'\t'*}"
+    existing_content="${raw#*$'\t'}"
+    if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template"; then
+      skip "$repo/$target_path already compliant"
+      continue
+    fi
+    paths+=("$target_path"); templates+=("$template"); names+=("$workflow")
+  done
 
-  if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template"; then
-    skip "$repo/$target_path already compliant"
-    return
-  fi
+  [[ "${#names[@]}" -eq 0 ]] && return  # nothing drifted for this repo
 
-  local branch="${SYNC_BRANCH_PREFIX}/${workflow%.yml}"
-  local title="chore: sync org-standard ${workflow} stub from ${ORG}/.github"
+  local n="${#names[@]}" list branch
+  list=$(IFS=', '; echo "${names[*]}")
+  branch="${SYNC_BRANCH_PREFIX}/workflows-$(date -u +%Y%m%d)"
+  local title="chore: sync ${n} org-standard workflow stub(s) from ${ORG}/.github"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    if [[ -n "$existing_sha" ]]; then
-      dry "Would open PR to update $repo/$target_path (branch $branch)"
-    else
-      dry "Would open PR to create $repo/$target_path (branch $branch)"
-    fi
+    dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
     return
   fi
 
-  local outcome
-  outcome=$(sd_deploy_via_pr "$ORG/$repo" "$target_path" "$template" \
-    "$branch" "$SYNC_LABEL" "$title" "$(pr_body_for "$workflow")") || true
+  # Interleave (path, template) into the variadic file-pair args.
+  local -a filepairs=() k
+  for (( k = 0; k < n; k++ )); do filepairs+=("${paths[k]}" "${templates[k]}"); done
+
+  local body outcome
+  body=$(batch_pr_body "${names[@]}")
+  outcome=$(sd_deploy_files_via_pr "$ORG/$repo" "$branch" "$SYNC_LABEL" "$title" "$body" "${filepairs[@]}") || true
 
   case "$outcome" in
-    "OPENED "*)       ok   "$repo/$target_path — opened ${outcome#OPENED }" ;;
-    "SKIP_PR_OPEN "*) skip "$repo/$target_path — PR #${outcome#SKIP_PR_OPEN } already open" ;;
-    "FAILED "*)       err  "$repo/$target_path — ${outcome#FAILED }" ;;
-    *)                err  "$repo/$target_path — unexpected outcome: ${outcome:-<none>}" ;;
+    "OPENED "*)       ok   "$repo — opened ${outcome#OPENED } (${n} stub(s): $list)" ;;
+    "SKIP_PR_OPEN "*) skip "$repo — sync PR #${outcome#SKIP_PR_OPEN } already open" ;;
+    "FAILED "*)       err  "$repo — ${outcome#FAILED }" ;;
+    *)                err  "$repo — unexpected outcome: ${outcome:-<none>}" ;;
   esac
 }
 
@@ -235,29 +256,7 @@ fi
 log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
 
 for repo in "${REPOS[@]}"; do
-  # Fully-exempt repos (no per-workflow opt-in) skip with a single log line
-  # instead of one per workflow.
-  if is_skipped_repo "$repo"; then
-    opts_in_any=false
-    for w in "${WORKFLOWS[@]}"; do
-      if repo_opts_into "$repo" "$w"; then
-        opts_in_any=true
-        break
-      fi
-    done
-    if [[ "$opts_in_any" == "false" ]]; then
-      skip "$repo (exempt)"
-      continue
-    fi
-  fi
-
-  for workflow in "${WORKFLOWS[@]}"; do
-    if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
-      skip "$repo/$workflow (exempt)"
-      continue
-    fi
-    deploy_workflow_to_repo "$repo" "$workflow"
-  done
+  deploy_repo "$repo"
 done
 
 log "Done."

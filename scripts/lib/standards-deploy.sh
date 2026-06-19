@@ -39,22 +39,42 @@ _STANDARDS_DEPLOY_SOURCED=1
 #
 # Prints exactly one outcome token line to stdout:
 #   OPENED <pr-url>            a PR was opened
-#   SKIP_PR_OPEN <pr-number>   an open PR already exists on this branch
+#   SKIP_PR_OPEN <pr-number>   an open labeled sync PR already exists for the repo
 #   FAILED <reason>            a hard error occurred (reason is a short slug)
 #
 # Returns 0 for OPENED/SKIP_PR_OPEN, non-zero for FAILED. Emits no other stdout,
 # so callers can capture the outcome with a command substitution.
+# Single-file convenience wrapper around sd_deploy_files_via_pr.
 sd_deploy_via_pr() {
   local repo="$1" path="$2" local_file="$3" branch="$4" label="$5" title="$6" body="$7"
+  sd_deploy_files_via_pr "$repo" "$branch" "$label" "$title" "$body" "$path" "$local_file"
+}
 
-  if [ ! -f "$local_file" ]; then
-    echo "FAILED missing-local-file"
+# sd_deploy_files_via_pr <repo> <branch> <label> <title> <body> \
+#                        <path> <local_file> [<path> <local_file> ...]
+#
+# Deploys one OR MORE files to a repo in a SINGLE labeled PR. A fleet re-sync of
+# N stubs for a repo is therefore N files in one PR, not N PRs. Idempotency is
+# keyed by the label — at most one open sync PR per repo; if one already exists
+# it is reused (skip). Trailing args are (path, local_file) pairs.
+sd_deploy_files_via_pr() {
+  local repo="$1" branch="$2" label="$3" title="$4" body="$5"
+  shift 5
+
+  if [ "$#" -eq 0 ] || [ $(( $# % 2 )) -ne 0 ]; then
+    echo "FAILED bad-file-args"
     return 1
   fi
 
-  # 1. Idempotency — an open PR already exists for this head branch.
+  # Validate every local file up front, before touching the remote.
+  local i
+  for (( i = 2; i <= $#; i += 2 )); do
+    if [ ! -f "${!i}" ]; then echo "FAILED missing-local-file"; return 1; fi
+  done
+
+  # 1. Idempotency — at most one open sync PR per repo, keyed by label.
   local existing_pr
-  existing_pr=$(gh pr list --repo "$repo" --head "$branch" --state open \
+  existing_pr=$(gh pr list --repo "$repo" --label "$label" --state open \
     --json number --jq '.[0].number // ""' 2>/dev/null || true)
   if [ -n "$existing_pr" ]; then
     echo "SKIP_PR_OPEN $existing_pr"
@@ -81,24 +101,27 @@ sd_deploy_via_pr() {
     fi
   fi
 
-  # 4. PUT the file verbatim onto the branch. Look up the blob SHA on the branch
-  #    so this handles both create (absent → empty SHA) and update (drifted stub)
-  #    regardless of whether the branch is fresh or reused.
-  local branch_sha encoded
-  branch_sha=$(gh api "repos/${repo}/contents/${path}?ref=${branch}" \
-    --jq '.sha // ""' 2>/dev/null || true)
-  encoded=$(base64 -w 0 "$local_file" 2>/dev/null || base64 -b 0 "$local_file")
+  # 4. PUT each file verbatim onto the branch. The blob SHA is looked up per file
+  #    on the branch so both create (absent → empty SHA) and update (drifted stub)
+  #    work, whether the branch is fresh or reused.
+  local path local_file branch_sha encoded j
+  for (( i = 1; i < $#; i += 2 )); do
+    j=$(( i + 1 )); path="${!i}"; local_file="${!j}"
+    branch_sha=$(gh api "repos/${repo}/contents/${path}?ref=${branch}" \
+      --jq '.sha // ""' 2>/dev/null || true)
+    encoded=$(base64 -w 0 "$local_file" 2>/dev/null || base64 -b 0 "$local_file")
 
-  local put_args=(--method PUT
-    --raw-field "message=${title}"
-    --raw-field "content=${encoded}"
-    --raw-field "branch=${branch}")
-  [ -n "$branch_sha" ] && put_args+=(--raw-field "sha=${branch_sha}")
+    local put_args=(--method PUT
+      --raw-field "message=${title}"
+      --raw-field "content=${encoded}"
+      --raw-field "branch=${branch}")
+    [ -n "$branch_sha" ] && put_args+=(--raw-field "sha=${branch_sha}")
 
-  if ! gh api "repos/${repo}/contents/${path}" "${put_args[@]}" --silent 2>/dev/null; then
-    echo "FAILED put-failed"
-    return 1
-  fi
+    if ! gh api "repos/${repo}/contents/${path}" "${put_args[@]}" --silent 2>/dev/null; then
+      echo "FAILED put-failed"
+      return 1
+    fi
+  done
 
   # 5. Ensure the label exists, then open the PR. `gh pr create --label` fails
   #    outright if the label is absent, and consumer repos do not carry the

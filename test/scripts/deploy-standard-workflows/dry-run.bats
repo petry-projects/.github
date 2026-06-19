@@ -47,7 +47,7 @@ STUB
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow add-to-project.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'DRY RUN — no PRs will be opened'
-  echo "$output" | grep -q 'Would open PR to create markets/.github/workflows/add-to-project.yml (branch standards-sync/add-to-project)'
+  echo "$output" | grep -qE 'Would open PR for markets \(branch standards-sync/workflows-[0-9]+\) — 1 stub\(s\): add-to-project.yml'
   # dry-run must not mutate: no branch creation, no PUT, no PR create
   ! grep -q 'git/refs --method POST' "$GH_CALLS"
   ! grep -q 'gh pr create' "$GH_CALLS"
