@@ -55,6 +55,16 @@ PP_PLAN_GATED_KEYS=(
   "dependabot_security_updates"
 )
 
+# Keys that specifically require GitHub Advanced Security (GHAS). Unlike the
+# plan-gated keys above, when GHAS is unavailable GitHub reports these as
+# "disabled" (present, not absent) and silently ignores any PATCH to enable
+# them (HTTP 200, no change). A non-compliant status is therefore non-actionable
+# whenever security_and_analysis.advanced_security.status is not "enabled", so
+# the finding must be suppressed to avoid a recurring, un-fixable audit warning.
+PP_GHAS_GATED_KEYS=(
+  "secret_scanning_non_provider_patterns"
+)
+
 # Minimum entries that every repo's .gitignore MUST contain. Every repo
 # starting from the org baseline at /.gitignore satisfies these by default.
 PP_REQUIRED_GITIGNORE_PATTERNS=(
@@ -202,7 +212,12 @@ pp_check_security_and_analysis() {
     return
   fi
 
-  local entry key expected severity detail actual is_plan_gated
+  # GitHub Advanced Security availability gates the GHAS-only settings below.
+  # When advanced_security is absent or not "enabled", GHAS is unavailable.
+  local ghas_status
+  ghas_status=$(echo "$sa" | jq -r '.advanced_security.status // "null"')
+
+  local entry key expected severity detail actual is_plan_gated is_ghas_gated
   for entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     actual=$(echo "$sa" | jq -r ".\"$key\".status // \"null\"")
@@ -220,6 +235,20 @@ pp_check_security_and_analysis() {
       fi
     done
     if [ "$is_plan_gated" = true ] && [ "$actual" = "null" ]; then
+      continue
+    fi
+    # A GHAS-gated key reported as anything other than "enabled" (including
+    # "disabled") is non-actionable when GHAS itself is unavailable — GitHub
+    # accepts but silently ignores PATCHes to enable it, so flagging it would
+    # produce a recurring finding that can never be remediated on this plan.
+    is_ghas_gated=false
+    for ghas_key in "${PP_GHAS_GATED_KEYS[@]}"; do
+      if [ "$key" = "$ghas_key" ]; then
+        is_ghas_gated=true
+        break
+      fi
+    done
+    if [ "$is_ghas_gated" = true ] && [ "$ghas_status" != "enabled" ]; then
       continue
     fi
     add_finding "$repo" "push-protection" "$key" "$severity" \
