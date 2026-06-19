@@ -923,8 +923,33 @@ check_ci_concurrency() {
 # exempt because it owns the reusables and may legitimately reference
 # its own workflows by @main during release prep.
 #
-# Array format: "workflow-filename:expected-reusable-basename:version-tag"
+# Array format: "workflow-filename:reusable-basename:canonical-pin:legacy-csv"
 # ---------------------------------------------------------------------------
+
+# stub_pin_acceptable <decoded> <reusable-basename> <canonical-ref> <legacy-csv>
+# True if a non-comment `uses:` line pins petry-projects/.github's <reusable> at
+# the canonical ref OR one of the comma-separated transitional legacy refs. The
+# legacy grace keeps a stub on its old @vN pin compliant while the fleet migrates
+# to the <name>/stable channel, so the audit neither flags nor reverts it
+# mid-migration (#482). Anchored to start-of-line so a `# uses: …` comment never
+# counts.
+stub_pin_acceptable() {
+  local decoded="$1" reusable="$2" canonical="$3" legacy_csv="$4"
+  local esc_reusable; esc_reusable=$(escape_ere "$reusable")
+
+  local -a legacy_arr=()
+  [ -n "$legacy_csv" ] && IFS=',' read -r -a legacy_arr <<< "$legacy_csv"
+
+  local alt="" r
+  for r in "$canonical" "${legacy_arr[@]}"; do
+    [ -z "$r" ] && continue
+    alt+="${alt:+|}$(escape_ere "$r")"
+  done
+
+  local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@(${alt})"
+  printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"
+}
+
 check_centralized_workflow_stubs() {
   local repo="$1"
 
@@ -932,19 +957,24 @@ check_centralized_workflow_stubs() {
   # own reusables by @main; skip the stub check for it.
   [ "$repo" = ".github" ] && return
 
-  # workflow-filename:expected-reusable-basename:version-tag
+  # workflow-filename:reusable-basename:canonical-pin:legacy-accepted-csv
+  #   canonical-pin       — the org-standard ref a stub should pin (the moving
+  #                         <name>/stable channel for migrated reusables).
+  #   legacy-accepted-csv — comma-separated refs still accepted *during the
+  #                         channel migration* so the audit neither flags nor
+  #                         reverts a stub still on its old @vN pin (#482). Empty
+  #                         once the fleet is fully migrated (then drop the grace).
   # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
-  # the private petry-projects/.github-private repo and is pinned @main (not a
-  # .github @v1 tag), so it doesn't fit this check's .github/@version model. It
-  # is validated by check_dev_lead_stub() below.
+  # the private petry-projects/.github-private repo and is pinned to the
+  # dev-lead/stable channel, validated by check_dev_lead_stub() below.
   local centralized=(
-    "auto-rebase.yml:auto-rebase-reusable:v1"
-    "dependency-audit.yml:dependency-audit-reusable:v1"
-    "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
-    "dependabot-rebase.yml:dependabot-rebase-reusable:v1"
-    "agent-shield.yml:agent-shield-reusable:v1"
-    "feature-ideation.yml:feature-ideation-reusable:v1"
-    "pr-review-mention.yml:pr-review-mention-reusable:v2"
+    "auto-rebase.yml:auto-rebase-reusable:auto-rebase/stable:v1,v2"
+    "dependency-audit.yml:dependency-audit-reusable:dependency-audit/stable:v1,v2"
+    "dependabot-automerge.yml:dependabot-automerge-reusable:dependabot-automerge/stable:v1,v2"
+    "dependabot-rebase.yml:dependabot-rebase-reusable:dependabot-rebase/stable:v1,v2"
+    "agent-shield.yml:agent-shield-reusable:agent-shield/stable:v1,v2"
+    "feature-ideation.yml:feature-ideation-reusable:v1:"
+    "pr-review-mention.yml:pr-review-mention-reusable:pr-review-mention/stable:v1,v2"
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -953,10 +983,10 @@ check_centralized_workflow_stubs() {
   workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
   [ -z "$workflow_list" ] && return
 
-  local entry wf reusable version
+  local entry wf reusable canonical legacy
   for entry in "${centralized[@]}"; do
-    IFS=':' read -r wf reusable version <<< "$entry"
-    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
+    IFS=':' read -r wf reusable canonical legacy <<< "$entry"
+    [ -z "$canonical" ] && { echo "::error::centralized entry '$entry' missing canonical pin — expected format 'wf:reusable:canonical:legacy-csv'" >&2; exit 1; }
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
@@ -973,23 +1003,19 @@ check_centralized_workflow_stubs() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-    # Required pattern: a non-comment line whose `uses:` value is exactly
-    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
-    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
-    # cannot satisfy the check.
-    local esc_reusable esc_version
-    esc_reusable=$(escape_ere "$reusable")
-    esc_version=$(escape_ere "$version")
-    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
-
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
-      continue  # stub is correctly pinned to the canonical version — compliant
+    # Compliant if a non-comment `uses:` line pins the reusable at the canonical
+    # channel or — transitionally, during the #482 migration — an accepted legacy
+    # @vN ref. stub_pin_acceptable anchors to start-of-line so a `# uses: …`
+    # comment never satisfies the check.
+    if stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; then
+      continue
     fi
 
     # Determine why it's non-compliant for a more actionable message.
-    local why
+    local esc_reusable why
+    esc_reusable=$(escape_ere "$reusable")
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
+      why="references the reusable but is not pinned to \`@${canonical}\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -997,7 +1023,7 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${canonical}\`." \
       "standards/ci-standards.md#centralization-tiers"
   done
 }
@@ -2156,4 +2182,8 @@ HEREDOC
   cat "$SUMMARY_FILE"
 }
 
-main "$@"
+# Run main only when executed directly, not when sourced (e.g. by bats tests
+# that exercise individual helper functions).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
