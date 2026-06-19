@@ -160,10 +160,37 @@ finding_count() {
   grep -q "|warning|" "$FINDINGS_LOG"
 }
 
-@test "pp_check_security_and_analysis: secret_scanning_non_provider_patterns disabled emits a warning finding" {
-  GH_API_RESPONSE="$(make_repo_json '{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"secret_scanning_ai_detection":{"status":"enabled"},"secret_scanning_non_provider_patterns":{"status":"disabled"},"dependabot_security_updates":{"status":"enabled"}}')"
+@test "pp_check_security_and_analysis: secret_scanning_non_provider_patterns disabled emits a warning finding (GHAS available)" {
+  # advanced_security enabled → GitHub Advanced Security is available, so a
+  # disabled non-provider-patterns setting is actionable and must be flagged.
+  GH_API_RESPONSE="$(make_repo_json '{"advanced_security":{"status":"enabled"},"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"secret_scanning_ai_detection":{"status":"enabled"},"secret_scanning_non_provider_patterns":{"status":"disabled"},"dependabot_security_updates":{"status":"enabled"}}')"
   pp_check_security_and_analysis "my-repo"
   grep -q "secret_scanning_non_provider_patterns" "$FINDINGS_LOG"
+}
+
+# ---------------------------------------------------------------------------
+# GHAS-gated: secret_scanning_non_provider_patterns requires GitHub Advanced
+# Security. When GHAS is unavailable on the plan, GitHub reports the setting as
+# "disabled" (not absent) and silently ignores any PATCH to enable it, so the
+# finding is non-actionable and must be suppressed.
+# ---------------------------------------------------------------------------
+
+@test "pp_check_security_and_analysis: non_provider_patterns disabled but advanced_security absent emits no finding (GHAS unavailable)" {
+  GH_API_RESPONSE="$(make_repo_json '{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"secret_scanning_ai_detection":{"status":"enabled"},"secret_scanning_non_provider_patterns":{"status":"disabled"},"dependabot_security_updates":{"status":"enabled"}}')"
+  pp_check_security_and_analysis "my-repo"
+  if grep -q "secret_scanning_non_provider_patterns" "$FINDINGS_LOG" 2>/dev/null; then
+    echo "unexpected finding for secret_scanning_non_provider_patterns when GHAS is unavailable" >&2
+    false
+  fi
+}
+
+@test "pp_check_security_and_analysis: non_provider_patterns disabled with advanced_security disabled emits no finding (GHAS unavailable)" {
+  GH_API_RESPONSE="$(make_repo_json '{"advanced_security":{"status":"disabled"},"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"secret_scanning_ai_detection":{"status":"enabled"},"secret_scanning_non_provider_patterns":{"status":"disabled"},"dependabot_security_updates":{"status":"enabled"}}')"
+  pp_check_security_and_analysis "my-repo"
+  if grep -q "secret_scanning_non_provider_patterns" "$FINDINGS_LOG" 2>/dev/null; then
+    echo "unexpected finding for secret_scanning_non_provider_patterns when GHAS is disabled" >&2
+    false
+  fi
 }
 
 # ---------------------------------------------------------------------------
