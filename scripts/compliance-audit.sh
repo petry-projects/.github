@@ -1328,7 +1328,7 @@ for raw in lines:
         child_indent = indent
 
     # Match the exact required direct child key (quoted or unquoted YAML key)
-    if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
+    if child_indent is not None and indent == child_indent and re.match(r"^[\"\x27]?copilot-setup-steps[\"\x27]?:[ ]*(#.*)?$", line):
         found = True
         break
 
