@@ -207,7 +207,8 @@ deploy_repo() {
   [[ "${#names[@]}" -eq 0 ]] && return  # nothing drifted for this repo
 
   local n="${#names[@]}" list branch
-  list=$(IFS=', '; echo "${names[*]}")
+  list=$(printf ", %s" "${names[@]}")
+  list="${list#, }"
   branch="${SYNC_BRANCH_PREFIX}/workflows-$(date -u +%Y%m%d)"
   local title="chore: sync ${n} org-standard workflow stub(s) from ${ORG}/.github"
 
@@ -217,7 +218,8 @@ deploy_repo() {
   fi
 
   # Interleave (path, template) into the variadic file-pair args.
-  local -a filepairs=() k
+  local -a filepairs=()
+  local k
   for (( k = 0; k < n; k++ )); do filepairs+=("${paths[k]}" "${templates[k]}"); done
 
   local body outcome

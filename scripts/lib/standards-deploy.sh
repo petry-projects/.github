@@ -104,14 +104,14 @@ sd_deploy_files_via_pr() {
   # 4. PUT each file verbatim onto the branch. The blob SHA is looked up per file
   #    on the branch so both create (absent → empty SHA) and update (drifted stub)
   #    work, whether the branch is fresh or reused.
-  local path local_file branch_sha encoded j
+  local i path local_file branch_sha encoded j put_args
   for (( i = 1; i < $#; i += 2 )); do
     j=$(( i + 1 )); path="${!i}"; local_file="${!j}"
     branch_sha=$(gh api "repos/${repo}/contents/${path}?ref=${branch}" \
       --jq '.sha // ""' 2>/dev/null || true)
     encoded=$(base64 -w 0 "$local_file" 2>/dev/null || base64 -b 0 "$local_file")
 
-    local put_args=(--method PUT
+    put_args=(--method PUT
       --raw-field "message=${title}"
       --raw-field "content=${encoded}"
       --raw-field "branch=${branch}")
