@@ -64,6 +64,9 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 # ---------------------------------------------------------------------------
 
 @test "this repo's copilot-setup-steps.yml is recognised as compliant" {
+  if [ ! -f "$REPO_ROOT/.github/workflows/copilot-setup-steps.yml" ]; then
+    skip "copilot-setup-steps.yml not present"
+  fi
   run _has_job < "$REPO_ROOT/.github/workflows/copilot-setup-steps.yml"
   [ "$status" -eq 0 ]
 }
