@@ -493,6 +493,7 @@ audit token the visibility it needs — both steps may be needed.
 
 ## Related Standards
 
+- [`advanced-security.md`](advanced-security.md) — org-wide GHAS enablement (the code security configuration that turns push protection on), licensing model, and push-protection live-fire verification
 - [`github-settings.md`](github-settings.md) — repo settings, rulesets, org secrets
 - [`agent-standards.md`](agent-standards.md) — AgentShield scanner and agent-config hygiene
 - [`ci-standards.md`](ci-standards.md) — workflow templates and required checks
