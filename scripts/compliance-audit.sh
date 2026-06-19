@@ -910,8 +910,7 @@ check_ci_concurrency() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: Tier 1 centralized workflows must be thin caller stubs pinned to the
-# canonical version tag for their reusable.
+# Check: Tier 1 centralized workflows must be thin caller stubs pinned to @v1
 #
 # For each workflow that the org has centralized into a reusable workflow,
 # verify the downstream repo's copy is a stub that delegates via:
@@ -933,10 +932,6 @@ check_centralized_workflow_stubs() {
   [ "$repo" = ".github" ] && return
 
   # workflow-filename:expected-reusable-basename:version-tag
-  # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
-  # the private petry-projects/.github-private repo and is pinned @main (not a
-  # .github @v1 tag), so it doesn't fit this check's .github/@version model. It
-  # is validated by check_dev_lead_stub() below.
   local centralized=(
     "auto-rebase.yml:auto-rebase-reusable:v1"
     "dependency-audit.yml:dependency-audit-reusable:v1"
@@ -1008,8 +1003,8 @@ check_centralized_workflow_stubs() {
 # Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
 # to the moving `dev-lead/stable` channel tag (not @main, not a frozen @vN — see
 # standards/ci-standards.md#dev-lead-agent for the self-host channel model), and
-# its concurrency + permissions are owned centrally. A stub drifts — and breaks —
-# in three ways this check catches (all root causes of petry-projects/.github#402):
+# its concurrency + permissions are owned centrally. A stub drifts — and breaks — in
+# three ways this check catches (all root causes of petry-projects/.github#402):
 #
 #   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@dev-lead/stable.
 #   2. Local concurrency block: per-stub concurrency drifts and cancels issue
@@ -1426,30 +1421,6 @@ ensure_audit_label() {
     --description "For dev-lead agent pickup" \
     --color "8B5CF6" \
     --force 2>/dev/null || true
-}
-
-# Create all required labels (idempotent — uses --force to update if present)
-ensure_required_labels() {
-  local repo="$1"
-  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
-    "in-progress|fbca04|An agent is actively working this issue"
-  )
-
-  for config in "${label_configs[@]}"; do
-    IFS='|' read -r name color description <<< "$config"
-    gh label create "$name" \
-      --repo "$ORG/$repo" \
-      --description "$description" \
-      --color "$color" \
-      --force 2>/dev/null || true
-  done
 }
 
 # Create all required labels (idempotent — uses --force to update if present)
