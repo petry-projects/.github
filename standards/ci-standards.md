@@ -393,6 +393,50 @@ failure-rate metric. The first scan step uses `continue-on-error: true` and an
 attempt reports `outcome == 'failure'`. The job fails only when both attempts
 fail, so a single transient CDN error no longer trips the workflow.
 
+#### SonarCloud Exemption: First-Party Reusable-Ref S7637
+
+SonarCloud's GitHub Actions rule **`githubactions:S7637`** ("pin actions to a
+full-length commit SHA") fires on first-party
+`petry-projects/.github(-private)` reusable-workflow refs in thin caller stubs.
+Those refs are **intentionally not SHA-pinned** — the org pins them to a moving
+channel/tag (`@<name>/stable`, `@v1`/`@v2`) by design (see the
+[Action Pinning Policy exemption](#exception-internal-reusable-workflow-references)).
+The org compliance audit already exempts them via `check_action_pinning`, but
+SonarCloud is an **external** gate that doesn't know about that exemption, so it
+flags them as high-severity findings and can fail the quality gate.
+
+**Standard:** every SonarCloud-gated repo's `sonar-project.properties` MUST
+suppress `githubactions:S7637` **only on the individual first-party caller-stub
+workflow files** — each stub gets its own `sonar.issue.ignore.multicriteria`
+criterion keyed to that file path. A blanket `resourceKey` such as
+`**/.github/workflows/*.yml`, `*.yml`, or `**` is **forbidden**: it would also
+drop S7637 on `ci.yml` / `sonarcloud.yml`, leaving third-party actions
+un-enforced. Third-party actions must always stay SHA-pinned.
+
+> SonarCloud's `sonar.issue.ignore` matches by file path + rule, not by `uses:`
+> ref content — so the exemption is scoped per caller-stub file rather than by
+> the ref string itself.
+
+Caller stubs that carry only a first-party reusable ref (and therefore need the
+exemption): `agent-shield.yml`, `pr-review-mention.yml`, `pr-auto-review.yml`,
+`auto-rebase.yml`, `dependabot-rebase.yml`, `dependabot-automerge.yml`,
+`dependency-audit.yml`, `feature-ideation.yml`, `add-to-project.yml`,
+`dev-lead.yml`. Copy the canonical block verbatim from this repo's
+[`sonar-project.properties`](https://github.com/petry-projects/.github/blob/main/sonar-project.properties);
+omit criteria for stubs a given repo does not have.
+
+```properties
+sonar.issue.ignore.multicriteria=s7637_agentshield,…
+sonar.issue.ignore.multicriteria.s7637_agentshield.ruleKey=githubactions:S7637
+sonar.issue.ignore.multicriteria.s7637_agentshield.resourceKey=**/agent-shield.yml
+# …one ruleKey/resourceKey pair per caller-stub file
+```
+
+The compliance audit's `check_sonar_s7637_exemption` enforces this org-wide: it
+files `sonar-s7637-exemption-missing` (warning) when a SonarCloud-gated repo's
+properties carry no S7637 exemption, and `sonar-s7637-exemption-too-broad`
+(error) when the exemption uses a blanket workflow-path `resourceKey`.
+
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
 Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
@@ -1145,6 +1189,13 @@ The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
 deliberately (bumped only on backward-compatible releases) and are not subject
 to tag-force-push risk because the org controls the tag. **Do not open
 compliance PRs to pin these references.**
+
+> **SonarCloud agrees via a scoped exemption, not a blanket disable.**
+> SonarCloud's external `githubactions:S7637` gate doesn't know about this
+> exemption, so each SonarCloud-gated repo suppresses S7637 *only on the
+> first-party caller-stub files* — see
+> [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637).
+> Third-party actions stay SHA-pinned.
 
 ---
 
