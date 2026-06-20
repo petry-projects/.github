@@ -37,6 +37,8 @@ SHOULD be audited and brought into compliance.
 
 All repositories MUST have the following security features enabled. These are
 the enforcement primitives behind the [Push Protection Standard](push-protection.md).
+They are enabled org-wide via the "GitHub recommended" code security
+configuration — see the [Advanced Security (GHAS) Standard](advanced-security.md).
 
 | Setting | Standard Value | Rationale |
 |---------|---------------|-----------|
