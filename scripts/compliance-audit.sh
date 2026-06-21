@@ -1072,10 +1072,19 @@ check_dev_lead_stub() {
   # 2) agent_ref must be threaded through to pin the same channel inside the
   #    reusable's own script/prompt checkout (prevents split-brain on promotion).
   #    Same channel set as the uses: pin above; should match the uses: channel.
-  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
-    add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
-      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
-      "standards/ci-standards.md#dev-lead-agent"
+  uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p')
+  if [ -n "$uses_channel" ]; then
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$uses_channel([[:space:]]|$)"; then
+      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$uses_channel\` to match the pinned channel \`$uses_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "standards/ci-standards.md#dev-lead-agent"
+    fi
+  else
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "standards/ci-standards.md#dev-lead-agent"
+    fi
   fi
 
   # 3) No per-stub concurrency block — concurrency is owned by the reusable.
