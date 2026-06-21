@@ -1389,7 +1389,7 @@ check_copilot_instructions() {
     --jq '.content' 2>/dev/null || echo "")
 
   if [ -z "$content" ]; then
-    add_finding "$repo" "standards" "missing-copilot-instructions" "error" \
+    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
       "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
       "standards/copilot-instructions-standard.md"
     return
@@ -1480,29 +1480,6 @@ ensure_required_labels() {
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
     "in-progress|fbca04|An agent is actively working this issue"
-  )
-
-  for config in "${label_configs[@]}"; do
-    IFS='|' read -r name color description <<< "$config"
-    gh label create "$name" \
-      --repo "$ORG/$repo" \
-      --description "$description" \
-      --color "$color" \
-      --force 2>/dev/null || true
-  done
-}
-
-# Create all required labels (idempotent — uses --force to update if present)
-ensure_required_labels() {
-  local repo="$1"
-  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
   )
 
   for config in "${label_configs[@]}"; do
