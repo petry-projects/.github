@@ -145,9 +145,8 @@ exercised on `next`, so a broken candidate can never gate its own fix.
 >   volume `healthy_runs ≥ ceil(baseline_runs / 7)` **and** candidate failure-rate
 >   `≤` baseline (no synthetic floor; an unused reusable simply parks). Rollback is
 >   the same single tag move in reverse against the prior `vX.Y.Z`.
-> - The channel tags are protected by the `release-channel-tags` ruleset, codified in
->   `.github/rulesets/` and applied by `scripts/apply-rulesets.sh`; the promotion
->   workflow is the authorized mover.
+> - The channel tags are protected by a `release-channel-tags` ruleset in the host repo
+>   (`.github-private`); the promotion workflow is the authorized mover.
 >
 > The authoritative process lives in that repo's `docs/release/` (`versioning.md`,
 > `runbook.md`); this section summarizes it. `pr-review` and the `.github`-hosted
