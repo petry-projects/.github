@@ -129,9 +129,9 @@ exercised on `next`, so a broken candidate can never gate its own fix.
 > repo (the canary/ring versioning initiative, epic #495). The authoritative
 > process lives there; this section summarizes it.
 >
-> `.github`-hosted reusables (e.g. `feature-ideation` and the Tier‑1 caller
+> `.github`-hosted reusables (e.g. `feature-ideation` and the Tier-1 caller
 > reusables) are being brought under the same model — `cut-release.sh` is being
-> extended to cover them. Until a given reusable has its ring channels cut it may
+> extended to cover them. Until a given reusable has its ring channels cut, it may
 > run on `stable` alone and promote in one gated hop, but that is an interim
 > state, not the target: `stable`-only is not a substitute for the ring ladder.
 
