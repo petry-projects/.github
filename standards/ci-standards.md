@@ -393,6 +393,50 @@ failure-rate metric. The first scan step uses `continue-on-error: true` and an
 attempt reports `outcome == 'failure'`. The job fails only when both attempts
 fail, so a single transient CDN error no longer trips the workflow.
 
+#### SonarCloud Exemption: First-Party Reusable-Ref S7637
+
+SonarCloud's GitHub Actions rule **`githubactions:S7637`** ("pin actions to a
+full-length commit SHA") fires on first-party
+`petry-projects/.github(-private)` reusable-workflow refs in thin caller stubs.
+Those refs are **intentionally not SHA-pinned** — the org pins them to a moving
+channel/tag (`@<name>/stable`, `@v1`/`@v2`) by design (see the
+[Action Pinning Policy exemption](#exception-internal-reusable-workflow-references)).
+The org compliance audit already exempts them via `check_action_pinning`, but
+SonarCloud is an **external** gate that doesn't know about that exemption, so it
+flags them as high-severity findings and can fail the quality gate.
+
+**Standard:** every SonarCloud-gated repo's `sonar-project.properties` MUST
+suppress `githubactions:S7637` **only on the individual first-party caller-stub
+workflow files** — each stub gets its own `sonar.issue.ignore.multicriteria`
+criterion keyed to that file path. A blanket `resourceKey` such as
+`**/.github/workflows/*.yml`, `*.yml`, or `**` is **forbidden**: it would also
+drop S7637 on `ci.yml` / `sonarcloud.yml`, leaving third-party actions
+un-enforced. Third-party actions must always stay SHA-pinned.
+
+> SonarCloud's `sonar.issue.ignore` matches by file path + rule, not by `uses:`
+> ref content — so the exemption is scoped per caller-stub file rather than by
+> the ref string itself.
+
+Caller stubs that carry only a first-party reusable ref (and therefore need the
+exemption): `agent-shield.yml`, `pr-review-mention.yml`, `pr-auto-review.yml`,
+`auto-rebase.yml`, `dependabot-rebase.yml`, `dependabot-automerge.yml`,
+`dependency-audit.yml`, `feature-ideation.yml`, `add-to-project.yml`,
+`dev-lead.yml`. Copy the canonical block verbatim from this repo's
+[`sonar-project.properties`](https://github.com/petry-projects/.github/blob/main/sonar-project.properties);
+omit criteria for stubs a given repo does not have.
+
+```properties
+sonar.issue.ignore.multicriteria=s7637_agentshield,…
+sonar.issue.ignore.multicriteria.s7637_agentshield.ruleKey=githubactions:S7637
+sonar.issue.ignore.multicriteria.s7637_agentshield.resourceKey=**/agent-shield.yml
+# …one ruleKey/resourceKey pair per caller-stub file
+```
+
+The compliance audit's `check_sonar_s7637_exemption` enforces this org-wide: it
+files `sonar-s7637-exemption-missing` (warning) when a SonarCloud-gated repo's
+properties carry no S7637 exemption, and `sonar-s7637-exemption-too-broad`
+(error) when the exemption uses a blanket workflow-path `resourceKey`.
+
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
 Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
@@ -970,6 +1014,68 @@ customisation.
 
 ---
 
+### 10. Idea → Initiative pipeline (`initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`) — BMAD Method repos
+
+**Condition:** BMAD Method-enabled repos that want approved ideas turned into
+tracked initiatives (epic + story DAG) automatically. Builds on
+[Feature Ideation](#9-feature-ideation-feature-ideationyml--bmad-method-repos) —
+ideation produces ideas; this pipeline triages, enriches, and (on human approval)
+plans them.
+
+**Prerequisite:** Discussions enabled with an "Ideas" category, and the
+`idea:approved` label present on the repo.
+
+#### Architecture: thin caller stub → dispatch reusable → central planner
+
+Unlike feature-ideation (which runs the analyst inline), the BMAD Scrum Master
+planner and the vendored BMAD frameworks live **once** in
+`petry-projects/.github-private`. `claude-code-action` aborts on `discussion`
+event contexts, so each stub's reusable **re-dispatches** the central
+`workflow_dispatch` with the host repo passed as `target_repo`, rather than
+planning inline. Three stub + reusable pairs, all pinned to their `<name>/stable`
+channel:
+
+| Stub (`standards/workflows/`) | Reusable (`.github/workflows/`) | Trigger → action |
+|---|---|---|
+| [`initiative-planner.yml`](workflows/initiative-planner.yml) | [`initiative-planner-reusable.yml`](../.github/workflows/initiative-planner-reusable.yml) | `discussion [labeled] idea:approved` (trusted actor) → central planner builds an **inert** epic + story DAG (`initiative`, **not** `initiative:auto`) in the host repo |
+| [`idea-triage.yml`](workflows/idea-triage.yml) | [`idea-triage-reusable.yml`](../.github/workflows/idea-triage-reusable.yml) | weekly + dispatch → refresh the host repo's "Idea Promotion Queue" issue |
+| [`idea-enhancer.yml`](workflows/idea-enhancer.yml) | [`idea-enhancer-reusable.yml`](../.github/workflows/idea-enhancer-reusable.yml) | new Ideas Discussion + weekly → enrich the host repo's un-enhanced ideas |
+
+Two human gates keep judgement with a maintainer: adding `idea:approved` to a
+Discussion fires the planner; adding `initiative:auto` to the resulting epic
+hands it to `initiative-driver` for auto-implementation.
+
+#### Project-board funnel (hybrid)
+
+Where a planner-created epic lands depends on the repo:
+
+- **Consumer (fleet) repos** → the repo's **own** project board. Point the repo's
+  [`add-to-project`](workflows/add-to-project.yml) at its repo-level project.
+- **`petry-projects/.github` and `petry-projects/.github-private`** → the
+  **org-level** project (`orgs/petry-projects/projects/1`, "Initiatives").
+
+#### Adopting in a new repo
+
+1. Copy [`standards/workflows/initiative-planner.yml`](workflows/initiative-planner.yml)
+   to `.github/workflows/initiative-planner.yml` (and, optionally,
+   `idea-triage.yml` / `idea-enhancer.yml`) in the target repo.
+2. Ensure Discussions is enabled with an "Ideas" category and the
+   `idea:approved` label exists.
+3. Confirm the org-level secret `GH_PAT_WORKFLOWS` is accessible **and its owner
+   has write access to the target repo** (the central planner writes the epic +
+   sub-issues cross-repo with that PAT).
+4. Point `add-to-project` per the hybrid funnel above.
+5. Approve an idea: add `idea:approved` to an Ideas Discussion. The central
+   planner materializes an inert epic + story DAG in the repo; review it and add
+   `initiative:auto` to the epic to begin auto-implementation.
+
+The cross-repo trigger is watched by the central
+`initiative-planner-canary.yml` and Fleet Monitor stub-drift checks, so a silent
+regression (e.g. the [#655](https://github.com/petry-projects/.github-private/issues/655)
+stale-base revert class) surfaces on the first approval rather than going unnoticed.
+
+---
+
 ## Workflow Patterns by Tech Stack
 
 ### TypeScript / Node.js (npm)
@@ -1145,6 +1251,13 @@ The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
 deliberately (bumped only on backward-compatible releases) and are not subject
 to tag-force-push risk because the org controls the tag. **Do not open
 compliance PRs to pin these references.**
+
+> **SonarCloud agrees via a scoped exemption, not a blanket disable.**
+> SonarCloud's external `githubactions:S7637` gate doesn't know about this
+> exemption, so each SonarCloud-gated repo suppresses S7637 *only on the
+> first-party caller-stub files* — see
+> [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637).
+> Third-party actions stay SHA-pinned.
 
 ---
 
