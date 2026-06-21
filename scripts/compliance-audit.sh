@@ -1057,19 +1057,24 @@ check_dev_lead_stub() {
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
   [ -z "$decoded" ] && return
 
-  # 1) Canonical pin (non-comment `uses:` line, exact ref) — the moving
-  #    dev-lead/stable channel tag (self-host channel model).
-  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/stable([[:space:]]|$)"; then
+  # 1) Canonical pin (non-comment `uses:` line) — a moving dev-lead channel tag
+  #    (self-host channel model). The production default is `stable`; the staged
+  #    canary model (versioning.md Phase 2, #499/#500) also permits the candidate
+  #    channel `next` and per-ring channels `ring0`, `ring1`, … A frozen `@vX.Y.Z`
+  #    or `@<sha>` is NOT a channel and is intentionally rejected — callers pin the
+  #    moving channel so rollout/rollback is a single central tag move.
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
-      "The \`dev-lead.yml\` caller stub must pin \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "The \`dev-lead.yml\` caller stub must pin a \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
   # 2) agent_ref must be threaded through to pin the same channel inside the
   #    reusable's own script/prompt checkout (prevents split-brain on promotion).
-  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/stable([[:space:]]|$)"; then
+  #    Same channel set as the uses: pin above; should match the uses: channel.
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
-      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/stable\` so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
