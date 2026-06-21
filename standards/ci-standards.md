@@ -208,7 +208,7 @@ below — copy and adapt the examples to each repo's tech stack. CodeQL is
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
@@ -819,7 +819,7 @@ gh api repos/petry-projects/.github/contents/standards/workflows/copilot-setup-s
 
 These workflows are required only when a specific ecosystem is detected.
 
-### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
+### 8. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
 **Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
 `_bmad-output/`, or equivalent BMAD planning artifacts).
@@ -829,15 +829,6 @@ through a 5-phase multi-skill ideation pipeline, producing evidence-grounded
 feature proposals as GitHub Discussions in the **Ideas** category. Each proposal
 is a separate Discussion, updated by subsequent runs as the market and project
 evolve.
-
-**Triggers:** the weekly `schedule`, manual `workflow_dispatch`, **and
-`discussion: created`**. On the discussion trigger, the stub passes
-`target_discussion: ${{ github.event.discussion.number }}`, putting the reusable
-in **single-idea enhancement mode**: it researches and refines that one new idea
-and posts a single enhancement comment, rather than running the broad scan. A
-job-level `if` restricts this to new Discussions in the **Ideas** category and
-skips the bot's own creations; enhancement is a comment (which does not re-fire
-`created`), so there is no trigger loop.
 
 **The pipeline (the reason this workflow exists):**
 
@@ -883,21 +874,8 @@ split into two parts:
    Defines the schedule, the `workflow_dispatch` inputs, and calls the
    reusable workflow with a single required parameter: `project_context`.
 
-3. **Reputable Source List** (repo-local, per-repo):
-   Each adopting repo maintains its own copy at `.github/feature-ideation-sources.md`
-   (or the path passed via the `sources_file` workflow input).
-   Use [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
-   as a starter template, then customise it for your project. The Phase 2 prompt
-   instructs Mary to read that file as her **starting set** for market research —
-   vendor blogs, RSS feeds, podcasts, and YouTube channels organised by category.
-   If the file is absent Mary falls back to open web search automatically.
-   Each repo owns its own copy; add or remove entries via PR in that repo.
-
 When we tune the prompt, the model, or the gotchas, we change one file in
-this repo. Repos tracking `@main` pick up the change on their next scheduled
-run; repos pinned to `@v1` pick it up only after the `v1` tag is updated and
-then on their next scheduled run. The source list is repo-local and propagates
-only within the repo that owns it.
+this repo and every adopter picks up the change on their next scheduled run.
 
 #### Adopting in a new repo
 
@@ -906,15 +884,11 @@ only within the repo that owns it.
 2. Replace the `project_context` value with a 3-5 sentence description of
    what the project is, who it serves, and the competitive landscape Mary
    should research. This is the **only** required edit.
-3. (Optional) Copy [`standards/feature-ideation-sources.md`](feature-ideation-sources.md)
-   to `.github/feature-ideation-sources.md` in the target repo and customise
-   it for your project. Mary reads YOUR copy — not the central template — so
-   each repo controls its own source list.
-4. (Optional) Adjust the cron schedule, focus area choices, or pin to a
+3. (Optional) Adjust the cron schedule, focus area choices, or pin to a
    tag instead of `@main` if you want change isolation.
-5. Ensure GitHub Discussions is enabled with an "Ideas" category — see
+4. Ensure GitHub Discussions is enabled with an "Ideas" category — see
    [Discussions Configuration](github-settings.md#discussions-configuration).
-6. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
+5. Confirm the org-level secret `CLAUDE_CODE_OAUTH_TOKEN` is accessible.
 
 #### Critical gotchas (baked into the reusable workflow)
 
