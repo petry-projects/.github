@@ -1006,7 +1006,7 @@ hands it to `initiative-driver` for auto-implementation.
 Where a planner-created epic lands depends on the repo:
 
 - **Consumer (fleet) repos** → the repo's **own** project board. Point the repo's
-  [`add-to-project`](#add-to-projectyml) at its repo-level project.
+  [`add-to-project`](workflows/add-to-project.yml) at its repo-level project.
 - **`petry-projects/.github` and `petry-projects/.github-private`** → the
   **org-level** project (`orgs/petry-projects/projects/1`, "Initiatives").
 
