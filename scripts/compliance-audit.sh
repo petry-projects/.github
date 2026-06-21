@@ -762,6 +762,98 @@ check_sonarcloud() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: SonarCloud S7637 first-party reusable-ref exemption (#498)
+#
+# SonarCloud's githubactions:S7637 ("pin actions to a full-length commit SHA")
+# fires on first-party petry-projects/.github(-private) reusable-ref caller
+# stubs that the org standard intentionally pins by moving channel/tag rather
+# than SHA (see check_action_pinning's exemption and the Action Pinning Policy).
+# The two policies are otherwise mutually exclusive on a single pin, so each
+# SonarCloud-gated repo must carry a NARROW sonar.issue.ignore that suppresses
+# S7637 only on the thin caller-stub workflow files — never a blanket
+# workflows/*.yml exclusion, which would also drop SHA-pin enforcement on the
+# third-party actions in ci.yml/sonarcloud.yml.
+#
+# classify_sonar_s7637_exemption echoes exactly one verdict for a given
+# sonar-project.properties body:
+#   present   — at least one issue-ignore criterion suppresses
+#               githubactions:S7637 and every such criterion targets specific
+#               caller-stub files (no blanket workflow glob).
+#   too-broad — an S7637 criterion uses a blanket resourceKey (the filename
+#               segment carries a wildcard, e.g. workflows/*.yml or *.yml, or
+#               the pattern is a bare **). This also exempts third-party actions
+#               and violates the org policy.
+#   missing   — no criterion suppresses githubactions:S7637.
+# ---------------------------------------------------------------------------
+classify_sonar_s7637_exemption() {
+  local content="$1"
+
+  # Criterion keys whose ruleKey assigns githubactions:S7637 (whitespace around
+  # the key/`=`/value is tolerated; properties keys are [A-Za-z0-9_]).
+  local keys
+  keys=$(printf '%s\n' "$content" \
+    | grep -E '^[[:space:]]*sonar\.issue\.ignore\.multicriteria\.[A-Za-z0-9_]+\.ruleKey[[:space:]]*=[[:space:]]*githubactions:S7637[[:space:]]*$' \
+    | sed -E 's/^[[:space:]]*sonar\.issue\.ignore\.multicriteria\.([A-Za-z0-9_]+)\.ruleKey.*/\1/' || true)
+
+  if [ -z "$keys" ]; then
+    echo "missing"
+    return
+  fi
+
+  local key resourcekey base broad=0
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    resourcekey=$(printf '%s\n' "$content" \
+      | grep -E "^[[:space:]]*sonar\\.issue\\.ignore\\.multicriteria\\.${key}\\.resourceKey[[:space:]]*=" \
+      | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*$//' | head -n1 || true)
+    # A criterion is blanket (too broad) when the filename segment carries a
+    # wildcard — e.g. **/.github/workflows/*.yml, *.yml — or the whole pattern
+    # is a bare **. Such a pattern also matches ci.yml and would drop S7637 on
+    # the third-party actions there.
+    base="${resourcekey##*/}"
+    if [ "$resourcekey" = "**" ] || case "$base" in *'*'* | *'?'*) true ;; *) false ;; esac; then
+      broad=1
+    fi
+  done <<< "$keys"
+
+  if [ "$broad" -eq 1 ]; then
+    echo "too-broad"
+  else
+    echo "present"
+  fi
+}
+
+check_sonar_s7637_exemption() {
+  local repo="$1"
+
+  # Only relevant when the repo actually runs SonarCloud analysis.
+  gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1 || return
+
+  local content decoded
+  content=$(gh_api "repos/$ORG/$repo/contents/sonar-project.properties" --jq '.content' 2>/dev/null || echo "")
+  # A missing properties file is reported separately by check_sonarcloud.
+  [ -z "$content" ] && return
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  local verdict
+  verdict=$(classify_sonar_s7637_exemption "$decoded")
+
+  case "$verdict" in
+    missing)
+      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+        "\`sonar-project.properties\` has no \`sonar.issue.ignore\` for \`githubactions:S7637\`. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the canonical per-stub exemption." \
+        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      ;;
+    too-broad)
+      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-too-broad" "error" \
+        "\`sonar-project.properties\` suppresses \`githubactions:S7637\` with a blanket workflow-path \`resourceKey\` (e.g. \`workflows/*.yml\` or \`**\`). This also exempts third-party actions in \`ci.yml\`/\`sonarcloud.yml\` from SHA-pin enforcement. Scope the exemption to the individual caller-stub files instead." \
+        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Check: CodeQL default setup is configured (and no stray codeql.yml exists)
 #
 # After petry-projects/.github#103, CodeQL is configured via GitHub's
@@ -2097,6 +2189,7 @@ main() {
     check_rulesets "$repo" "$repo_json"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
+    check_sonar_s7637_exemption "$repo"
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
     check_ci_concurrency "$repo"
