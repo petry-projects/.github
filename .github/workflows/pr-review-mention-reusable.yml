@@ -15,16 +15,6 @@ name: PR Review — Mention Trigger (Reusable)
 
 on:
   workflow_call:
-    inputs:
-      tooling_ref:
-        description: |
-          Ref of petry-projects/.github to source the dispatcher scripts from.
-          Defaults to the `pr-review-mention/stable` channel so the tooling
-          tracks the released reusable. Override only to test a fork/PR branch
-          (`tooling_ref: my-branch`) or main (`tooling_ref: main`) end-to-end.
-        required: false
-        default: 'pr-review-mention/stable'
-        type: string
     secrets:
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
@@ -100,16 +90,6 @@ jobs:
             esac
           fi
 
-      - name: Checkout dispatcher tooling
-        if: steps.trust.outputs.trusted == 'true'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: petry-projects/.github
-          ref: ${{ inputs.tooling_ref }}
-          path: .pr-review-mention-tooling
-          fetch-depth: 1
-          persist-credentials: false
-
       - name: Resolve PR URL
         id: pr
         if: steps.trust.outputs.trusted == 'true'
@@ -117,12 +97,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
           # Resolve by event name: review_requested and review-comment payloads
           # expose the PR directly; only issue_comment needs a gh api round-trip.
-          # The script guards an empty value so we never call `gh api ""` (#500).
+          # Guard the empty case so we never call `gh api ""` (#500).
           EVENT_NAME: ${{ github.event_name }}
           PR_HTML_URL: ${{ github.event.pull_request.html_url }}
           ISSUE_PR_API_URL: ${{ github.event.issue.pull_request.url }}
         run: |
-          PR_URL="$(.pr-review-mention-tooling/.github/scripts/pr-review-mention/resolve-pr-url.sh)"
+          case "$EVENT_NAME" in
+            pull_request | pull_request_review_comment)
+              PR_URL="$PR_HTML_URL"
+              ;;
+            issue_comment)
+              if [ -z "$ISSUE_PR_API_URL" ]; then
+                echo "resolve-pr-url: issue_comment event has no pull_request url (not a PR comment)" >&2
+                exit 1
+              fi
+              PR_URL="$(gh api "$ISSUE_PR_API_URL" --jq '.html_url')" || {
+                echo "resolve-pr-url: failed to retrieve PR URL from GitHub API using '$ISSUE_PR_API_URL'" >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo "resolve-pr-url: unsupported event '$EVENT_NAME'" >&2
+              exit 1
+              ;;
+          esac
+          if [ -z "$PR_URL" ] || [ "$PR_URL" = "null" ]; then
+            echo "resolve-pr-url: could not resolve a PR url for event '$EVENT_NAME'" >&2
+            exit 1
+          fi
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
           echo "PR URL: $PR_URL"
 
