@@ -141,7 +141,7 @@ the standing queue that the auto-rebase fan-out has to service.
 | `dependabot[bot]` | Already capped per-ecosystem; security PRs must never be starved. |
 | `OrganizationAdmin` / `@petry-projects/org-leads` | Human break-glass and maintainer PRs. |
 | `dependabot-automerge-petry` (App) | Operates on existing PRs (merge/approve), does not add to the queue. |
-| Security/hotfix-labelled PRs (e.g. `security`) | Urgent fixes must bypass any throttle. |
+| Security/hotfix-labeled PRs (e.g. `security`) | Urgent fixes must bypass any throttle. |
 
 Final values, the exact tier boundaries, and whether to use a single org-wide
 cap vs. per-source sub-caps are **deferred to human sign-off** before Story 2.
@@ -229,7 +229,7 @@ The new cap **must exclude Dependabot** to avoid double-capping:
 
 - **WebSearch was unavailable** in the CI environment (permission not granted);
   WebFetch of GitHub's *blog/changelog* index returned 404. The three
-  **documentation** surfaces in §3 (rulesets rules, repo REST endpoint, org
+  **documentation** surfaces in §3 (ruleset rules, repo REST endpoint, org
   PR-review settings) **were** fetched first-hand and are the basis for the
   decision. If a preview/early-access "PR limits" feature exists that those docs
   pages do not yet describe, a human with changelog access should confirm and, if
