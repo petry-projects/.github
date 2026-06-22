@@ -1,0 +1,65 @@
+# Backlog reconcile for the Initiatives project (petry-projects/.github#518).
+#
+# The event-driven add-to-project automation misses qualifying items created by
+# the default GITHUB_TOKEN (GitHub doesn't fire workflows from default-token
+# events) and items whose run was dropped under congestion. This scheduled/
+# manual reconcile scans every installed repo's OPEN issues/PRs + Ideas
+# discussions and reconciles them onto the board using the same gate + helpers
+# as the event path — so missed items land within one cycle.
+#
+# Runs centrally in petry-projects/.github (the scripts live here); mints the
+# petry-projects-planner App token for issues/PRs read + project write.
+name: Add-to-Project Reconcile
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log intended adds/removes without mutating the board"
+        type: boolean
+        default: true
+      repos:
+        description: "Optional space-separated owner/repo list (default: all App-installed repos)"
+        type: string
+        default: ""
+  schedule:
+    - cron: "0 7 * * *" # daily 07:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: add-to-project-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.INITIATIVES_APP_ID }}
+          private-key: ${{ secrets.INITIATIVES_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Reconcile backlog into the project
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PROJECT_ID: PVT_kwDOD2inqs4BZq3-
+          PROJECT_URL: https://github.com/orgs/petry-projects/projects/1
+          REQUIRED_LABEL: dev-lead
+          EXCLUDED_LABELS: compliance-audit,health-check,fleet-tracker,daily-report
+          IDEAS_CATEGORY: Ideas
+          RECON_REPOS: ${{ inputs.repos }}
+          # Manual runs default to dry-run; scheduled runs are live.
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+        run: bash .github/scripts/add-to-project/reconcile-backlog.sh
