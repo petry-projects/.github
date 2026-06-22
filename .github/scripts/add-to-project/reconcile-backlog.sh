@@ -33,13 +33,17 @@ source "${_dir}/reconcile-discussion.sh"  # reconcile_discussion
 
 : "${PROJECT_ID:?PROJECT_ID is required}"
 ideas_category="${IDEAS_CATEGORY:-Ideas}"
+# Exported (with default applied) so the discussions --jq filter can read it via
+# `env.RECON_IDEAS_CATEGORY` instead of shell-interpolating it — avoids jq syntax
+# breakage / injection if the category name contains quotes or backslashes.
+export RECON_IDEAS_CATEGORY="${ideas_category}"
 
 # Resolve target repos: explicit RECON_REPOS, else the App installation's repos.
 declare -a repos
 if [ -n "${RECON_REPOS:-}" ]; then
   read -r -a repos <<< "${RECON_REPOS}"
 else
-  mapfile -t repos < <(gh api --paginate /installation/repositories --jq '.repositories[].full_name' 2>/dev/null)
+  mapfile -t repos < <(gh api --paginate /installation/repositories --jq '.repositories[].full_name')
 fi
 if [ "${#repos[@]}" -eq 0 ]; then
   echo "::error::no repos to reconcile (set RECON_REPOS or check the App installation)" >&2
@@ -54,19 +58,25 @@ for repo in "${repos[@]}"; do
 
   # Open issues AND PRs (the issues endpoint returns both; the gate applies to
   # both identically). Pass labels as the objects array the gate expects.
+  # Fetch into a variable so an API failure is surfaced (not silenced) and
+  # `set -e`'s check isn't bypassed by a subshell; feed the loop via here-string
+  # so it stays in the parent shell and `scanned` is updated correctly.
+  issues_tsv=$(gh api --paginate "repos/${repo}/issues?state=open&per_page=100" \
+            --jq '.[] | [.node_id, .html_url, ([.labels[] | {name}] | @json)] | @tsv') || {
+    echo "::error::failed to fetch issues for ${repo}" >&2
+    echo "::endgroup::"
+    continue
+  }
   while IFS=$'\t' read -r nid url labels; do
     [ -z "$nid" ] && continue
     scanned=$((scanned + 1))
     reconcile_content_with_project "$nid" "$url" "$labels" || true
-  done < <(gh api --paginate "repos/${repo}/issues?state=open&per_page=100" \
-            --jq '.[] | [.node_id, .html_url, ([.labels[] | {name}] | @json)] | @tsv' 2>/dev/null)
+  done <<< "$issues_tsv"
 
-  # Open Ideas-category discussions → draft items.
-  while IFS=$'\t' read -r number title url; do
-    [ -z "$number" ] && continue
-    scanned=$((scanned + 1))
-    reconcile_discussion "$number" "$title" "$url" "$ideas_category" || true
-  done < <(gh api graphql --paginate -f owner="${repo%%/*}" -f name="${repo##*/}" -f query='
+  # Open Ideas-category discussions → draft items. Same robustness as above; the
+  # category is read inside jq via `env.RECON_IDEAS_CATEGORY` (set earlier) rather
+  # than shell-interpolated, so special characters can't break or inject into it.
+  discussions_tsv=$(gh api graphql --paginate -f owner="${repo%%/*}" -f name="${repo##*/}" -f query='
     query($owner:String!,$name:String!,$endCursor:String){
       repository(owner:$owner,name:$name){
         discussions(first:100,after:$endCursor,states:OPEN){
@@ -74,7 +84,16 @@ for repo in "${repos[@]}"; do
           nodes{number title url category{name}}
         }
       }
-    }' --jq ".data.repository.discussions.nodes[] | select(.category.name==\"${ideas_category}\") | [(.number|tostring), .title, .url] | @tsv" 2>/dev/null)
+    }' --jq '.data.repository.discussions.nodes[] | select(.category.name==env.RECON_IDEAS_CATEGORY) | [(.number|tostring), .title, .url] | @tsv') || {
+    echo "::error::failed to fetch discussions for ${repo}" >&2
+    echo "::endgroup::"
+    continue
+  }
+  while IFS=$'\t' read -r number title url; do
+    [ -z "$number" ] && continue
+    scanned=$((scanned + 1))
+    reconcile_discussion "$number" "$title" "$url" "$ideas_category" || true
+  done <<< "$discussions_tsv"
 
   echo "::endgroup::"
 done
