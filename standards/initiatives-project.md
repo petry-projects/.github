@@ -51,8 +51,15 @@ The reconciliation is idempotent — re-delivered webhooks don't double-error.
 - **Fork PRs labeled by a maintainer when the author is `FIRST_TIMER` /
   `CONTRIBUTOR`.** The `pull_request_target` gate evaluates the PR author's
   association; this is documented as a known limit in the workflow header.
-- **Historical (already-open) qualifying items.** The workflow only fires on
-  new events. Backfilled in bulk on 2026-06-07 — see #387 retro.
+- **Items the event triggers never fire for.** The event path misses two
+  structural cases: issues/PRs created by the default `GITHUB_TOKEN`
+  (`app/github-actions`) — GitHub does not fire workflows from default-token
+  events — and runs dropped under runner congestion. **A scheduled/manual
+  backlog reconcile (`add-to-project-reconcile.yml`, #518) closes both:** it
+  scans every App-installed repo's open issues/PRs + Ideas discussions daily and
+  reconciles each via the same gate/helpers, so a missed item lands within one
+  cycle. Run it manually with `dry_run` to preview. Full history (incl.
+  closed/merged) was bulk-backfilled 2026-06-07 and again 2026-06-21.
 
 To add a content-linked item manually:
 
@@ -188,11 +195,14 @@ configured manually in the UI):
 
 ```text
 .github/workflows/add-to-project.yml             # Workflow (events → script call)
+.github/workflows/add-to-project-reconcile.yml   # Scheduled/manual backlog reconcile (#518)
 .github/scripts/add-to-project/
+    lib.sh                                       # find/add/draft/delete helpers (DRY_RUN-aware)
     add-issue-or-pr.sh                           # Noise gate + addProjectV2ItemById
     reconcile-discussion.sh                      # Paginated find + 4-state reconciler
+    reconcile-backlog.sh                         # Scans open issues/PRs + Ideas, reconciles via the above
 .github/workflows/add-to-project-tests.yml       # shellcheck + bats CI gate
-test/workflows/add-to-project/                   # 35 bats tests, gh stub, fixtures
+test/workflows/add-to-project/                   # bats tests, gh stub, fixtures
 ```
 
 **Auth:** A dedicated GitHub App (`petry-projects-planner`, App ID

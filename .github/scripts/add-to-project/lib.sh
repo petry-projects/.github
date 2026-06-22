@@ -185,6 +185,11 @@ add_content_to_project() {
   fi
   local content_node_id="$1"
 
+  if [ "${DRY_RUN:-}" = "1" ]; then
+    printf '[dry-run] would add content %s to project\n' "${content_node_id}"
+    return 0
+  fi
+
   # addProjectV2ItemById is idempotent: adding content already on the board
   # returns the existing item, so the add path needs no find-first dedup.
   # shellcheck disable=SC2016  # $projectId/$contentId are GraphQL variables
@@ -206,6 +211,11 @@ add_draft_item() {
   local title="$1"
   local body="$2"
 
+  if [ "${DRY_RUN:-}" = "1" ]; then
+    printf '[dry-run] would add draft: %s\n' "${title}"
+    return 0
+  fi
+
   # shellcheck disable=SC2016  # $projectId/$title/$body are GraphQL variables
   gh api graphql \
     -F projectId="${PROJECT_ID}" \
@@ -224,6 +234,11 @@ delete_project_item() {
     return 64
   fi
   local item_id="$1"
+
+  if [ "${DRY_RUN:-}" = "1" ]; then
+    printf '[dry-run] would delete item %s from project\n' "${item_id}"
+    return 0
+  fi
 
   # Be idempotent on redelivered webhooks / racing runs: a "Could not
   # resolve" error from a no-longer-present item is the desired final state,
