@@ -47,15 +47,17 @@ on:
     types: [closed, labeled]
   schedule:
     - cron: "41 3 * * *" # off-peak safety net for missed close events
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # One lane per repo so a close burst + the schedule cannot fan out duplicate
-  # dispatches. cancel-in-progress=false so queued dispatches are not dropped.
+  # One lane per repo so a close burst + the schedule does not fan out duplicate
+  # dispatches. cancel-in-progress=true cancels any pending/running redundant dispatches
+  # since the central driver sweeps all epics anyway.
   group: initiative-driver-dispatch-${{ github.repository }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   dispatch:
