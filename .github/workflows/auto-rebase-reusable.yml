@@ -65,11 +65,15 @@ on:
       tooling_ref:
         description: |
           Ref of petry-projects/.github to source the auto-rebase scripts from.
-          Defaults to `v1` to match the @v1 pin used by caller stubs. Override
-          only to test a fork/PR branch (`tooling_ref: my-branch`) or main
-          (`tooling_ref: main`) end-to-end.
+          Leave empty (the default) to source them from THIS reusable's own
+          commit (`github.job_workflow_sha`) — that guarantees the predicate in
+          lib/eligibility.sh always matches the version of this workflow the
+          caller pinned, with no skew. (Previously defaulted to `v1`, which
+          predates eligibility.sh and made every run fail with "No such file
+          or directory" — see issue #465.) Override only to test a fork/PR
+          branch (`tooling_ref: my-branch`) end-to-end.
         required: false
-        default: 'v1'
+        default: ''
         type: string
     secrets:
       GH_PAT_WORKFLOWS:
@@ -87,7 +91,11 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: petry-projects/.github
-          ref: ${{ inputs.tooling_ref }}
+          # Source the scripts from this reusable's own commit so the predicate
+          # always matches the pinned workflow version. `job_workflow_sha` is the
+          # commit SHA of THIS reusable file for the run; `tooling_ref` overrides
+          # it only for end-to-end testing of a branch.
+          ref: ${{ inputs.tooling_ref || github.job_workflow_sha }}
           path: .auto-rebase-tooling
           fetch-depth: 1
           persist-credentials: false
