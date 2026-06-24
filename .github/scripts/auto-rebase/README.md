@@ -6,7 +6,7 @@ lives here so it can be unit-tested with bats
 (`test/workflows/auto-rebase/`) instead of being trapped inline in YAML.
 
 The reusable workflow checks this repo out at `inputs.tooling_ref` and sources
-`lib/eligibility.sh` to decide which behind PRs to update. `tooling_ref`
+`lib/eligibility.sh` to decide which out-of-date PRs to update. `tooling_ref`
 defaults to empty, which resolves to the reusable's own commit
 (`github.job_workflow_sha`) so the predicate always matches the pinned
 workflow version. Set `tooling_ref` only to test a branch end-to-end.
