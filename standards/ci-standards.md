@@ -97,12 +97,20 @@ blast radius to the whole fleet. A release is promoted **one ring at a time**,
 advancing to the next ring only after it has run healthy in the inner ring for a
 defined **soak window**:
 
-| Ring | Channel | Blast radius | Pinned by |
+| Ring | Channel | Members (host-relative) | Blast radius |
 |---|---|---|---|
-| 0 — canary | `<name>/next` | The reusable's **own self-host** duty (dogfood) | the host repo itself |
-| 1 | `<name>/ring1` | One low-traffic consumer | that consumer |
-| _n_ | `<name>/ring`_n_ | Progressively more consumers | those consumers |
-| Production | `<name>/stable` | The whole fleet | everyone else |
+| canary | `<name>/next` | the repo that **hosts** the reusable (dogfood at the source) | the host's own self-host duty |
+| 0 | `<name>/ring0` | the **other** org-infra repo (`.github` + `.github-private`, partitioned by host) | org infrastructure |
+| 1 | `<name>/ring1` | named low-traffic consumers | a couple of real consumers |
+| _n_ | `<name>/ring`_n_ | progressively more consumers | widening fleet |
+| Production | `<name>/stable` | everyone else | the whole fleet |
+
+`next` is **host-relative**: it resolves to whichever org-infra repo owns the reusable,
+and `ring0` is the other — so `next` + `ring0` always span `.github` + `.github-private`.
+For `dev-lead` (hosted in `.github-private`): `next` = `.github-private`, `ring0` = `.github`,
+`ring1` = `{TalkTerm, bmad-bgreat-suite}`, `stable` = the rest. The machine-readable source
+of truth is [`standards/canary-rings.json`](https://github.com/petry-projects/.github-private/blob/main/standards/canary-rings.json)
+in the host repo, consumed by the promotion automation.
 
 How it works:
 
@@ -117,23 +125,34 @@ How it works:
   rings never receive the bad version.
 - **Bounded blast radius + fast rollback.** A regression that slips past an inner ring is contained to that ring and rolled back with one tag move, long before it could reach `stable`.
 
-Ring 0 is the reusable's **own self-host**: it dogfoods every release first, at
+The canary ring (`next`) is the reusable's **own self-host**: it dogfoods every release first, at
 zero external blast radius. This is also what breaks the self-host circular
 dependency — production callers keep running `stable` while the new version is
 exercised on `next`, so a broken candidate can never gate its own fix.
 
-> **Rollout status.** The full ring model — `next`/`ring`_n_/`stable` channels,
-> immutable `<agent>/vX.Y.Z` releases, and promotion by a central tag move — is
-> **implemented and in production** for the `.github-private` agents (`dev-lead`,
-> `pr-review`), managed by `scripts/cut-release.sh` and `docs/release/` in that
-> repo (the canary/ring versioning initiative, epic #495). The authoritative
-> process lives there; this section summarizes it.
+> **Rollout status.** The full ring model — host-relative `next`/`ring`_n_/`stable`
+> channels, immutable `<agent>/vX.Y.Z` releases, and promotion by a central tag move
+> — is **implemented and in production** for `dev-lead` (the pathfinder; `v1.4.0`
+> rolled out canary → rings → `stable` and verified). It is managed in
+> `petry-projects/.github-private` (the canary/ring versioning initiative, epic #495):
 >
-> `.github`-hosted reusables (e.g. `feature-ideation` and the Tier-1 caller
-> reusables) are being brought under the same model — `cut-release.sh` is being
-> extended to cover them. Until a given reusable has its ring channels cut, it may
-> run on `stable` alone and promote in one gated hop, but that is an interim
-> state, not the target: `stable`-only is not a substitute for the ring ladder.
+> - `scripts/cut-release.sh` cuts immutable releases.
+> - `standards/canary-rings.json` is the ring-membership source of truth.
+> - `scripts/canary-rollout.sh` + `.github/workflows/canary-rollout.yml` run the
+>   **automated, health-gated promotion**: a read-only `evaluate` every 4h reports
+>   each ring's gate state, and a dispatch-gated `promote` advances **one ring at a
+>   time** only when the rings already on the candidate pass the **soak gate** —
+>   volume `healthy_runs ≥ ceil(baseline_runs / 7)` **and** candidate failure-rate
+>   `≤` baseline (no synthetic floor; an unused reusable simply parks). Rollback is
+>   the same single tag move in reverse against the prior `vX.Y.Z`.
+> - The channel tags are protected by a `release-channel-tags` ruleset in the host repo
+>   (`.github-private`); the promotion workflow is the authorized mover.
+>
+> The authoritative process lives in that repo's `docs/release/` (`versioning.md`,
+> `runbook.md`); this section summarizes it. `pr-review` and the `.github`-hosted
+> reusables (e.g. `feature-ideation`) are being brought under the same model next
+> (#499/#616/#688). Until a given reusable has its ring channels cut, it may run on
+> `stable` alone and promote in one gated hop — an interim state, not the target.
 
 **Migration.** This is the target for all reusable workflows; they adopt it
 incrementally. A reusable that has not yet published a `stable` channel keeps its
