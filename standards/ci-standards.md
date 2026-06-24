@@ -125,7 +125,7 @@ How it works:
   rings never receive the bad version.
 - **Bounded blast radius + fast rollback.** A regression that slips past an inner ring is contained to that ring and rolled back with one tag move, long before it could reach `stable`.
 
-Ring 0 is the reusable's **own self-host**: it dogfoods every release first, at
+The canary ring (`next`) is the reusable's **own self-host**: it dogfoods every release first, at
 zero external blast radius. This is also what breaks the self-host circular
 dependency — production callers keep running `stable` while the new version is
 exercised on `next`, so a broken candidate can never gate its own fix.
