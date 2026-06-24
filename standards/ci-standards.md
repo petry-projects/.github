@@ -1066,6 +1066,7 @@ channel:
 | [`initiative-planner.yml`](workflows/initiative-planner.yml) | [`initiative-planner-reusable.yml`](../.github/workflows/initiative-planner-reusable.yml) | `discussion [labeled] idea:approved` (trusted actor) → central planner builds an **inert** epic + story DAG (`initiative`, **not** `initiative:auto`) in the host repo |
 | [`idea-triage.yml`](workflows/idea-triage.yml) | [`idea-triage-reusable.yml`](../.github/workflows/idea-triage-reusable.yml) | weekly + dispatch → refresh the host repo's "Idea Promotion Queue" issue |
 | [`idea-enhancer.yml`](workflows/idea-enhancer.yml) | [`idea-enhancer-reusable.yml`](../.github/workflows/idea-enhancer-reusable.yml) | new Ideas Discussion + weekly → enrich the host repo's un-enhanced ideas |
+| [`initiative-driver.yml`](workflows/initiative-driver.yml) | _(none — direct `gh workflow run`)_ | `issues [closed, labeled] initiative:auto` + off-peak `schedule` → dispatches the central `initiative-driver` with `target_repo=<host>`; the central driver releases ready sub-issues of the host's `initiative:auto` epics to dev-lead |
 
 Two human gates keep judgement with a maintainer: adding `idea:approved` to a
 Discussion fires the planner; adding `initiative:auto` to the resulting epic
