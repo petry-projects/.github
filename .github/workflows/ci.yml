@@ -62,7 +62,8 @@ jobs:
           chmod +x actionlint
           rm actionlint.tar.gz
           # Lint our own workflow files (fail on errors, ignore shellcheck style hints)
-          ./actionlint -ignore 'SC2129' .github/workflows/*.yml
+          # `job_workflow_sha` is a valid reusable-workflow context property; actionlint 1.7.7 schema omits it
+          ./actionlint -ignore 'SC2129' -ignore '"job_workflow_sha" is not defined' .github/workflows/*.yml
           # Template workflows use placeholder expressions — informational only
           ./actionlint -ignore 'context' standards/workflows/*.yml || true
 
