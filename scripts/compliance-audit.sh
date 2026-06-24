@@ -1515,9 +1515,30 @@ check_copilot_instructions() {
 check_check_suite_prefs() {
   local repo="$1"
 
-  local prefs
-  prefs=$(gh_api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
-  if [ -z "$prefs" ]; then
+  # The GET endpoint returns 404 when check-suite preferences have never been
+  # set for this repo — i.e. no app (Claude/CodeRabbit) has created a check run
+  # yet, so no orphaned "queued" suite can exist. That is the compliant
+  # "missing" state (mirrors the per-app handling below), not a read failure, so
+  # it must not raise a finding. Only a genuine unreadable error (auth/scope/
+  # network) warrants the warning. apply-repo-settings.sh and
+  # fix-check-suite-prefs.sh tolerate this same 404. Capture the GET's combined
+  # output and exit status (gh_api swallows both) so the cases can be told apart.
+  local prefs="" rc=1 i
+  for i in 1 2 3; do
+    prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      break
+    fi
+    # 404 is deterministic and benign — stop retrying and report nothing.
+    if grep -q 'HTTP 404' <<< "$prefs"; then
+      return 0
+    fi
+    if [ "$i" -lt 3 ]; then
+      sleep $((i * 2))
+    fi
+  done
+
+  if [ "$rc" -ne 0 ]; then
     add_finding "$repo" "settings" "check-suite-prefs-unreadable" "warning" \
       "Could not read check-suite preferences — verify GH_TOKEN has repo scope and the repo is accessible. Check-suite auto-trigger compliance was not evaluated." \
       "standards/github-settings.md"
