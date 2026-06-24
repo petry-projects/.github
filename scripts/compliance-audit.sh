@@ -1525,15 +1525,13 @@ check_check_suite_prefs() {
   # output and exit status (gh_api swallows both) so the cases can be told apart.
   local prefs="" rc=1 i
   for i in 1 2 3; do
-    if prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1); then
-      rc=0
+    prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
       break
-    else
-      rc=$?
     fi
     # 404 is deterministic and benign — stop retrying and report nothing.
     if grep -q 'HTTP 404' <<< "$prefs"; then
-      return
+      return 0
     fi
     if [ "$i" -lt 3 ]; then
       sleep $((i * 2))
