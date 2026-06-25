@@ -2013,23 +2013,27 @@ check_centralized_workflow_stubs() {
   [ "$repo" = ".github" ] && return
 
   # workflow-filename:reusable-basename:canonical-pin:legacy-accepted-csv
-  #   canonical-pin       — the org-standard ref a stub should pin (the moving
-  #                         <name>/stable channel for migrated reusables).
-  #   legacy-accepted-csv — comma-separated refs still accepted *during the
-  #                         channel migration* so the audit neither flags nor
-  #                         reverts a stub still on its old @vN pin (#482). Empty
-  #                         once the fleet is fully migrated (then drop the grace).
+  #   canonical-pin       — the org-standard ref a stub should pin. The sentinel
+  #                         `RING` means "this reusable is on the canary-ring
+  #                         model": the expected channel is the repo's RING TIER
+  #                         (next/ring0/ring1/stable — see ring_tier_for_repo),
+  #                         e.g. `agent-shield/ring1` on a ring1 repo. Any other
+  #                         value is a fixed pin (e.g. feature-ideation → v1).
+  #   legacy-accepted-csv — additional refs still accepted *during* migration so
+  #                         the audit neither flags nor reverts a stub mid-move.
+  #                         For RING reusables the per-repo legacy set (the
+  #                         `<name>/stable` channel + v1,v2) is computed below.
   # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
   # the private petry-projects/.github-private repo and is pinned to the
   # dev-lead/stable channel, validated by check_dev_lead_stub() below.
   local centralized=(
-    "auto-rebase.yml:auto-rebase-reusable:auto-rebase/stable:v1,v2"
-    "dependency-audit.yml:dependency-audit-reusable:dependency-audit/stable:v1,v2"
-    "dependabot-automerge.yml:dependabot-automerge-reusable:dependabot-automerge/stable:v1,v2"
-    "dependabot-rebase.yml:dependabot-rebase-reusable:dependabot-rebase/stable:v1,v2"
-    "agent-shield.yml:agent-shield-reusable:agent-shield/stable:v1,v2"
+    "auto-rebase.yml:auto-rebase-reusable:RING"
+    "dependency-audit.yml:dependency-audit-reusable:RING"
+    "dependabot-automerge.yml:dependabot-automerge-reusable:RING"
+    "dependabot-rebase.yml:dependabot-rebase-reusable:RING"
+    "agent-shield.yml:agent-shield-reusable:RING"
     "feature-ideation.yml:feature-ideation-reusable:v1:"
-    "pr-review-mention.yml:pr-review-mention-reusable:pr-review-mention/stable:v1,v2"
+    "pr-review-mention.yml:pr-review-mention-reusable:RING"
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -2042,6 +2046,22 @@ check_centralized_workflow_stubs() {
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable canonical legacy <<< "$entry"
     [ -z "$canonical" ] && { echo "::error::centralized entry '$entry' missing canonical pin — expected format 'wf:reusable:canonical:legacy-csv'" >&2; exit 1; }
+
+    # RING sentinel: this reusable is on the canary-ring model. The canonical
+    # ref is the channel for THIS repo's ring tier (next/ring0/ring1/stable),
+    # and the per-repo legacy grace accepts the `<name>/stable` channel plus the
+    # pre-ring @v1/@v2 pins so the audit neither flags nor reverts a stub while
+    # the fleet migrates onto the rings (#870, same revert-collision lesson as
+    # #482). Higher tiers are also acceptable so a repo pinned ahead of its tier
+    # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
+    # /stable) is never flagged — only @main / inline / off-channel pins are.
+    if [ "$canonical" = "RING" ]; then
+      local chan tier
+      chan="${reusable%-reusable}"
+      tier="$(ring_tier_for_repo "$repo")"
+      canonical="${chan}/${tier}"
+      legacy="${chan}/next,${chan}/ring0,${chan}/ring1,${chan}/stable,v1,v2"
+    fi
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
