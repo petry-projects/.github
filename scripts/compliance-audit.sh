@@ -1548,6 +1548,22 @@ check_centralized_workflow_stubs() {
       legacy="$(ring_legacy_csv "$chan" "$repo")"
     fi
 
+    # RING sentinel: this reusable is on the canary-ring model. The canonical
+    # ref is the channel for THIS repo's ring tier (next/ring0/ring1/stable),
+    # and the per-repo legacy grace accepts the `<name>/stable` channel plus the
+    # pre-ring @v1/@v2 pins so the audit neither flags nor reverts a stub while
+    # the fleet migrates onto the rings (#870, same revert-collision lesson as
+    # #482). Higher tiers are also acceptable so a repo pinned ahead of its tier
+    # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
+    # /stable) is never flagged — only @main / inline / off-channel pins are.
+    if [ "$canonical" = "RING" ]; then
+      local chan tier
+      chan="${reusable%-reusable}"
+      tier="$(ring_tier_for_repo "$repo")"
+      canonical="${chan}/${tier}"
+      legacy="${chan}/next,${chan}/ring0,${chan}/ring1,${chan}/stable,v1,v2"
+    fi
+
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
     # (dependabot-rebase, feature-ideation) are intentionally optional.
