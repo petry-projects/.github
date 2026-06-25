@@ -138,6 +138,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/dev-lead-retrigger.sh
 . "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
 
+# Canary-ring pin model — ring_tier_for_repo(), ring_canonical_ref(),
+# ring_legacy_csv(). Shared with deploy-standard-workflows.sh so the audit's
+# "non-compliant" and the deploy sweep's "drift" stay in lockstep (#482).
+# shellcheck source=lib/ring-pins.sh
+. "$SCRIPT_DIR/lib/ring-pins.sh"
+
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -1042,23 +1048,9 @@ stub_pin_acceptable() {
   printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"
 }
 
-# ring_tier_for_repo <repo>
-# Map a repo to its canary-ring tier for the #482 reusables (epic #495 topology):
-#   next   — .github-private  (candidate / first soak)
-#   ring0  — .github          (dogfood; but .github self-hosts via @main and is
-#                              skipped by the stub check, so this is informational)
-#   ring1  — TalkTerm, bmad-bgreat-suite  (early fleet canary)
-#   stable — everything else  (broad fleet)
-# Keep in sync with docs/release/ring topology and cut-release.sh channels.
-ring_tier_for_repo() {
-  case "$1" in
-    .github-private)            printf 'next' ;;
-    .github)                    printf 'ring0' ;;
-    TalkTerm | bmad-bgreat-suite) printf 'ring1' ;;
-    *)                          printf 'stable' ;;
-  esac
-  return 0
-}
+# ring_tier_for_repo(), ring_canonical_ref() and ring_legacy_csv() are provided by
+# lib/ring-pins.sh (sourced above) — the single source of truth shared with the
+# deploy sweep so the audit and the deploy never disagree on a stub's pin (#482).
 
 check_centralized_workflow_stubs() {
   local repo="$1"
@@ -1111,11 +1103,10 @@ check_centralized_workflow_stubs() {
     # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
     # /stable) is never flagged — only @main / inline / off-channel pins are.
     if [ "$canonical" = "RING" ]; then
-      local chan tier
+      local chan
       chan="${reusable%-reusable}"
-      tier="$(ring_tier_for_repo "$repo")"
-      canonical="${chan}/${tier}"
-      legacy="${chan}/next,${chan}/ring0,${chan}/ring1,${chan}/stable,v1,v2"
+      canonical="$(ring_canonical_ref "$chan" "$repo")"
+      legacy="$(ring_legacy_csv "$chan" "$repo")"
     fi
 
     # Skip workflows that don't exist in this repo. Required workflows are
