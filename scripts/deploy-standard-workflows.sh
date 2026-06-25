@@ -33,6 +33,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/standards-deploy.sh
 source "$SCRIPT_DIR/lib/standards-deploy.sh"
+# Canary-ring pin model — shared with compliance-audit.sh so this sweep's notion
+# of "drift" matches the audit's "non-compliant" and never reverts a repo's
+# intentional ring/next pin back to the template's stable channel (#482).
+# shellcheck source=scripts/lib/ring-pins.sh
+source "$SCRIPT_DIR/lib/ring-pins.sh"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -149,12 +154,34 @@ fetch_existing() {
 
 # True if the existing decoded content already has the canonical uses: reference
 # for this workflow (extracted from the template itself, so it tracks version bumps).
+#
+# Ring-aware (#482): templates pin a moving channel tag `<base>/stable`, but a
+# repo on a non-stable ring tier legitimately pins `<base>/<tier>` (e.g.
+# `<base>/ring1`). For those reusables the stub is compliant when it pins ANY ref
+# the shared ring model accepts for THIS repo (its tier channel + the transitional
+# legacy grace) — so the sweep never reverts an intentional ring/next pin. Non-ring
+# templates (e.g. add-to-project, feature-ideation@v1) keep the exact-match rule.
 is_already_compliant() {
-  local existing_content="$1" template="$2"
+  local existing_content="$1" template="$2" repo="$3"
   local expected_uses
   expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | tr -d '\r')
   [[ -z "$expected_uses" ]] && return 1
-  echo "$existing_content" | grep -qF "$expected_uses"
+
+  local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
+  if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then
+    base="${BASH_REMATCH[1]}"
+    # Only treat it as ring-managed if the reusable is on the ring model AND the
+    # template pins a channel tag (not a frozen @vX / SHA).
+    if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(stable|next|ring[0-9]+)$ ]]; then
+      local ref
+      while IFS= read -r ref; do
+        [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
+      done < <(ring_accepted_refs "$base" "$repo")
+      return 1
+    fi
+  fi
+
+  grep -qF "$expected_uses" <<< "$existing_content"
 }
 
 # Build the PR body for a batched stub deployment (one PR per repo).
@@ -197,7 +224,7 @@ deploy_repo() {
     raw=$(fetch_existing "$repo" "$target_path")
     existing_sha="${raw%%$'\t'*}"
     existing_content="${raw#*$'\t'}"
-    if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template"; then
+    if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template" "$repo"; then
       skip "$repo/$target_path already compliant"
       continue
     fi

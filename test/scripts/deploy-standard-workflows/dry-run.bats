@@ -62,3 +62,32 @@ STUB
   echo "$output" | grep -q 'already compliant'
   echo "$output" | grep -vq 'Would open PR'
 }
+
+# Ring-awareness (#482): the auto-rebase template pins @auto-rebase/stable, but a
+# ring1 repo legitimately pins @auto-rebase/ring1. The sweep must treat that as
+# compliant and NOT plan a PR reverting it to stable.
+stub_pinning() {  # <ref> → base64 of a minimal stub pinning the reusable at <ref>
+  local body="jobs:
+  auto-rebase:
+    uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@$1
+    secrets: inherit"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
+@test "dry-run treats a ring1 tier-channel pin as compliant on a ring1 repo" {
+  GH_CONTENT_B64="$(stub_pinning auto-rebase/ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  echo "$output" | grep -vq 'Would open PR'
+}
+
+@test "dry-run still flags an off-channel (SHA) pin on a ring1 repo" {
+  GH_CONTENT_B64="$(stub_pinning '376a4fcb1117444595e3e702fa450873d0e54310 # auto-rebase/stable')"
+  export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
+}
