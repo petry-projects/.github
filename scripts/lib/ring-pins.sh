@@ -21,7 +21,7 @@
 # WITHOUT the `-reusable` suffix (e.g. `auto-rebase`, not `auto-rebase-reusable`)
 # and WITHOUT the `.yml` extension. dev-lead is included: it is ring-released too
 # (its reusable lives in .github-private but the same tier topology applies).
-RING_REUSABLES=(
+readonly RING_REUSABLES=(
   auto-rebase
   dependency-audit
   dependabot-automerge
@@ -62,6 +62,7 @@ ring_is_ring_reusable() {
 # `agent-shield/ring1` on a ring1 repo.
 ring_canonical_ref() {
   printf '%s/%s' "$1" "$(ring_tier_for_repo "$2")"
+  return 0
 }
 
 # ring_accepted_refs <channel-base> <repo> -> newline-separated list of refs that
@@ -75,6 +76,7 @@ ring_accepted_refs() {
   local name="$1" repo="$2"
   ring_canonical_ref "$name" "$repo"; printf '\n'
   printf '%s/next\n%s/ring0\n%s/ring1\n%s/stable\nv1\nv2\n' "$name" "$name" "$name" "$name"
+  return 0
 }
 
 # ring_legacy_csv <channel-base> <repo> -> the accepted refs EXCEPT the canonical
@@ -82,4 +84,5 @@ ring_accepted_refs() {
 # legacy separately.
 ring_legacy_csv() {
   ring_accepted_refs "$1" "$2" | tail -n +2 | paste -sd, -
+  return 0
 }

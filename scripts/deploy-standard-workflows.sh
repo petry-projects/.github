@@ -181,7 +181,7 @@ is_already_compliant() {
     fi
   fi
 
-  grep -qF "$expected_uses" <<< "$existing_content"
+  grep -qF "$expected_uses" <<< "$existing_content" && return 0 || return 1
 }
 
 # Build the PR body for a batched stub deployment (one PR per repo).
