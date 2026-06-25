@@ -1057,6 +1057,7 @@ ring_tier_for_repo() {
     TalkTerm | bmad-bgreat-suite) printf 'ring1' ;;
     *)                          printf 'stable' ;;
   esac
+  return 0
 }
 
 check_centralized_workflow_stubs() {
