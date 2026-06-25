@@ -62,3 +62,35 @@ R="petry-projects/.github/.github/workflows/agent-shield-reusable.yml"
   accept "    uses: $R@v2" "v1" ""
   [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# ring_tier_for_repo() — maps a repo to its canary-ring tier (epic #495).
+# ---------------------------------------------------------------------------
+tier() {
+  run bash -c 'source "$1" >/dev/null 2>&1; ring_tier_for_repo "$2"' _ "$SCRIPT" "$1"
+}
+
+@test "ring tier: .github-private is next" {
+  tier ".github-private"
+  [ "$status" -eq 0 ]
+  [ "$output" = "next" ]
+}
+
+@test "ring tier: .github is ring0 (dogfood)" {
+  tier ".github"
+  [ "$output" = "ring0" ]
+}
+
+@test "ring tier: TalkTerm and bmad-bgreat-suite are ring1" {
+  tier "TalkTerm"
+  [ "$output" = "ring1" ]
+  tier "bmad-bgreat-suite"
+  [ "$output" = "ring1" ]
+}
+
+@test "ring tier: any other repo defaults to stable" {
+  tier "markets"
+  [ "$output" = "stable" ]
+  tier "broodly"
+  [ "$output" = "stable" ]
+}
