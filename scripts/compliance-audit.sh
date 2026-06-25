@@ -2056,11 +2056,10 @@ check_centralized_workflow_stubs() {
     # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
     # /stable) is never flagged — only @main / inline / off-channel pins are.
     if [ "$canonical" = "RING" ]; then
-      local chan tier
+      local chan
       chan="${reusable%-reusable}"
-      tier="$(ring_tier_for_repo "$repo")"
-      canonical="${chan}/${tier}"
-      legacy="${chan}/next,${chan}/ring0,${chan}/ring1,${chan}/stable,v1,v2"
+      canonical="$(ring_canonical_ref "$chan" "$repo")"
+      legacy="$(ring_legacy_csv "$chan" "$repo")"
     fi
 
     # Skip workflows that don't exist in this repo. Required workflows are
