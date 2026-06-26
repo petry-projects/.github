@@ -33,17 +33,20 @@ setup() {
   [ "$(ring_canonical_ref dev-lead .github-private)" = "dev-lead/next" ]
 }
 
-@test "ring_accepted_refs: canonical first, then legacy grace" {
+@test "ring_accepted_refs: canonical first, then the ring-channel grace" {
   run ring_accepted_refs auto-rebase TalkTerm
   [ "${lines[0]}" = "auto-rebase/ring1" ]                 # canonical = tier channel
   printf '%s\n' "${lines[@]}" | grep -qx "auto-rebase/stable"  # higher tier accepted
-  printf '%s\n' "${lines[@]}" | grep -qx "v1"                  # pre-ring grace
-  printf '%s\n' "${lines[@]}" | grep -qx "v2"
+  # the pre-ring @v1/@v2 grace was dropped in #870 — migration complete
+  ! printf '%s\n' "${lines[@]}" | grep -qx "v1"
+  ! printf '%s\n' "${lines[@]}" | grep -qx "v2"
 }
 
-@test "ring_legacy_csv excludes the canonical and comma-joins the rest" {
+@test "ring_legacy_csv excludes the canonical and comma-joins the ring channels" {
   run ring_legacy_csv auto-rebase markets
-  # canonical (auto-rebase/stable) must not be duplicated in the legacy list head
-  [[ "$output" == *"v1,v2"* ]]
   [[ "$output" == *"auto-rebase/next"* ]]
+  [[ "$output" == *"auto-rebase/ring1"* ]]
+  # no pre-ring grace
+  [[ "$output" != *"v1"* ]]
+  [[ "$output" != *"v2"* ]]
 }
