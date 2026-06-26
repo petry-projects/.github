@@ -78,8 +78,9 @@ ring_canonical_ref() {
 # is now flagged — the migration is complete, so those are genuine drift.
 ring_accepted_refs() {
   local name="$1" repo="$2"
-  ring_canonical_ref "$name" "$repo"; printf '\n'
-  printf '%s/next\n%s/ring0\n%s/ring1\n%s/stable\n' "$name" "$name" "$name" "$name"
+  local canonical; canonical=$(ring_canonical_ref "$name" "$repo")
+  printf '%s\n' "$canonical"
+  printf '%s/next\n%s/ring0\n%s/ring1\n%s/stable\n' "$name" "$name" "$name" "$name" | grep -vFx "$canonical"
   return 0
 }
 

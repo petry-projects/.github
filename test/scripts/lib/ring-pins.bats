@@ -46,6 +46,7 @@ setup() {
   run ring_legacy_csv auto-rebase markets
   [[ "$output" == *"auto-rebase/next"* ]]
   [[ "$output" == *"auto-rebase/ring1"* ]]
+  [[ "$output" != *"auto-rebase/stable"* ]]
   # no pre-ring grace
   [[ "$output" != *"v1"* ]]
   [[ "$output" != *"v2"* ]]
