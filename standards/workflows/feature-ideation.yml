@@ -64,6 +64,11 @@ on:
         required: false
         default: false
         type: boolean
+      enhance_backlog:
+        description: 'Backlog enhancement sweep: enhance this repo''s open, human-authored, not-yet-enhanced Ideas (one comment each, idempotent). Combine with dry_run=true to preview.'
+        required: false
+        default: false
+        type: boolean
   # Auto-enhance a freshly-created idea: when a new Discussion is opened in the
   # Ideas category, the analyst researches and refines it in single-idea mode.
   discussion:
@@ -123,5 +128,7 @@ jobs:
       focus_area: ${{ inputs.focus_area || '' }}
       research_depth: ${{ inputs.research_depth || 'standard' }}
       dry_run: ${{ inputs.dry_run || false }}
+      # Backlog enhancement sweep of existing un-enhanced Ideas (workflow_dispatch).
+      enhance_backlog: ${{ inputs.enhance_backlog || false }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
