@@ -21,8 +21,10 @@ accept() {
     _ "$SCRIPT" "$line" "$canonical" "$legacy"
 }
 
-C="agent-shield/stable"   # canonical channel for these tests
-L="v1,v2"                 # transitional legacy grace
+C="agent-shield/stable"   # canonical channel for these tests (a stable-tier repo)
+# Retained grace = the other ring channels (a repo pinned to a higher tier than
+# its own is never flagged). The pre-ring @v1/@v2 grace was dropped in #870.
+L="agent-shield/next,agent-shield/ring0,agent-shield/ring1"
 R="petry-projects/.github/.github/workflows/agent-shield-reusable.yml"
 
 @test "canonical channel pin is accepted" {
@@ -30,14 +32,19 @@ R="petry-projects/.github/.github/workflows/agent-shield-reusable.yml"
   [ "$status" -eq 0 ]
 }
 
-@test "transitional legacy @v1 is accepted" {
-  accept "    uses: $R@v1" "$C" "$L"
+@test "a higher-tier ring channel is accepted (promotion grace)" {
+  accept "    uses: $R@agent-shield/ring1" "$C" "$L"
   [ "$status" -eq 0 ]
 }
 
-@test "transitional legacy @v2 is accepted" {
+@test "a pre-ring @v1 pin is now rejected (grace dropped, #870)" {
+  accept "    uses: $R@v1" "$C" "$L"
+  [ "$status" -ne 0 ]
+}
+
+@test "a pre-ring @v2 pin is now rejected (grace dropped, #870)" {
   accept "    uses: $R@v2" "$C" "$L"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
 }
 
 @test "a SHA pin is rejected (must move to the channel)" {

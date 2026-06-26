@@ -67,15 +67,20 @@ ring_canonical_ref() {
 
 # ring_accepted_refs <channel-base> <repo> -> newline-separated list of refs that
 # a stub in <repo> may pin without being flagged/reverted. The FIRST line is the
-# canonical tier channel; the rest are the transitional legacy grace: every ring
-# channel (so a repo pinned to a higher tier — e.g. ring1 still on /stable, or a
-# promoted /next — is never flagged) plus the pre-ring @v1/@v2 pins (so a stub
-# mid-migration is left alone). The grace is dropped once the fleet is fully on
-# the rings (#870 follow-up); dropping it here tightens BOTH consumers at once.
+# canonical tier channel; the rest are every ring channel, so a repo pinned to a
+# HIGHER tier than its own (e.g. a ring1 repo still on /stable, or a /next pin
+# promoted toward /stable) is never flagged and cut-release.sh promotions roll
+# without the audit tripping mid-promotion.
+#
+# The pre-ring @v1/@v2 migration grace was DROPPED in #870 once the whole fleet
+# was confirmed on `<name>/<tier>` channels (only .github's own dogfood callers
+# still carry @v2, and both consumers skip .github). A stub on @v1/@v2/SHA/@main
+# is now flagged — the migration is complete, so those are genuine drift.
 ring_accepted_refs() {
   local name="$1" repo="$2"
-  ring_canonical_ref "$name" "$repo"; printf '\n'
-  printf '%s/next\n%s/ring0\n%s/ring1\n%s/stable\nv1\nv2\n' "$name" "$name" "$name" "$name"
+  local canonical; canonical=$(ring_canonical_ref "$name" "$repo")
+  printf '%s\n' "$canonical"
+  printf '%s/next\n%s/ring0\n%s/ring1\n%s/stable\n' "$name" "$name" "$name" "$name" | grep -vFx "$canonical"
   return 0
 }
 
