@@ -74,6 +74,18 @@ on:
         required: false
         default: ''
         type: string
+      enhance_backlog:
+        description: |
+          When true, run in BACKLOG ENHANCEMENT mode: sweep this repo's open,
+          human-authored, not-yet-enhanced Ideas Discussions and post one
+          enhancement comment on each (idempotent via the marker — see E1). Ignored
+          when `target_discussion` is set (single-idea mode wins). With
+          `dry_run: true`, the intended comments are logged to the JSONL artifact
+          rather than posted. This restores the existing-backlog sweep that the
+          standalone idea-enhancer provided before consolidation.
+        required: false
+        default: false
+        type: boolean
       tooling_ref:
         description: |
           Ref of petry-projects/.github to source the feature-ideation scripts from.
@@ -224,6 +236,7 @@ jobs:
           TOOLING_DIR: ${{ github.workspace }}/.feature-ideation-tooling/.github/scripts/feature-ideation
           FOCUS_AREA: ${{ inputs.focus_area || '' }}
           TARGET_DISCUSSION: ${{ inputs.target_discussion || '' }}
+          ENHANCE_BACKLOG: ${{ inputs.enhance_backlog && '1' || '0' }}
           SOURCES_FILE_PATH: ${{ inputs.sources_file }}
           RESEARCH_DEPTH: ${{ inputs.research_depth }}
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1.0.133
@@ -277,6 +290,7 @@ jobs:
             - `$DRY_RUN`          — "1" = mutations are logged to `$DRY_RUN_LOG`, not executed
             - `$FOCUS_AREA`       — optional focus area (empty = open exploration)
             - `$TARGET_DISCUSSION`— if non-empty, a Discussion number to enhance (single-idea mode)
+            - `$ENHANCE_BACKLOG`  — "1" = backlog enhancement sweep (used only when `$TARGET_DISCUSSION` is empty)
             - `$RESEARCH_DEPTH`   — quick | standard | deep
             - `$GH_TOKEN`         — workflow token with `discussions: write`
 
@@ -305,12 +319,41 @@ jobs:
                `comment_on_discussion "$DISCUSSION_ID" "$BODY"` (the Phase-8 helper).
                Do **NOT** create new Discussions, run the matcher, or comment on anything
                else. If the Discussion is not in the `ideas` category, exit without posting.
-            5. Idempotency: if a prior comment already carries the marker
-               `<!-- feature-ideation:enhanced -->`, do nothing. Otherwise begin your comment
-               with that exact HTML marker so re-runs are safe.
+            5. Idempotency (marker continuity): treat the Discussion as ALREADY ENHANCED —
+               and do nothing — if any existing comment carries EITHER
+               `<!-- feature-ideation:enhanced -->` OR the legacy
+               `<!-- idea-enhancer:enhanced -->` marker. Otherwise begin your comment with
+               the canonical `<!-- feature-ideation:enhanced -->` marker so re-runs (and the
+               cutover from the old idea-enhancer) are safe.
 
-            **If `$TARGET_DISCUSSION` is empty**, ignore this section and run the normal
-            scheduled ideation below.
+            **Else, if `$ENHANCE_BACKLOG` is "1"** (and `$TARGET_DISCUSSION` is empty), run in
+            **backlog enhancement mode** and SKIP the broad scheduled scan — this backfills
+            existing ideas and never generates new ones:
+
+            1. Enumerate this repo's open Discussions in the `ideas` category via GraphQL with
+               `$GH_TOKEN` (derive OWNER/REPO from `${{ github.repository }}`), paging through
+               all of them:
+               ```bash
+               QUERY='{repository(owner:"OWNER",name:"REPO"){discussions(first:50,after:CURSOR){'
+               QUERY+='pageInfo{hasNextPage endCursor} nodes{number id title body category{slug}'
+               QUERY+=' author{login __typename} comments(first:50){nodes{author{login} body}}}}}}'
+               gh api graphql -f query="$QUERY"
+               ```
+            2. Build the **candidate** set: `category.slug == "ideas"` AND the author is a real
+               human (author `__typename` is `User`, not `Bot`/`Organization`) AND no existing
+               comment carries EITHER marker from step 5. Skip everything else (bot-authored
+               ideas, and anything already enhanced under either marker). If there are no
+               candidates, print a short summary and exit cleanly.
+            3. For EACH candidate, perform the SAME focused per-idea research + ONE additive
+               enhancement comment as single-idea steps 2–4 above, beginning the comment with
+               the canonical `<!-- feature-ideation:enhanced -->` marker. Post **exactly one**
+               comment per candidate via `comment_on_discussion "$DISCUSSION_ID" "$BODY"` (the
+               Phase-8 helper, which honors `$DRY_RUN`: when `$DRY_RUN` is "1" it logs the
+               intended comment to `$DRY_RUN_LOG` and posts NOTHING). Do **NOT** create
+               Discussions, run the matcher, or comment on non-candidates.
+
+            **If `$TARGET_DISCUSSION` is empty AND `$ENHANCE_BACKLOG` is not "1"**, ignore the
+            enhancement sections above and run the normal scheduled ideation below.
 
             ## Phase 1: Load Context
 
