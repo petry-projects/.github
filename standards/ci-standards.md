@@ -910,10 +910,10 @@ skips the bot's own creations; enhancement is a comment (which does not re-fire
 `created`), so there is no trigger loop.
 
 **Backlog enhancement (backfill) + dry-run.** Beyond enhancing *newly-created*
-ideas, the reusable can **backfill the existing Ideas backlog**: dispatch with
+Ideas, the reusable can **backfill the existing Ideas backlog**: dispatch with
 `enhance_backlog: true` to sweep this repo's open, **human-authored**,
 not-yet-enhanced Ideas and post **exactly one** enhancement comment on each
-(bots and already-enhanced ideas are skipped). Combine with `dry_run: true` to
+(bots and already-enhanced Ideas are skipped). Combine with `dry_run: true` to
 **preview** — the intended per-Discussion comments are logged to the JSONL
 artifact and nothing is posted:
 
