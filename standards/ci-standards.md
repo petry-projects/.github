@@ -916,12 +916,14 @@ not-yet-enhanced Ideas and post **exactly one** enhancement comment on each
 (bots and already-enhanced ideas are skipped). Combine with `dry_run: true` to
 **preview** — the intended per-Discussion comments are logged to the JSONL
 artifact and nothing is posted:
+
 ```bash
 # Preview the backfill (posts nothing):
 gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true -f dry_run=true
 # Run it for real:
 gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true
 ```
+
 Idempotency is **marker-continuous**: a Discussion is treated as already-enhanced
 if it carries **either** `<!-- feature-ideation:enhanced -->` **or** the legacy
 `<!-- idea-enhancer:enhanced -->`, so re-runs are no-ops and the cutover from the
