@@ -909,6 +909,27 @@ job-level `if` restricts this to new Discussions in the **Ideas** category and
 skips the bot's own creations; enhancement is a comment (which does not re-fire
 `created`), so there is no trigger loop.
 
+**Backlog enhancement (backfill) + dry-run.** Beyond enhancing *newly-created*
+Ideas, the reusable can **backfill the existing Ideas backlog**: dispatch with
+`enhance_backlog: true` to sweep this repo's open, **human-authored**,
+not-yet-enhanced Ideas and post **exactly one** enhancement comment on each
+(bots and already-enhanced Ideas are skipped). Combine with `dry_run: true` to
+**preview** — the intended per-Discussion comments are logged to the JSONL
+artifact and nothing is posted:
+
+```bash
+# Preview the backfill (posts nothing):
+gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true -f dry_run=true
+# Run it for real:
+gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true
+```
+
+Idempotency is **marker-continuous**: a Discussion is treated as already-enhanced
+if it carries **either** `<!-- feature-ideation:enhanced -->` **or** the legacy
+`<!-- idea-enhancer:enhanced -->`, so re-runs are no-ops and the cutover from the
+former standalone `idea-enhancer` never double-enhances. `target_discussion`
+(single-idea mode) takes precedence over `enhance_backlog` when both are set.
+
 **The pipeline (the reason this workflow exists):**
 
 | Phase | Skill | Purpose |
