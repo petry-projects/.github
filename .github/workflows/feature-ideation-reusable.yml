@@ -334,7 +334,10 @@ jobs:
                `$GH_TOKEN` (derive OWNER/REPO from `${{ github.repository }}`), paging through
                all of them:
                ```bash
-               gh api graphql -f query='{repository(owner:"OWNER",name:"REPO"){discussions(first:50,after:CURSOR){pageInfo{hasNextPage endCursor} nodes{number id title body category{slug} author{login __typename} comments(first:50){nodes{author{login} body}}}}}}'
+               QUERY='{repository(owner:"OWNER",name:"REPO"){discussions(first:50,after:CURSOR){'
+               QUERY+='pageInfo{hasNextPage endCursor} nodes{number id title body category{slug}'
+               QUERY+=' author{login __typename} comments(first:50){nodes{author{login} body}}}}}}'
+               gh api graphql -f query="$QUERY"
                ```
             2. Build the **candidate** set: `category.slug == "ideas"` AND the author is a real
                human (author `__typename` is `User`, not `Bot`/`Organization`) AND no existing
