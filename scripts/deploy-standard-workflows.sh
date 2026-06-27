@@ -164,7 +164,7 @@ fetch_existing() {
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
-  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | tr -d '\r')
+  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r')
   [[ -z "$expected_uses" ]] && return 1
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
