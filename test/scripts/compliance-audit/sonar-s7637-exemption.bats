@@ -167,13 +167,12 @@ WF
 
 @test "inline: every shipped channel-pinned caller-stub template is present" {
   root="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  for tmpl in dev-lead agent-shield pr-review-mention pr-auto-review auto-rebase \
-              dependabot-rebase dependabot-automerge dependency-audit \
-              add-to-project idea-triage idea-enhancer initiative-planner; do
-    classify_inline "$(cat "$root/standards/workflows/$tmpl.yml")"
+  for tmpl in "$root"/standards/workflows/*.yml; do
+    tmpl_name=$(basename "$tmpl")
+    classify_inline "$(cat "$tmpl")"
     [ "$status" -eq 0 ]
-    [ "$output" = "present" ] || {
-      echo "template $tmpl.yml classified as '$output', expected present" >&2
+    [ "$output" != "missing" ] || {
+      echo "template $tmpl_name classified as missing, but should be present or n/a" >&2
       return 1
     }
   done
