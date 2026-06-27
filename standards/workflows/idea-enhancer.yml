@@ -45,5 +45,5 @@ permissions: {}
 
 jobs:
   idea-enhancer:
-    uses: petry-projects/.github/.github/workflows/idea-enhancer-reusable.yml@idea-enhancer/stable
+    uses: petry-projects/.github/.github/workflows/idea-enhancer-reusable.yml@idea-enhancer/stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets: inherit

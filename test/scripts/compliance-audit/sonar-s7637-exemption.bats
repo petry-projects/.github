@@ -105,3 +105,76 @@ PROPS
   [ "$status" -eq 0 ]
   [ "$output" = "present" ]
 }
+
+# ---------------------------------------------------------------------------
+# classify_inline_s7637_marker() — the canonical mechanism (#549). Verifies the
+# inline `# NOSONAR(githubactions:S7637)` marker travels on each channel-pinned
+# first-party reusable-ref `uses:` line in a caller-stub workflow file.
+#   present — every channel-pinned first-party reusable-ref line carries the marker
+#   missing — at least one channel-pinned first-party reusable-ref line lacks it
+#   n/a     — no channel-pinned first-party reusable ref (SHA-pinned or none)
+# ---------------------------------------------------------------------------
+
+# Run the real inline classifier against the given workflow-file content.
+classify_inline() {
+  run bash -c 'source "$1" >/dev/null 2>&1; classify_inline_s7637_marker "$2"' \
+    _ "$SCRIPT" "$1"
+}
+
+@test "inline: channel-pinned first-party ref with the marker is present" {
+  classify_inline "$(printf 'jobs:\n  dev-lead:\n    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable  # NOSONAR(githubactions:S7637) first-party channel ref\n')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "present" ]
+}
+
+@test "inline: channel-pinned first-party ref without the marker is missing" {
+  classify_inline "$(printf 'jobs:\n  dev-lead:\n    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable\n')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "missing" ]
+}
+
+@test "inline: a @v2 moving-major channel ref needs the marker too" {
+  classify_inline "$(printf 'jobs:\n  pr-auto-review:\n    uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@v2\n')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "missing" ]
+}
+
+@test "inline: a SHA-pinned first-party ref needs no marker (n/a)" {
+  classify_inline "$(printf 'jobs:\n  feature-ideation:\n    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@e20a8fac1b6a10bd6ad0999258e88a423f890ba6 # v1\n')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "n/a" ]
+}
+
+@test "inline: a workflow with no first-party reusable ref is n/a" {
+  classify_inline "$(printf 'jobs:\n  ci:\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "n/a" ]
+}
+
+@test "inline: mixed — one marked channel ref + one SHA-pinned ref is present" {
+  body=$(cat <<'WF'
+jobs:
+  a:
+    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@agent-shield/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+  b:
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@e20a8fac1b6a10bd6ad0999258e88a423f890ba6 # v1
+WF
+)
+  classify_inline "$body"
+  [ "$status" -eq 0 ]
+  [ "$output" = "present" ]
+}
+
+@test "inline: every shipped channel-pinned caller-stub template is present" {
+  root="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  for tmpl in dev-lead agent-shield pr-review-mention pr-auto-review auto-rebase \
+              dependabot-rebase dependabot-automerge dependency-audit \
+              add-to-project idea-triage idea-enhancer initiative-planner; do
+    classify_inline "$(cat "$root/standards/workflows/$tmpl.yml")"
+    [ "$status" -eq 0 ]
+    [ "$output" = "present" ] || {
+      echo "template $tmpl.yml classified as '$output', expected present" >&2
+      return 1
+    }
+  done
+}

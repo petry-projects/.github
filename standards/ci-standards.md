@@ -431,37 +431,63 @@ The org compliance audit already exempts them via `check_action_pinning`, but
 SonarCloud is an **external** gate that doesn't know about that exemption, so it
 flags them as high-severity findings and can fail the quality gate.
 
-**Standard:** every SonarCloud-gated repo's `sonar-project.properties` MUST
-suppress `githubactions:S7637` **only on the individual first-party caller-stub
-workflow files** — each stub gets its own `sonar.issue.ignore.multicriteria`
-criterion keyed to that file path. A blanket `resourceKey` such as
-`**/.github/workflows/*.yml`, `*.yml`, or `**` is **forbidden**: it would also
-drop S7637 on `ci.yml` / `sonarcloud.yml`, leaving third-party actions
-un-enforced. Third-party actions must always stay SHA-pinned.
+**Standard (canonical — inline NOSONAR in the stub):** the first-party
+channel-pinned `uses:` line in every caller stub MUST carry an inline
+`# NOSONAR(githubactions:S7637)` marker, e.g.:
 
-> SonarCloud's `sonar.issue.ignore` matches by file path + rule, not by `uses:`
-> ref content — so the exemption is scoped per caller-stub file rather than by
-> the ref string itself.
+```yaml
+jobs:
+  dev-lead:
+    # First-party channel tag — do NOT SHA-pin (AGENTS.md mutable-ref exception).
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+```
 
-Caller stubs that carry only a first-party reusable ref (and therefore need the
-exemption): `agent-shield.yml`, `pr-review-mention.yml`, `pr-auto-review.yml`,
-`auto-rebase.yml`, `dependabot-rebase.yml`, `dependabot-automerge.yml`,
-`dependency-audit.yml`, `feature-ideation.yml`, `add-to-project.yml`,
-`dev-lead.yml`. Copy the canonical block verbatim from this repo's
-[`sonar-project.properties`](https://github.com/petry-projects/.github/blob/main/sonar-project.properties);
-omit criteria for stubs a given repo does not have.
+SonarCloud honors the inline comment and suppresses S7637 on exactly that line,
+so the exemption travels **with the stub file** — adopters who copy the template
+verbatim inherit it with **zero** per-repo `sonar-project.properties` entries and
+**no file rename**. Spike-validated on `bmad-bgreat-suite#334` (`3cbfa005`):
+Quality Gate ERROR → OK, `new_security_rating` C → A, required `SonarCloud`
+check fail → pass.
+
+The marker goes **only on first-party reusable-ref lines** pinned to a moving
+channel/tag (`@<name>/stable`, `@v1`/`@v2`). A SHA-pinned ref (e.g.
+`feature-ideation.yml`'s `@<sha> # v1`) already satisfies S7637 and gets **no**
+marker. Third-party actions stay SHA-pinned and S7637-enforced; never add a
+blanket glob or a file-wide disable.
+
+Caller-stub templates carrying a channel-pinned first-party reusable ref (and
+therefore the inline marker): `dev-lead.yml`, `agent-shield.yml`,
+`pr-review-mention.yml`, `pr-auto-review.yml`, `auto-rebase.yml`,
+`dependabot-rebase.yml`, `dependabot-automerge.yml`, `dependency-audit.yml`,
+`add-to-project.yml`, `idea-triage.yml`, `idea-enhancer.yml`,
+`initiative-planner.yml`. Copy each template verbatim from
+[`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows)
+and the marker comes with it.
+
+**Legacy (per-file `sonar-project.properties` — optional, transitional):** the
+older mechanism suppressed S7637 **only on the individual caller-stub workflow
+files** via one `sonar.issue.ignore.multicriteria` criterion per file path. It
+still works and is **accepted during the transition**, but is no longer required
+once the stubs carry the inline marker — the inline marker is the canonical
+mechanism and auto-covers any newly added channel-pinned stub without a per-repo
+edit. A blanket `resourceKey` such as `**/.github/workflows/*.yml`, `*.yml`, or
+`**` remains **forbidden**: it would also drop S7637 on `ci.yml` /
+`sonarcloud.yml`, leaving third-party actions un-enforced.
 
 ```properties
+# Legacy / optional — only needed for stubs not yet carrying the inline marker.
 sonar.issue.ignore.multicriteria=s7637_agentshield,…
 sonar.issue.ignore.multicriteria.s7637_agentshield.ruleKey=githubactions:S7637
 sonar.issue.ignore.multicriteria.s7637_agentshield.resourceKey=**/agent-shield.yml
 # …one ruleKey/resourceKey pair per caller-stub file
 ```
 
-The compliance audit's `check_sonar_s7637_exemption` enforces this org-wide: it
-files `sonar-s7637-exemption-missing` (warning) when a SonarCloud-gated repo's
-properties carry no S7637 exemption, and `sonar-s7637-exemption-too-broad`
-(error) when the exemption uses a blanket workflow-path `resourceKey`.
+The compliance audit's `check_sonar_s7637_exemption` enforces this org-wide: a
+repo is compliant when every channel-pinned first-party caller stub carries the
+inline marker **or** (during transition) the legacy per-file properties
+exemption is present. It files `sonar-s7637-exemption-missing` (warning) when a
+SonarCloud-gated repo has neither, and `sonar-s7637-exemption-too-broad` (error)
+when the legacy exemption uses a blanket workflow-path `resourceKey`.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
@@ -1610,26 +1636,24 @@ The cron's three `repository_dispatch` retry types — `dev-lead-ci-failure`,
 3. Set `GH_PAT_WORKFLOWS` — a PAT with read access to `petry-projects/.github-private` — as an org or repo secret (required for cross-repo script access).
 4. Optionally set `vars.DEV_LEAD_ENGINE` to `claude` (default), `gemini`, or `copilot`.
 5. Optionally set `vars.DEV_LEAD_DRY_RUN=true` during the initial rollout period.
-6. **If the repo is SonarCloud-gated, add the `s7637_devlead` exemption to
-   `sonar-project.properties`** (required). `dev-lead.yml` is a first-party
+6. **If the repo is SonarCloud-gated**, the S7637 exemption is already baked
+   into the stub: `dev-lead.yml`'s `uses:` line carries the inline
+   `# NOSONAR(githubactions:S7637)` marker, so copying the template verbatim
+   (step 1) is all that is required. `dev-lead.yml` is a first-party
    reusable-ref caller stub pinned to a moving channel tag — `@dev-lead/stable`,
    or a canary-ring tag (`@dev-lead/ring0` | `@dev-lead/ring1` | `@dev-lead/next`)
    under the [canary-rings rollout](#reusable-workflow-versioning--the-stable-channel).
-   That mutable ref is intentionally **not** SHA-pinned, so SonarCloud's
-   `githubactions:S7637` flags it at HIGH severity, drives `new_security_rating`
-   to **C**, and fails the Quality Gate — blocking the required `SonarCloud`
-   check. Add the per-file criterion (keyed to `**/dev-lead.yml`, **never** a
-   blanket `resourceKey`) exactly as for every other caller stub:
-
-   ```properties
-   sonar.issue.ignore.multicriteria.s7637_devlead.ruleKey=githubactions:S7637
-   sonar.issue.ignore.multicriteria.s7637_devlead.resourceKey=**/dev-lead.yml
-   ```
-
-   and add `s7637_devlead` to the `sonar.issue.ignore.multicriteria` list. See
-   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637)
-   for the canonical block; `check_sonar_s7637_exemption` files
-   `sonar-s7637-exemption-missing` against repos that omit it.
+   That mutable ref is intentionally **not** SHA-pinned, so without the marker
+   SonarCloud's `githubactions:S7637` would flag it at HIGH severity, drive
+   `new_security_rating` to **C**, and fail the Quality Gate — blocking the
+   required `SonarCloud` check. The inline marker suppresses S7637 on exactly
+   that line and travels with the file. **No `sonar-project.properties` entry is
+   needed.** (The legacy per-file `s7637_devlead` criterion keyed to
+   `**/dev-lead.yml` still works and is accepted during the transition, but is
+   optional once the stub carries the marker.) See
+   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637);
+   `check_sonar_s7637_exemption` files `sonar-s7637-exemption-missing` only when
+   a repo has neither the inline marker nor the legacy entry.
 
 ### Required secrets
 

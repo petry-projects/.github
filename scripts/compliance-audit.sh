@@ -829,16 +829,107 @@ classify_sonar_s7637_exemption() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Inline NOSONAR S7637 marker on first-party caller stubs (#549)
+#
+# Canonical mechanism (supersedes the per-file sonar-project.properties approach):
+# the inline `# NOSONAR(githubactions:S7637)` marker on the channel-pinned
+# first-party reusable-ref `uses:` line travels WITH the caller-stub file, so
+# adopters inherit the exemption on copy with zero per-repo properties entries.
+#
+# classify_inline_s7637_marker echoes exactly one verdict for a single workflow
+# file's decoded content:
+#   present — every channel-pinned first-party reusable-ref `uses:` line carries
+#             the inline `NOSONAR(githubactions:S7637)` marker.
+#   missing — at least one channel-pinned first-party reusable-ref line lacks the
+#             marker; SonarCloud's githubactions:S7637 would fire on it.
+#   n/a     — the file has no channel-pinned first-party reusable ref (it is
+#             SHA-pinned — which already satisfies S7637 — or carries no
+#             first-party reusable ref at all), so no inline marker is required.
+# ---------------------------------------------------------------------------
+classify_inline_s7637_marker() {
+  local content="$1"
+
+  # First-party reusable-workflow `uses:` lines (channel- or SHA-pinned).
+  local uses_lines
+  uses_lines=$(printf '%s\n' "$content" \
+    | grep -E '^[[:space:]]*uses:[[:space:]]*petry-projects/\.github(-private)?/\.github/workflows/[^@[:space:]]+@' || true)
+
+  if [ -z "$uses_lines" ]; then
+    echo "n/a"
+    return
+  fi
+
+  local line ref channel_seen=0 missing=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # The pinned ref is the token after the first '@', up to whitespace/comment.
+    ref=$(printf '%s\n' "$line" | sed -E 's/^[^@]*@([^[:space:]#]+).*/\1/')
+    # A 40-char hex SHA pin already satisfies S7637 — no inline marker needed.
+    if printf '%s' "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+      continue
+    fi
+    channel_seen=1
+    if ! printf '%s' "$line" | grep -qF 'NOSONAR(githubactions:S7637)'; then
+      missing=1
+    fi
+  done <<< "$uses_lines"
+
+  if [ "$channel_seen" -eq 0 ]; then
+    echo "n/a"
+  elif [ "$missing" -eq 1 ]; then
+    echo "missing"
+  else
+    echo "present"
+  fi
+}
+
 check_sonar_s7637_exemption() {
   local repo="$1"
 
   # Only relevant when the repo actually runs SonarCloud analysis.
   gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1 || return
 
+  # Canonical (#549): scan the repo's caller-stub workflows for the inline
+  # `# NOSONAR(githubactions:S7637)` marker. If every channel-pinned first-party
+  # reusable-ref stub carries it, the repo is exempt with no per-file
+  # sonar-project.properties entries needed.
+  local workflows wf wf_content wf_decoded inline_verdict
+  local inline_seen=0 inline_missing=0
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  for wf in $workflows; do
+    case "$wf" in *.yml | *.yaml) ;; *) continue ;; esac
+    wf_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$wf_content" ] && continue
+    wf_decoded=$(echo "$wf_content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$wf_decoded" ] && continue
+    inline_verdict=$(classify_inline_s7637_marker "$wf_decoded")
+    case "$inline_verdict" in
+      present) inline_seen=1 ;;
+      missing) inline_seen=1; inline_missing=1 ;;
+    esac
+  done
+
+  # Every channel-pinned first-party stub carries the inline marker → exempt.
+  if [ "$inline_seen" -eq 1 ] && [ "$inline_missing" -eq 0 ]; then
+    return
+  fi
+
+  # Legacy per-file mechanism — accepted during the transition (#549). A repo
+  # whose stubs are not yet inline-marked is still compliant if its
+  # sonar-project.properties carries the narrow per-stub exemption.
   local content decoded
   content=$(gh_api "repos/$ORG/$repo/contents/sonar-project.properties" --jq '.content' 2>/dev/null || echo "")
-  # A missing properties file is reported separately by check_sonarcloud.
-  [ -z "$content" ] && return
+  if [ -z "$content" ]; then
+    # No properties file. Flag only when a stub needs but lacks the inline marker
+    # (a missing properties file itself is reported by check_sonarcloud).
+    if [ "$inline_missing" -eq 1 ]; then
+      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+        "First-party caller stub(s) carry a channel-pinned reusable ref (\`@<name>/stable\`, \`@v1\`/\`@v2\`) without the inline \`# NOSONAR(githubactions:S7637)\` marker, and there is no legacy \`sonar-project.properties\` exemption. SonarCloud will flag them as unpinned actions even though the org exempts them from SHA-pinning. Add the inline marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` entry." \
+        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+    fi
+    return
+  fi
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
   [ -z "$decoded" ] && return
 
@@ -848,12 +939,12 @@ check_sonar_s7637_exemption() {
   case "$verdict" in
     missing)
       add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
-        "\`sonar-project.properties\` has no \`sonar.issue.ignore\` for \`githubactions:S7637\`. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the canonical per-stub exemption." \
+        "No \`githubactions:S7637\` exemption found. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the inline \`# NOSONAR(githubactions:S7637)\` marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` exemption in \`sonar-project.properties\`." \
         "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
       ;;
     too-broad)
       add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-too-broad" "error" \
-        "\`sonar-project.properties\` suppresses \`githubactions:S7637\` with a blanket workflow-path \`resourceKey\` (e.g. \`workflows/*.yml\` or \`**\`). This also exempts third-party actions in \`ci.yml\`/\`sonarcloud.yml\` from SHA-pin enforcement. Scope the exemption to the individual caller-stub files instead." \
+        "\`sonar-project.properties\` suppresses \`githubactions:S7637\` with a blanket workflow-path \`resourceKey\` (e.g. \`workflows/*.yml\` or \`**\`). This also exempts third-party actions in \`ci.yml\`/\`sonarcloud.yml\` from SHA-pin enforcement. Scope the exemption to the individual caller-stub files instead, or migrate to the inline \`# NOSONAR(githubactions:S7637)\` marker." \
         "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
       ;;
   esac
