@@ -857,7 +857,7 @@ classify_inline_s7637_marker() {
 
   if [ -z "$uses_lines" ]; then
     echo "n/a"
-    return
+    return 0
   fi
 
   local line ref channel_seen=0 missing=0
@@ -912,7 +912,7 @@ check_sonar_s7637_exemption() {
 
   # Every channel-pinned first-party stub carries the inline marker → exempt.
   if [ "$inline_seen" -eq 1 ] && [ "$inline_missing" -eq 0 ]; then
-    return
+    return 0
   fi
 
   # Legacy per-file mechanism — accepted during the transition (#549). A repo
@@ -928,7 +928,7 @@ check_sonar_s7637_exemption() {
         "First-party caller stub(s) carry a channel-pinned reusable ref (\`@<name>/stable\`, \`@v1\`/\`@v2\`) without the inline \`# NOSONAR(githubactions:S7637)\` marker, and there is no legacy \`sonar-project.properties\` exemption. SonarCloud will flag them as unpinned actions even though the org exempts them from SHA-pinning. Add the inline marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` entry." \
         "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
     fi
-    return
+    return 0
   fi
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
   [ -z "$decoded" ] && return
@@ -938,9 +938,11 @@ check_sonar_s7637_exemption() {
 
   case "$verdict" in
     missing)
-      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
-        "No \`githubactions:S7637\` exemption found. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the inline \`# NOSONAR(githubactions:S7637)\` marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` exemption in \`sonar-project.properties\`." \
-        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      if [ "$inline_seen" -eq 1 ]; then
+        add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+          "No \`githubactions:S7637\` exemption found. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the inline \`# NOSONAR(githubactions:S7637)\` marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` exemption in \`sonar-project.properties\`." \
+          "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      fi
       ;;
     too-broad)
       add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-too-broad" "error" \
