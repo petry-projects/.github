@@ -283,7 +283,7 @@ check_dependabot_config() {
     add_finding "$repo" "dependabot" "missing-config" "error" \
       "Missing \`.github/dependabot.yml\` configuration file" \
       "standards/dependabot-policy.md"
-    return
+    return 0
   fi
 
   local decoded
@@ -688,7 +688,7 @@ check_codeowners() {
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
       "standards/codeowners-standard.md"
-    return
+    return 0
   fi
 
   # Extract non-comment, non-blank owner lines for accurate matching.
@@ -704,7 +704,7 @@ check_codeowners() {
     add_finding "$repo" "settings" "codeowners-empty" "error" \
       "CODEOWNERS file has no owner lines (only comments/blank)" \
       "standards/codeowners-standard.md"
-    return
+    return 0
   fi
 
   # Rule 1: @petry-projects/org-leads MUST be the first owner on every line
@@ -803,7 +803,7 @@ classify_sonar_s7637_exemption() {
 
   if [ -z "$keys" ]; then
     echo "missing"
-    return
+    return 0
   fi
 
   local key resourcekey base broad=0
@@ -888,7 +888,7 @@ check_sonar_s7637_exemption() {
   local repo="$1"
 
   # Only relevant when the repo actually runs SonarCloud analysis.
-  gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1 || return
+  gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1 || return 0
 
   # Canonical (#549): scan the repo's caller-stub workflows for the inline
   # `# NOSONAR(githubactions:S7637)` marker. If every channel-pinned first-party
@@ -931,7 +931,7 @@ check_sonar_s7637_exemption() {
     return 0
   fi
   decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-  [ -z "$decoded" ] && return
+  [ -z "$decoded" ] && return 0
 
   local verdict
   verdict=$(classify_sonar_s7637_exemption "$decoded")
