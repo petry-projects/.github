@@ -1610,6 +1610,26 @@ The cron's three `repository_dispatch` retry types — `dev-lead-ci-failure`,
 3. Set `GH_PAT_WORKFLOWS` — a PAT with read access to `petry-projects/.github-private` — as an org or repo secret (required for cross-repo script access).
 4. Optionally set `vars.DEV_LEAD_ENGINE` to `claude` (default), `gemini`, or `copilot`.
 5. Optionally set `vars.DEV_LEAD_DRY_RUN=true` during the initial rollout period.
+6. **If the repo is SonarCloud-gated, add the `s7637_devlead` exemption to
+   `sonar-project.properties`** (required). `dev-lead.yml` is a first-party
+   reusable-ref caller stub pinned to a moving channel tag — `@dev-lead/stable`,
+   or a canary-ring tag (`@dev-lead/ring0` | `@dev-lead/ring1` | `@dev-lead/next`)
+   under the [canary-rings rollout](#reusable-workflow-versioning--the-stable-channel).
+   That mutable ref is intentionally **not** SHA-pinned, so SonarCloud's
+   `githubactions:S7637` flags it at HIGH severity, drives `new_security_rating`
+   to **C**, and fails the Quality Gate — blocking the required `SonarCloud`
+   check. Add the per-file criterion (keyed to `**/dev-lead.yml`, **never** a
+   blanket `resourceKey`) exactly as for every other caller stub:
+
+   ```properties
+   sonar.issue.ignore.multicriteria.s7637_devlead.ruleKey=githubactions:S7637
+   sonar.issue.ignore.multicriteria.s7637_devlead.resourceKey=**/dev-lead.yml
+   ```
+
+   and add `s7637_devlead` to the `sonar.issue.ignore.multicriteria` list. See
+   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637)
+   for the canonical block; `check_sonar_s7637_exemption` files
+   `sonar-s7637-exemption-missing` against repos that omit it.
 
 ### Required secrets
 
