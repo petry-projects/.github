@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCE OF TRUTH: petry-projects/.github/standards/workflows/dependency-audit.yml
-# Standard:        petry-projects/.github/standards/ci-standards.md#6-dependency-audit-dependency-audityml
+# Standard:        petry-projects/.github/standards/ci-standards.md#7-dependency-audit-dependency-audityml
 # Reusable:        petry-projects/.github/.github/workflows/dependency-audit-reusable.yml
 #
 # AGENTS — READ BEFORE EDITING:
