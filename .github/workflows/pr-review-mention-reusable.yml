@@ -37,12 +37,20 @@ jobs:
     # team review requests; comment fields don't exist on pull_request events.
     # For comment events we also gate at the job level on author_association so
     # that the job (and its secrets) never start for external/untrusted actors.
+    #
+    # Self-trigger guard (#538): a comment authored by donpetry-bot, or one
+    # carrying a `<!-- pr-review-agent ... -->` marker, is the agent talking
+    # about its own work and must never re-fire the listener. Without this the
+    # mention-ack (@-mention authored by the bot, marker-tagged) re-triggers the
+    # cascade — the #860 runaway (1,481 identical acks at ~9s for ~4.5h).
     if: |
       (github.event_name == 'pull_request' &&
        github.event.requested_reviewer != null &&
        github.event.requested_reviewer.login == 'donpetry-bot' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' &&
+       github.event.comment.user.login != 'donpetry-bot' &&
+       !contains(github.event.comment.body, '<!-- pr-review-agent') &&
        contains(github.event.comment.body, '@donpetry-bot') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
        (github.event_name == 'pull_request_review_comment' ||
@@ -134,12 +142,16 @@ jobs:
           GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
+          # Reference the actor in PLAIN TEXT (no leading @): a literal @-mention
+          # fires a mention webhook, and an ack that ever named the bot would
+          # re-trigger this listener. Defense-in-depth alongside the job `if:`
+          # self-trigger guard above (#538 / #860).
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             ACTOR="${{ github.event.sender.login }}"
-            MSG="@${ACTOR} assigned me as reviewer — starting a fresh review now. Results will appear in a few minutes."
+            MSG="${ACTOR} assigned me as reviewer — starting a fresh review now. Results will appear in a few minutes."
           else
             ACTOR="${{ github.event.comment.user.login }}"
-            MSG="@${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
+            MSG="${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
           fi
           gh pr comment "$PR_URL" --body "$(printf '<!-- pr-review-agent mention-ack -->\n%s' "${MSG}")"
 

@@ -1,0 +1,55 @@
+# Quality gate for the reusable pr-review-mention workflow.
+#
+# Triggered on any PR that touches:
+#   - .github/workflows/pr-review-mention*.yml
+#   - test/workflows/pr-review-mention/**
+#   - standards/workflows/pr-review-mention.yml
+#
+# Gate (must pass before merge):
+#   1. bats — contract tests for the self-trigger guard and ack text (#538)
+#
+# Standard: this workflow pins the anti-self-trigger contract from issue #538
+# (the org-repo half of the #860 mention-ack runaway).
+
+name: PR Review Mention Tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pr-review-mention*.yml'
+      - 'test/workflows/pr-review-mention/**'
+      - 'standards/workflows/pr-review-mention.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/pr-review-mention*.yml'
+      - 'test/workflows/pr-review-mention/**'
+      - 'standards/workflows/pr-review-mention.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-review-mention-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Install bats
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats
+
+      - name: Run bats suite
+        run: bats --print-output-on-failure test/workflows/pr-review-mention/
