@@ -1137,6 +1137,7 @@ Where a planner-created epic lands depends on the repo:
    labels** the pipeline relies on. The driver's `initiative:auto` gate **cannot be
    armed if its label is missing** (the driver pilot hit exactly this — see #888),
    so create them all up front:
+
    ```bash
    gh label create "idea:approved"      -R <owner>/<repo> -c 0E8A16 2>/dev/null || true
    gh label create "initiative"         -R <owner>/<repo> -c 1D76DB 2>/dev/null || true
@@ -1145,6 +1146,7 @@ Where a planner-created epic lands depends on the repo:
    gh label create "dev-lead:hands-off" -R <owner>/<repo> -c FBCA04 2>/dev/null || true
    gh label create "initiative:hold"    -R <owner>/<repo> -c FBCA04 2>/dev/null || true
    ```
+
 3. Confirm the org-level secret `GH_PAT_WORKFLOWS` is accessible **and its owner
    has write access to the target repo** (the central planner writes the epic +
    sub-issues cross-repo with that PAT).
