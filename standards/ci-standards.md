@@ -1132,9 +1132,21 @@ Where a planner-created epic lands depends on the repo:
 
 1. Copy [`standards/workflows/initiative-planner.yml`](workflows/initiative-planner.yml)
    to `.github/workflows/initiative-planner.yml` (and, optionally,
-   `idea-triage.yml` / `idea-enhancer.yml`) in the target repo.
-2. Ensure Discussions is enabled with an "Ideas" category and the
-   `idea:approved` label exists.
+   `idea-triage.yml`) in the target repo.
+2. Ensure Discussions is enabled with an "Ideas" category, and **create the gate
+   labels** the pipeline relies on. The driver's `initiative:auto` gate **cannot be
+   armed if its label is missing** (the driver pilot hit exactly this — see #888),
+   so create them all up front:
+
+   ```bash
+   gh label create "idea:approved"      -R <owner>/<repo> -c 0E8A16 -d "Approved ideas ready for planning" 2>/dev/null || true
+   gh label create "initiative"         -R <owner>/<repo> -c 1D76DB -d "Tracked initiatives (epics)" 2>/dev/null || true
+   gh label create "initiative:auto"    -R <owner>/<repo> -c 0E8A16 -d "Armed initiatives for auto-implementation" 2>/dev/null || true
+   gh label create "dev-lead"           -R <owner>/<repo> -c 5319E7 -d "Issues assigned to the dev-lead agent" 2>/dev/null || true
+   gh label create "dev-lead:hands-off" -R <owner>/<repo> -c FBCA04 -d "Exclude from dev-lead agent automation" 2>/dev/null || true
+   gh label create "initiative:hold"    -R <owner>/<repo> -c FBCA04 -d "Initiatives on hold" 2>/dev/null || true
+   ```
+
 3. Confirm the org-level secret `GH_PAT_WORKFLOWS` is accessible **and its owner
    has write access to the target repo** (the central planner writes the epic +
    sub-issues cross-repo with that PAT).
