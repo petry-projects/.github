@@ -49,7 +49,7 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/standards/pr-limits.json"
 }
 
 @test "all required top-level keys exist" {
-  for key in status _note org_wide per_source_caps exempt_actors; do
+  for key in status _note _schema_version org_wide per_source_caps exempt_actors exempt_labels; do
     run jq -e "has(\"$key\")" "$CONFIG"
     [ "$status" -eq 0 ]
     [ "$output" = "true" ]
@@ -86,4 +86,19 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/standards/pr-limits.json"
   run jq -e '.exempt_actors | index("dependabot[bot]") != null' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
+}
+
+@test "security is present in the exempt-label list (ADR §6/§7.4)" {
+  # Guards the ADR safety property that urgent security/hotfix PRs are never
+  # throttled by the cap; a regression dropping this label must fail CI.
+  run jq -e '.exempt_labels | index("security") != null' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "_schema_version is a positive integer" {
+  run jq -er '._schema_version' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]+$ ]]
+  [ "$output" -gt 0 ]
 }
