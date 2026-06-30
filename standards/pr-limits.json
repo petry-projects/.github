@@ -1,0 +1,25 @@
+{
+  "status": "provisional",
+  "_note": "PROVISIONAL — pending human sign-off (ADR docs/initiatives/pull-request-limits-adr.md §6). Every numeric value below is a proposal anchored to the §5 baseline, NOT a GitHub-imposed maximum (none exists; see ADR §2-§3). The confirmed numbers can be set here later without a code change — consumers read values from this single file, never hardcoded. Consumers: Phase 2b admission gate (#507b) and Phase 3 apply path (#508).",
+  "_schema_version": 1,
+  "org_wide": {
+    "automation_open_pr_cap": 18,
+    "_note": "Soft cap on concurrent open, non-draft automation PRs org-wide, counting only non-Dependabot sources (ADR §6, §7.4). Range proposed in ADR §6 is ~15-20."
+  },
+  "_per_source_caps_note": "Optional per-source sub-caps (ADR §6). Complementary to the org-wide cap. Dependabot is intentionally absent — it stays governed solely by its own ecosystem open-pull-requests-limit (ADR §7.4). Kept as a clean name->integer map so consumers can read values directly.",
+  "per_source_caps": {
+    "dev-lead": 9,
+    "claude": 4,
+    "initiative-driver": 5
+  },
+  "exempt_actors": [
+    "dependabot[bot]",
+    "OrganizationAdmin",
+    "@petry-projects/org-leads",
+    "dependabot-automerge-petry"
+  ],
+  "exempt_labels": [
+    "security"
+  ],
+  "_exempt_note": "Actors/labels whose PRs must never be blocked by the cap (ADR §6, §7.4). dependabot[bot] is exempt because it is already bounded per-ecosystem and security PRs must never be starved; OrganizationAdmin / @petry-projects/org-leads are human break-glass and maintainer PRs; dependabot-automerge-petry operates on existing PRs (does not add to the queue); security-labeled PRs are urgent fixes that bypass any throttle."
+}
