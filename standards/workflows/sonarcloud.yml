@@ -43,9 +43,9 @@ jobs:
           fetch-depth: 0
       - name: SonarCloud Scan
         id: sonar
-        if: ${{ env.SONAR_TOKEN != '' }}
+        if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         continue-on-error: true
       - name: SonarCloud Scan (retry)
-        if: ${{ env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure' }}
+        if: env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure'
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
