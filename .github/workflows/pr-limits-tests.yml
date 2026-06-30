@@ -1,0 +1,58 @@
+# Quality gate for the PR-limit shared config (the single source of truth) and
+# its validating bats test.
+#
+# Triggered on any PR that touches:
+#   - standards/pr-limits.json
+#   - test/scripts/pr-limits/**
+#   - .github/workflows/pr-limits-tests.yml
+#
+# Gate: bats validates that standards/pr-limits.json parses as JSON, the
+# org-wide cap is a positive integer, all required keys exist, the numbers are
+# flagged provisional, and dependabot[bot] is on the exempt list.
+#
+# Context: ADR docs/initiatives/pull-request-limits-adr.md (#506). This story
+# (#507) delivers only the data; the admission gate is #507b and the apply path
+# is #508. Modeled on .github/workflows/auto-rebase-tests.yml.
+
+name: PR-limits Tests
+
+on:
+  pull_request:
+    paths:
+      - 'standards/pr-limits.json'
+      - 'test/scripts/pr-limits/**'
+      - '.github/workflows/pr-limits-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'standards/pr-limits.json'
+      - 'test/scripts/pr-limits/**'
+      - '.github/workflows/pr-limits-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-limits-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Validate config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Install bats, shellcheck, and jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats shellcheck jq
+
+      - name: Run bats suite
+        run: bats --print-output-on-failure test/scripts/pr-limits/
