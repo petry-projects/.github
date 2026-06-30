@@ -58,7 +58,10 @@ plg_config_path() {
 # ---------------------------------------------------------------------------
 plg_is_dry_run() {
   local dry="${DRY_RUN:-${DEV_LEAD_DRY_RUN:-false}}"
-  [ "$dry" = "true" ]
+  if [ "$dry" = "true" ]; then
+    return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -69,8 +72,10 @@ plg_is_dry_run() {
 plg_is_exempt_actor() {
   local source="$1" config
   config="$(plg_config_path)"
-  jq -e --arg s "$source" '(.exempt_actors // []) | index($s) != null' "$config" \
-    >/dev/null 2>&1
+  if jq -e --arg s "$source" '(.exempt_actors // []) | index($s) != null' "$config" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -87,8 +92,8 @@ plg_count_open_automation_prs() {
   local org="${ORG:-petry-projects}"
   local exempt_actors exempt_labels prs
 
-  exempt_actors="$(jq -c '.exempt_actors // []' "$config")"
-  exempt_labels="$(jq -c '.exempt_labels // []' "$config")"
+  exempt_actors="$(jq -c '.exempt_actors // []' "$config" 2>/dev/null || echo '[]')"
+  exempt_labels="$(jq -c '.exempt_labels // []' "$config" 2>/dev/null || echo '[]')"
 
   prs="$(gh search prs \
     --owner "$org" \
@@ -115,6 +120,7 @@ plg_count_open_automation_prs() {
           )
       ] | length
     ' <<<"$prs" 2>/dev/null || printf '0'
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -128,7 +134,7 @@ plg_count_source_prs() {
   local org="${ORG:-petry-projects}"
   local prs
 
-  prs="$(gh search prs "head:$source" \
+  prs="$(gh search prs "head:$source/" \
     --owner "$org" \
     --state open \
     --draft=false \
@@ -142,6 +148,7 @@ plg_count_source_prs() {
   fi
 
   jq -r 'length' <<<"$prs" 2>/dev/null || printf '0'
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -180,8 +187,9 @@ plg_admission_gate() {
   # 1. Exempt actors are always allowed and are never counted.
   if plg_is_exempt_actor "$source"; then
     plg_log "source '$source' is an exempt actor — allowed (not subject to the cap)"
-    plg_finish "$source" "allow" "exempt actor"
-    return $?
+    local rc=0
+    plg_finish "$source" "allow" "exempt actor" && rc=0 || rc=$?
+    return "$rc"
   fi
 
   local org_cap org_count
@@ -191,6 +199,10 @@ plg_admission_gate() {
     return 2
   fi
   org_count="$(plg_count_open_automation_prs "$config")"
+  if ! [[ "$org_count" =~ ^[0-9]+$ ]]; then
+    plg_log "error: retrieved open PR count is not a valid integer: '$org_count'"
+    return 2
+  fi
 
   local decision="allow" reason
   reason="org queue ${org_count}/${org_cap}"
@@ -205,6 +217,10 @@ plg_admission_gate() {
     if [[ "$sub_cap" =~ ^[0-9]+$ ]]; then
       local src_count
       src_count="$(plg_count_source_prs "$source")"
+      if ! [[ "$src_count" =~ ^[0-9]+$ ]]; then
+        plg_log "error: retrieved source PR count is not a valid integer: '$src_count'"
+        return 2
+      fi
       reason="org queue ${org_count}/${org_cap}, source '${source}' queue ${src_count}/${sub_cap}"
       if [ "$src_count" -ge "$sub_cap" ]; then
         decision="defer"
@@ -213,7 +229,9 @@ plg_admission_gate() {
     fi
   fi
 
-  plg_finish "$source" "$decision" "$reason"
+  local rc=0
+  plg_finish "$source" "$decision" "$reason" && rc=0 || rc=$?
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------
