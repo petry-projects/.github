@@ -1167,13 +1167,15 @@ Where a planner-created epic lands depends on the repo:
 #### Adopting in a new repo
 
 1. Copy [`standards/workflows/initiative-planner.yml`](workflows/initiative-planner.yml)
-   and [`initiative-driver.yml`](workflows/initiative-driver.yml) to
-   `.github/workflows/` (and, optionally, `idea-triage.yml`) in the target repo.
-   Copy **verbatim** — the templates carry the inline
+   and [`standards/workflows/initiative-driver.yml`](workflows/initiative-driver.yml)
+   to `.github/workflows/` (and, optionally,
+   [`standards/workflows/idea-triage.yml`](workflows/idea-triage.yml) and
+   [`standards/workflows/idea-enhancer.yml`](workflows/idea-enhancer.yml)) in the
+   target repo. Copy **verbatim** — the templates carry the inline
    `# NOSONAR(githubactions:S7637)` and `# NOSONAR(githubactions:S7635)` markers,
    so a SonarCloud-gated repo needs **no** `sonar-project.properties` edits (see
    [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637)
-   and the `secrets: inherit` S7635 note that follows it).
+   and [First-Party `secrets: inherit` S7635](#sonarcloud-exemption-first-party-secrets-inherit-s7635)).
 2. Ensure Discussions is enabled with an "Ideas" category, and **create the gate
    labels** the pipeline relies on. The driver's `initiative:auto` gate **cannot be
    armed if its label is missing** (the driver pilot hit exactly this — see #888),
