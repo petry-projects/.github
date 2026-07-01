@@ -4,15 +4,21 @@
 #
 # ADOPTING THIS WORKFLOW:
 #   1. This ships verbatim into repos created from petry-projects/repo-template.
-#   2. It is a CUSTOMIZE-PER-STACK stub: it passes out of the box so a fresh repo
-#      is green on day 0. Replace the placeholder step with your stack's
-#      lint / format / typecheck / unit-test / coverage steps (see the standard).
-#   3. The job name `build-and-test` is the required CI status check. Keep it — or,
-#      if you split into per-language jobs (e.g. TypeScript, Go, Python), update the
-#      repo's branch-protection required checks to match the new job names.
+#   2. `build-and-test` is a CUSTOMIZE-PER-STACK stub: it passes out of the box so
+#      a fresh repo is green on day 0. Replace its placeholder step with your
+#      stack's lint / format / typecheck / unit-test steps (see the standard). If
+#      you split it into per-language jobs (TypeScript, Go, Python), that is fine —
+#      it is not a required status check.
+#   3. `secret-scan` (check name `Secret scan (gitleaks)`) and `coverage` ARE
+#      required status checks in the org `code-quality` ruleset. Keep both.
+#      • secret-scan is stack-agnostic gitleaks; free on public repos, and uses the
+#        org `GITLEAKS_LICENSE` secret on private org repos.
+#      • coverage defaults to shell (bats) line-coverage via kcov — the current
+#        YAML/Shell stack — and is green until you add tests. Uncomment the per-stack
+#        block as you add Node / Go / Python. See BOOTSTRAP.md.
 #
 # CONVENTIONS (enforced by the standard):
-#   • permissions: {} at top, least-privilege per job (CI needs contents: read)
+#   • permissions: {} at top, least-privilege per job
 #   • triggers: push + pull_request to main
 #   • concurrency keyed by ref+sha so a new push cancels the stale run
 #   • SHA-pin every third-party action (never a tag/branch)
@@ -42,12 +48,68 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # ── Replace the step below with your stack's checks ───────────────────────
-      # Standard CI stages: lint, format check, type check, unit tests, coverage
-      # (plus integration / e2e / build where applicable). For example, a Node repo:
+      # Standard CI stages: lint, format check, type check, unit tests (coverage is
+      # the separate `coverage` job below). For example, a Node repo:
       #   - uses: actions/setup-node@<sha> # vX   (with node-version + cache)
       #   - run: npm ci
       #   - run: npm run lint && npm run typecheck && npm test
       # See BOOTSTRAP.md and the CI standard. Until you add real steps, the
-      # placeholder below keeps the required `build-and-test` check green.
+      # placeholder below keeps this job green.
       - name: Placeholder — replace with real build/test steps
-        run: echo "CI stub — add your stack's lint/format/typecheck/test/coverage steps; see BOOTSTRAP.md."
+        run: echo "CI stub — add your stack's lint/format/typecheck/test steps; see BOOTSTRAP.md."
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        # Free on public repos; org private repos use the GITLEAKS_LICENSE secret.
+        # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v3.0.0 --jq '.object.sha'
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        with:
+          args: detect --source . --redact --verbose --exit-code 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Default lane: shell (bats) line-coverage via kcov — the current YAML/Shell
+      # stack. Real coverage runs automatically once tests/**/*.bats exist; a fresh
+      # repo with no tests passes green so it is not blocked on day 0.
+      - name: Shell (bats) coverage
+        run: |
+          shopt -s nullglob globstar
+          bats_tests=(tests/**/*.bats)
+          if [ "${#bats_tests[@]}" -eq 0 ]; then
+            echo "No tests/**/*.bats found — no coverage-bearing shell tests yet."
+            echo "Real shell coverage activates automatically once you add bats tests."
+            echo "For other stacks, uncomment the block below; see BOOTSTRAP.md."
+            echo "Passing so a fresh repo is green on day 0."
+            exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats kcov
+          mkdir -p coverage
+          kcov --include-path=. --exclude-pattern=/tests/,/.git/ coverage bats -r tests
+          echo "Shell line-coverage report written to ./coverage (open index.html)."
+
+      # ── Expand per stack as you add them (uncomment + set a threshold) ──────────
+      # Node:   npx c8 --check-coverage --lines 80 npm test
+      # Go:     go test ./... -coverprofile=cover.out && go tool cover -func=cover.out
+      # Python: pytest --cov --cov-fail-under=80
+      # Wire your stack's coverage threshold here; see BOOTSTRAP.md.
