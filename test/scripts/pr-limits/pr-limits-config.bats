@@ -29,12 +29,11 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/standards/pr-limits.json"
 }
 
 @test "status field records the human sign-off state" {
-  # After the epic #505 gate #566 sign-off (2026-07-01) the numbers are
-  # human-confirmed. Accept either state so the test is stable across the
-  # provisional -> signed-off transition.
+  # The epic #505 gate #566 sign-off (2026-07-01) is complete, so strictly
+  # assert signed-off — a regression back to provisional must fail CI.
   run jq -er '.status' "$CONFIG"
   [ "$status" -eq 0 ]
-  [[ "$output" = "signed-off" || "$output" = "provisional" ]]
+  [ "$output" = "signed-off" ]
 }
 
 @test "an inline _note documents that the numbers are not yet confirmed" {
