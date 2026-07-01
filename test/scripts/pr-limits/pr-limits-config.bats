@@ -28,10 +28,12 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/standards/pr-limits.json"
   [ "$status" -eq 0 ]
 }
 
-@test "status field marks the values provisional (pending human sign-off)" {
+@test "status field records the human sign-off state" {
+  # The epic #505 gate #566 sign-off (2026-07-01) is complete, so strictly
+  # assert signed-off — a regression back to provisional must fail CI.
   run jq -er '.status' "$CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = "provisional" ]
+  [ "$output" = "signed-off" ]
 }
 
 @test "an inline _note documents that the numbers are not yet confirmed" {
@@ -56,21 +58,21 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/standards/pr-limits.json"
   done
 }
 
-@test "per-source sub-caps cover dev-lead, claude, and initiative-driver" {
-  for src in dev-lead claude initiative-driver; do
-    run jq -e ".per_source_caps | has(\"$src\")" "$CONFIG"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+@test "per_source_caps is an object (single org-wide ceiling — may be empty)" {
+  # The signed-off policy (2026-07-01) is a single org-wide soft ceiling, so
+  # per-source sub-caps are optional and currently empty. The key must still
+  # exist and be an object so consumers can read it uniformly.
+  run jq -er '.per_source_caps | type' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "object" ]
 }
 
-@test "each per-source sub-cap is a positive integer" {
-  run jq -er '.per_source_caps | to_entries[] | .value' "$CONFIG"
+@test "any configured per-source sub-cap is a positive integer" {
+  # Per-source caps are optional; validate only those present. `all` over an
+  # empty map is vacuously true, so this passes when none are configured.
+  run jq -e '(.per_source_caps // {}) | to_entries | all(.value | (type == "number") and (. > 0) and (. == floor))' "$CONFIG"
   [ "$status" -eq 0 ]
-  while read -r v; do
-    [[ "$v" =~ ^[0-9]+$ ]]
-    [ "$v" -gt 0 ]
-  done <<< "$output"
+  [ "$output" = "true" ]
 }
 
 @test "exempt_actors is a non-empty array" {
