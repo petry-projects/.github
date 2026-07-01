@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: …/<name>-reusable.yml@<name>/stable` — the reusable's moving `stable` channel tag ([Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)). Reusables not yet migrated to a channel keep their current canonical pin in the interim; `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh` enforces the expected pin per reusable. | The matching `*-reusable.yml` (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable; a release is cut and promoted by moving the channel tag, never by editing callers. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: …/<name>-reusable.yml@<name>/stable` — the reusable's moving `stable` channel tag ([Reusable workflow versioning](#reusable-workflow-versioning--current-and-target-models)). Reusables not yet migrated to a channel keep their current canonical pin in the interim; `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh` enforces the expected pin per reusable. | The matching `*-reusable.yml` (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable; a release is cut and promoted by moving the channel tag, never by editing callers. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -33,15 +33,27 @@ file with that header, **stop and read the header first** — if the change
 isn't allowed by the contract, the right move is a PR against the central
 reusable, not a local edit.
 
-### Reusable workflow versioning — the `stable` channel
+### Reusable workflow versioning — current and target models
 
-**Standard.** Every reusable workflow is versioned by a **moving `stable`
-channel tag**, and every caller pins to it **once** —
-`uses: …/<name>-reusable.yml@<name>/stable`. A caller must **never** pin a
-reusable to `@main` (a branch) and **never** to a frozen `@vX.Y.Z` (a version).
-This applies to **every** reusable workflow regardless of which repo hosts it
-(public or private) or which repo calls it (a downstream consumer or the
-reusable's own self-host duty).
+**Current pinning policy.** Tier 1 reusable workflows are pinned in one of two forms:
+
+1. **SHA-pinned** (preferred when possible) — `uses: …/<name>-reusable.yml@<40-hex-SHA> # comment`
+   - Immutable; satisfies SonarCloud and other security gates that require commit-level pinning.
+   - Used by: `auto-rebase`, `agent-shield`, `feature-ideation`, `dependabot-rebase`.
+2. **Version-tag-pinned** — `uses: …/<name>-reusable.yml@<version>` (e.g., `@v1`, `@v2`)
+   - Allowed for backwards compatibility; callers are edited when a new major version is released.
+   - Used by: `dependabot-automerge`, `dependency-audit`, `pr-review-mention`.
+
+Callers **must never** pin a reusable to `@main` (a branch) — branches have no version boundary and allow untested changes to go live instantly.
+
+**Target model — the `stable` channel (future).** This org is migrating to a **moving `stable`
+channel tag** model where every caller pins to it **once** —
+`uses: …/<name>-reusable.yml@<name>/stable`. A release is rolled out by **moving the tag centrally**
+rather than editing every caller repo. This is the long-term target for all reusable workflows.
+The `dev-lead` reusable (in the private repo) already uses the channel model: `@dev-lead/stable`.
+
+**Why the `stable` channel model.** It is a *moving* tag that always points at the current known-good release.
+Callers pin it once and are never edited again; a release is rolled out by moving the tag centrally and rolled back by moving it back.
 
 **Why not `@main` (a branch).** `@main` has no version boundary: the instant a
 commit lands on the reusable's default branch it is live for every caller at
@@ -51,15 +63,10 @@ PRs) it is worse: a broken change becomes the very version that must approve its
 own fix, so the fix is gated by the breakage — a circular dependency that fails
 closed.
 
-**Why not a frozen `@vX.Y.Z` (a version).** A bare version pin is immutable, so
+**Why not a frozen `@vX.Y.Z` (a version)?** A bare version pin is immutable, so
 rolling out a change means **editing every caller** to the new tag: a fan-out PR
 per release, a partially-migrated fleet in between, and security fixes that wait
-behind that churn.
-
-**The `stable` channel gets both right.** It is a *moving* tag that always
-points at the current known-good release. Callers pin it once and are never
-edited again; a release is rolled out by **moving the tag centrally** and rolled
-back by moving it back.
+behind that churn. The `stable` channel avoids this by using a moving tag.
 
 **Benefits.**
 
@@ -220,7 +227,7 @@ The script is idempotent: it skips a repo whose stub already pins the template's
 `uses:` ref, and skips opening a second PR when a `standards-sync` one is already
 open for that workflow. Deployment never edits a caller's `uses:`/`agent_ref`
 pins by hand — a release is rolled out by moving the channel tag (see
-[Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
+[Reusable workflow versioning](#reusable-workflow-versioning--current-and-target-models)).
 
 ---
 
@@ -232,6 +239,11 @@ SonarCloud, and Dev-Lead Agent workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack. CodeQL is
 **not** a workflow file: it is configured via GitHub-managed default setup
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
+
+In addition, BMAD Method-enabled repositories MUST also include the conditional
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
+documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
+for the template.
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
 [Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
@@ -834,7 +846,10 @@ comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (G
 Without it the sentinel comment still appears but no automatic resolution will run.
 Dependabot PRs are excluded because `dependabot-rebase.yml` handles those.
 
-**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1`.
+**Compliance:** The compliance audit (`check_centralized_workflow_stubs`) verifies that repos adopting `auto-rebase.yml` use the canonical thin caller stub
+delegating to `petry-projects/.github/.github/workflows/auto-rebase-reusable.yml` with the exact SHA-pinned reference
+(`@126c1441ee9cf040f2ce3ef0eda85d459b82f8e9 # v1`). A downstream stub referencing `@v1` is non-compliant;
+update by copying `standards/workflows/auto-rebase.yml` verbatim.
 
 ### 10. PR Review Mention (`pr-review-mention.yml`)
 
@@ -1353,33 +1368,51 @@ incorrect pinned one.
 
 ### Exception: Internal Reusable Workflow References
 
-Calls to first-party `petry-projects/*` reusable workflows are **exempt from
-SHA-pinning** — they are refs to workflows the org owns, not third-party
-actions. Per [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel),
-pin them to the reusable's moving `stable` channel tag (a reusable still being
-migrated keeps its current canonical tag in the interim). Never `@main`, never a
-SHA.
+First-party `petry-projects/*` reusable workflows are not third-party actions,
+so they are not subject to the same blanket SHA-pinning requirement. However,
+the correct reference style differs by which repo hosts the reusable:
+
+**`.github` org reusables** (e.g., `auto-rebase-reusable.yml`,
+`dependency-audit-reusable.yml`): SHA-pinned references are **preferred**
+because SonarCloud flags mutable tag refs as a supply-chain risk. The canonical
+version tag (e.g., `@v1`) is still **accepted** for backwards compatibility.
+Never `@main`.
 
 ```yaml
-# CORRECT — pin a reusable workflow to its moving `stable` channel tag (pin once)
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@<name>/stable
+# PREFERRED — SHA-pinned, satisfies SonarCloud supply-chain gate
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@126c1441ee9cf040f2ce3ef0eda85d459b82f8e9 # v1
+
+# ACCEPTED — mutable version tag; backwards-compatible, accepted by the compliance audit
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@v1
 
 # WRONG — a branch ref has no version boundary; a bad commit is instantly live for all callers
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@main
-
-# WRONG — do not SHA-pin first-party reusable workflow refs (and a frozen pin needs a per-caller edit to roll out)
-uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@main
 ```
 
-**Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
-the default branch. Anthropic's OIDC token endpoint validates that the
-workflow file on a PR branch is identical to the default branch — any diff
-causes `401 Workflow validation failed` and the agent cannot run on that PR.
+**`.github-private` reusables** (e.g., `dev-lead-reusable.yml`): Use the
+`dev-lead/stable` channel tag — never `@main`, never a SHA.
 
-The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
-deliberately (bumped only on backward-compatible releases) and are not subject
-to tag-force-push risk because the org controls the tag. **Do not open
-compliance PRs to pin these references.**
+```yaml
+# CORRECT — pin to the moving stable channel tag
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable
+
+# WRONG — a branch ref has no version boundary; a bad commit is instantly live for all callers
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
+
+# WRONG — SHA-pinning creates a diff from main, failing Anthropic OIDC validation (see below)
+uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+```
+
+**Why no SHA-pin for `.github-private` reusables:** Pinning the `uses:` line in
+a Tier 1 caller stub creates a diff from the default branch. Anthropic's OIDC
+token endpoint validates that the workflow file on a PR branch is identical to
+the default branch — any diff causes `401 Workflow validation failed` and the
+agent cannot run on that PR.
+
+The `dev-lead/stable` channel tag on `petry-projects/.github-private` is managed
+deliberately (advanced only on validated releases) and is not subject to
+tag-force-push risk because the org controls the tag. **Do not open compliance
+PRs to SHA-pin these references.**
 
 > **SonarCloud agrees via a scoped exemption, not a blanket disable.**
 > SonarCloud's external `githubactions:S7637` gate doesn't know about this
@@ -1632,7 +1665,7 @@ centrally so they cannot drift per repo:
   — and passes `with: { agent_ref: dev-lead/stable }` so dev-lead's own
   scripts/prompts checkout runs at the same pinned channel (it defaults to `main`
   when omitted). This is the org reusable-workflow versioning standard; see
-  [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)
+  [Reusable workflow versioning](#reusable-workflow-versioning--current-and-target-models)
   for the policy, benefits, and release process.
 - **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
   set that the reusable requests**:
