@@ -242,14 +242,21 @@ but the categories are universal.
 
 #### Required Check Categories
 
-| Check | Required | Check Name(s) | Notes |
-|-------|----------|---------------|-------|
-| **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
-| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
-| **Dev-Lead Agent** | All repos | `Dev-Lead Agent / dev-lead` | AI code review and agent automation on every PR |
-| **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
-| **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
-| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
+The `code-quality` ruleset enforces a fixed set of **required status-check contexts**.
+The single source of truth for those contexts is the codified ruleset JSON,
+[`.github-private/.github/rulesets/code-quality.json`](https://github.com/petry-projects/.github-private/blob/main/.github/rulesets/code-quality.json),
+applied by `apply-rulesets.sh` / `bootstrap-new-repo.sh`. This table MUST match it.
+
+| Check | In `code-quality` ruleset | Check Name | Notes |
+|-------|---------------------------|------------|-------|
+| **SonarCloud** | ✅ required | `SonarCloud` | Code quality, maintainability, security hotspots |
+| **CodeQL** | ✅ required | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
+| **AgentShield** | ✅ required | `agent-shield / AgentShield` | Agent-config security scan on every PR |
+| **Dependency Audit** | ✅ required | `dependency-audit / Detect ecosystems` | Multi-ecosystem vulnerability audit (the per-ecosystem jobs skip and must NOT be required) |
+| **Secret Scan** | ✅ required | `Secret scan (gitleaks)` | Full-history gitleaks scan in `ci.yml` — free on public repos, `GITLEAKS_LICENSE` on private (see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense)) |
+| **Coverage** | ✅ required | `coverage` | Stack-aware `coverage` job in `ci.yml`: defaults to shell (bats) line-coverage via kcov and is green until tests exist, then expands per stack (Node/Go/Python). Thresholds are opt-in per stack — see BOOTSTRAP.md |
+| **Dev-Lead Agent** | Runs per-PR | `Dev-Lead Agent / dev-lead` | AI review/automation on every PR; supplies the org-leads CODEOWNER approval for the `pr-quality` ruleset. Not a required status-check context here |
+| **CI Pipeline** | Repo-specific | e.g. `build-and-test`, `TypeScript`, `Go` | Lint/format/typecheck/unit-test. The job name varies by stack, so it is not a universal required context; require it per-repo if desired |
 
 > **Check names must match exactly.** GitHub-managed CodeQL produces a check named
 > `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
