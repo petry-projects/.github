@@ -494,8 +494,7 @@ when the legacy exemption uses a blanket workflow-path `resourceKey`.
 SonarCloud's rule **`githubactions:S7635`** ("only pass required secrets to this
 workflow") fires on the **`secrets: inherit`** line of a first-party caller stub.
 Caller stubs pass `secrets: inherit` **by design** so the central reusable
-receives every secret it needs (e.g. `GH_PAT_WORKFLOWS` + `CLAUDE_CODE_OAUTH_TOKEN`
-+ more) without each caller enumerating — and re-enumerating on every reusable
+receives every secret it needs (e.g. `GH_PAT_WORKFLOWS` + `CLAUDE_CODE_OAUTH_TOKEN` + more) without each caller enumerating — and re-enumerating on every reusable
 change. The reusable is **first-party and fully trusted**, the same trust boundary
 that exempts the channel ref from S7637 above.
 
