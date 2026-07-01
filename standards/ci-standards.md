@@ -489,6 +489,43 @@ exemption is present. It files `sonar-s7637-exemption-missing` (warning) when a
 SonarCloud-gated repo has neither, and `sonar-s7637-exemption-too-broad` (error)
 when the legacy exemption uses a blanket workflow-path `resourceKey`.
 
+#### SonarCloud Exemption: First-Party `secrets: inherit` S7635
+
+SonarCloud's rule **`githubactions:S7635`** ("only pass required secrets to this
+workflow") fires on the **`secrets: inherit`** line of a first-party caller stub.
+Caller stubs pass `secrets: inherit` **by design** so the central reusable
+receives every secret it needs (e.g. `GH_PAT_WORKFLOWS` + `CLAUDE_CODE_OAUTH_TOKEN`
++ more) without each caller enumerating — and re-enumerating on every reusable
+change. The reusable is **first-party and fully trusted**, the same trust boundary
+that exempts the channel ref from S7637 above.
+
+**Standard (canonical — inline NOSONAR on the `secrets:` line):** every
+first-party caller stub that uses `secrets: inherit` MUST carry an inline
+`# NOSONAR(githubactions:S7635)` marker on that line, e.g.:
+
+```yaml
+jobs:
+  idea-triage:
+    uses: petry-projects/.github/.github/workflows/idea-triage-reusable.yml@idea-triage/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
+```
+
+Like the S7637 marker, SonarCloud suppresses S7635 on exactly that line, so the
+exemption travels **with the stub file** — verbatim adopters inherit it with
+**zero** per-repo `sonar-project.properties` entries. The grandfathered existing
+deployments pass because they are not "new code"; the rule only bites a stub the
+first time it is **added** to a SonarCloud-gated repo. (The legacy per-file
+`sonar.issue.ignore.multicriteria` mechanism with `ruleKey=githubactions:S7635`
+also works and is accepted during transition, but the inline marker is canonical.)
+
+Caller-stub templates that use `secrets: inherit` and therefore carry the S7635
+marker: `initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`.
+**Pending:** `dev-lead.yml`, `auto-rebase.yml`, `dependabot-automerge.yml`, and
+`pr-review-mention.yml` also use `secrets: inherit` but do not yet carry the
+marker; because they are already deployed fleet-wide (so re-syncing them fans out
+broadly) the marker is being added to them under a separate rollout — until then a
+**new** adoption of one of those four needs the legacy per-file S7635 exemption.
+
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
 Secret detection via the gitleaks action. This job **must be added to the CI pipeline**
@@ -1131,8 +1168,13 @@ Where a planner-created epic lands depends on the repo:
 #### Adopting in a new repo
 
 1. Copy [`standards/workflows/initiative-planner.yml`](workflows/initiative-planner.yml)
-   to `.github/workflows/initiative-planner.yml` (and, optionally,
-   `idea-triage.yml`) in the target repo.
+   and [`initiative-driver.yml`](workflows/initiative-driver.yml) to
+   `.github/workflows/` (and, optionally, `idea-triage.yml`) in the target repo.
+   Copy **verbatim** — the templates carry the inline
+   `# NOSONAR(githubactions:S7637)` and `# NOSONAR(githubactions:S7635)` markers,
+   so a SonarCloud-gated repo needs **no** `sonar-project.properties` edits (see
+   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637)
+   and the `secrets: inherit` S7635 note that follows it).
 2. Ensure Discussions is enabled with an "Ideas" category, and **create the gate
    labels** the pipeline relies on. The driver's `initiative:auto` gate **cannot be
    armed if its label is missing** (the driver pilot hit exactly this — see #888),

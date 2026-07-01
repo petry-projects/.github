@@ -43,4 +43,4 @@ permissions: {}
 jobs:
   idea-triage:
     uses: petry-projects/.github/.github/workflows/idea-triage-reusable.yml@idea-triage/stable  # NOSONAR(githubactions:S7637) first-party channel ref
-    secrets: inherit
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable

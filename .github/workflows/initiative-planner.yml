@@ -50,4 +50,4 @@ jobs:
     # Mirrors add-to-project.yml / pr-review-mention.yml; local refs also avoid the
     # SHA-pin security finding a remote tag ref raises on the hosting repo.
     uses: ./.github/workflows/initiative-planner-reusable.yml
-    secrets: inherit
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
