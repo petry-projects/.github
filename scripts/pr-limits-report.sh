@@ -52,15 +52,30 @@ EXEMPT_ACTORS="$(jq -c '.exempt_actors // []' "$CONFIG" 2>/dev/null || echo '[]'
 EXEMPT_LABELS="$(jq -c '.exempt_labels // []' "$CONFIG" 2>/dev/null || echo '[]')"
 
 # ── Enumerate open, non-draft PRs org-wide (same idiom as the admission gate) ──
+# Distinguish a real `gh` failure from a genuinely-empty queue. Unlike the
+# admission gate (which fails OPEN so PR creation is never wedged), a scheduled
+# report must fail LOUDLY when it cannot measure — otherwise a transient API
+# error masquerades as a misleading "🟢 Under cap 0/cap" result.
+gh_rc=0
 PRS="$(gh search prs \
   --owner "$ORG" \
   --state open \
   --draft=false \
   --limit 1000 \
   --json author,labels,repository,title,url \
-  2>/dev/null || true)"
+  2>/dev/null)" || gh_rc=$?
 
-# Robust to an empty / failed enumeration: treat as an empty array, report 0.
+if [ "$gh_rc" -ne 0 ]; then
+  UNAVAILABLE="$(printf '## PR-limits report — %s\n\n> ⚠️ **Metric unavailable** — `gh search prs` failed (rc=%s); the open-PR queue could not be enumerated. No cap comparison was produced.\n' "$ORG" "$gh_rc")"
+  printf '%s\n' "$UNAVAILABLE"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '%s\n' "$UNAVAILABLE" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  exit 1
+fi
+
+# rc 0: a genuinely empty result is a real "0 open PRs". Keep the unparseable-JSON
+# guard as a secondary safety net (rc 0 but garbage stdout).
 if [ -z "$PRS" ]; then
   PRS='[]'
 fi

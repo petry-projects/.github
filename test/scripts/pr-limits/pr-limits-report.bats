@@ -187,3 +187,65 @@ run_report() {
   [[ "$output" == *"AT OR OVER CAP"* ]]
   [[ "$output" == *"| Cap | 4 |"* ]]
 }
+
+# --------------------------------------------------------------------------
+# A null / missing author does not crash jq: it is counted as "unknown".
+# --------------------------------------------------------------------------
+@test "null or missing author is counted as unknown without a jq error" {
+  write_config 10
+  export GH_STUB_STDOUT
+  GH_STUB_STDOUT="$(jq -nc '[
+    { author: null,                       labels: [], repository: { name: "a" }, title: "t", url: "u" },
+    { author: { login: "dev-lead-bot" },  labels: [], repository: { name: "b" }, title: "t", url: "u" },
+    {                                     labels: [], repository: { name: "c" }, title: "t", url: "u" }
+  ]')"
+  run_report
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Open non-draft PRs (total) | 3"* ]]
+  [[ "$output" == *"Counted toward cap | 3"* ]]
+  # Both the null-author and the missing-author PR collapse to "unknown" (count 2).
+  [[ "$output" == *"| unknown | 2 |"* ]]
+  [[ "$output" == *"| dev-lead-bot | 1 |"* ]]
+  # No jq error text leaked into the output.
+  [[ "$output" != *"Cannot index"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Interleaved authors: group_by yields correct per-author counts regardless of
+# input order (jq group_by sorts internally). Locks that invariant in.
+# --------------------------------------------------------------------------
+@test "interleaved authors are grouped correctly regardless of input order" {
+  write_config 10
+  export GH_STUB_STDOUT
+  GH_STUB_STDOUT="$(jq -nc '[
+    { author: { login: "a-bot" }, labels: [], repository: { name: "1" }, title: "t", url: "u" },
+    { author: { login: "b-bot" }, labels: [], repository: { name: "2" }, title: "t", url: "u" },
+    { author: { login: "a-bot" }, labels: [], repository: { name: "3" }, title: "t", url: "u" },
+    { author: { login: "b-bot" }, labels: [], repository: { name: "4" }, title: "t", url: "u" },
+    { author: { login: "a-bot" }, labels: [], repository: { name: "5" }, title: "t", url: "u" }
+  ]')"
+  run_report
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| a-bot | 3 |"* ]]
+  [[ "$output" == *"| b-bot | 2 |"* ]]
+}
+
+# --------------------------------------------------------------------------
+# A `gh` failure (non-zero exit) fails loudly: the report exits non-zero and
+# prints "Metric unavailable" — NOT a fake "0/cap Under cap" table. Unlike the
+# admission gate (which fails open for PR creation), a scheduled measurement
+# report must not masquerade a query error as a real zero.
+# --------------------------------------------------------------------------
+@test "gh failure prints Metric unavailable and exits non-zero (no fake table)" {
+  write_config 50
+  export GH_STUB_EXIT=4
+  export GH_STUB_STDOUT=""
+  export GH_STUB_STDERR="simulated gh API error"
+  run_report
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Metric unavailable"* ]]
+  [[ "$output" == *"rc=4"* ]]
+  # Must NOT emit the normal metrics table or an "under cap" verdict.
+  [[ "$output" != *"Under cap"* ]]
+  [[ "$output" != *"Counted toward cap"* ]]
+}
