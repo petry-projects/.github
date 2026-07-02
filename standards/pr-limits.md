@@ -86,10 +86,12 @@ The gate is fail-open (a transient `gh` error yields a count of `0` and an allow
 and honours `DRY_RUN` / `DEV_LEAD_DRY_RUN` by computing and logging the decision
 but always returning allow.
 
-> **Wiring status.** The library and its tests exist today; wiring it into the
-> live PR-creation path (dev-lead / initiative-driver / agentic workflows) and
-> choosing rollout scope is **Story 3, [#508](https://github.com/petry-projects/.github/issues/508)**.
-> Until that lands, the gate is available to call but is not yet on the live path.
+> **Wiring status.** The library and its tests exist, and the gate is now wired
+> into the PR-creation engine in `petry-projects/.github-private` (**Story 3**,
+> [#508](https://github.com/petry-projects/.github/issues/508)). Enforcement
+> activates as that change promotes through the dev-lead channels (ring0 →
+> stable) via the normal canary soak — so the gate is wired but not yet
+> enforcing on the running channel.
 
 ## 4. Exempt actors — sanctioned, not a misconfiguration
 
