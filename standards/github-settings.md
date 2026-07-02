@@ -252,19 +252,21 @@ a fresh approval under the current CODEOWNERS.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-The **codified source of truth** for the required-check set is
-[`standards/rulesets/code-quality.json`](rulesets/code-quality.json) — the table
-below reconciles to it. `apply-rulesets.sh` applies that file; do not add a context
-here that the file does not carry (or vice versa) without updating both.
+`apply-rulesets.sh` **dynamically constructs** the `code-quality` ruleset for each
+repo by probing its workflow files via `detect_required_checks()` — it does not apply
+a static JSON file. The table below is the canonical reference for the required-check
+set; keep it in sync with the detection logic in `scripts/apply-rulesets.sh`. Note:
+`apply-rulesets.sh` manages only the `pr-quality` and `code-quality` branch rulesets —
+the `release-channel-tags` ruleset is managed in `.github-private` (see
+[§Source of truth & repo boundary](#source-of-truth--repo-boundary)).
 
 #### Required Check Categories
 
-The **four contexts codified in `code-quality.json`** are required on every repo's
-default branch:
+The **four required check contexts** applied to every repo's default branch are:
 
 | Check | Status | Check Name(s) | Notes |
 |-------|--------|---------------|-------|
-| **SonarCloud** | ✅ Required (codified) | `SonarCloud` | Code quality, maintainability, security hotspots |
+| **SonarCloud** | ✅ Required (codified) | `SonarCloud Analysis / SonarCloud` | Code quality, maintainability, security hotspots. `apply-rulesets.sh` derives the check name as `<sonarcloud.yml name> / SonarCloud`; the standard template sets `name: SonarCloud Analysis`, producing this context. Verify with `gh pr checks <PR>` if the workflow name differs |
 | **CodeQL** | ✅ Required (codified) | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
 | **AgentShield** | ✅ Required (codified) | `agent-shield / AgentShield` | Deep agent-config security scan on every PR |
 | **Dependency Audit** | ✅ Required (codified) | `dependency-audit / Detect ecosystems` | Only the unconditional `Detect ecosystems` job is required; per-ecosystem audit jobs are gated on lockfile presence and would fail as required-but-skipped |
@@ -274,7 +276,7 @@ The following are **intentionally NOT** in `code-quality.json` today:
 | Check | Status | Check Name(s) | Why |
 |-------|--------|---------------|-----|
 | **Secret Scan** | ⏳ Template / new repos; not yet fleet-wide | `Secret scan (gitleaks)` | Produced by the template [`ci.yml`](workflows/ci.yml) (see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense)). Added to the ruleset fleet-wide only once existing repos produce it |
-| **Coverage** | ⏳ Template / new repos; not yet fleet-wide | `coverage` | Produced by the template [`ci.yml`](workflows/ci.yml) (green-until-tests). Requiring it fleet-wide before repos have a coverage job would brick every PR — backfill first, then add the context |
+| **Coverage** | ⏳ Template / new repos; not yet fleet-wide | `coverage` | **Not produced by the template [`ci.yml`](workflows/ci.yml) out of the box** — the template ships a single `build-and-test` job; a separate `coverage` check must be explicitly configured when adopting the template (see [ci-standards.md](ci-standards.md)). Requiring it fleet-wide before repos produce it would brick every PR — backfill first, then add the context |
 | **Dev-Lead Agent** | ❌ Not a required context | `Dev-Lead Agent / dev-lead` | Per-PR AI review, not a merge gate: the agent's GitHub App refuses to mint a token for any PR touching workflow files, so requiring it would deadlock every workflow-modifying PR |
 | **CI Pipeline** | Repo-specific (not a fixed org context) | e.g. `build-and-test`, `TypeScript`, `Go` | Lint/format/typecheck/test; the job name is repo-defined, so it is required per-repo (via branch protection), not as a codified org-wide context |
 
