@@ -620,6 +620,33 @@ auto-rebase fan-out. Full standard, rationale, and operator runbook:
 > treat these as intentional exemptions. To change the cap or the exempt list,
 > follow the runbook in [`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md).
 
+#### Pull Request Limits (automation open-PR cap)
+
+The org enforces a **soft ceiling on concurrent open, non-draft automation PRs
+org-wide** so automation cannot outrun merge throughput and inflate the
+auto-rebase fan-out. Full standard, rationale, and operator runbook:
+[`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md).
+
+- **GitHub has no native "max open PRs" surface** (no repo setting, org setting,
+  or ruleset rule — verified in the [ADR](https://github.com/petry-projects/.github/blob/main/docs/initiatives/pull-request-limits-adr.md)),
+  so this is enforced **source-side** by [`scripts/lib/pr-limit-gate.sh`](https://github.com/petry-projects/.github/blob/main/scripts/lib/pr-limit-gate.sh):
+  a PR-creating workflow asks the gate before opening a PR and **defers** (never
+  fails or closes) when the queue is at the cap. Live-path wiring is Story 3 (#508).
+- **The configured value lives only in [`standards/pr-limits.json`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.json)** —
+  the single source of truth. Read it with `jq`; never hardcode or restate it.
+
+> **Exempt actors are sanctioned policy, not drift.** `dependabot[bot]`,
+> `OrganizationAdmin`, `@petry-projects/org-leads`, the `dependabot-automerge-petry`
+> app, and `security`-labeled PRs are on the cap's exempt list — never blocked
+> and never counted. This mirrors the ruleset bypass-actor allowance (see
+> [Ruleset remediation](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md)):
+> `dependabot[bot]` is already bounded by its own per-ecosystem
+> `open-pull-requests-limit` (so counting it here would double-cap and could
+> starve a security PR), the human/admin actors are break-glass and maintainer
+> traffic, and the app only operates on existing PRs. A compliance audit should
+> treat these as intentional exemptions. To change the cap or the exempt list,
+> follow the runbook in [`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md).
+
 ---
 
 ## Multi-Agent Isolation — Git Worktrees
