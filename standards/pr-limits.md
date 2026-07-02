@@ -75,8 +75,7 @@ workflow sources it and calls `plg_admission_gate <source>` before opening a PR:
 
 1. If `<source>` is an exempt actor (§4) → **allow** (never blocked, never counted).
 2. Else it counts the open, non-draft, non-exempt automation queue org-wide via
-   `gh search prs` (the same enumeration idiom as
-   [`.dev-lead/scripts/list-prs.sh`](../.dev-lead/scripts/list-prs.sh)) and, if
+   `gh search prs` (the enumeration lives in the gate library itself) and, if
    the queue is at or over `org_wide.automation_open_pr_cap` → **defer**.
 3. If a per-source sub-cap is configured for `<source>` and its own queue is at
    or over it → **defer**. (No sub-caps are configured under the current
@@ -180,9 +179,8 @@ them touches a GitHub setting or ruleset — there is no such surface to apply
   — decision record (Story 1, #506).
 - [`standards/pr-limits.json`](pr-limits.json) — single source of truth (Story 2, #507).
 - [`scripts/lib/pr-limit-gate.sh`](../scripts/lib/pr-limit-gate.sh) — source-side
-  admission gate; live wiring is Story 3, #508.
+  admission gate (does its own `gh search prs` enumeration); wired into the
+  PR-creation engine in `petry-projects/.github-private` (Story 3).
 - [`standards/dependabot-policy.md`](dependabot-policy.md) — the complementary
   per-ecosystem Dependabot cap.
-- [`.dev-lead/scripts/list-prs.sh`](../.dev-lead/scripts/list-prs.sh) — the PR
-  enumeration idiom the gate reuses.
 - [`test/scripts/pr-limits/`](../test/scripts/pr-limits) — config + gate tests.
