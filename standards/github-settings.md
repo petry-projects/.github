@@ -126,7 +126,7 @@ rules are deprecated — migrate existing classic rules to rulesets.
 ### Source of truth & repo boundary
 
 The codified ruleset JSONs are the source of truth for the two sanctioned
-rulesets; `apply-rulesets.sh` and `bootstrap-new-repo.sh` apply them to each repo.
+rulesets; `scripts/apply-rulesets.sh` (and any org automation consuming it) applies them to each repo.
 As **org-wide compliance policy they are owned by `petry-projects/.github`**, and
 their canonical home is `standards/rulesets/`. Do **not** author them in
 `petry-projects/.github-private` — that repo is scoped to agents/skills and their

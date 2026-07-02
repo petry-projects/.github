@@ -35,9 +35,9 @@ diverging silently.
 
 Org-wide **standards and compliance policy are owned by `petry-projects/.github`**
 (this repo): everything in the table above, **plus the codified compliance
-rulesets** — `code-quality` and `pr-quality` — that `apply-rulesets.sh` /
-`bootstrap-new-repo.sh` apply to every repo. The canonical home for those ruleset
-JSONs is `standards/rulesets/`.
+rulesets** — `code-quality` and `pr-quality` — that `scripts/apply-rulesets.sh`
+(and org automation consuming it) apply to every repo. The canonical home for those
+ruleset JSONs is `standards/rulesets/`.
 
 **`petry-projects/.github-private` is scoped to agents, skills, and their reusable
 workflows/assets.** It must **not** be the source of truth for org-wide policy.
@@ -47,7 +47,7 @@ protects `.github-private`'s own `pr-review/**` and `dev-lead/**` agent-release 
 **Rule of thumb:** if a standard or ruleset applies to the whole fleet, it belongs
 in `.github/standards/`. If it protects an agent's/skill's own assets, it stays in
 `.github-private`. When in doubt, put it in `.github` and have `.github-private`
-**consume** it — the way `seed-repo-template.sh` fetches `standards/workflows/` from
+**consume** it — the way repo-seeding tooling fetches `standards/workflows/` from
 `.github`. Do **not** add new org-wide standards or rulesets to `.github-private`.
 
 > **Known exception being remediated:** `code-quality.json` and `pr-quality.json`
