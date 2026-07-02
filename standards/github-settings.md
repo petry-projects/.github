@@ -123,6 +123,22 @@ Rulesets are the primary enforcement mechanism for branch policies. All
 repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
+### Source of truth & repo boundary
+
+The codified ruleset JSONs are the source of truth for the two sanctioned
+rulesets; `apply-rulesets.sh` and `bootstrap-new-repo.sh` apply them to each repo.
+As **org-wide compliance policy they are owned by `petry-projects/.github`**, and
+their canonical home is `standards/rulesets/`. Do **not** author them in
+`petry-projects/.github-private` — that repo is scoped to agents/skills and their
+reusable assets. The only ruleset that belongs there is `release-channel-tags`
+(it protects `.github-private`'s own `pr-review/**` / `dev-lead/**` release tags).
+See the repo-boundary rule in [`AGENTS.md`](../AGENTS.md).
+
+> **In transit:** `code-quality.json` and `pr-quality.json` currently still live
+> in `.github-private/.github/rulesets/` and are being relocated to
+> `standards/rulesets/` here — see
+> [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
+
 **`pr-quality` and `code-quality` are the only sanctioned rulesets.** Legacy
 `protect-branches` rulesets and ad-hoc `main` rulesets are deprecated: they
 duplicate protections and, because GitHub evaluates bypass eligibility per
