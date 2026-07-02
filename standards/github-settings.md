@@ -262,7 +262,8 @@ the `release-channel-tags` ruleset is managed in `.github-private` (see
 
 #### Required Check Categories
 
-The table below covers the **unconditional fleet-wide required check contexts** — the base set `detect_required_checks()` applies when each org-standard workflow file is present. The script also conditionally adds **Dev-Lead Agent** (when `dev-lead.yml` exists) and **Secret scan** (when `ci.yml` contains the gitleaks action), but those are in staged rollout; see below.
+The table below covers the **unconditional fleet-wide required check contexts** — the base set `detect_required_checks()` applies when each org-standard workflow file is present.
+The script also conditionally adds **Dev-Lead Agent** (when `dev-lead.yml` exists) and **Secret scan** (when `ci.yml` contains the gitleaks action), but those are in staged rollout; see below.
 
 | Check | Status | Check Name(s) | Notes |
 |-------|--------|---------------|-------|
