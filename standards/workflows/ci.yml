@@ -12,7 +12,7 @@
 #      repo's branch-protection required checks to match the new job names.
 #   4. Two more jobs ship by default and are org required checks — `Secret scan
 #      (gitleaks)` (per push-protection.md; needs a .gitleaks.toml at root, seeded
-#      with this template) and `coverage` (green until your stack emits coverage).
+#      by repo-template tooling) and `coverage` (green until your stack emits coverage).
 #      Keep their job names stable so the required checks stay satisfied.
 #
 # CONVENTIONS (enforced by the standard):
@@ -82,7 +82,8 @@ jobs:
           url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
           wget -q "${url}" -O /tmp/gitleaks.tar.gz
           echo "${GITLEAKS_CHECKSUM}  /tmp/gitleaks.tar.gz" | sha256sum -c
-          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin
 
       - name: Run gitleaks
         # Requires a .gitleaks.toml at repo root (seeded by seed-repo-template.sh).
