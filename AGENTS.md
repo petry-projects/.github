@@ -31,6 +31,33 @@ is, by definition, drift from the standard. If a needed standard or template
 is missing, file an issue against `petry-projects/.github` rather than
 diverging silently.
 
+### What lives where — `.github` vs `.github-private`
+
+Org-wide **standards and compliance policy are owned by `petry-projects/.github`**
+(this repo): everything in the table above, **plus the codified compliance
+rulesets** — `code-quality` and `pr-quality` — that `apply-rulesets.sh` /
+`bootstrap-new-repo.sh` apply to every repo. The canonical home for those ruleset
+JSONs is `standards/rulesets/`.
+
+**`petry-projects/.github-private` is scoped to agents, skills, and their reusable
+workflows/assets.** It must **not** be the source of truth for org-wide policy.
+The only ruleset that legitimately lives there is `release-channel-tags` — it
+protects `.github-private`'s own `pr-review/**` and `dev-lead/**` agent-release tags.
+
+**Rule of thumb:** if a standard or ruleset applies to the whole fleet, it belongs
+in `.github/standards/`. If it protects an agent's/skill's own assets, it stays in
+`.github-private`. When in doubt, put it in `.github` and have `.github-private`
+**consume** it — the way `seed-repo-template.sh` fetches `standards/workflows/` from
+`.github`. Do **not** add new org-wide standards or rulesets to `.github-private`.
+
+> **Known exception being remediated:** `code-quality.json` and `pr-quality.json`
+> currently live in `.github-private/.github/rulesets/` (added ad-hoc under
+> compliance fix #60, before this boundary was documented) and are being relocated
+> to `standards/rulesets/` — see
+> [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
+> Treat `.github` as the intended canonical home; do not extend the `.github-private`
+> copies.
+
 ---
 
 ## Project Context
