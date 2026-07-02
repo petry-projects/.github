@@ -262,7 +262,7 @@ the `release-channel-tags` ruleset is managed in `.github-private` (see
 
 #### Required Check Categories
 
-The **four required check contexts** applied to every repo's default branch are:
+The table below covers the **unconditional fleet-wide required check contexts** — the base set `detect_required_checks()` applies when each org-standard workflow file is present. The script also conditionally adds **Dev-Lead Agent** (when `dev-lead.yml` exists) and **Secret scan** (when `ci.yml` contains the gitleaks action), but those are in staged rollout; see below.
 
 | Check | Status | Check Name(s) | Notes |
 |-------|--------|---------------|-------|
@@ -282,11 +282,11 @@ The following are **intentionally NOT** in `code-quality.json` today:
 
 **Sequencing (why Secret Scan + Coverage are staged).** Adding a required context
 to `code-quality.json` makes it a merge gate on **every** repo the ruleset targets;
-a repo that does not *produce* that check is bricked. The template `ci.yml` now
-ships both jobs so new repos produce them, but existing fleet repos do not yet have
-a coverage job — so `coverage` (and `Secret scan (gitleaks)`) are added to the shared
-ruleset only **after** a fleet backfill. Until then, keep the stricter set scoped to
-the template / new repos. See [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
+a repo that does not *produce* that check is bricked. Neither context is produced by
+the template `ci.yml` out of the box — repos must explicitly add a coverage job and
+the gitleaks secret-scan step before those check names appear. Both are added to the
+shared ruleset only **after** a fleet backfill. Until then, keep them scoped to repos
+that already produce them. See [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
 
 > **Check names must match exactly.** GitHub-managed CodeQL produces a check named
 > `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
