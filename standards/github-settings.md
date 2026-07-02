@@ -261,20 +261,42 @@ a fresh approval under the current CODEOWNERS.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have the following quality checks configured and
-required. The specific check names and ecosystem configurations vary by repo,
-but the categories are universal.
+`apply-rulesets.sh` **dynamically constructs** the `code-quality` ruleset for each
+repo by probing its workflow files via `detect_required_checks()` — it does not apply
+a static JSON file. The table below is the canonical reference for the required-check
+set; keep it in sync with the detection logic in `scripts/apply-rulesets.sh`. Note:
+`apply-rulesets.sh` manages only the `pr-quality` and `code-quality` branch rulesets —
+the `release-channel-tags` ruleset is managed in `.github-private` (see
+[§Source of truth & repo boundary](#source-of-truth--repo-boundary)).
 
 #### Required Check Categories
 
-| Check | Required | Check Name(s) | Notes |
-|-------|----------|---------------|-------|
-| **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
-| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
-| **Dev-Lead Agent** | All repos | `Dev-Lead Agent / dev-lead` | AI code review and agent automation on every PR |
-| **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
-| **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
-| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
+The table below covers the **unconditional fleet-wide required check contexts** — the base set `detect_required_checks()` applies when each org-standard workflow file is present.
+The script also conditionally adds **Dev-Lead Agent** (when `dev-lead.yml` exists) and **Secret scan** (when `ci.yml` contains the gitleaks action), but those are in staged rollout; see below.
+
+| Check | Status | Check Name(s) | Notes |
+|-------|--------|---------------|-------|
+| **SonarCloud** | ✅ Required (codified) | `SonarCloud Analysis / SonarCloud` | Code quality, maintainability, security hotspots. `apply-rulesets.sh` derives the check name as `<sonarcloud.yml name> / SonarCloud`; the standard template sets `name: SonarCloud Analysis`, producing this context. Verify with `gh pr checks <PR>` if the workflow name differs |
+| **CodeQL** | ✅ Required (codified) | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
+| **AgentShield** | ✅ Required (codified) | `agent-shield / AgentShield` | Deep agent-config security scan on every PR |
+| **Dependency Audit** | ✅ Required (codified) | `dependency-audit / Detect ecosystems` | Only the unconditional `Detect ecosystems` job is required; per-ecosystem audit jobs are gated on lockfile presence and would fail as required-but-skipped |
+
+The following are **intentionally NOT** in `code-quality.json` today:
+
+| Check | Status | Check Name(s) | Why |
+|-------|--------|---------------|-----|
+| **Secret Scan** | ⏳ Template / new repos; not yet fleet-wide | `Secret scan (gitleaks)` | Produced by the template [`ci.yml`](workflows/ci.yml) (see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense)). Added to the ruleset fleet-wide only once existing repos produce it |
+| **Coverage** | ⏳ Template / new repos; not yet fleet-wide | `coverage` | **Not produced by the template [`ci.yml`](workflows/ci.yml) out of the box** — the template ships a single `build-and-test` job; a separate `coverage` check must be explicitly configured when adopting the template (see [ci-standards.md](ci-standards.md)). Requiring it fleet-wide before repos produce it would brick every PR — backfill first, then add the context |
+| **Dev-Lead Agent** | ❌ Not a required context | `Dev-Lead Agent / dev-lead` | Per-PR AI review, not a merge gate: the agent's GitHub App refuses to mint a token for any PR touching workflow files, so requiring it would deadlock every workflow-modifying PR |
+| **CI Pipeline** | Repo-specific (not a fixed org context) | e.g. `build-and-test`, `TypeScript`, `Go` | Lint/format/typecheck/test; the job name is repo-defined, so it is required per-repo (via branch protection), not as a codified org-wide context |
+
+**Sequencing (why Secret Scan + Coverage are staged).** Adding a required context
+to `code-quality.json` makes it a merge gate on **every** repo the ruleset targets;
+a repo that does not *produce* that check is bricked. Neither context is produced by
+the template `ci.yml` out of the box — repos must explicitly add a coverage job and
+the gitleaks secret-scan step before those check names appear. Both are added to the
+shared ruleset only **after** a fleet backfill. Until then, keep them scoped to repos
+that already produce them. See [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
 
 > **Check names must match exactly.** GitHub-managed CodeQL produces a check named
 > `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
