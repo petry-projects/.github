@@ -152,6 +152,15 @@ silently drops a merge gate. `check_legacy_rulesets()` in
 legacy ruleset and reports the exact migration delta (checks to move into
 `code-quality` first, or "safe to delete").
 
+**Source of truth.** The codified `pr-quality` and `code-quality` ruleset JSONs
+live in this repo at [`standards/rulesets/`](rulesets/) — `.github` owns org-wide
+compliance policy (see [`AGENTS.md`](../AGENTS.md#organization-standards) for the
+repo-boundary rule, codified in #576). Run `apply-rulesets.sh` to converge each
+repo's live ruleset to the desired state documented here. The one ruleset that stays in
+`petry-projects/.github-private` is `release-channel-tags` — it protects that
+repo's own `pr-review/**` and `dev-lead/**` agent-release tags and is therefore
+correctly repo-local.
+
 > **Remediating ruleset findings is a manual, admin-token procedure** —
 > `compliance-remediate.sh` skips the `rulesets` category. Follow the
 > [Ruleset Remediation Runbook](ruleset-remediation-runbook.md) (snapshot →
