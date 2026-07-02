@@ -17,14 +17,14 @@ Both carry the two mandatory bypass actors — `OrganizationAdmin` and the
 
 ## Applying
 
-`scripts/apply-rulesets.sh` reads these files and creates/updates the named ruleset
-on a target repo — re-running converges to the file's desired state (a no-op when
-already in sync). Rulesets live **on each repo**; editing a file here changes the
+These files are the **desired-state source of truth**. `scripts/apply-rulesets.sh`
+creates/updates the named ruleset on a target repo to match — re-running is a no-op
+when already in sync. Rulesets live **on each repo**; editing a file here changes the
 desired state, not any live ruleset, until the applier runs.
 
 ```bash
 # Preview the payload for one repo (no writes):
-RULESETS_REPO=petry-projects/<repo> DRY_RUN=true bash scripts/apply-rulesets.sh
+GH_TOKEN=<admin-token> bash scripts/apply-rulesets.sh <repo> --dry-run
 ```
 
 ## Scope boundary
