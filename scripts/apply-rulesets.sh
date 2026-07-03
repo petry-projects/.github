@@ -1,12 +1,31 @@
 #!/usr/bin/env bash
 # apply-rulesets.sh — Apply standard repository rulesets to petry-projects repos
 #
+# ─────────────────────────────────────────────────────────────────────────────
+# LEGACY / DETECTION-BASED APPLIER — NOT the codified source of truth.
+#
+# This copy builds the `code-quality` required-status-check set *dynamically* by
+# probing each repo's workflow files. The canonical source of truth for the org
+# rulesets is the codified JSON under `standards/rulesets/` (code-quality.json,
+# pr-quality.json), applied by the file-driven applier in `.github-private`,
+# which reads those files and PUTs them verbatim. See AGENTS.md ("What lives
+# where") and petry-projects/.github#575 / #580.
+#
+# When these two disagree, the codified `standards/rulesets/*.json` wins. Do NOT
+# teach this script to require any context that is absent from those files —
+# doing so recreates the divergence #580 removed (the `Dev-Lead Agent / dev-lead`
+# injection). Prefer the codified applier; the clean end-state (#580 option 1) is
+# to retire this detection path entirely once the cross-repo bootstrap story for
+# `.github-private` is settled.
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Companion script to compliance-audit.sh. Creates or updates the rulesets defined in:
 #   standards/github-settings.md#repository-rulesets
+#   standards/rulesets/*.json (codified source of truth)
 #
 # Rulesets managed:
 #   pr-quality    — pull request review requirements and merge policy
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Dev-Lead Agent)
+#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup)
 #
 # Usage:
 #   # Apply to a specific repo:
@@ -125,9 +144,11 @@ detect_required_checks() {
     # the per-ecosystem jobs.
     checks+=("dependency-audit / Detect ecosystems")
   fi
-  if echo "$workflows" | grep -qx "dev-lead.yml"; then
-    checks+=("Dev-Lead Agent / dev-lead")
-  fi
+  # NOTE: Dev-Lead Agent / dev-lead is intentionally NOT added as a required
+  # check, even when dev-lead.yml is present. Per #579 the Dev-Lead Agent is a
+  # per-PR review, not a merge gate: requiring it deadlocks every
+  # workflow-touching PR. The codified standards/rulesets/code-quality.json
+  # deliberately omits it, and this detection-based copy must agree (#580).
   # dependabot-automerge / dependabot-rebase are intentionally NOT
   # required: dependabot-automerge runs only on dependabot[bot] PRs and
   # dependabot-rebase runs only on push to main, neither of which are
@@ -351,56 +372,62 @@ apply_rulesets() {
 }
 
 # ---------------------------------------------------------------------------
-# Parse arguments
+# Main — parse arguments and dispatch
 # ---------------------------------------------------------------------------
-if [ $# -eq 0 ]; then
-  usage
-fi
+main() {
+  if [ $# -eq 0 ]; then
+    usage
+  fi
 
-if [ -z "${GH_TOKEN:-}" ]; then
-  err "GH_TOKEN is required — provide a token with administration:write scope"
-  exit 1
-fi
-
-export GH_TOKEN
-
-TARGET=""
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --all)     TARGET="--all" ;;
-    -*)        err "Unknown flag: $arg"; usage ;;
-    *)         TARGET="$arg" ;;
-  esac
-done
-
-if [ -z "$TARGET" ]; then
-  usage
-fi
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-if [ "$TARGET" = "--all" ]; then
-  info "Fetching all non-archived repos in $ORG ..."
-  repos=$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)
-
-  if [ -z "$repos" ]; then
-    err "No repositories found in $ORG — check GH_TOKEN permissions"
+  if [ -z "${GH_TOKEN:-}" ]; then
+    err "GH_TOKEN is required — provide a token with administration:write scope"
     exit 1
   fi
 
-  failed=0
-  for repo in $repos; do
-    apply_rulesets "$repo" || failed=$((failed + 1))
+  export GH_TOKEN
+
+  TARGET=""
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) DRY_RUN=true ;;
+      --all)     TARGET="--all" ;;
+      -*)        err "Unknown flag: $arg"; usage ;;
+      *)         TARGET="$arg" ;;
+    esac
   done
 
-  if [ "$failed" -gt 0 ]; then
-    err "$failed repo(s) failed — check output above for details"
-    exit 1
+  if [ -z "$TARGET" ]; then
+    usage
   fi
 
-  ok "All repos processed successfully"
-else
-  apply_rulesets "$TARGET"
+  if [ "$TARGET" = "--all" ]; then
+    info "Fetching all non-archived repos in $ORG ..."
+    local repos
+    repos=$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)
+
+    if [ -z "$repos" ]; then
+      err "No repositories found in $ORG — check GH_TOKEN permissions"
+      exit 1
+    fi
+
+    local failed=0 repo
+    for repo in $repos; do
+      apply_rulesets "$repo" || failed=$((failed + 1))
+    done
+
+    if [ "$failed" -gt 0 ]; then
+      err "$failed repo(s) failed — check output above for details"
+      exit 1
+    fi
+
+    ok "All repos processed successfully"
+  else
+    apply_rulesets "$TARGET"
+  fi
+}
+
+# Run main only when executed directly, not when sourced (e.g. by bats tests
+# that exercise individual helper functions such as detect_required_checks).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
 fi
