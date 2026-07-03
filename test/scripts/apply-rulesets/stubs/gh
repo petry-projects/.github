@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Fake `gh` binary for the apply-rulesets bats suite.
+#
+# detect_required_checks() in scripts/apply-rulesets.sh probes a repo via a
+# handful of `gh api` calls. This stub answers those endpoints from env vars so
+# tests can shape a repo's workflow set without per-fixture stub variants.
+#
+# Recognized vars:
+#   GH_STUB_WORKFLOWS    — whitespace-separated workflow filenames returned for
+#                          the `.github/workflows` contents listing (default:
+#                          empty → repo has no workflows).
+#   GH_STUB_CODEQL_STATE — value returned for the code-scanning default-setup
+#                          `.state` probe (default: "configured").
+#
+# Content fetches for individual workflow files return empty (the script guards
+# every content call with `|| echo ""`), which is sufficient for the checks
+# these tests exercise (they do not depend on sonarcloud.yml / ci.yml bodies).
+
+set -euo pipefail
+
+# Locate the api path: the first positional argument after the `api` subcommand.
+path=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "api" ]; then
+    path="$arg"
+    break
+  fi
+  prev="$arg"
+done
+
+case "$path" in
+  */contents/.github/workflows)
+    # The real call uses `--jq '.[].name'`; emit the already-projected names.
+    for wf in ${GH_STUB_WORKFLOWS:-}; do
+      printf '%s\n' "$wf"
+    done
+    ;;
+  */code-scanning/default-setup)
+    printf '%s' "${GH_STUB_CODEQL_STATE:-configured}"
+    ;;
+  */contents/.github/workflows/*)
+    # Individual workflow file content — not needed for these tests.
+    printf ''
+    ;;
+  *)
+    printf 'gh stub: unhandled api path: %s\n' "$path" >&2
+    exit 1
+    ;;
+esac

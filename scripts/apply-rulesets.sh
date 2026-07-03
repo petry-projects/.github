@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 # apply-rulesets.sh — Apply standard repository rulesets to petry-projects repos
 #
+# ─────────────────────────────────────────────────────────────────────────────
+# LEGACY: DETECTION-BASED RULESET BUILDER
+#
+# This copy *builds* the `code-quality` ruleset in-code by probing each repo's
+# workflow files (detect_required_checks). It predates the codified,
+# file-driven applier in `.github-private/scripts/apply-rulesets.sh` (#889),
+# which reads the checked-in desired-state JSON in `standards/rulesets/*.json`
+# and PUTs it verbatim. Those JSON files — not this script — are the canonical
+# source of truth for the `pr-quality` / `code-quality` rulesets (see
+# standards/rulesets/README.md).
+#
+# When editing what this script produces, reconcile it against
+# `standards/rulesets/code-quality.json`: the two tools must not disagree about
+# the required-context set. In particular this builder deliberately does NOT add
+# `Dev-Lead Agent / dev-lead` as a required context — the codified file omits it
+# on purpose (#579: Dev-Lead Agent is per-PR review, not a merge gate; requiring
+# it deadlocks any PR that touches workflow files). See #580.
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Companion script to compliance-audit.sh. Creates or updates the rulesets defined in:
 #   standards/github-settings.md#repository-rulesets
 #
@@ -125,9 +144,12 @@ detect_required_checks() {
     # the per-ecosystem jobs.
     checks+=("dependency-audit / Detect ecosystems")
   fi
-  if echo "$workflows" | grep -qx "dev-lead.yml"; then
-    checks+=("Dev-Lead Agent / dev-lead")
-  fi
+  # NOTE: dev-lead.yml is intentionally NOT mapped to a required check. The
+  # `Dev-Lead Agent / dev-lead` context is per-PR review, not a merge gate: the
+  # agent's GitHub App refuses to mint a token for any PR touching workflow
+  # files, so requiring it would deadlock every workflow-modifying PR. The
+  # codified standards/rulesets/code-quality.json deliberately omits it (#579),
+  # and this builder must agree (#580).
   # dependabot-automerge / dependabot-rebase are intentionally NOT
   # required: dependabot-automerge runs only on dependabot[bot] PRs and
   # dependabot-rebase runs only on push to main, neither of which are
@@ -351,6 +373,11 @@ apply_rulesets() {
 }
 
 # ---------------------------------------------------------------------------
+# Entry point — guarded so the pure functions above (detect_required_checks,
+# build_ruleset_json, …) can be sourced and unit-tested without running main.
+# ---------------------------------------------------------------------------
+main() {
+# ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ]; then
@@ -403,4 +430,9 @@ if [ "$TARGET" = "--all" ]; then
   ok "All repos processed successfully"
 else
   apply_rulesets "$TARGET"
+fi
+}
+
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
 fi
