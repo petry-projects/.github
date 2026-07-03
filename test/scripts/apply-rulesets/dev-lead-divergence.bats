@@ -24,6 +24,9 @@ setup() {
   # the top-level token check from aborting the source.
   # shellcheck source=/dev/null
   source "$SCRIPT"
+
+  # Initialize mock variables to prevent unbound variable errors under set -u
+  MOCK_WORKFLOWS=()
 }
 
 # ---------------------------------------------------------------------------
@@ -38,7 +41,7 @@ gh() {
   local path="${2:-}"
   case "$path" in
     */contents/.github/workflows)
-      printf '%s\n' "${MOCK_WORKFLOWS[@]}"
+      [ "${#MOCK_WORKFLOWS[@]}" -gt 0 ] && printf '%s\n' "${MOCK_WORKFLOWS[@]}" || true
       ;;
     */contents/.github/workflows/sonarcloud.yml)
       # No top-level `name:` → workflow_name() returns empty → detection uses
@@ -102,7 +105,7 @@ gh() {
 
   detected=$(printf '%s\n' "$output" | sort)
   codified=$(jq -r '.rules[] | select(.type=="required_status_checks")
-    | .parameters.required_status_checks[].context' \
+    | .parameters?.required_status_checks?[]?.context?' \
     "${BATS_TEST_DIRNAME}/../../../standards/rulesets/code-quality.json" | sort)
   [ "$detected" = "$codified" ]
 }

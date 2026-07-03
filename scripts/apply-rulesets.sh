@@ -386,7 +386,7 @@ main() {
 
   export GH_TOKEN
 
-  TARGET=""
+  local TARGET="" arg
   for arg in "$@"; do
     case "$arg" in
       --dry-run) DRY_RUN=true ;;
