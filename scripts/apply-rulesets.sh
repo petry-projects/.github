@@ -45,35 +45,54 @@ DRY_RUN="${DRY_RUN:-false}"
 # ruleset_id_by_name <repo> <name> — echo the id of an existing ruleset, or empty.
 ruleset_id_by_name() {
   local repo="$1" name="$2"
-  gh api --paginate "repos/${repo}/rulesets" \
-    | jq -r --arg n "$name" 'if type=="array" then .[] else . end | select(.name==$n) | .id'
+  local output rc=0
+  output=$(gh api --paginate "repos/${repo}/rulesets" 2>/dev/null) && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "::error::failed to fetch rulesets for ${repo} (exit code ${rc})" >&2
+    return "$rc"
+  fi
+  echo "$output" | jq -r --arg n "$name" 'if type=="array" then .[] else . end | select(.name==$n) | .id'
 }
 
 # apply_one <repo> <json_file> — create or update the ruleset described by json_file.
 apply_one() {
   local repo="$1" file="$2"
-  local name id
+  local name id id_rc=0
   name="$(jq -r '.name' "$file")"
   [ -n "$name" ] && [ "$name" != "null" ] || { echo "::error::$file has no .name" >&2; return 1; }
-  id="$(ruleset_id_by_name "$repo" "$name")"
+  id="$(ruleset_id_by_name "$repo" "$name")" && id_rc=0 || id_rc=$?
+  if [ "$id_rc" -ne 0 ]; then
+    echo "::error::failed to resolve ruleset ID for '${name}' on ${repo}" >&2
+    return "$id_rc"
+  fi
 
   if [ -n "$id" ]; then
     echo "  update ruleset '${name}' (id ${id}) on ${repo}"
     if [ "$DRY_RUN" = "true" ]; then echo "    [dry-run] PUT repos/${repo}/rulesets/${id}"; return 0; fi
-    gh api --method PUT "repos/${repo}/rulesets/${id}" --input "$file" >/dev/null
+    gh api --method PUT "repos/${repo}/rulesets/${id}" --input "$file" >/dev/null || {
+      echo "::error::failed to update ruleset '${name}' on ${repo}" >&2
+      return 1
+    }
   else
     echo "  create ruleset '${name}' on ${repo}"
     if [ "$DRY_RUN" = "true" ]; then echo "    [dry-run] POST repos/${repo}/rulesets"; return 0; fi
-    gh api --method POST "repos/${repo}/rulesets" --input "$file" >/dev/null
+    gh api --method POST "repos/${repo}/rulesets" --input "$file" >/dev/null || {
+      echo "::error::failed to create ruleset '${name}' on ${repo}" >&2
+      return 1
+    }
   fi
+  return 0
 }
 
 # apply_repo <repo> <file...> — apply each ruleset file to one repo.
 apply_repo() {
   local repo="$1"; shift
   echo "[apply-rulesets] repo=${repo} dir=${RULESETS_DIR} dry_run=${DRY_RUN}"
-  local file
-  for file in "$@"; do apply_one "$repo" "$file"; done
+  local file rc=0
+  for file in "$@"; do
+    apply_one "$repo" "$file" || rc=$?
+  done
+  return "$rc"
 }
 
 # resolve_repo <arg> — echo owner/repo: pass through an owner/repo, else prefix $ORG.
@@ -101,6 +120,7 @@ main() {
     esac
   done
 
+  gh auth status >/dev/null 2>&1 || { echo "::error::GitHub authentication failed — set GH_TOKEN or run 'gh auth login'" >&2; return 1; }
   [ -d "$RULESETS_DIR" ] || { echo "::error::rulesets dir not found: $RULESETS_DIR" >&2; return 1; }
 
   # Select the ruleset files (all *.json, or only the named ones).
@@ -120,8 +140,12 @@ main() {
   if [ "$all" = true ]; then
     [ -z "$target" ] || { echo "::error::--all and a repo argument are mutually exclusive" >&2; return 2; }
     echo "[apply-rulesets] fetching non-archived repos in ${ORG} ..."
-    local repos repo failed=0
-    repos="$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)"
+    local repos repo failed=0 repos_rc=0
+    repos="$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)" && repos_rc=0 || repos_rc=$?
+    if [ "$repos_rc" -ne 0 ]; then
+      echo "::error::failed to list repositories for organization ${ORG} (exit code ${repos_rc})" >&2
+      return "$repos_rc"
+    fi
     [ -n "$repos" ] || { echo "::error::no repositories found in ${ORG} — check GH_TOKEN" >&2; return 1; }
     for repo in $repos; do
       apply_repo "${ORG}/${repo}" "${files[@]}" || { failed=$((failed + 1)); echo "::warning::failed on ${ORG}/${repo}"; }
