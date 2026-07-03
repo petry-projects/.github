@@ -350,9 +350,9 @@ flipping default setup on causes both to run and double-bills CI minutes.
 
 **Status check name:** GitHub publishes default setup results under the
 required-status-check context name **`CodeQL`** (single context, regardless
-of how many languages are detected). The org `apply-rulesets.sh` script
-adds this context to the `code-quality` ruleset for any repo where default
-setup is configured.
+of how many languages are detected). The codified `code-quality` ruleset
+([`standards/rulesets/code-quality.json`](rulesets/code-quality.json)) carries
+the `CodeQL` context, applied to each repo by `apply-rulesets.sh`.
 
 **Escape hatch — when advanced setup is justified:** A repo MAY revert to
 an inline `codeql.yml` workflow only when it has a concrete need that

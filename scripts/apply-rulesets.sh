@@ -1,406 +1,166 @@
 #!/usr/bin/env bash
-# apply-rulesets.sh — Apply standard repository rulesets to petry-projects repos
+set -euo pipefail
+# apply-rulesets.sh — codified, idempotent application of the org compliance rulesets.
 #
-# Companion script to compliance-audit.sh. Creates or updates the rulesets defined in:
-#   standards/github-settings.md#repository-rulesets
+# CANONICAL org tooling (petry-projects/.github#580 / #575). Reads the codified source
+# of truth in standards/rulesets/*.json (code-quality.json, pr-quality.json) and
+# creates/updates the named ruleset on the target repo(s). Re-running converges to the
+# file's desired state (a no-op when already in sync).
 #
-# Rulesets managed:
-#   pr-quality    — pull request review requirements and merge policy
-#   code-quality  — required status checks (CI, SonarCloud, CodeQL default setup, Dev-Lead Agent)
+# This REPLACES the retired detection-based builder, which dynamically probed each
+# repo's workflow files and *generated* the ruleset in-code. That approach DIVERGED
+# from the codified set — e.g. it injected `Dev-Lead Agent / dev-lead` as a required
+# context, which standards/github-settings.md#code-quality deliberately excludes
+# (per-PR review, not a merge gate). The codified JSON is now the single source of
+# truth; there is no in-code generation.
+#
+# Detection items → codified mapping (nothing org-wide is lost by the retirement):
+#   SonarCloud, CodeQL, agent-shield/AgentShield, dependency-audit/Detect ecosystems
+#     → carried statically in standards/rulesets/code-quality.json.
+#   Dev-Lead Agent → intentionally NOT required (the divergence this retires).
+#   CI Pipeline (build-and-test) → repo-specific job name → required per-repo via
+#     branch protection, not a fixed org context (see github-settings.md §code-quality).
+#   Secret scan (gitleaks) + coverage → produced by the template ci.yml; added to the
+#     ruleset fleet-wide only after the coverage backfill (#581), not here.
+#
+# Rulesets live ON each repo: editing a JSON here changes the desired state, not any
+# live ruleset, until this applier runs.
 #
 # Usage:
-#   # Apply to a specific repo:
-#   GH_TOKEN=<admin-token> ./scripts/apply-rulesets.sh <repo-name>
+#   GH_TOKEN=<admin> ./scripts/apply-rulesets.sh --repo owner/repo [--dry-run] [<name>...]
+#   GH_TOKEN=<admin> ./scripts/apply-rulesets.sh <repo-name>       [--dry-run]   # bare name → $ORG/<name>
+#   GH_TOKEN=<admin> ./scripts/apply-rulesets.sh --all             [--dry-run]   # every non-archived org repo
 #
-#   # Apply to all non-archived org repos:
-#   GH_TOKEN=<admin-token> ./scripts/apply-rulesets.sh --all
-#
-#   # Dry run (show what would be changed):
-#   GH_TOKEN=<admin-token> ./scripts/apply-rulesets.sh <repo-name> --dry-run
-#
-# Requirements:
-#   - GH_TOKEN must have administration:write scope on the target repo(s)
-#   - gh CLI must be installed
-#   - jq must be installed
+# Env:
+#   GH_TOKEN       token with administration:write on the target repo(s) (required for writes)
+#   ORG            org for --all and bare repo names (default: petry-projects)
+#   RULESETS_DIR   directory of ruleset JSONs (default: <repo-root>/standards/rulesets)
+#   DRY_RUN        "true" → print intent, make no write calls
 
-set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+ORG="${ORG:-petry-projects}"
+RULESETS_DIR="${RULESETS_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)/standards/rulesets}"
+DRY_RUN="${DRY_RUN:-false}"
 
-ORG="petry-projects"
-DRY_RUN=false
-
-info()  { echo "[INFO]  $*"; }
-ok()    { echo "[OK]    $*"; }
-err()   { echo "[ERROR] $*" >&2; }
-skip()  { echo "[SKIP]  $*"; }
-
-usage() {
-  echo "Usage: $0 <repo-name> [--dry-run]"
-  echo "       $0 --all [--dry-run]"
-  echo ""
-  echo "Environment variables:"
-  echo "  GH_TOKEN   GitHub token with administration:write scope (required)"
-  exit 1
+# ruleset_id_by_name <repo> <name> — echo the id of an existing ruleset, or empty.
+ruleset_id_by_name() {
+  local repo="$1" name="$2"
+  local output rc=0
+  output=$(gh api --paginate "repos/${repo}/rulesets" 2>/dev/null) && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "::error::failed to fetch rulesets for ${repo} (exit code ${rc})" >&2
+    return "$rc"
+  fi
+  echo "$output" | jq -r --arg n "$name" 'if type=="array" then .[] else . end | select(.name==$n) | .id'
 }
 
-# ---------------------------------------------------------------------------
-# Detect required status checks from a repo's workflow files
-# ---------------------------------------------------------------------------
-detect_required_checks() {
-  local repo="$1"
-  local checks=()
-
-  # Fetch list of workflow files present in the repo
-  local workflows
-  workflows=$(gh api "repos/$ORG/$repo/contents/.github/workflows" \
-    --jq '.[].name' 2>/dev/null || echo "")
-
-  # Helper: fetch workflow file content and extract the top-level `name:` field
-  workflow_name() {
-    local file="$1"
-    gh api "repos/$ORG/$repo/contents/.github/workflows/$file" \
-      --jq '.content' 2>/dev/null \
-      | base64 -d 2>/dev/null \
-      | grep -m1 '^name:' \
-      | sed 's/^name:[[:space:]]*//' \
-      | tr -d '"'"'" \
-      | sed "s/'//g" \
-      || echo ""
-  }
-
-  # --- SonarCloud ---
-  if echo "$workflows" | grep -qx "sonarcloud.yml"; then
-    local sc_wf_name
-    sc_wf_name=$(workflow_name "sonarcloud.yml")
-    if [ -n "$sc_wf_name" ]; then
-      checks+=("$sc_wf_name / SonarCloud")
-    else
-      checks+=("SonarCloud")
-    fi
+# apply_one <repo> <json_file> — create or update the ruleset described by json_file.
+apply_one() {
+  local repo="$1" file="$2"
+  local name id id_rc=0
+  name="$(jq -r '.name' "$file")"
+  [ -n "$name" ] && [ "$name" != "null" ] || { echo "::error::$file has no .name" >&2; return 1; }
+  id="$(ruleset_id_by_name "$repo" "$name")" && id_rc=0 || id_rc=$?
+  if [ "$id_rc" -ne 0 ]; then
+    echo "::error::failed to resolve ruleset ID for '${name}' on ${repo}" >&2
+    return "$id_rc"
   fi
 
-  # --- CodeQL (GitHub-managed default setup) ---
-  # CodeQL is no longer driven by a per-repo workflow file. We probe the
-  # default-setup API: if the state is "configured", GitHub publishes results
-  # under the required-status-check context name `CodeQL` (single context,
-  # regardless of how many languages are detected). See
-  # standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
-  #
-  # Note: a stray .github/workflows/codeql.yml is drift and will be flagged
-  # by compliance-audit.sh#check_codeql_default_setup. We do NOT fall back
-  # to a workflow-derived check name here, because doing so would let drift
-  # silently satisfy the rule and bypass remediation.
-  local codeql_state codeql_err
-  if codeql_err=$(gh api "repos/$ORG/$repo/code-scanning/default-setup" --jq '.state' 2>&1); then
-    codeql_state="$codeql_err"  # on success, stdout holds the state value
-    if [ "$codeql_state" = "configured" ]; then
-      checks+=("CodeQL")
-    else
-      info "  CodeQL default setup not configured for $repo (state: $codeql_state) — skipping CodeQL required check. Run apply-repo-settings.sh first."
-    fi
+  if [ -n "$id" ]; then
+    echo "  update ruleset '${name}' (id ${id}) on ${repo}"
+    if [ "$DRY_RUN" = "true" ]; then echo "    [dry-run] PUT repos/${repo}/rulesets/${id}"; return 0; fi
+    gh api --method PUT "repos/${repo}/rulesets/${id}" --input "$file" >/dev/null || {
+      echo "::error::failed to update ruleset '${name}' on ${repo}" >&2
+      return 1
+    }
   else
-    err "  Failed to probe CodeQL default-setup state for $repo. API error: $codeql_err"
-    err "  Check that GH_TOKEN has code-scanning scope and the repo exists."
-    return 1
+    echo "  create ruleset '${name}' on ${repo}"
+    if [ "$DRY_RUN" = "true" ]; then echo "    [dry-run] POST repos/${repo}/rulesets"; return 0; fi
+    gh api --method POST "repos/${repo}/rulesets" --input "$file" >/dev/null || {
+      echo "::error::failed to create ruleset '${name}' on ${repo}" >&2
+      return 1
+    }
   fi
-
-  # --- Tier 1 centralized workflows ---
-  # Caller-job-ids are fixed by the canonical stubs in
-  # standards/workflows/, so the resulting reusable check names
-  # (<caller-job-id> / <reusable-job-id-or-name>) are known constants.
-  # See standards/ci-standards.md#centralization-tiers
-  #
-  # NOTE: claude-code / claude is intentionally NOT added as a required
-  # check. claude-code-action's GitHub App refuses to mint a token for
-  # any PR that touches workflow files, which would deadlock every
-  # workflow-modifying PR. The check is still useful for review feedback
-  # on normal PRs, but it must not be a merge gate.
-  if echo "$workflows" | grep -qx "agent-shield.yml"; then
-    checks+=("agent-shield / AgentShield")
-  fi
-  if echo "$workflows" | grep -qx "dependency-audit.yml"; then
-    # Only the detect job runs unconditionally; per-ecosystem audit jobs
-    # (npm audit, govulncheck, cargo audit, pip-audit, pnpm audit) are
-    # gated on lockfile presence and report SKIPPED when absent. A
-    # required-but-skipped check fails the gate, so we cannot require
-    # the per-ecosystem jobs.
-    checks+=("dependency-audit / Detect ecosystems")
-  fi
-  if echo "$workflows" | grep -qx "dev-lead.yml"; then
-    checks+=("Dev-Lead Agent / dev-lead")
-  fi
-  # dependabot-automerge / dependabot-rebase are intentionally NOT
-  # required: dependabot-automerge runs only on dependabot[bot] PRs and
-  # dependabot-rebase runs only on push to main, neither of which are
-  # regular contributor PRs.
-  # feature-ideation runs on a schedule, never on PRs, so also not required.
-
-  # --- CI Pipeline ---
-  if echo "$workflows" | grep -qx "ci.yml"; then
-    local ci_wf_name
-    ci_wf_name=$(workflow_name "ci.yml")
-    # Fetch ci.yml content once; used for first-job detection and secret-scan check below
-    local ci_content ci_decoded
-    ci_content=$(gh api "repos/$ORG/$repo/contents/.github/workflows/ci.yml" \
-      --jq '.content' 2>/dev/null || echo "")
-    ci_decoded=$(echo "$ci_content" | base64 -d 2>/dev/null || echo "")
-    # Fetch the first job name from ci.yml
-    local ci_job_name
-    ci_job_name=$(echo "$ci_decoded" \
-      | awk '
-          /^jobs:/ { in_jobs=1; found=0; next }
-          in_jobs && /^  [a-zA-Z0-9_-]+:/ && !found {
-            job_id=substr($0, 3); gsub(/:.*/, "", job_id); current_job=job_id; next
-          }
-          in_jobs && /^    name:/ && !found {
-            name=substr($0, 11); gsub(/^[ \t]+|[ \t]+$/, "", name); gsub(/["\x27]/, "", name)
-            print name; found=1; exit
-          }
-        ' 2>/dev/null || echo "")
-    if [ -z "$ci_job_name" ]; then
-      ci_job_name="build"
-    fi
-    if [ -n "$ci_wf_name" ]; then
-      checks+=("$ci_wf_name / $ci_job_name")
-    else
-      checks+=("$ci_job_name")
-    fi
-
-    # --- Secret scan (gitleaks) — included when ci.yml contains the gitleaks action ---
-    if echo "$ci_decoded" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
-      checks+=("Secret scan (gitleaks)")
-    fi
-  fi
-
-  # Output as newline-separated list (guard against empty array with set -u)
-  [ "${#checks[@]}" -gt 0 ] && printf '%s\n' "${checks[@]}" || true
+  return 0
 }
 
-# ---------------------------------------------------------------------------
-# Build the pr-quality ruleset JSON payload
-# ---------------------------------------------------------------------------
-build_pr_quality_ruleset_json() {
-  jq -n '{
-    name: "pr-quality",
-    target: "branch",
-    enforcement: "active",
-    conditions: {
-      ref_name: {
-        include: ["~DEFAULT_BRANCH"],
-        exclude: []
-      }
-    },
-    rules: [
-      {
-        type: "pull_request",
-        parameters: {
-          required_approving_review_count: 1,
-          dismiss_stale_reviews_on_push: true,
-          require_code_owner_review: true,
-          require_last_push_approval: true,
-          required_review_thread_resolution: true
-        }
-      },
-      { type: "required_linear_history" },
-      { type: "non_fast_forward" },
-      { type: "deletion" }
-    ],
-    bypass_actors: [
-      {
-        actor_id: 0,
-        actor_type: "OrganizationAdmin",
-        bypass_mode: "always"
-      },
-      {
-        actor_id: 3167543,
-        actor_type: "Integration",
-        bypass_mode: "always"
-      }
-    ]
-  }'
+# apply_repo <repo> <file...> — apply each ruleset file to one repo.
+apply_repo() {
+  local repo="$1"; shift
+  echo "[apply-rulesets] repo=${repo} dir=${RULESETS_DIR} dry_run=${DRY_RUN}"
+  local file rc=0
+  for file in "$@"; do
+    apply_one "$repo" "$file" || rc=$?
+  done
+  return "$rc"
 }
 
-# ---------------------------------------------------------------------------
-# Build the code-quality ruleset JSON payload
-# ---------------------------------------------------------------------------
-build_ruleset_json() {
-  local name="$1"
-  shift
-  local checks=("$@")
-
-  # Build the required_status_checks array
-  local checks_json
-  checks_json=$(printf '%s\n' "${checks[@]}" | jq -R '{"context": .}' | jq -s '.')
-
-  jq -n \
-    --arg name "$name" \
-    --argjson checks "$checks_json" \
-    '{
-      name: $name,
-      target: "branch",
-      enforcement: "active",
-      conditions: {
-        ref_name: {
-          include: ["~DEFAULT_BRANCH"],
-          exclude: []
-        }
-      },
-      rules: [
-        {
-          type: "required_status_checks",
-          parameters: {
-            strict_required_status_checks_policy: true,
-            do_not_enforce_on_create: false,
-            required_status_checks: $checks
-          }
-        }
-      ],
-      bypass_actors: [
-        {
-          actor_id: 0,
-          actor_type: "OrganizationAdmin",
-          bypass_mode: "always"
-        },
-        {
-          actor_id: 3167543,
-          actor_type: "Integration",
-          bypass_mode: "always"
-        }
-      ]
-    }'
+# resolve_repo <arg> — echo owner/repo: pass through an owner/repo, else prefix $ORG.
+resolve_repo() {
+  case "$1" in */*) printf '%s' "$1" ;; *) printf '%s/%s' "$ORG" "$1" ;; esac
 }
 
-# ---------------------------------------------------------------------------
-# Apply rulesets to a single repo
-# ---------------------------------------------------------------------------
-apply_rulesets() {
-  local repo="$1"
-  info "Processing $ORG/$repo ..."
-
-  # Fetch existing rulesets
-  local existing_rulesets
-  existing_rulesets=$(gh api "repos/$ORG/$repo/rulesets" 2>/dev/null || echo "[]")
-
-  # --- pr-quality ruleset ---
-  local pr_quality_id
-  pr_quality_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "pr-quality") | .id' 2>/dev/null || echo "")
-
-  local pr_quality_payload
-  pr_quality_payload=$(build_pr_quality_ruleset_json)
-
-  if [ "$DRY_RUN" = true ]; then
-    if [ -n "$pr_quality_id" ]; then
-      skip "  DRY_RUN — would UPDATE pr-quality ruleset (id=$pr_quality_id) for $ORG/$repo"
-    else
-      skip "  DRY_RUN — would CREATE pr-quality ruleset for $ORG/$repo"
-    fi
-    echo "$pr_quality_payload" | jq '.'
-  elif [ -n "$pr_quality_id" ]; then
-    info "  Updating existing pr-quality ruleset (id=$pr_quality_id) ..."
-    gh api -X PUT "repos/$ORG/$repo/rulesets/$pr_quality_id" \
-      --input <(echo "$pr_quality_payload") > /dev/null
-    ok "  pr-quality ruleset updated for $ORG/$repo"
-  else
-    info "  Creating pr-quality ruleset ..."
-    gh api -X POST "repos/$ORG/$repo/rulesets" \
-      --input <(echo "$pr_quality_payload") > /dev/null
-    ok "  pr-quality ruleset created for $ORG/$repo"
-  fi
-
-  # --- code-quality ruleset ---
-  local existing_id
-  existing_id=$(echo "$existing_rulesets" | jq -r '.[] | select(.name == "code-quality") | .id' 2>/dev/null || echo "")
-
-  # Detect required checks for this repo
-  local checks=()
-  mapfile -t checks < <(detect_required_checks "$repo")
-
-  if [ "${#checks[@]}" -eq 0 ]; then
-    err "  No required checks detected for $ORG/$repo — skipping code-quality ruleset"
-    return 1
-  fi
-
-  info "  Detected required checks:"
-  for c in "${checks[@]}"; do
-    info "    - $c"
+main() {
+  local target="" all=false
+  local names=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)
+        [ "$#" -ge 2 ] || { echo "::error::--repo requires a value" >&2; return 2; }
+        target="$2"; shift 2 ;;
+      --all)     all=true; shift ;;
+      --dry-run) DRY_RUN=true; shift ;;
+      --*)       echo "::error::unknown flag: $1" >&2; return 2 ;;
+      *)
+        # A bare token is the target repo (back-compat with the retired applier's
+        # positional <repo-name>) unless --repo/--all already set it, in which case
+        # remaining bare tokens filter which ruleset names to apply.
+        if [ -z "$target" ] && [ "$all" = false ]; then target="$1"; else names+=("$1"); fi
+        shift ;;
+    esac
   done
 
-  local payload
-  payload=$(build_ruleset_json "code-quality" "${checks[@]}")
+  gh auth status >/dev/null 2>&1 || { echo "::error::GitHub authentication failed — set GH_TOKEN or run 'gh auth login'" >&2; return 1; }
+  [ -d "$RULESETS_DIR" ] || { echo "::error::rulesets dir not found: $RULESETS_DIR" >&2; return 1; }
 
-  if [ "$DRY_RUN" = true ]; then
-    if [ -n "$existing_id" ]; then
-      skip "  DRY_RUN — would UPDATE code-quality ruleset (id=$existing_id) for $ORG/$repo"
-    else
-      skip "  DRY_RUN — would CREATE code-quality ruleset for $ORG/$repo"
+  # Select the ruleset files (all *.json, or only the named ones).
+  local files=()
+  if [ "${#names[@]}" -gt 0 ]; then
+    local n
+    for n in "${names[@]}"; do
+      [ -f "${RULESETS_DIR}/${n}.json" ] && files+=("${RULESETS_DIR}/${n}.json") \
+        || { echo "::error::no ruleset file ${n}.json in ${RULESETS_DIR}" >&2; return 1; }
+    done
+  else
+    local f
+    for f in "${RULESETS_DIR}"/*.json; do [ -e "$f" ] && files+=("$f"); done
+  fi
+  [ "${#files[@]}" -gt 0 ] || { echo "  no ruleset files to apply"; return 0; }
+
+  if [ "$all" = true ]; then
+    [ -z "$target" ] || { echo "::error::--all and a repo argument are mutually exclusive" >&2; return 2; }
+    echo "[apply-rulesets] fetching non-archived repos in ${ORG} ..."
+    local repos repo failed=0 repos_rc=0
+    repos="$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)" && repos_rc=0 || repos_rc=$?
+    if [ "$repos_rc" -ne 0 ]; then
+      echo "::error::failed to list repositories for organization ${ORG} (exit code ${repos_rc})" >&2
+      return "$repos_rc"
     fi
-    echo "$payload" | jq '.'
+    [ -n "$repos" ] || { echo "::error::no repositories found in ${ORG} — check GH_TOKEN" >&2; return 1; }
+    for repo in $repos; do
+      apply_repo "${ORG}/${repo}" "${files[@]}" || { failed=$((failed + 1)); echo "::warning::failed on ${ORG}/${repo}"; }
+    done
+    [ "$failed" -eq 0 ] || { echo "::error::${failed} repo(s) failed" >&2; return 1; }
+    echo "[apply-rulesets] done (${#files[@]} ruleset(s) across the fleet)"
     return 0
   fi
 
-  if [ -n "$existing_id" ]; then
-    info "  Updating existing code-quality ruleset (id=$existing_id) ..."
-    gh api -X PUT "repos/$ORG/$repo/rulesets/$existing_id" \
-      --input <(echo "$payload") > /dev/null
-    ok "  code-quality ruleset updated for $ORG/$repo"
-  else
-    info "  Creating code-quality ruleset ..."
-    gh api -X POST "repos/$ORG/$repo/rulesets" \
-      --input <(echo "$payload") > /dev/null
-    ok "  code-quality ruleset created for $ORG/$repo"
-  fi
+  [ -n "$target" ] || { echo "::error::usage: $0 --repo owner/repo | <repo-name> | --all  [--dry-run] [<name>...]" >&2; return 2; }
+  apply_repo "$(resolve_repo "$target")" "${files[@]}"
+  echo "[apply-rulesets] done (${#files[@]} ruleset(s))"
 }
 
-# ---------------------------------------------------------------------------
-# Parse arguments
-# ---------------------------------------------------------------------------
-if [ $# -eq 0 ]; then
-  usage
-fi
-
-if [ -z "${GH_TOKEN:-}" ]; then
-  err "GH_TOKEN is required — provide a token with administration:write scope"
-  exit 1
-fi
-
-export GH_TOKEN
-
-TARGET=""
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --all)     TARGET="--all" ;;
-    -*)        err "Unknown flag: $arg"; usage ;;
-    *)         TARGET="$arg" ;;
-  esac
-done
-
-if [ -z "$TARGET" ]; then
-  usage
-fi
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-if [ "$TARGET" = "--all" ]; then
-  info "Fetching all non-archived repos in $ORG ..."
-  repos=$(gh repo list "$ORG" --no-archived --json name -q '.[].name' --limit 500)
-
-  if [ -z "$repos" ]; then
-    err "No repositories found in $ORG — check GH_TOKEN permissions"
-    exit 1
-  fi
-
-  failed=0
-  for repo in $repos; do
-    apply_rulesets "$repo" || failed=$((failed + 1))
-  done
-
-  if [ "$failed" -gt 0 ]; then
-    err "$failed repo(s) failed — check output above for details"
-    exit 1
-  fi
-
-  ok "All repos processed successfully"
-else
-  apply_rulesets "$TARGET"
+# Source-guard: tests source this to exercise ruleset_id_by_name / apply_one.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
 fi

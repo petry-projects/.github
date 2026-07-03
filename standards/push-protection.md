@@ -428,12 +428,13 @@ When onboarding a repository to this standard:
 2. **Verify gitignore** contains the standard entries listed in
    [Required gitignore entries](#required-gitignore-entries).
 3. **Add the `secret-scan` job** to `ci.yml` per [Layer 3](#layer-3--ci-secret-scanning-secondary-defense).
-4. **Add `secret-scan` as a required check** in the `code-quality` ruleset.
-   If provisioning is done via `scripts/apply-rulesets.sh`, first update
-   `detect_required_checks()` in that script to recognize and insert the
-   `secret-scan` check, then re-apply rulesets org-wide. Update
+4. **Add `secret-scan` as a required check** in the `code-quality` ruleset —
+   add the `Secret scan (gitleaks)` context to the codified
+   [`standards/rulesets/code-quality.json`](rulesets/code-quality.json), then
+   re-apply org-wide with `scripts/apply-rulesets.sh`. Do this **only after** the
+   fleet backfill (every repo must produce the check first — see #581), and update
    [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
-   if the ruleset template needs a new entry.
+   to move the row from staged to required.
 5. **Scan existing history** one time with `gitleaks git --redact --exit-code 1`
    before enabling enforcement, to surface any pre-existing secrets across all
    commits (not just the current working tree).
