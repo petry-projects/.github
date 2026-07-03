@@ -170,6 +170,13 @@ neither of which is invoked by any in-repo workflow (verified by grep over
 > the ruleset / settings" gap the planner flagged is real and confirmed: both
 > scripts are run by hand (or referenced as manual remediation steps in
 > [`scripts/compliance-remediate.sh`](../../scripts/compliance-remediate.sh)).
+>
+> **Update (2026-07, #575 / #580):** the premise above no longer holds. The codified
+> [`standards/rulesets/{code-quality,pr-quality}.json`](../../standards/rulesets/) now
+> exist and ARE the source of truth, and the detection-based in-code generation was
+> retired — `apply-rulesets.sh` now reads those JSON files and PUTs them. The §7.2 /
+> §7.3 conclusion is unaffected: PR limits remain a source-side admission gate, not an
+> `apply-rulesets.sh` field.
 
 ### 7.2 Where PR limits land
 
