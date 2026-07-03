@@ -193,7 +193,7 @@ jobs:
                   BLOCKED_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"
                   BLOCKED_BODY+=$'\n'"git rebase origin/$BASE_BRANCH"
                   BLOCKED_BODY+=$'\n'"git push --force-with-lease"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$BLOCKED_BODY"
+                  auto_rebase_post_comment_best_effort "$PR_NUMBER" "$REPO" "$BLOCKED_BODY"
                 fi
               elif echo "$UPDATE_OUTPUT" | grep -qi "merge conflict"; then
                 # Merge conflict — post the sentinel to trigger dev-lead rebase.
