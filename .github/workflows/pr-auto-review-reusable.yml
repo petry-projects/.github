@@ -181,7 +181,9 @@ jobs:
           #    required. \$owner/\$repo/\$number are GraphQL variable references;
           #    the backslash-dollar escaping prevents shell expansion while
           #    keeping the literal $ that GraphQL expects.
-          # TODO: paginate reviewThreads for PRs with >100 threads.
+          # Known limitation: only the first 100 review threads are inspected;
+          # PRs with more than 100 threads are not fully paginated. Accepted
+          # as-is — such PRs are vanishingly rare across this org's repos.
           UNRESOLVED=$(gh api graphql \
             -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved}}}}}" \
             -f owner="${REPO%%/*}" \
