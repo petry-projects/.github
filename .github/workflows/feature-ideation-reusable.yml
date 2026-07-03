@@ -205,7 +205,7 @@ jobs:
       - name: Validate project_context is customised
         # Fail fast if an adopter copied the caller stub without replacing
         # the placeholder. Without this, runs would burn cost producing
-        # generic Discussions about a "TODO: Replace this" project.
+        # generic Discussions about an uncustomised placeholder project.
         env:
           PROJECT_CONTEXT: ${{ inputs.project_context }}
         run: |
