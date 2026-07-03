@@ -21,5 +21,6 @@
 auto_rebase_post_comment_best_effort() {
   local pr_number="$1" repo="$2" body="$3"
   gh pr comment "$pr_number" --repo "$repo" --body "$body" \
-    || echo "::warning::could not post conflict comment on #$pr_number (comment cap / API error) — continuing"
+    || echo "::warning::could not post conflict comment on #$pr_number (comment cap / API error) — continuing" >&2
+  return 0
 }
