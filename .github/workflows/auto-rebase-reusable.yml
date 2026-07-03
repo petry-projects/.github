@@ -110,6 +110,8 @@ jobs:
         run: |
           # shellcheck source=/dev/null
           . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/eligibility.sh
+          # shellcheck source=/dev/null
+          . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/comments.sh
 
           # Find open non-Dependabot PRs from the same repo (exclude forks)
           PRS=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
@@ -232,7 +234,10 @@ jobs:
                   CONFLICT_BODY+=$'\n'"git merge origin/$BASE_BRANCH"
                   CONFLICT_BODY+=$'\n'"# resolve conflicts, then:"
                   CONFLICT_BODY+=$'\n'"git add ."$'\n'"git commit"$'\n'"git push"$'\n'"\`\`\`"
-                  gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$CONFLICT_BODY"
+                  # Best-effort: a comment-side failure (e.g. GitHub's 2500-comment
+                  # cap) must not abort the step and starve the other PRs of a
+                  # rebase (issue #594) — it is logged and swallowed instead.
+                  auto_rebase_post_comment_best_effort "$PR_NUMBER" "$REPO" "$CONFLICT_BODY"
                 fi
               else
                 echo "  Warning: failed to update PR #$PR_NUMBER — $UPDATE_OUTPUT"

@@ -59,7 +59,9 @@ jobs:
       - name: shellcheck
         run: |
           set -euo pipefail
-          shellcheck -x .github/scripts/auto-rebase/lib/eligibility.sh
+          shellcheck -x \
+            .github/scripts/auto-rebase/lib/eligibility.sh \
+            .github/scripts/auto-rebase/lib/comments.sh
 
       - name: Run bats suite
         run: bats --print-output-on-failure test/workflows/auto-rebase/
