@@ -261,22 +261,25 @@ a fresh approval under the current CODEOWNERS.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-`apply-rulesets.sh` **dynamically constructs** the `code-quality` ruleset for each
-repo by probing its workflow files via `detect_required_checks()` — it does not apply
-a static JSON file. The table below is the canonical reference for the required-check
-set; keep it in sync with the detection logic in `scripts/apply-rulesets.sh`. Note:
-`apply-rulesets.sh` manages only the `pr-quality` and `code-quality` branch rulesets —
-the `release-channel-tags` ruleset is managed in `.github-private` (see
+The **codified** [`standards/rulesets/code-quality.json`](rulesets/code-quality.json)
+is the source of truth for the required-check set; `apply-rulesets.sh` reads it and
+PUTs it to each repo. (The detection-based in-code builder that dynamically probed
+workflow files was **retired** in #580 — it diverged from this file.) The table below
+reconciles to `code-quality.json`; keep the two in sync. Note: `apply-rulesets.sh`
+manages only the `pr-quality` and `code-quality` branch rulesets — the
+`release-channel-tags` ruleset is managed in `.github-private` (see
 [§Source of truth & repo boundary](#source-of-truth--repo-boundary)).
 
 #### Required Check Categories
 
-The table below covers the **unconditional fleet-wide required check contexts** — the base set `detect_required_checks()` applies when each org-standard workflow file is present.
-The script also conditionally adds **Dev-Lead Agent** (when `dev-lead.yml` exists) and **Secret scan** (when `ci.yml` contains the gitleaks action), but those are in staged rollout; see below.
+The four contexts below are the **unconditional fleet-wide required checks** codified
+in `code-quality.json`. `Dev-Lead Agent` is intentionally excluded, and
+`Secret scan (gitleaks)` + `coverage` are staged (template / new repos first) — see
+the reclassification table and sequencing note that follow.
 
 | Check | Status | Check Name(s) | Notes |
 |-------|--------|---------------|-------|
-| **SonarCloud** | ✅ Required (codified) | `SonarCloud Analysis / SonarCloud` | Code quality, maintainability, security hotspots. `apply-rulesets.sh` derives the check name as `<sonarcloud.yml name> / SonarCloud`; the standard template sets `name: SonarCloud Analysis`, producing this context. Verify with `gh pr checks <PR>` if the workflow name differs |
+| **SonarCloud** | ✅ Required (codified) | `SonarCloud` | Code quality, maintainability, security hotspots. The context is exactly as codified in `code-quality.json`; verify with `gh pr checks <PR>` if a repo's SonarCloud workflow reports under a different name |
 | **CodeQL** | ✅ Required (codified) | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
 | **AgentShield** | ✅ Required (codified) | `agent-shield / AgentShield` | Deep agent-config security scan on every PR |
 | **Dependency Audit** | ✅ Required (codified) | `dependency-audit / Detect ecosystems` | Only the unconditional `Detect ecosystems` job is required; per-ecosystem audit jobs are gated on lockfile presence and would fail as required-but-skipped |

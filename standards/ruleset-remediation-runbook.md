@@ -63,9 +63,10 @@ preserving any existing actors. Already-compliant rulesets are skipped.
 ./scripts/fix-ruleset-bypass.sh <repo>
 ```
 
-> `apply-rulesets.sh` full-replaces `pr-quality` / `code-quality` with the two
-> canonical bypass actors; `fix-ruleset-bypass.sh` is the least-destructive,
-> any-ruleset complement used to remediate audit findings.
+> `apply-rulesets.sh` full-replaces `pr-quality` / `code-quality` from the codified
+> `standards/rulesets/*.json` (which carry the two canonical bypass actors);
+> `fix-ruleset-bypass.sh` is the least-destructive, any-ruleset complement used to
+> remediate audit findings.
 
 ## 3. Legacy rulesets — migrate checks first, THEN delete
 
