@@ -44,9 +44,12 @@ gh() {
       [ "${#MOCK_WORKFLOWS[@]}" -gt 0 ] && printf '%s\n' "${MOCK_WORKFLOWS[@]}" || true
       ;;
     */contents/.github/workflows/sonarcloud.yml)
-      # No top-level `name:` → workflow_name() returns empty → detection uses
-      # the bare `SonarCloud` fallback, matching the codified code-quality.json.
-      printf 'on: push\njobs:\n  scan: {}\n' | base64
+      # Matches the org-standard standards/workflows/sonarcloud.yml (name: SonarCloud
+      # Analysis, job: SonarCloud). SonarCloud registers its check context directly
+      # as "SonarCloud" — detection must emit "SonarCloud", never the compound
+      # "SonarCloud Analysis / SonarCloud" that a naive workflow_name() derivation
+      # would produce.
+      printf 'name: SonarCloud Analysis\non: push\njobs:\n  sonarcloud:\n    name: SonarCloud\n' | base64
       ;;
     */contents/.github/workflows/ci.yml)
       printf 'name: CI\njobs:\n  build:\n    name: build\n' | base64
@@ -78,6 +81,22 @@ gh() {
   run detect_required_checks "somerepo"
   [ "$status" -eq 0 ]
   [[ "$output" != *"Dev-Lead"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# SonarCloud context: always the bare "SonarCloud", never the compound form.
+# ---------------------------------------------------------------------------
+
+@test "sonarcloud.yml with 'name: SonarCloud Analysis' emits bare 'SonarCloud' context" {
+  # The org-standard sonarcloud.yml has name: SonarCloud Analysis. SonarCloud
+  # registers its check directly via the SonarCloud API as "SonarCloud", so
+  # the required-check context must never be "SonarCloud Analysis / SonarCloud".
+  MOCK_WORKFLOWS=("sonarcloud.yml")
+  MOCK_CODEQL_STATE="not-configured"
+  run detect_required_checks "somerepo"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SonarCloud"* ]]
+  [[ "$output" != *"SonarCloud Analysis / SonarCloud"* ]]
 }
 
 # ---------------------------------------------------------------------------

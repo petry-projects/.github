@@ -87,14 +87,13 @@ detect_required_checks() {
   }
 
   # --- SonarCloud ---
+  # SonarCloud registers its check context directly via the SonarCloud API as
+  # "SonarCloud" (the job name), independent of the workflow's top-level `name:`.
+  # Do NOT derive the context from the workflow name — that would emit
+  # "<name> / SonarCloud" (e.g. "SonarCloud Analysis / SonarCloud"), which is
+  # wrong and diverges from both the actual check and the codified code-quality.json.
   if echo "$workflows" | grep -qx "sonarcloud.yml"; then
-    local sc_wf_name
-    sc_wf_name=$(workflow_name "sonarcloud.yml")
-    if [ -n "$sc_wf_name" ]; then
-      checks+=("$sc_wf_name / SonarCloud")
-    else
-      checks+=("SonarCloud")
-    fi
+    checks+=("SonarCloud")
   fi
 
   # --- CodeQL (GitHub-managed default setup) ---
