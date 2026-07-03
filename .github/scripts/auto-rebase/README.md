@@ -38,3 +38,23 @@ do not change a reviewer's stance.
 
 New modes (e.g. a future "front-of-queue N") can be added here and selected by
 callers via the `eligibility` input with no change to the workflow file.
+
+## `lib/comments.sh`
+
+Thin best-effort I/O wrapper around `gh pr comment` (not a pure predicate).
+Source the file, then call:
+
+| Function | Input | Returns |
+|----------|-------|---------|
+| `auto_rebase_post_comment_best_effort PR_NUMBER REPO BODY` | PR number, `owner/repo`, comment body | always `0` — posts the comment; on failure logs a `::warning::` and swallows the error |
+
+### Why best-effort (issue #594)
+
+The reusable posts a conflict-resolution comment when a branch update hits a
+merge conflict. That `gh pr comment` used to run unguarded under
+`shell: bash -e`, so a single PR that had hit GitHub's **2500-comment cap**
+(`Commenting is disabled on issues with more than 2500 comments`) failed the
+whole step — starving every *other* open PR of its rebase in the same run. A
+best-effort notification must never be fatal to the core function of rebasing
+the other PRs, so this helper logs a warning and returns `0` on any
+comment-side error (comment cap, secondary rate limit, transient 5xx).
