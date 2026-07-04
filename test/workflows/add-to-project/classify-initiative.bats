@@ -218,6 +218,26 @@ assert_log_contains() {
   [ "$output" = "Business Analyst" ]
 }
 
+@test "classify_by_rules: ContentTwin repo work → ContentTwin" {
+  run classify_by_rules "fix: content generation pipeline retry |  | petry-projects/contenttwin"
+  [ "$output" = "ContentTwin" ]
+}
+
+@test "classify_by_rules: bmad-suite repo work → BMAD (not dev-lead)" {
+  run classify_by_rules "feat: add planning agent persona |  | petry-projects/bmad-bgreat-suite"
+  [ "$output" = "BMAD" ]
+}
+
+@test "classify_by_rules: SonarCloud inside bmad-suite → Org Standards (infra wins)" {
+  run classify_by_rules "sonarcloud: shell hygiene cleanup |  | petry-projects/bmad-bgreat-suite"
+  [ "$output" = "Org Standards" ]
+}
+
+@test "classify_by_rules: dev-lead story churn still → dev-lead agent (not BMAD)" {
+  run classify_by_rules "dev-lead: story churn on phantom spec |  | petry-projects/.github-private"
+  [ "$output" = "dev-lead agent" ]
+}
+
 @test "classify_by_rules: no match → empty output, exit 0" {
   run classify_by_rules "zzq nonsense placeholder widget |  | x/y"
   [ "$status" -eq 0 ]
