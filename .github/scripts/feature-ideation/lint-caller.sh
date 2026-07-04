@@ -137,11 +137,7 @@ main() {
     fi
     # Preserve exit-2 (file/parse error) over exit-1 (lint finding), matching
     # lint-prompt.sh's precedence.
-    if scan_file "$file"; then
-      file_rc=0
-    else
-      file_rc=$?
-    fi
+    scan_file "$file" && file_rc=0 || file_rc=$?
     case "$file_rc" in
       0) ;;
       1) if [ "$exit" -eq 0 ]; then exit=1; fi ;;
