@@ -53,7 +53,7 @@ DRY_RUN="${DRY_RUN:-false}"
 # dir": standards/rulesets/ also holds release-channel-tags.json, which is a targeted
 # tag ruleset for the reusable-hosting meta-repos only and must NOT be swept fleet-
 # wide — it is applied only when named explicitly (e.g. `--repo <meta> release-channel-tags`).
-FLEET_RULESETS=(code-quality pr-quality)
+readonly FLEET_RULESETS=(code-quality pr-quality)
 
 # ruleset_id_by_name <repo> <name> — echo the id of an existing ruleset, or empty.
 ruleset_id_by_name() {
