@@ -11,7 +11,9 @@ bats_require_minimum_version 1.5.0
 SCRIPT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/scripts/sonarcloud-audit.sh"
 
 call() {
-  run bash -c 'source "$1" >/dev/null 2>&1; "$2" "$3"' _ "$SCRIPT" "$1" "$2"
+  local func="$1"
+  shift
+  run bash -c 'source "$1" >/dev/null 2>&1; shift; "$@"' _ "$SCRIPT" "$func" "$@"
 }
 
 # ── classify_workstream ────────────────────────────────────────────────────
@@ -98,19 +100,19 @@ call() {
 
 # ── family_is_security ─────────────────────────────────────────────────────
 @test "s7635 is a security family" {
-  run bash -c 'source "$1" >/dev/null 2>&1; family_is_security s7635' _ "$SCRIPT"; [ "$status" -eq 0 ]
+  call family_is_security s7635; [ "$status" -eq 0 ]
 }
 @test "ghactions is a security family" {
-  run bash -c 'source "$1" >/dev/null 2>&1; family_is_security ghactions' _ "$SCRIPT"; [ "$status" -eq 0 ]
+  call family_is_security ghactions; [ "$status" -eq 0 ]
 }
 @test "pysec is a security family" {
-  run bash -c 'source "$1" >/dev/null 2>&1; family_is_security pysec' _ "$SCRIPT"; [ "$status" -eq 0 ]
+  call family_is_security pysec; [ "$status" -eq 0 ]
 }
 @test "shell is NOT a security family" {
-  run bash -c 'source "$1" >/dev/null 2>&1; family_is_security shell' _ "$SCRIPT"; [ "$status" -ne 0 ]
+  call family_is_security shell; [ "$status" -ne 0 ]
 }
 @test "tests is NOT a security family" {
-  run bash -c 'source "$1" >/dev/null 2>&1; family_is_security tests' _ "$SCRIPT"; [ "$status" -ne 0 ]
+  call family_is_security tests; [ "$status" -ne 0 ]
 }
 
 # ── issue_marker (hidden idempotency key) ──────────────────────────────────

@@ -166,15 +166,24 @@ _sonar_get() {
 
 # Echo the list of SonarCloud project keys in the org.
 sonar_list_projects() {
-  _sonar_get "/api/components/search?organization=${SONAR_ORG}&qualifiers=TRK&ps=500" \
-    | jq -r '.components[].key'
+  local page=1 resp total page_count
+  while :; do
+    resp=$(_sonar_get "/api/components/search?organization=${SONAR_ORG}&qualifiers=TRK&ps=500&p=${page}") \
+      || { warn "sonar_list_projects: page ${page} fetch failed — results may be incomplete"; return 1; }
+    echo "$resp" | jq -r '.components[].key'
+    total=$(echo "$resp" | jq '.paging.total')
+    page_count=$(echo "$resp" | jq '.components | length')
+    { [ "$((page * 500))" -ge "$total" ] || [ "$page_count" -eq 0 ]; } && break
+    page=$((page + 1))
+  done
 }
 
 # Fetch all open issues for a project as a JSON array (paginated).
 sonar_project_issues() {
   local key="$1" page=1 out="[]" resp total fetched=0
   while :; do
-    resp=$(_sonar_get "/api/issues/search?organization=${SONAR_ORG}&componentKeys=${key}&resolved=false&ps=500&p=${page}") || break
+    resp=$(_sonar_get "/api/issues/search?organization=${SONAR_ORG}&componentKeys=${key}&resolved=false&ps=500&p=${page}") \
+      || { warn "sonar_project_issues: page ${page} fetch failed for ${key} — results may be incomplete"; return 1; }
     total=$(echo "$resp" | jq '.total')
     out=$(jq -s '.[0] + .[1]' <(echo "$out") <(echo "$resp" | jq '.issues'))
     fetched=$(echo "$out" | jq 'length')
@@ -194,16 +203,17 @@ scan() {
     target_name="${TARGET_REPO#"$ORG/"}"
   fi
 
-  echo "[]" > "$FINDINGS_FILE"
+  local ndjson_file="$REPORT_DIR/findings.ndjson"
+  : > "$ndjson_file"
   local project repo issues family
 
   for project in $(sonar_list_projects); do
     repo=$(sonar_project_to_repo "$project")
     [ -n "$target_name" ] && [ "$repo" != "$target_name" ] && continue
-    info "Scanning $project → $repo"
+    info "Scanning $project -> $repo"
     issues=$(sonar_project_issues "$project")
 
-    # Emit one finding per issue with its computed family.
+    # Emit one NDJSON object per issue with its computed family.
     while IFS= read -r row; do
       [ -z "$row" ] && continue
       local rule sev typ msg comp
@@ -213,18 +223,25 @@ scan() {
       msg=$(echo "$row" | jq -r '.message // ""')
       comp=$(echo "$row" | jq -r '.component // "" | sub("^[^:]+:";"")')
       family=$(classify_workstream "$rule")
-      jq --arg repo "$repo" --arg project "$project" --arg rule "$rule" \
+      jq -n --arg repo "$repo" --arg project "$project" --arg rule "$rule" \
          --arg severity "$sev" --arg type "$typ" --arg family "$family" \
          --arg message "$msg" --arg file "$comp" \
-         '. += [{repo:$repo,project:$project,rule:$rule,severity:$severity,type:$type,family:$family,message:$message,file:$file}]' \
-         "$FINDINGS_FILE" > "$FINDINGS_FILE.tmp" && mv "$FINDINGS_FILE.tmp" "$FINDINGS_FILE"
+         '{repo:$repo,project:$project,rule:$rule,severity:$severity,type:$type,family:$family,message:$message,file:$file}' \
+         >> "$ndjson_file"
     done < <(echo "$issues" | jq -c '.[]')
   done
+
+  # Convert NDJSON to a JSON array in a single O(n) pass.
+  if [ -s "$ndjson_file" ]; then
+    jq -s '.' "$ndjson_file" > "$FINDINGS_FILE"
+  else
+    echo "[]" > "$FINDINGS_FILE"
+  fi
 
   # Aggregate into per (repo, family) groups.
   jq '
     def sevrank: {"BLOCKER":5,"CRITICAL":4,"MAJOR":3,"MINOR":2,"INFO":1}[.] // 0;
-    group_by(.repo + " " + .family)
+    sort_by(.repo, .family) | group_by([.repo, .family])
     | map({
         repo: .[0].repo,
         project: .[0].project,
@@ -232,8 +249,8 @@ scan() {
         count: length,
         has_vuln: (any(.[]; .type == "VULNERABILITY")),
         max_severity: (max_by(.severity | sevrank) | .severity),
-        rules: (group_by(.rule) | map({rule: .[0].rule, count: length, message: .[0].message}) | sort_by(-.count)),
-        files: (group_by(.file) | map({file: .[0].file, count: length}) | sort_by(-.count))
+        rules: (sort_by(.rule) | group_by(.rule) | map({rule: .[0].rule, count: length, message: .[0].message}) | sort_by(-.count)),
+        files: (sort_by(.file) | group_by(.file) | map({file: .[0].file, count: length}) | sort_by(-.count))
       })
     | sort_by(.repo, .family)
   ' "$FINDINGS_FILE" > "$GROUPS_FILE"
