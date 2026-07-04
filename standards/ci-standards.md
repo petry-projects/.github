@@ -963,13 +963,29 @@ is a separate Discussion, updated by subsequent runs as the market and project
 evolve.
 
 **Triggers:** the weekly `schedule`, manual `workflow_dispatch`, **and
-`discussion: created`**. On the discussion trigger, the stub passes
-`target_discussion: ${{ github.event.discussion.number }}`, putting the reusable
-in **single-idea enhancement mode**: it researches and refines that one new idea
-and posts a single enhancement comment, rather than running the broad scan. A
-job-level `if` restricts this to new Discussions in the **Ideas** category and
-skips the bot's own creations; enhancement is a comment (which does not re-fire
-`created`), so there is no trigger loop.
+`discussion: created`**. `claude-code-action` aborts on `discussion` event
+contexts, so the stub does **not** call the reusable inline on that event.
+Instead a `redispatch` job — gated to new Discussions in the **Ideas** category,
+skipping the bot's own creations — re-invokes the workflow via
+`workflow_dispatch` (using `GH_PAT_WORKFLOWS`), forwarding the Discussion number
+as the `target_discussion` input. The re-dispatched run puts the reusable in
+**single-idea enhancement mode**: it researches and refines that one new idea and
+posts a single enhancement comment, rather than running the broad scan.
+Enhancement is a comment (which does not re-fire `created`), so there is no
+trigger loop. This mirrors `initiative-planner.yml`'s redispatch bridge.
+
+> **#571 — never reference the `inputs` context in the reusable `with:`.** A
+> reusable-workflow call graph (`uses:` + `with:`) is validated at **workflow
+> setup**, before and regardless of the calling job's `if:`. The `inputs`
+> context is only populated for `workflow_dispatch` / `workflow_call`, so a
+> `with:` value referencing `${{ inputs.* }}` fails the whole run (zero jobs,
+> "Invalid workflow file") on the `discussion` trigger even though the `ideate`
+> job is gated off it. The stub therefore resolves dispatch inputs in an
+> ordinary `prep` job (whose step expressions run at job time and are skipped on
+> `discussion`) and passes them to `ideate` via `needs.prep.outputs.*` — an
+> always-valid context that defers the `with:` evaluation to run time. This is
+> enforced by [`lint-caller.sh`](../.github/scripts/feature-ideation/lint-caller.sh)
+> in the feature-ideation test suite.
 
 **Backlog enhancement (backfill) + dry-run.** Beyond enhancing *newly-created*
 Ideas, the reusable can **backfill the existing Ideas backlog**: dispatch with
