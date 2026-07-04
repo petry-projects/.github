@@ -107,7 +107,9 @@ classify_by_rules() {
     printf '[classify_by_rules] rules file not found: %s\n' "${rules}" >&2
     return 65
   fi
-  while IFS=$'\t' read -r name rx; do
+  while IFS=$'\t' read -r name rx || [ -n "${name}" ]; do
+    name="${name%$'\r'}"
+    rx="${rx%$'\r'}"
     case "${name}" in ''|'#'*) continue ;; esac
     [ -n "${rx}" ] || continue
     if printf '%s' "${sig}" | grep -Eiq -- "${rx}"; then
@@ -130,7 +132,9 @@ theme_for() {
     printf '[theme_for] taxonomy file not found: %s\n' "${tax}" >&2
     return 65
   fi
-  while IFS=$'\t' read -r init theme; do
+  while IFS=$'\t' read -r init theme || [ -n "${init}" ]; do
+    init="${init%$'\r'}"
+    theme="${theme%$'\r'}"
     case "${init}" in ''|'#'*) continue ;; esac
     if [ "${init}" = "${want}" ]; then
       printf '%s' "${theme}"
@@ -175,12 +179,12 @@ resolve_fields() {
       }
     }')
 
-  if [ "$(printf '%s' "${json}" | jq -r '.data.node')" = "null" ]; then
+  if [ "$(printf '%s' "${json}" | jq -r '.data.node?')" = "null" ]; then
     printf '[resolve_fields] GraphQL returned data.node:null for PROJECT_ID=%s — token may lack access, or the project was deleted.\n' "${PROJECT_ID}" >&2
     return 75
   fi
-  CI_INIT_FIELD_ID=$(printf '%s' "${json}" | jq -r '.data.node.initiative.id // ""')
-  CI_THEME_FIELD_ID=$(printf '%s' "${json}" | jq -r '.data.node.theme.id // ""')
+  CI_INIT_FIELD_ID=$(printf '%s' "${json}" | jq -r '.data.node.initiative.id? // ""')
+  CI_THEME_FIELD_ID=$(printf '%s' "${json}" | jq -r '.data.node.theme.id? // ""')
   if [ -z "${CI_INIT_FIELD_ID}" ]; then
     printf '[resolve_fields] Initiative single-select field %q not found on the project.\n' "${INITIATIVE_FIELD:-Initiative}" >&2
     return 65
@@ -189,10 +193,10 @@ resolve_fields() {
   local id name
   while IFS=$'\t' read -r id name; do
     [ -n "${id}" ] && CI_INIT_OPT["${name}"]="${id}"
-  done < <(printf '%s' "${json}" | jq -r '.data.node.initiative.options[]? | "\(.id)\t\(.name)"')
+  done < <(printf '%s' "${json}" | jq -r '.data.node.initiative.options?[]? | "\(.id)\t\(.name)"')
   while IFS=$'\t' read -r id name; do
     [ -n "${id}" ] && CI_THEME_OPT["${name}"]="${id}"
-  done < <(printf '%s' "${json}" | jq -r '.data.node.theme.options[]? | "\(.id)\t\(.name)"')
+  done < <(printf '%s' "${json}" | jq -r '.data.node.theme.options?[]? | "\(.id)\t\(.name)"')
 }
 
 # _ci_report <total> <already> <matched> <unmatched> <skipped>
@@ -247,7 +251,7 @@ sweep_project() {
           }
         }
       }
-    }' | jq -s '[.[].data.node.items.nodes[]?]')
+    }' | jq -s '[.[].data.node.items.nodes?[]?]')
 
   local total=0 already=0 matched=0 unmatched=0 skipped=0
   local node
@@ -256,11 +260,11 @@ sweep_project() {
     total=$((total + 1))
 
     local item_id cur title labels repo sig decided init theme optid
-    item_id=$(printf '%s' "${node}" | jq -r '.id')
-    cur=$(printf '%s' "${node}" | jq -r '.initiative.name // ""')
-    title=$(printf '%s' "${node}" | jq -r '.content.title // ""')
-    labels=$(printf '%s' "${node}" | jq -c '.content.labels.nodes // []')
-    repo=$(printf '%s' "${node}" | jq -r '.content.repository.nameWithOwner // ""')
+    item_id=$(printf '%s' "${node}" | jq -r '.id?')
+    cur=$(printf '%s' "${node}" | jq -r '.initiative.name? // ""')
+    title=$(printf '%s' "${node}" | jq -r '.content.title? // ""')
+    labels=$(printf '%s' "${node}" | jq -c '.content.labels.nodes? // []')
+    repo=$(printf '%s' "${node}" | jq -r '.content.repository.nameWithOwner? // ""')
 
     if [ -n "${cur}" ] && [ "${RECLASSIFY:-}" != "all" ]; then
       already=$((already + 1))

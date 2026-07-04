@@ -205,7 +205,7 @@ assert_log_contains() {
 @test "decide_for_signature: matched → 'initiative<TAB>theme'" {
   run decide_for_signature "sonarcloud ruleset drift |  | x/y"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qP 'Org Standards\tFleet Operations'
+  [[ "$output" == "Org Standards"$'\t'"Fleet Operations" ]]
 }
 
 @test "decide_for_signature: unmatched → empty" {
@@ -258,9 +258,9 @@ setup_sweep_stub() {
   assert_log_contains "updateProjectV2ItemFieldValue" "PVTI_A" "F_INIT" "o_orgstd"
   assert_log_contains "F_THEME" "t_fleet"
   # Never touches the already-associated or unmatched items.
-  run bash -c "grep -c PVTI_B '${GH_STUB_LOG}' || true"
+  run grep -c PVTI_B "${GH_STUB_LOG}"
   [ "$output" = "0" ]
-  run bash -c "grep -c PVTI_C '${GH_STUB_LOG}' || true"
+  run grep -c PVTI_C "${GH_STUB_LOG}"
   [ "$output" = "0" ]
 }
 

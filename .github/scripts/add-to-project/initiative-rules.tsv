@@ -13,7 +13,7 @@ Model Selection	model.?(selection|fallback|tier|switch)|fallback model|opus.?fal
 Agent Shield	agent.?shield|prompt.?injection|input sanitiz|sanitiz|agent.?(security|hardening|governance)|jailbreak|secret.?redact|mcp.*(governance|allowlist|registry)|credential isolation|owasp|posture scoring|egress (firewall|policy|filter|rule)|firewall policy
 Self-healing	self.?heal|auto.?remediat|auto.?fix|self.?repair|stall detect|pipeline stall|recovery escalation
 dev-lead agent	dev.?lead|deep.?impl|bmad|engine.?(timeout|error)|story churn|phantom.?spec|thin.?caller|inlined (claude|workflow)|claude\.yml|claude-fix|prompting framework
-GH-AW	gh-?aw|agentic.?workflow|\baw\b|ci.?failure|failure.?analyst|ci-?analyst|failure-to-agent|lock\.?file|lock\.yml
+GH-AW	gh-?aw|agentic.?workflow|(^|[^[:alnum:]])aw([^[:alnum:]]|$)|ci.?failure|failure.?analyst|ci-?analyst|failure-to-agent|lock\.?file|lock\.yml
 Copilot Instructions	copilot.*instruction|copilot coding agent|copilot governance|copilot custom|\.github/copilot|copilot-instructions
 Fleet Monitor	fleet.?(monitor|tracker|view|health)|health.?check|hourly runs?|cron entr|scheduled .*(runs?|actions)
 Daily Reports	daily.?report|nightly.?report|status.?digest|org.?status|token.?(cost|report|metric|observ)|weekly .*report
