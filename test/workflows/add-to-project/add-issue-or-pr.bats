@@ -302,6 +302,21 @@ assert_last_invocation_contains() {
   [ "$status" -eq 1 ]
 }
 
+@test "evaluate_noise_gate: empty REQUIRED_LABEL un-gates (any labels qualify)" {
+  export REQUIRED_LABEL=""
+  run evaluate_noise_gate "$(labels_of bug)"
+  [ "$status" -eq 0 ]
+  run evaluate_noise_gate "$(labels_of)"
+  [ "$status" -eq 0 ]
+}
+
+@test "evaluate_noise_gate: empty REQUIRED_LABEL still honours excluded labels" {
+  export REQUIRED_LABEL=""
+  run --separate-stderr evaluate_noise_gate "$(labels_of bug compliance-audit)"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"has excluded label 'compliance-audit'"* ]]
+}
+
 @test "evaluate_noise_gate: empty EXCLUDED_LABELS disables exclusions entirely" {
   # An explicitly empty value (not unset) means "no exclusions" — the
   # ${VAR-default} form respects it instead of falling back to the default set.
