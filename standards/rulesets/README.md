@@ -1,5 +1,16 @@
 # Repository Rulesets — codified source of truth
 
+> **These are org-level policy, applied per-repo.** Every JSON here is an
+> **organization-level** ruleset in intent — including `release-channel-tags`, whose
+> bypass actors are org-scoped identities (`OrganizationAdmin` + org-installed Apps).
+> GitHub's native **org-level rulesets require the Team plan**; `petry-projects` is on
+> Free (`GET /orgs/petry-projects/rulesets` → 403 *"Upgrade to GitHub Team"*), so
+> `scripts/apply-rulesets.sh` **replicates each definition onto its target repos** as
+> repo-level rulesets. That per-repo projection is our stand-in for the paywalled
+> feature — do not mistake these for repo-specific config. If the org moves to Team,
+> the simplification is to define each once at `/orgs/{org}/rulesets` (with
+> repository-targeting conditions) and retire the replication loop.
+
 This directory holds the **org-wide compliance ruleset JSONs** for `petry-projects`.
 `.github` owns org-wide standards and compliance policy; its canonical home is
 `standards/`. See [`AGENTS.md`](../../AGENTS.md#organization-standards) for the
