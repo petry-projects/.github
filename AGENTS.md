@@ -19,7 +19,7 @@ Read the relevant standard *before* making changes that touch CI, repo settings,
 | **Workflow templates** | [`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows) | Copy-paste-ready templates: `agent-shield.yml`, `dev-lead.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `dependency-audit.yml`, `feature-ideation.yml` |
 | **Agent configuration** | [`standards/agent-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md) | CLAUDE.md / AGENTS.md / SKILL.md required structure, frontmatter rules, cross-references |
 | **Repo settings + labels** | [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md) | Required settings, label set with exact colors, code-quality ruleset, branch protection |
-| **Rulesets** | [`standards/rulesets/`](https://github.com/petry-projects/.github/tree/main/standards/rulesets) | Codified source-of-truth JSON for the org-wide `pr-quality` + `code-quality` rulesets (applied by `apply-rulesets.sh`). `release-channel-tags` stays repo-local in `.github-private` |
+| **Rulesets** | [`standards/rulesets/`](https://github.com/petry-projects/.github/tree/main/standards/rulesets) | Codified source-of-truth JSON for the org-wide `pr-quality`, `code-quality`, and `release-channel-tags` rulesets (applied by `apply-rulesets.sh`) |
 | **Dependabot config** | [`standards/dependabot-policy.md`](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md) and [`standards/dependabot/`](https://github.com/petry-projects/.github/tree/main/standards/dependabot) | Per-ecosystem dependabot.yml templates and policy |
 | **Advanced Security (GHAS)** | [`standards/advanced-security.md`](https://github.com/petry-projects/.github/blob/main/standards/advanced-security.md) | Org-wide GHAS enablement via the "GitHub recommended" code security configuration, licensing model, and how to verify push protection actually enforces |
 | **Push protection** | [`standards/push-protection.md`](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md) | Secret scanning + push protection, local gitleaks hooks, CI secret-scan job, incident response |
@@ -42,14 +42,14 @@ ruleset JSONs is `standards/rulesets/`.
 
 **`petry-projects/.github-private` is scoped to agents, skills, and their reusable
 workflows/assets.** It must **not** be the source of truth for org-wide policy.
-The only ruleset that legitimately lives there is `release-channel-tags` — it
-protects `.github-private`'s own `pr-review/**` and `dev-lead/**` agent-release tags.
+No rulesets should be defined there; all rulesets are owned by `.github/standards/rulesets/`.
 
-**Rule of thumb:** if a standard or ruleset applies to the whole fleet, it belongs
-in `.github/standards/`. If it protects an agent's/skill's own assets, it stays in
-`.github-private`. When in doubt, put it in `.github` and have `.github-private`
-**consume** it — the way repo-seeding tooling fetches `standards/workflows/` from
-`.github`. Do **not** add new org-wide standards or rulesets to `.github-private`.
+**Rule of thumb:** all standards and rulesets belong in `.github/standards/`, whether
+they apply fleet-wide (like `pr-quality` and `code-quality`) or are targeted to specific
+repos (like `release-channel-tags` for meta-repos). When in doubt, put it in `.github`
+and have `.github-private` **consume** it — the way repo-seeding tooling fetches
+`standards/workflows/` from `.github`. Do **not** add new org-wide standards or rulesets
+to `.github-private`.
 
 > **Known exception being remediated:** `code-quality.json` and `pr-quality.json`
 > currently live in `.github-private/.github/rulesets/` (added ad-hoc under
