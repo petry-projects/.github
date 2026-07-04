@@ -260,3 +260,45 @@ delete_project_item() {
     return 1
   fi
 }
+
+# set_item_single_select_value <item_id> <field_id> <option_id>
+#   Set a single-select field on one project item to the given option.
+#
+# This is updateProjectV2ItemFieldValue — a per-item VALUE write. It is NOT
+# updateProjectV2Field (the schema mutation that full-replaces the option
+# list and can orphan every item's value; see
+# standards/initiatives-project.md → "Adding or modifying single-select
+# options safely"). Writing an item value here can never wipe the schema, so
+# a back-fill sweep over hundreds of items is inherently safe.
+#
+# Exit 0 on success; 64 on bad args. DRY_RUN=1 logs the intended write and
+# mutates nothing.
+set_item_single_select_value() {
+  if [ "$#" -ne 3 ]; then
+    printf '[set_item_single_select_value] expected 3 args (item_id field_id option_id), got %d\n' "$#" >&2
+    return 64
+  fi
+  local item_id="$1"
+  local field_id="$2"
+  local option_id="$3"
+
+  if [ "${DRY_RUN:-}" = "1" ]; then
+    printf '[dry-run] would set item %s field %s = option %s\n' "${item_id}" "${field_id}" "${option_id}"
+    return 0
+  fi
+
+  # shellcheck disable=SC2016  # $projectId/$itemId/$fieldId/$optionId are GraphQL variables
+  gh api graphql \
+    -F projectId="${PROJECT_ID}" \
+    -F itemId="${item_id}" \
+    -F fieldId="${field_id}" \
+    -F optionId="${option_id}" \
+    -f query='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){
+      updateProjectV2ItemFieldValue(input:{
+        projectId:$projectId, itemId:$itemId, fieldId:$fieldId,
+        value:{ singleSelectOptionId:$optionId }
+      }){
+        projectV2Item { id }
+      }
+    }' >/dev/null
+}
