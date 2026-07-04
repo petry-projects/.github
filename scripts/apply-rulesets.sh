@@ -26,6 +26,12 @@ set -euo pipefail
 # Rulesets live ON each repo: editing a JSON here changes the desired state, not any
 # live ruleset, until this applier runs.
 #
+# Default set: with NO ruleset name, only the FLEET_RULESETS allowlist (code-quality,
+# pr-quality) is applied — NOT every *.json in the dir. standards/rulesets/ also holds
+# release-channel-tags.json (a tag ruleset protecting the reusable-hosting meta-repos'
+# channel/version tags); it is targeted, not fleet-wide, so it is applied ONLY when
+# named explicitly:  ./scripts/apply-rulesets.sh --repo petry-projects/.github release-channel-tags
+#
 # Usage:
 #   GH_TOKEN=<admin> ./scripts/apply-rulesets.sh --repo owner/repo [--dry-run] [<name>...]
 #   GH_TOKEN=<admin> ./scripts/apply-rulesets.sh <repo-name>       [--dry-run]   # bare name → $ORG/<name>
@@ -41,6 +47,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 ORG="${ORG:-petry-projects}"
 RULESETS_DIR="${RULESETS_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)/standards/rulesets}"
 DRY_RUN="${DRY_RUN:-false}"
+
+# The fleet-wide compliance rulesets applied by DEFAULT (when no ruleset name is
+# given), on --repo and --all alike. This is an ALLOWLIST, not "every *.json in the
+# dir": standards/rulesets/ also holds release-channel-tags.json, which is a targeted
+# tag ruleset for the reusable-hosting meta-repos only and must NOT be swept fleet-
+# wide — it is applied only when named explicitly (e.g. `--repo <meta> release-channel-tags`).
+FLEET_RULESETS=(code-quality pr-quality)
 
 # ruleset_id_by_name <repo> <name> — echo the id of an existing ruleset, or empty.
 ruleset_id_by_name() {
@@ -123,18 +136,15 @@ main() {
   gh auth status >/dev/null 2>&1 || { echo "::error::GitHub authentication failed — set GH_TOKEN or run 'gh auth login'" >&2; return 1; }
   [ -d "$RULESETS_DIR" ] || { echo "::error::rulesets dir not found: $RULESETS_DIR" >&2; return 1; }
 
-  # Select the ruleset files (all *.json, or only the named ones).
+  # Select the ruleset files: the named ones, else the fleet allowlist (NOT every
+  # *.json — that would sweep release-channel-tags fleet-wide; see FLEET_RULESETS).
   local files=()
-  if [ "${#names[@]}" -gt 0 ]; then
-    local n
-    for n in "${names[@]}"; do
-      [ -f "${RULESETS_DIR}/${n}.json" ] && files+=("${RULESETS_DIR}/${n}.json") \
-        || { echo "::error::no ruleset file ${n}.json in ${RULESETS_DIR}" >&2; return 1; }
-    done
-  else
-    local f
-    for f in "${RULESETS_DIR}"/*.json; do [ -e "$f" ] && files+=("$f"); done
-  fi
+  if [ "${#names[@]}" -eq 0 ]; then names=("${FLEET_RULESETS[@]}"); fi
+  local n
+  for n in "${names[@]}"; do
+    [ -f "${RULESETS_DIR}/${n}.json" ] && files+=("${RULESETS_DIR}/${n}.json") \
+      || { echo "::error::no ruleset file ${n}.json in ${RULESETS_DIR}" >&2; return 1; }
+  done
   [ "${#files[@]}" -gt 0 ] || { echo "  no ruleset files to apply"; return 0; }
 
   if [ "$all" = true ]; then

@@ -11,9 +11,13 @@ these rulesets are enforced.
 |------|---------|--------|----------|
 | [`pr-quality.json`](pr-quality.json) | `pr-quality` | `~DEFAULT_BRANCH` | 1 approval, code-owner review, thread resolution, dismiss-stale, squash-only merge |
 | [`code-quality.json`](code-quality.json) | `code-quality` | `~DEFAULT_BRANCH` | Required status checks (SonarCloud, CodeQL, agent-shield, dependency-audit) |
+| [`release-channel-tags.json`](release-channel-tags.json) | `release-channel-tags` | `refs/tags/**` | Blocks unauthorized **update/deletion** of any tag (protects moving channel pointers + version tags); creation stays free |
 
-Both carry the two mandatory bypass actors — `OrganizationAdmin` and the
-`dependabot-automerge-petry` Integration app (id `3167543`), both `bypass_mode: always`.
+`pr-quality` / `code-quality` carry the two mandatory bypass actors —
+`OrganizationAdmin` and the `dependabot-automerge-petry` Integration app (id
+`3167543`), both `bypass_mode: always`. `release-channel-tags` additionally grants
+bypass to the **release-manager** Integration app (id `4193127`) so channel promotion
+and dev-lead autocut can move channel tags.
 
 ## Applying
 
@@ -29,10 +33,20 @@ GH_TOKEN=<admin-token> bash scripts/apply-rulesets.sh <repo> --dry-run
 
 ## Scope boundary
 
-- **Fleet-wide → here.** `pr-quality` / `code-quality` are org-wide policy.
-- **Protects an agent/skill's own assets → stays in `.github-private`.**
-  `release-channel-tags` lives in `petry-projects/.github-private` because it
-  protects that repo's own `pr-review/**` and `dev-lead/**` release tags.
+- **Org standards → here.** All ruleset definitions are org standards owned by
+  `.github`. `pr-quality` / `code-quality` are applied **fleet-wide** (the default
+  set); `release-channel-tags` is an org standard but **targeted** — applied only to
+  the reusable-hosting meta-repos (`.github`, `.github-private`), whose tags are all
+  release-management tags. It is applied by name, never swept fleet-wide:
+
+  ```bash
+  GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github release-channel-tags
+  GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github-private release-channel-tags
+  ```
+
+- **The default (no-name) set is the `FLEET_RULESETS` allowlist**, *not* every
+  `*.json` here — so adding a targeted ruleset like `release-channel-tags` never
+  leaks into `--all` / `--repo` fleet runs.
 
 ## Changing the required-check set
 
