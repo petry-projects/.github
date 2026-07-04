@@ -176,8 +176,40 @@ assert_log_contains() {
   [ "$output" = "Compliance Blitz" ]
 }
 
+@test "classify_by_rules: cross-cutting infra WINS over the product repo (SonarCloud in a product repo → Org Standards)" {
+  # The key ordering guarantee: a SonarCloud sweep inside a product repo is
+  # Org Standards work, not product work.
+  run classify_by_rules "sonarcloud: shell script hygiene cleanup |  | petry-projects/talkterm"
+  [ "$output" = "Org Standards" ]
+}
+
+@test "classify_by_rules: a genuine product feature in the product repo → the product initiative" {
+  run classify_by_rules "add spatial audio to the voice provider pipeline |  | petry-projects/talkterm"
+  [ "$output" = "TalkTerm" ]
+}
+
+@test "classify_by_rules: avatar idea draft (no repo) → TalkTerm" {
+  run classify_by_rules "3d avatar evolution with lip-sync |  | draft"
+  [ "$output" = "TalkTerm" ]
+}
+
+@test "classify_by_rules: beekeeping idea → Broodly, not TalkTerm (hive wins)" {
+  run classify_by_rules "conversational voice assistant grounded in hive history |  | draft"
+  [ "$output" = "Broodly" ]
+}
+
+@test "classify_by_rules: feature-ideation → Business Analyst" {
+  run classify_by_rules "feat(feature-ideation): add curated source list for mary |  | petry-projects/.github"
+  [ "$output" = "Business Analyst" ]
+}
+
+@test "classify_by_rules: token cost report → Cost Observability, not Daily Reports" {
+  run classify_by_rules "org-wide weekly token cost observatory report |  | petry-projects/.github"
+  [ "$output" = "Cost Observability" ]
+}
+
 @test "classify_by_rules: no match → empty output, exit 0" {
-  run classify_by_rules "bees and honey harvest schedule |  | x/y"
+  run classify_by_rules "zzq nonsense placeholder widget |  | x/y"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -209,7 +241,7 @@ assert_log_contains() {
 }
 
 @test "decide_for_signature: unmatched → empty" {
-  run decide_for_signature "bees and honey |  | x/y"
+  run decide_for_signature "zzq nonsense placeholder |  | x/y"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -224,7 +256,7 @@ setup_sweep_stub() {
   write_items_page "$items" \
     '{"id":"PVTI_A","initiative":null,"content":{"__typename":"Issue","title":"SonarCloud: fix S7635 stubs","labels":{"nodes":[{"name":"dev-lead"}]},"repository":{"nameWithOwner":"petry-projects/.github"}}}' \
     '{"id":"PVTI_B","initiative":{"name":"Auto-rebase"},"content":{"__typename":"PullRequest","title":"auto-rebase tweak","labels":{"nodes":[{"name":"dev-lead"}]},"repository":{"nameWithOwner":"petry-projects/.github"}}}' \
-    '{"id":"PVTI_C","initiative":null,"content":{"__typename":"DraftIssue","title":"bees and honey harvest"}}'
+    '{"id":"PVTI_C","initiative":null,"content":{"__typename":"DraftIssue","title":"zzq nonsense placeholder"}}'
   local script="${TT_TMP}/script.txt"
   {
     gh_script_line 0 "$fields" "-"   # resolve_fields
