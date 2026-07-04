@@ -115,7 +115,7 @@ jobs:
           # required-label gate. An empty REQUIRED_LABEL means "no required
           # label" (see add-issue-or-pr.sh::evaluate_noise_gate). The
           # excluded-labels noise filter still applies to both.
-          REQUIRED_LABEL: ${{ github.event_name == 'issues' && '' || inputs.required_label }}
+          REQUIRED_LABEL: ${{ github.event_name != 'issues' && inputs.required_label || '' }}
           EXCLUDED_LABELS: ${{ inputs.excluded_labels }}
           LABELS_JSON: ${{ toJson(github.event.issue.labels || github.event.pull_request.labels) }}
           CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}

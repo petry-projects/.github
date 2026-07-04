@@ -61,18 +61,19 @@ for repo in "${repos[@]}"; do
   # silenced) and `set -e`'s check isn't bypassed by a subshell; feed the loop
   # via here-string so it stays in the parent shell and `scanned` updates.
   issues_tsv=$(gh api --paginate "repos/${repo}/issues?state=open&per_page=100" \
-            --jq '.[] | [.node_id, .html_url, ([.labels[] | {name}] | @json), (if .pull_request then "pr" else "issue" end)] | @tsv') || {
+            --jq '.[] | [.node_id, .html_url, ([.labels?[]? | {name}] | @json), (if .pull_request then "pr" else "issue" end)] | @tsv') || {
     echo "::error::failed to fetch issues for ${repo}" >&2
     echo "::endgroup::"
     continue
   }
-  while IFS=$'\t' read -r nid url labels kind; do
+  while IFS=$'\t' read -r nid url labels kind || [ -n "$kind" ]; do
+    kind="${kind%$'\r'}"
     [ -z "$nid" ] && continue
     scanned=$((scanned + 1))
     # Un-gate issues (empty required label); PRs keep the gate.
     if [ "$kind" = "pr" ]; then REQUIRED_LABEL="$pr_required"; else REQUIRED_LABEL=""; fi
     export REQUIRED_LABEL
-    reconcile_content_with_project "$nid" "$url" "$labels" || true
+    reconcile_content_with_project "$nid" "$url" "$labels"
   done <<< "$issues_tsv"
 
   echo "::endgroup::"

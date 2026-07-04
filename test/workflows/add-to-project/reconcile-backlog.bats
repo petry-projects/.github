@@ -13,10 +13,11 @@ load 'helpers/setup'
 # (node_id<TAB>url<TAB>labels-json<TAB>kind) and "not found" for project lookups.
 write_issue_stub() {
   local rows="$1" bin="${TT_TMP}/bin"; mkdir -p "$bin"
-  cat > "$bin/gh" <<STUB
+  export STUB_ROWS="$rows"
+  cat > "$bin/gh" <<'STUB'
 #!/usr/bin/env bash
-case "\$*" in
-  *"repos/"*"/issues"*) printf '${rows}' ;;
+case "$*" in
+  *"repos/"*"/issues"*) printf '%b' "$STUB_ROWS" ;;
   *graphql*) printf '' ;;
 esac
 STUB
