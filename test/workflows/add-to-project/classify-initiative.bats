@@ -208,6 +208,16 @@ assert_log_contains() {
   [ "$output" = "Cost Observability" ]
 }
 
+@test "classify_by_rules: claude-named agent work → dev-lead agent (claude was the old name)" {
+  run classify_by_rules "fix(claude-ci-fix): resolve pr via api when check_run payload empty |  | petry-projects/.github"
+  [ "$output" = "dev-lead agent" ]
+}
+
+@test "classify_by_rules: market research / ideation → Business Analyst" {
+  run classify_by_rules "market research and ideation: agentic swe bots |  | draft"
+  [ "$output" = "Business Analyst" ]
+}
+
 @test "classify_by_rules: no match → empty output, exit 0" {
   run classify_by_rules "zzq nonsense placeholder widget |  | x/y"
   [ "$status" -eq 0 ]
