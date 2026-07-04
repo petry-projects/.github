@@ -113,6 +113,16 @@ call() {
   run bash -c 'source "$1" >/dev/null 2>&1; family_is_security tests' _ "$SCRIPT"; [ "$status" -ne 0 ]
 }
 
+# ── issue_marker (hidden idempotency key) ──────────────────────────────────
+@test "issue_marker embeds a stable repo/family key as an HTML comment" {
+  run bash -c 'source "$1" >/dev/null 2>&1; issue_marker "$2" "$3"' _ "$SCRIPT" "markets" "ghactions"
+  [ "$output" = "<!-- sonarcloud-audit:key=markets/ghactions -->" ]
+}
+@test "issue_marker handles dotted repo names (.github)" {
+  run bash -c 'source "$1" >/dev/null 2>&1; issue_marker "$2" "$3"' _ "$SCRIPT" ".github" "misc"
+  [ "$output" = "<!-- sonarcloud-audit:key=.github/misc -->" ]
+}
+
 # ── family_title stability (used as the idempotency key) ───────────────────
 @test "family_title is non-empty for every known family" {
   run bash -c 'source "$1" >/dev/null 2>&1;

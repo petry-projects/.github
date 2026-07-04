@@ -109,6 +109,14 @@ family_is_security() {
   esac
 }
 
+# Stable idempotency key, embedded as a hidden HTML comment in each issue body.
+# Keyed on repo/family so matching survives human title edits and lets the audit
+# ADOPT (rather than duplicate) a pre-existing issue that carries the marker.
+# args: <repo> <family>
+issue_marker() {
+  echo "<!-- sonarcloud-audit:key=$1/$2 -->"
+}
+
 # Numeric rank for a Sonar severity (higher = worse). Used to pick a bucket's
 # worst severity for its priority label.
 severity_rank() {
@@ -295,6 +303,8 @@ Labeled \`$(severity_priority_label "$max_sev")\` — mapped from this bucket's 
 
 ---
 *Idempotent issue — updated automatically each audit run; auto-closed when the finding count reaches zero.*
+
+$(issue_marker "$repo" "$family")
 BODY
 }
 
@@ -323,10 +333,13 @@ manage_group_issue() {
 
   ensure_labels "$repo"
 
-  local existing
+  # Match on the hidden body marker (repo/family), not the human title — robust
+  # to title edits and lets the audit adopt a pre-existing marker-bearing issue.
+  local existing marker
+  marker="sonarcloud-audit:key=${repo}/${family}"
   existing=$(gh issue list --repo "$ORG/$repo" --label "$SONAR_AUDIT_LABEL" --state open \
-    --search "\"$stable_title\" in:title" --json number,title \
-    -q ".[] | select(.title == \"$stable_title\") | .number" 2>/dev/null | head -1 || echo "")
+    --json number,body --limit 200 2>/dev/null \
+    | jq -r --arg m "$marker" '.[] | select((.body // "") | contains($m)) | .number' 2>/dev/null | head -1 || echo "")
 
   if [ -n "$existing" ]; then
     # Refresh the dashboard body + ensure current priority label, drop stale ones.
@@ -366,22 +379,25 @@ manage_group_issue() {
 }
 
 # Close audit issues whose (repo, family) group no longer has findings.
+# Reads the family from each issue's hidden body marker (not its title), so a
+# renamed issue is still matched to its group.
 close_resolved() {
   local repo="$1"
   local open_issues
   open_issues=$(gh issue list --repo "$ORG/$repo" --label "$SONAR_AUDIT_LABEL" --state open \
-    --json number,title -q '.[] | "\(.number)\t\(.title)"' 2>/dev/null || echo "")
+    --json number,body --limit 200 2>/dev/null \
+    | jq -r '.[] | "\(.number)\t" + ((.body // "") | (try (capture("sonarcloud-audit:key=[^/]+/(?<fam>[a-z0-9]+)").fam) catch ""))' 2>/dev/null || echo "")
   [ -z "$open_issues" ] && return
 
-  # Current family titles present for this repo.
-  local current_titles
-  current_titles=$(jq -r --arg repo "$repo" '.[] | select(.repo == $repo) | .family' "$GROUPS_FILE" 2>/dev/null \
-    | while read -r fam; do [ -n "$fam" ] && echo "SonarCloud: $(family_title "$fam")"; done)
+  # Families currently present for this repo.
+  local current_fams
+  current_fams=$(jq -r --arg repo "$repo" '.[] | select(.repo == $repo) | .family' "$GROUPS_FILE" 2>/dev/null)
 
-  local num ttl
-  while IFS=$'\t' read -r num ttl; do
+  local num fam
+  while IFS=$'\t' read -r num fam; do
     [ -z "$num" ] && continue
-    if ! echo "$current_titles" | grep -qxF "$ttl"; then
+    [ -z "$fam" ] && continue   # not a marker-bearing audit issue — leave it alone
+    if ! echo "$current_fams" | grep -qxF "$fam"; then
       gh issue close "$num" --repo "$ORG/$repo" \
         --comment "Resolved! No open SonarCloud findings remain in this workstream as of $(date -u +%Y-%m-%d). Closing automatically." 2>/dev/null \
         && { ISSUES_REMOVED=$((ISSUES_REMOVED + 1)); info "Closed resolved #$num in $repo"; } || true
