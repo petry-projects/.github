@@ -109,8 +109,8 @@ Theme. Roadmap-view grouping uses Initiative; cross-cutting filters
 
 | Theme | Initiatives |
 |---|---|
-| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model fallback` |
-| **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards` |
+| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model Selection` |
+| **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards`, `Release Strategy` |
 | **Compliance** | `Compliance program`, `Compliance Blitz`, `Self-healing`, `Auto-rebase` |
 | **Tooling** | `Initiatives Project`, `Tooling` |
 | **Ad hoc** | `Ad hoc` |
@@ -195,12 +195,15 @@ configured manually in the UI):
 
 ```text
 .github/workflows/add-to-project.yml             # Workflow (events → script call)
-.github/workflows/add-to-project-reconcile.yml   # Scheduled/manual backlog reconcile (#518)
+.github/workflows/add-to-project-reconcile.yml   # Scheduled/manual backlog reconcile (#518) + classify (#415)
 .github/scripts/add-to-project/
-    lib.sh                                       # find/add/draft/delete helpers (DRY_RUN-aware)
+    lib.sh                                       # find/add/draft/delete/set-field helpers (DRY_RUN-aware)
     add-issue-or-pr.sh                           # Noise gate + addProjectV2ItemById
     reconcile-discussion.sh                      # Paginated find + 4-state reconciler
     reconcile-backlog.sh                         # Scans open issues/PRs + Ideas, reconciles via the above
+    classify-initiative.sh                       # Rule-driven Initiative/Theme back-fill (#415)
+    initiative-rules.tsv                         # Ordered "Initiative <TAB> regex" match rules
+    initiative-taxonomy.tsv                      # "Initiative <TAB> Theme" roll-up
 .github/workflows/add-to-project-tests.yml       # shellcheck + bats CI gate
 test/workflows/add-to-project/                   # bats tests, gh stub, fixtures
 ```
@@ -218,6 +221,46 @@ discussion number) serialize via concurrency group — `created` and
 
 **Project ID:** `PVT_kwDOD2inqs4BZq3-` (hardcoded in the workflow env).
 Multi-Project consumers of the same scripts would parameterize this.
+
+## How Initiative classification works
+
+Adding an item to the board and *categorizing* it are separate concerns. The
+add path (above) only sets board membership; it leaves the **Initiative**
+field blank. `classify-initiative.sh` (#415) fills it.
+
+- **Deterministic, not AI.** Each item is flattened into a lowercase
+  signature `title | labels | owner/repo` and matched against ordered regex
+  rules in `initiative-rules.tsv` — **first match wins**, so specific
+  initiatives sit above the generic bucket they'd otherwise be swallowed by
+  (Compliance Blitz before Compliance program; Org Standards before
+  Compliance program). A matched item also gets the **Theme** that Initiative
+  rolls up to, from `initiative-taxonomy.tsv`.
+- **Gate labels are stripped from the signature.** Every board item carries
+  the `dev-lead` required label, so if it stayed in the signature the
+  `dev-lead agent` rule would match *every* item. `SIGNATURE_IGNORE_LABELS`
+  (default = the required + excluded noise-gate labels) drops it; only labels
+  that actually signal an initiative survive. This is the concrete mechanism
+  behind the "`dev-lead` is a work-assignment signal, not a classification
+  signal" note in **Fields** above.
+- **No guessing.** An item that matches no rule is left blank and printed as
+  `UNMATCHED` for triage — the classifier never assigns "Ad hoc" as a
+  catch-all. Coverage is reported in the job summary on every run. Tune
+  coverage by adding rows to `initiative-rules.tsv`.
+- **Safe by construction.** It writes only per-item field *values*
+  (`updateProjectV2ItemFieldValue`), never the field *schema*
+  (`updateProjectV2Field`), so it cannot trip the option-wipe footgun in
+  "Adding or modifying single-select options safely" above. It resolves live
+  option ids by name at runtime; a rule naming an initiative that isn't a
+  live option is skipped with a warning rather than failing the run.
+- **Non-destructive.** By default it only fills items whose Initiative is
+  empty, so a human's manual assignment is never overwritten. Set
+  `RECLASSIFY=all` (workflow input `reclassify_all`) to re-evaluate every
+  item.
+
+It runs as the second step of `add-to-project-reconcile.yml`, right after the
+backlog reconcile, so items added in a cycle are categorized in the same run.
+Manual dispatch defaults to `dry_run` (preview coverage + the UNMATCHED list
+before mutating). The first live run back-fills the existing blank items.
 
 ## Deferred work (not in the pilot)
 
