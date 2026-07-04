@@ -149,7 +149,14 @@ jobs:
             ACTOR="${{ github.event.comment.user.login }}"
             MSG="@${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
           fi
-          gh pr comment "$PR_URL" --body "$(printf '<!-- pr-review-agent mention-ack -->\n%s' "${MSG}")"
+          # Best-effort (issue #594): the ack comment ran unguarded under `bash -e`,
+          # so a single PR at GitHub's 2500-comment cap ("Commenting is disabled on
+          # issues with more than 2500 comments"), a secondary rate limit, or a
+          # transient 5xx failed the whole step — blocking the pr-review-mention
+          # ring1→stable canary soak. The ack is cosmetic; the review dispatch in the
+          # next step is what matters, so swallow a comment-side failure as a warning.
+          gh pr comment "$PR_URL" --body "$(printf '<!-- pr-review-agent mention-ack -->\n%s' "${MSG}")" \
+            || echo "::warning::could not post ack comment on $PR_URL (comment cap / API error) — continuing"
 
       - name: Trigger review agent
         if: steps.trust.outputs.trusted == 'true'
