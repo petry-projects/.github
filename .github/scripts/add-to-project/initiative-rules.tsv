@@ -1,0 +1,25 @@
+# Initiative <TAB> ERE regex  — deterministic classification rules for
+# classify-initiative.sh, matched (case-insensitive) against a per-item
+# signature = "title | label,label | owner/repo", all lowercased.
+#
+# ORDER IS PRIORITY: first matching row wins, so put specific initiatives
+# above the generic bucket they'd otherwise be swallowed by (e.g. Compliance
+# Blitz and Org Standards before Compliance program). An item that matches no
+# rule is left BLANK and reported for triage — the classifier never guesses
+# "Ad hoc". Tune rows here; coverage is measured on every dry-run.
+Auto-rebase	auto.?rebase|update.?branch|rebase (bot|loop|collision)|conflict.?comment|dismiss.?stale|last.?push.?approval|stale.?base
+pr-review agent	pr.?review|(code|bot|single|advisory) review|review.?(one.?pr|decision|enumeration|loop|comments?|bot|gate|findings|annotation|enhancement)|advisory bot|coderabbit|(gemini|copilot|sonarcloud|codex) review|fix.?request|extract_verdict|mention.?(ack|trigger)|changes_requested|@petry-review|@donpetry-bot|review-one-pr
+Model Selection	model.?(selection|fallback|tier|switch)|fallback model|opus.?fallback|retire .*(opus|gpt|claude-|model)|update to opus|opus 4|cross.?provider|provider.?switch|additional providers|providers,? .*model|engine.?(availability|model|upgrade)|rate.?limit resilience
+Agent Shield	agent.?shield|prompt.?injection|input sanitiz|sanitiz|agent.?(security|hardening|governance)|jailbreak|secret.?redact|mcp.*(governance|allowlist|registry)|credential isolation|owasp|posture scoring|egress (firewall|policy|filter|rule)|firewall policy
+Self-healing	self.?heal|auto.?remediat|auto.?fix|self.?repair|stall detect|pipeline stall|recovery escalation
+dev-lead agent	dev.?lead|deep.?impl|bmad|engine.?(timeout|error)|story churn|phantom.?spec|thin.?caller|inlined (claude|workflow)|claude\.yml|claude-fix|prompting framework
+GH-AW	gh-?aw|agentic.?workflow|\baw\b|ci.?failure|failure.?analyst|ci-?analyst|failure-to-agent|lock\.?file|lock\.yml
+Copilot Instructions	copilot.*instruction|copilot coding agent|copilot governance|copilot custom|\.github/copilot|copilot-instructions
+Fleet Monitor	fleet.?(monitor|tracker|view|health)|health.?check|hourly runs?|cron entr|scheduled .*(runs?|actions)
+Daily Reports	daily.?report|nightly.?report|status.?digest|org.?status|token.?(cost|report|metric|observ)|weekly .*report
+Compliance Blitz	compliance.?blitz|compliance.?day|compliance backlog
+Org Standards	sonarcloud|sonar[ ._-]|s7[0-9]{3}|s86[0-9]{2}|s59[0-9]{2}|scorecard|ruleset|codeowners|branch.?(protection|ruleset)|push.?protection|ci.?standard|baseline|standards.?(sync|deploy|reconcile)|nosonar|secret.?scan|gitleaks|dependency.?(harden|pinning)|pin.*(sha|ref|reusable|version|action)|actionlint|yamllint|lint check|dependabot|org.?standard|org-wide .*(standard|instruction|reusable)|code.?quality|zizmor|oidc|access control|standards drift|drift detection|integrity verification|execution protection|security linting|pull request limits|pr.?limits|admission gate
+Compliance program	compliance|audit|remediat
+Release Strategy	release.?(strategy|train|notes|channel|cadence|automation)|channel.?(promote|cut|soak|pin)|ring.?(rollout|promote|enrol)|canary|version(ing)? standard|semantic versioning|promote .*(channel|ring|stable)
+Initiatives Project	initiative|add.?to.?project|projects? v2|project board|roadmap view|initiatives project|issue.?fields|github projects
+Tooling	tooling|scratchpad|dev.?tool|utility script|repo template
