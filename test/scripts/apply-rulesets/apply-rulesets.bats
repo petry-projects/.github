@@ -49,6 +49,19 @@ EOF
   done
 }
 
+@test "release-channel-tags.json: tag ruleset, generic refs/tags/** include, update+deletion only" {
+  run jq -er '.target == "tag"
+    and (.conditions.ref_name.include == ["refs/tags/**"])
+    and ([.rules[].type] | sort == ["deletion","update"])' "$RULESETS_DIR/release-channel-tags.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "release-channel-tags.json: carries OrgAdmin + both Integration apps (automation 3167543 + release-manager 4193127)" {
+  run jq -er '([.bypass_actors[] | select(.actor_type=="Integration") | .actor_id] | sort == [3167543,4193127])
+    and ([.bypass_actors[].actor_type] | index("OrganizationAdmin"))' "$RULESETS_DIR/release-channel-tags.json"
+  [ "$status" -eq 0 ]
+}
+
 # ── apply behavior: create / update / dry-run ─────────────────────────────────
 @test "apply --repo: creates rulesets when absent (POST per file)" {
   _stub_gh
@@ -94,6 +107,25 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"code-quality"* ]]
   [[ "$output" != *"pr-quality"* ]]
+  [[ "$output" == *"done (1 ruleset(s))"* ]]
+}
+
+@test "apply: default set is the fleet allowlist only — release-channel-tags is NOT swept in" {
+  _stub_gh
+  export RULESETS_LIST='[]'
+  run bash "$APPLY" --repo petry-projects/acme
+  [ "$status" -eq 0 ]
+  # code-quality + pr-quality applied; release-channel-tags excluded despite being in the dir.
+  [[ "$output" == *"done (2 ruleset(s))"* ]]
+  [[ "$output" != *"release-channel-tags"* ]]
+}
+
+@test "apply: release-channel-tags applies only when named explicitly" {
+  _stub_gh
+  export RULESETS_LIST='[]'
+  run bash "$APPLY" --repo petry-projects/.github release-channel-tags --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"release-channel-tags"* ]]
   [[ "$output" == *"done (1 ruleset(s))"* ]]
 }
 

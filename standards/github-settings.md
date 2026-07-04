@@ -125,13 +125,13 @@ rules are deprecated — migrate existing classic rules to rulesets.
 
 ### Source of truth & repo boundary
 
-The codified ruleset JSONs are the source of truth for the two sanctioned
-rulesets; `scripts/apply-rulesets.sh` (and any org automation consuming it) applies them to each repo.
+The codified ruleset JSONs are the source of truth for all rulesets;
+`scripts/apply-rulesets.sh` (and any org automation consuming it) applies them to each repo.
 As **org-wide compliance policy they are owned by `petry-projects/.github`**, and
-their canonical home is `standards/rulesets/`. Do **not** author them in
+their canonical home is `standards/rulesets/`. Do **not** author rulesets in
 `petry-projects/.github-private` — that repo is scoped to agents/skills and their
-reusable assets. The only ruleset that belongs there is `release-channel-tags`
-(it protects `.github-private`'s own `pr-review/**` / `dev-lead/**` release tags).
+reusable assets. All rulesets, including targeted ones like `release-channel-tags`,
+are defined in `.github/standards/rulesets/`.
 See the repo-boundary rule in [`AGENTS.md`](../AGENTS.md).
 
 > **In transit:** `code-quality.json` and `pr-quality.json` currently still live
@@ -152,14 +152,11 @@ silently drops a merge gate. `check_legacy_rulesets()` in
 legacy ruleset and reports the exact migration delta (checks to move into
 `code-quality` first, or "safe to delete").
 
-**Source of truth.** The codified `pr-quality` and `code-quality` ruleset JSONs
-live in this repo at [`standards/rulesets/`](rulesets/) — `.github` owns org-wide
-compliance policy (see [`AGENTS.md`](../AGENTS.md#organization-standards) for the
-repo-boundary rule, codified in #576). Run `apply-rulesets.sh` to converge each
-repo's live ruleset to the desired state documented here. The one ruleset that stays in
-`petry-projects/.github-private` is `release-channel-tags` — it protects that
-repo's own `pr-review/**` and `dev-lead/**` agent-release tags and is therefore
-correctly repo-local.
+**Source of truth.** All ruleset JSONs — `pr-quality`, `code-quality`, and
+`release-channel-tags` — live in this repo at [`standards/rulesets/`](rulesets/).
+`.github` owns org-wide compliance policy (see [`AGENTS.md`](../AGENTS.md#organization-standards)
+for the repo-boundary rule, codified in #576). Run `apply-rulesets.sh` to converge each
+repo's live ruleset to the desired state documented here.
 
 > **Remediating ruleset findings is a manual, admin-token procedure** —
 > `compliance-remediate.sh` skips the `rulesets` category. Follow the
