@@ -271,6 +271,64 @@ check_reusable_workflow_paths() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Pure reusable workflows must be disabled
+# ---------------------------------------------------------------------------
+# A "pure reusable" is a workflow whose `on:` block declares workflow_call and
+# NOTHING else — it has no independent event triggers and can never run on its
+# own, only when invoked via `uses:`. Per ci-standards.md such workflows must be
+# disabled in the Actions UI. GitHub ignores a reusable's enabled/disabled state
+# when it is called via workflow_call, so disabling has zero effect on callers.
+# Hybrid workflows that ALSO declare a real trigger (schedule/workflow_dispatch/
+# push/pull_request/...) are exempt and must stay active.
+#
+# Only block-form `on:` is classified (every fleet reusable uses it); an inline
+# `on: workflow_call` would simply not match and be skipped — a safe miss, not a
+# false positive.
+check_reusable_workflows_disabled() {
+  local repo="$1"
+
+  local workflows
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+
+  for wf in $workflows; do
+    [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
+
+    local content decoded
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$decoded" ] && continue
+
+    # Extract the top-level trigger keys declared under the `on:` block.
+    local triggers
+    triggers=$(echo "$decoded" | awk '
+      /^on:/                     { inblock=1; next }
+      inblock && /^[^[:space:]#]/ { exit }          # dedent -> left the on: block
+      inblock && /^  [a-zA-Z_]/  {                   # exactly-2-space-indented key
+        key=$1; sub(/:.*/,"",key); gsub(/[[:space:]]/,"",key); print key
+      }
+    ')
+
+    # Pure reusable = workflow_call present AND no other trigger key.
+    echo "$triggers" | grep -qx "workflow_call" || continue
+    if [ "$(echo "$triggers" | grep -vx "workflow_call" | grep -c .)" -ne 0 ]; then
+      continue   # hybrid (workflow_call + real trigger) — exempt, must stay active
+    fi
+
+    # Pure reusable — check its enabled/disabled state.
+    local state
+    state=$(gh_api "repos/$ORG/$repo/actions/workflows/$wf" --jq '.state' 2>/dev/null || echo "")
+    [ -z "$state" ] && continue   # not registered (e.g. absent from default branch)
+
+    if [ "$state" = "active" ]; then
+      add_finding "$repo" "reusable-workflows" "reusable-active-$wf" "warning" \
+        "Pure reusable workflow \`$wf\` (workflow_call-only) is \`active\`; it should be disabled since it can never run on its own. Disable with: \`gh workflow disable $wf -R $ORG/$repo\`" \
+        "standards/ci-standards.md#pure-reusable-workflows-must-be-disabled"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -2351,6 +2409,7 @@ main() {
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_reusable_workflow_paths "$repo"
+    check_reusable_workflows_disabled "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"

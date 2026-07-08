@@ -162,6 +162,58 @@ that reusable. The reference implementation and the full rationale live in the
 release-strategy initiative
 (`petry-projects/.github-private/docs/initiatives/agentic-release-strategy.md`).
 
+### Pure reusable workflows must be disabled
+
+**Standard.** A **pure reusable workflow** — one whose `on:` block declares
+**`workflow_call` and nothing else** — MUST be set to `disabled_manually` in the
+Actions UI. This applies to the single-source-of-truth `*-reusable.yml`
+definition files hosted in `petry-projects/.github` and
+`petry-projects/.github-private`.
+
+**Why.** A pure reusable has no independent event triggers, so it can never run
+on its own — it executes **only** when another workflow invokes it via `uses:`.
+Left active, it clutters the Actions sidebar with an entry that never has its own
+runs, and a lone active-vs-disabled mix reads as "something is broken" to anyone
+auditing the repo. Disabling states plainly: *this is a library, not a runnable
+workflow.*
+
+**Disabling is safe — it has zero effect on callers.** GitHub **ignores** a
+reusable workflow's enabled/disabled state when it is invoked through
+`workflow_call`; the flag only suppresses a workflow's *own* event triggers, of
+which a pure reusable has none. A disabled reusable is still fully callable, at
+any ref, by any number of caller stubs. (Verified: `dev-lead-reusable.yml` sat
+disabled while 8 caller repos ran it successfully.) Caller count is irrelevant —
+a reusable with 0 callers and one with 8 are both disabled.
+
+**Exemption — anything with a real trigger stays active.** A workflow that
+declares `workflow_call` **alongside** a real trigger (`schedule`,
+`workflow_dispatch`, `push`, `pull_request`, `repository_dispatch`, …) is **not**
+a pure reusable: it runs on its own and MUST remain active. Example:
+`actions-fleet-monitor.yml` (has `schedule` + `workflow_dispatch` + `workflow_call`).
+
+Thin **caller / trigger stubs** are likewise not pure reusables — they carry the
+real event triggers and stay active. Note the common engine-plus-stub split: an
+**engine** that is `workflow_call`-only is a pure reusable and **is disabled**,
+while its **trigger stub** carries the events and **stays active**. For example
+`pr-review.yml` (the engine, `workflow_call`-only → disabled) is invoked by
+`pr-review-trigger.yml` (the stub, `check_suite`/`pull_request`/… → active).
+Disabling the engine does not stop reviews — the stub still fires and calls it.
+
+**How to disable.**
+
+```bash
+gh workflow disable <name>-reusable.yml -R petry-projects/<repo>
+# verify:
+gh api repos/petry-projects/<repo>/actions/workflows/<name>-reusable.yml --jq '.state'  # -> disabled_manually
+```
+
+**Compliance.** `check_reusable_workflows_disabled` in
+[`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh) flags any pure
+`workflow_call`-only workflow found in the `active` state as a `warning`
+finding. Note that disabled state is **not** captured in git — a newly added
+reusable is born `active` and must be disabled explicitly, which is exactly what
+this check catches on the next audit.
+
 ### Available templates
 
 | Template | Tier | Purpose |
