@@ -107,7 +107,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${APP_TOKEN}" ]; then
-            echo "::error::Canary rollout requires a GitHub App token (RELEASE_MANAGER_APP_CLIENT_ID (variable) + RELEASE_MANAGER_APP_KEY (secret)). Refusing to fall back to github.token, which cannot move protected .github channel tags (#868)."
+            echo "::error::Canary rollout requires a GitHub App token" \
+              "(RELEASE_MANAGER_APP_CLIENT_ID (variable) + RELEASE_MANAGER_APP_KEY (secret))." \
+              "Refusing to fall back to github.token, which cannot move protected .github channel tags (#868)."
             exit 1
           fi
 

@@ -42,7 +42,7 @@ intended-state surface with no write calls (#970 AC #2/#3)"_.
 
 ### Default ring (`stable`)
 
-```
+```text
 $ DRY_RUN=true GITHUB_ACTOR=octocat bash scripts/bootstrap-new-repo.sh petry-projects/acme-service
 [bootstrap] repo=petry-projects/acme-service dry_run=true ring=dev-lead/stable
 [bootstrap] (1/5) release ring confirmation (dev-lead/stable)
@@ -74,7 +74,7 @@ $ DRY_RUN=true GITHUB_ACTOR=octocat bash scripts/bootstrap-new-repo.sh petry-pro
 The ring step additionally registers the repo in both central files and repins the
 caller stub — and asserts no drift before writing:
 
-```
+```text
 [bootstrap] (1/5) release ring confirmation (dev-lead/ring1)
   [ring-audit] repo=petry-projects/acme-service agent=dev-lead ring=ring1 operator=octocat at=... decision=registered
   [dry-run] would add petry-projects/acme-service to dev-lead 'ring1' members in canary-rings.json
