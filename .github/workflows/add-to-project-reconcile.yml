@@ -3,9 +3,10 @@
 # The event-driven add-to-project automation misses qualifying items created by
 # the default GITHUB_TOKEN (GitHub doesn't fire workflows from default-token
 # events) and items whose run was dropped under congestion. This scheduled/
-# manual reconcile scans every installed repo's OPEN issues/PRs + Ideas
-# discussions and reconciles them onto the board using the same gate + helpers
-# as the event path — so missed items land within one cycle.
+# manual reconcile scans every installed repo's OPEN issues/PRs (issues
+# un-gated; PRs keep the dev-lead gate) and reconciles them onto the board
+# using the same gate + helpers as the event path — so missed items land
+# within one cycle.
 #
 # Runs centrally in petry-projects/.github (the scripts live here); mints the
 # petry-projects-planner App token for issues/PRs read + project write.
@@ -68,7 +69,6 @@ jobs:
           PROJECT_URL: https://github.com/orgs/petry-projects/projects/1
           REQUIRED_LABEL: dev-lead
           EXCLUDED_LABELS: compliance-audit,health-check,fleet-tracker,daily-report
-          IDEAS_CATEGORY: Ideas
           RECON_REPOS: ${{ inputs.repos }}
           # Manual runs default to dry-run; scheduled runs are live.
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
