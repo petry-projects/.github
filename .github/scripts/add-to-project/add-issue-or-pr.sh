@@ -2,15 +2,16 @@
 # add-issue-or-pr.sh — reconcile a single issue or PR with the org
 # Initiatives project. An item belongs on the board iff it passes the
 # noise gate:
-#   - carries the required label (REQUIRED_LABEL, default `dev-lead`)
+#   - carries the required label (REQUIRED_LABEL) — but an EMPTY
+#     REQUIRED_LABEL means "no required label", which is how issues are
+#     un-gated (every issue tracked) while PRs keep the `dev-lead` gate;
 #   - carries NONE of the excluded labels (EXCLUDED_LABELS, default
-#     compliance-audit,health-check,fleet-tracker,daily-report) — the gate
-#     that keeps strategic work distinct from automation-generated work.
+#     compliance-audit,health-check,fleet-tracker,daily-report) — the noise
+#     filter that keeps automation-generated churn off the board.
 #
 # Reconcile, not just add (petry-projects/.github#415 §2): if an item that
-# was on the board stops qualifying — `dev-lead` removed, or an excluded
-# label added — its project item is removed. This is the issue/PR analogue
-# of reconcile-discussion.sh's state machine, built on the shared
+# was on the board stops qualifying — required label removed, or an excluded
+# label added — its project item is removed, built on the shared
 # find_project_item / delete_project_item helpers in lib.sh.
 #
 # Required env:
@@ -54,7 +55,11 @@ evaluate_noise_gate() {
     labels_json='[]'
   fi
 
-  local required="${REQUIRED_LABEL:-dev-lead}"
+  # ${VAR-default} (no colon): an unset REQUIRED_LABEL falls back to dev-lead,
+  # but an explicitly EMPTY value means "no required label" — every item
+  # qualifies (subject only to the excluded-labels filter). This is how issues
+  # are un-gated while PRs keep the dev-lead requirement.
+  local required="${REQUIRED_LABEL-dev-lead}"
   # Use ${VAR-default} (no colon): an unset EXCLUDED_LABELS falls back to the
   # default set, but an explicitly empty value means "no exclusions" so a repo
   # can opt out entirely.
@@ -74,7 +79,7 @@ evaluate_noise_gate() {
     --argjson excluded "${excluded_json}" \
     '
       [.[].name] as $names
-      | if ($names | index($required) | not) then
+      | if ($required != "" and ($names | index($required) | not)) then
           "missing:" + $required
         else
           ([$excluded[] | select(. as $e | $names | index($e))]) as $hits

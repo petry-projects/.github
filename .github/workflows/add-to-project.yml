@@ -18,12 +18,12 @@
 #   • If you need different behaviour, open a PR against the reusable.
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Adds qualifying issues, PRs, and Ideas-category discussions in
-# petry-projects/.github to the org-level Initiatives project
-# (https://github.com/orgs/petry-projects/projects/1).
+# Tracks all issues (un-gated) and dev-lead-labeled PRs from
+# petry-projects/.github on the org-level Initiatives project
+# (https://github.com/orgs/petry-projects/projects/1). Ideas live in
+# Discussions and are not tracked here (see standards/initiatives-project.md).
 #
 # Tracking: petry-projects/.github#387, #415
-# Discussion: petry-projects/.github#386
 name: Auto-add to Initiatives project
 
 on:
@@ -31,21 +31,15 @@ on:
     types: [opened, labeled, unlabeled, reopened]
   pull_request_target:
     types: [opened, labeled, unlabeled, reopened, ready_for_review]
-  discussion:
-    # `deleted` and `transferred` are subscribed so an Ideas-tracked
-    # discussion that vanishes also has its draft cleaned up.
-    types: [created, category_changed, deleted, transferred]
 
 permissions: {}
 
 concurrency:
-  # Same content (same issue/PR/discussion number) always shares a group
-  # regardless of event subtype, so e.g. `labeled` and `unlabeled` for the
-  # same item can't race against each other.
+  # Same content (same issue/PR number) always shares a group regardless of
+  # event subtype, so e.g. `labeled` and `unlabeled` for the same item can't
+  # race against each other.
   group: >-
-    add-to-project-${{ github.event_name == 'discussion'
-    && format('disc-{0}', github.event.discussion.number)
-    || format('{0}-{1}', github.event_name,
+    add-to-project-${{ format('{0}-{1}', github.event_name,
        github.event.issue.number || github.event.pull_request.number) }}
   cancel-in-progress: false
 
