@@ -179,16 +179,15 @@ _cross_repo_file_pr() {
     || { echo "  [warn] ${repo}: cannot create branch ${branch}" >&2; return 1; }
   sha="$(gh api "repos/${repo}/contents/${path}?ref=${branch}" --jq '.sha' 2>/dev/null || true)"
   [ -n "$sha" ] && sha_arg=(--field "sha=${sha}")
-  encoded="$(printf '%s' "$content" | base64 -w 0 2>/dev/null || printf '%s' "$content" | base64)"
+  # Portable unwrapped base64: GNU wraps at 76 cols and BSD has no -w0, so strip
+  # newlines explicitly — the Contents API rejects a wrapped payload.
+  encoded="$(printf '%s' "$content" | base64 | tr -d '\n')"
   gh api "repos/${repo}/contents/${path}" --method PUT \
     --field "message=${msg}" --field "content=${encoded}" --field "branch=${branch}" \
     "${sha_arg[@]}" --silent 2>/dev/null \
     || { echo "  [warn] ${repo}: cannot write ${path}" >&2; return 1; }
+  # gh/jq availability is checked once in main(); no need to re-check here.
   local existing_pr
-  if ! command -v gh > /dev/null 2>&1; then
-    echo "  [warn] gh CLI is not installed" >&2
-    return 1
-  fi
   existing_pr="$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
   if [ -n "$existing_pr" ]; then
     echo "  [ring] PR #$existing_pr already open for branch $branch on $repo"
@@ -206,10 +205,13 @@ _cross_repo_file_pr() {
 # present it is a no-op; if the anchor is absent it errors rather than corrupt.
 _cross_repo_ring_pins_pr() {
   local repo="$1" agent="$2" ring="$3" content new branch
-  content="$(gh api "repos/${STANDARDS_REPO}/contents/${RING_PINS_PATH}" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  content="$(gh api "repos/${STANDARDS_REPO}/contents/${RING_PINS_PATH}" --jq '.content' 2>/dev/null | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } || true)"
   [ -n "$content" ] || { echo "::error::cannot fetch ${STANDARDS_REPO}:${RING_PINS_PATH} for ring-pins registration" >&2; return 1; }
-  if printf '%s' "$content" | grep -qF "\"$repo\""; then
-    echo "  [ring] ${repo} already present in ${RING_PINS_PATH} — in sync"
+  # Ring-specific: only treat as in-sync if the repo is already in THIS ring's array
+  # line (`<ring>=( … )`). A bare repo-wide match would false-positive when the repo is
+  # registered in a *different* ring, leaving canary-rings.json and ring-pins.sh divergent.
+  if printf '%s' "$content" | grep -F "${ring}=(" | grep -qF "\"$repo\""; then
+    echo "  [ring] ${repo} already present in ${RING_PINS_PATH} for ${ring} — in sync"
     return 0
   fi
   new="$(printf '%s' "$content" | awk -v repo="$repo" -v ring="$ring" '
@@ -234,7 +236,7 @@ _cross_repo_ring_pins_pr() {
 _cross_repo_repin_stub_pr() {
   local repo="$1" agent="$2" ring="$3" path content new branch
   path=".github/workflows/${agent}.yml"
-  content="$(gh api "repos/${repo}/contents/${path}" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  content="$(gh api "repos/${repo}/contents/${path}" --jq '.content' 2>/dev/null | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } || true)"
   [ -n "$content" ] || { echo "  [warn] ${repo}: no ${path} stub to repin" >&2; return 0; }
   new="$(printf '%s' "$content" \
     | sed -E "s#@${agent}/[A-Za-z0-9_-]+#@${agent}/${ring}#g; s#(agent_ref:[[:space:]]*[\"']?)${agent}/[A-Za-z0-9_-]+#\\1${agent}/${ring}#g")"
@@ -367,7 +369,7 @@ step_codeowners() {
     echo "  [warn] CODEOWNERS not found on ${repo} — cannot verify team ownership" >&2
     return 0
   fi
-  decoded="$(printf '%s' "$encoded" | base64 -d 2>/dev/null || true)"
+  decoded="$(printf '%s' "$encoded" | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } || true)"
   # First owner on the first non-comment, non-blank rule line.
   first_owner="$(printf '%s\n' "$decoded" \
     | sed 's/#.*//' \

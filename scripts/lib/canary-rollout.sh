@@ -53,9 +53,9 @@ median_x2() {
   fi
 }
 
-# robust_sample_target <fraction_permille> <clamp_lo> <clamp_hi> <daily_counts...>
-# Robust baseline: cap each per-day executed count at 3× the median day (neutralising
-# spikes like a runaway loop day), take the mean of the capped days, then the sample
+# robust_sample_target <fraction_permille> <clamp_lo> <clamp_hi> <cap_multiple> <daily_counts...>
+# Robust baseline: cap each per-day executed count at <cap_multiple>× the median day (default
+# 3×, neutralising spikes like a runaway loop day), take the mean of the capped days, then the sample
 # target = clamp(round(fraction · avg), lo, hi). fraction is in per-mille (250 == 0.25).
 #
 # All arithmetic stays exact in integers by working in "×2" units for the median:
@@ -103,8 +103,8 @@ _semver_gt() {
   local a1=0 a2=0 a3=0 b1=0 b2=0 b3=0
   IFS=. read -r a1 a2 a3 <<< "$1"
   IFS=. read -r b1 b2 b3 <<< "$2"
-  if [ "$a1" -ne "$b1" ]; then [ "$a1" -gt "$b1" ]; return; fi
-  if [ "$a2" -ne "$b2" ]; then [ "$a2" -gt "$b2" ]; return; fi
+  if [ "$a1" -ne "$b1" ]; then [ "$a1" -gt "$b1" ]; return $?; fi
+  if [ "$a2" -ne "$b2" ]; then [ "$a2" -gt "$b2" ]; return $?; fi
   [ "$a3" -gt "$b3" ]
 }
 

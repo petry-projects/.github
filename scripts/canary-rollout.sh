@@ -203,10 +203,18 @@ candidate_cut_date() {
 # _run_json <repo> <workflow> <since_z> — gh run-list JSON (conclusion,createdAt,databaseId,workflowName) for a
 # repo since the given Zulu timestamp. Empty repo/wildcard → []. Never fails the caller.
 _run_json() {
-  local repo="$1" wf="$2" since="$3"
+  local repo="$1" wf="$2" since="$3" out
   [ -z "$repo" ] || [ "$repo" = '*' ] && { echo '[]'; return 0; }
-  gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
-    -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null || echo '[]'
+  # Fail CLOSED on a genuine gh failure (network / rate-limit / expired creds): returning
+  # an empty [] would read as "zero failures" and could green-light a bad promotion. A
+  # non-zero return halts the run under `set -e` instead. An empty-but-successful result
+  # (no runs) is still a valid [].
+  if ! out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
+      -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
+    echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf)" >&2
+    return 1
+  fi
+  echo "${out:-[]}"
 }
 
 # _tier_sample <agent> <since_z> <repo...> — EXECUTED runs (success+failure) on the
@@ -322,12 +330,25 @@ _baseline_daily() {
 # by triage to confirm a CANDIDATE REGRESSION (#548): a failure whose reusable is identical
 # to the prior version is pre-existing, not introduced by the candidate.
 _reusable_differs() {
-  local agent="$1" cand="$2" prior="$3" reusable a b
+  local agent="$1" cand="$2" prior="$3" reusable a b host
   reusable="$(_agent_field "$agent" reusable)"
   [ -z "$reusable" ] || [ -z "$cand" ] || [ -z "$prior" ] && { echo 0; return 0; }
-  a="$(git rev-parse -q --verify "${cand}:${reusable}" 2>/dev/null || echo "")"
-  b="$(git rev-parse -q --verify "${prior}:${reusable}" 2>/dev/null || echo "")"
-  [ -n "$a" ] && [ "$a" != "$b" ] && { echo 1; return 0; }
+  host="$(_agent_field "$agent" host)"; host="${host:-$THIS_REPO}"
+  if [ "$host" = "$THIS_REPO" ]; then
+    # This-repo agent: the reusable blob lives in the local checkout.
+    a="$(git rev-parse -q --verify "${cand}:${reusable}" 2>/dev/null || echo "")"
+    b="$(git rev-parse -q --verify "${prior}:${reusable}" 2>/dev/null || echo "")"
+  else
+    # Cross-repo agent (#613): the reusable blob lives on the HOST repo, not locally —
+    # a local `git rev-parse` would resolve empty and wrongly report "unchanged". Resolve
+    # the blob SHA on the host via gh api, like the autocut path does.
+    a="$(_gh_blob_sha "$host" "$reusable" "$cand")"
+    b="$(_gh_blob_sha "$host" "$reusable" "$prior")"
+  fi
+  # Fail CLOSED: an unresolvable compare counts as "changed" so the benign-failure
+  # allowlist is disabled and a genuine candidate regression is never masked.
+  { [ -z "$a" ] || [ -z "$b" ]; } && { echo 1; return 0; }
+  [ "$a" != "$b" ] && { echo 1; return 0; }
   echo 0
 }
 

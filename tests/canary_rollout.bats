@@ -149,6 +149,40 @@ setup() {
   [ "$(classify_failure 1 data)" = "PRE_EXISTING" ]
 }
 
+# ── _reusable_differs: cross-repo host-aware blob compare (#613) ───────────────
+# When an agent's host != THIS_REPO (e.g. dev-lead hosted in .github-private while the
+# engine runs from .github), the reusable blob is NOT in the local checkout — the compare
+# must go through `gh api` on the host. agent-shield (host = petry-projects/.github) is the
+# cross-repo agent here, with THIS_REPO forced to .github-private via GITHUB_REPOSITORY.
+@test "_reusable_differs: cross-repo agent resolves host blobs via gh api — differ → 1" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  { echo '#!/usr/bin/env bash'
+    echo 'case "$*" in'
+    echo '  *"ref=CAND"*)  echo "aaaaaaaaaa" ;;'
+    echo '  *"ref=PRIOR"*) echo "bbbbbbbbbb" ;;'
+    echo '  *) echo "" ;;'
+    echo 'esac'; } > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _reusable_differs agent-shield CAND PRIOR"
+  [ "$status" -eq 0 ]; [ "$output" = "1" ]
+}
+
+@test "_reusable_differs: cross-repo agent — identical host blob → 0" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "samesamesame"\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _reusable_differs agent-shield CAND PRIOR"
+  [ "$status" -eq 0 ]; [ "$output" = "0" ]
+}
+
+@test "_reusable_differs: cross-repo agent — unresolvable blob fails CLOSED → 1" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho ""\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _reusable_differs agent-shield CAND PRIOR"
+  [ "$status" -eq 0 ]; [ "$output" = "1" ]
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]
@@ -743,7 +777,8 @@ GHEOF
   [[ "$output" == *"opened blocker issue #777 for dev-lead"* ]]
   [[ "$output" == *"wrote fleet-status table to the job summary"* ]]
   # Exactly ONE issue create (the blocker) — the dashboard is NOT an issue anymore.
-  [ "$(grep -c '^CREATE|' "$ISSUE_LOG" || true)" -eq 1 ]
+  run grep -c '^CREATE|' "$ISSUE_LOG"
+  [ "$output" -eq 1 ]
   grep -q -- "--label canary-blocker" "$ISSUE_LOG"
   ! grep -q -- "--label canary-dashboard" "$ISSUE_LOG"
   ! grep -q "^PIN|" "$ISSUE_LOG"

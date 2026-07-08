@@ -43,46 +43,54 @@ together always cover both org-infra repos, whichever hosts the agent. Hard-codi
 ## 3. Decision 2 — soak / health gate rules
 
 The promotion gate is a pure, unit-tested decision core ([`scripts/lib/canary-rollout.sh`](../../scripts/lib/canary-rollout.sh);
-tests [`tests/canary_rollout.bats`](../../tests/canary_rollout.bats)). A candidate `vX.Y.Z` advances to the next ring only once the rings
-**already on** the candidate have, over a trailing **7-day** window (`SOAK_WINDOW_DAYS = 7`):
+tests [`tests/canary_rollout.bats`](../../tests/canary_rollout.bats)), whose definitive spec is **#548**. A candidate `vX.Y.Z`
+advances one ring only when the source tier (the tier currently running it) clears, evaluated per transition against EXECUTED runs
+(success+failure; skipped/cancelled excluded) since the candidate's **own** cut:
 
-- **Volume:** `healthy_runs >= min_healthy_runs`, where `min_healthy_runs = ceil(baseline_runs / 7)` — roughly one trailing day's worth of the prior version's run volume.
-- **Quality:** candidate failure-rate `<=` baseline failure-rate (compared in integer per-mille to stay in pure-bash arithmetic).
+- **Dwell floor:** the candidate has held the source tier a minimum time — `next→ring0` ≥ 4h, `ring0→ring1` ≥ 8h,
+  `ring1→stable` ≥ 12h (registry-configurable per transition in `standards/canary-rings.json` `.gate`).
+- **Sample floor:** a graduated `clamp(round(0.25·avg), 3, 15)` over a robust, spike-capped baseline. `next→ring0` is dwell-only
+  when the source tier has no caller; `ring0→ring1` **waives** a fresh sample and rides cumulative health; `ring1→stable` needs ≥ 1 ring1 run.
+- **Cumulative health (ALWAYS):** ZERO failures and ZERO startup-failures across EVERY tier since the candidate's first cut. A failure
+  whose reusable blob is **unchanged** from the prior release is triaged as PRE_EXISTING, not a candidate regression.
 
-Two rules make the gate safe under low traffic:
-
-- **No synthetic floor / "we still wait."** A ring with no healthy candidate volume simply never advances — the candidate parks at the frontier
-  rather than being waved through on an arbitrary minimum. `baseline_runs == 0` yields `min_healthy_runs == 0`, but the `healthy_runs > 0` guard
-  still blocks promotion on zero real volume.
-- **Quality is checked first.** A failure-rate breach is evaluated before the volume threshold, so a regression is never masked by "not enough runs yet."
+Two properties keep the gate safe under low traffic: it never advances on an arbitrary synthetic floor (no volume → the candidate
+parks at the frontier), and any in-window failure is triaged before promotion, so a real regression is never masked by "not enough runs yet."
 
 ### Gate states
 
 | State | Meaning | Follow-up |
 |---|---|---|
-| `PROMOTE` | Quality holds **and** the volume threshold is met | Advance the next ring (innermost-out). |
-| `SOAKING` | Quality holds but not enough healthy candidate runs yet | Wait — no action. |
-| `INVESTIGATE` | Candidate failure-rate exceeds baseline (possible regression) | A **human** classifies it: pre-existing → log + continue; genuine regression → fix + cut a new `vX.Y.Z`, which **RESETs** the rollout. |
-| `RESET` | Roll all rings back to the last known-good | A **human/override outcome** of a confirmed regression — *not* an automatic gate state. |
+| `PROMOTE` | Dwell + sample floors met and cumulative health is clean | Advance the next ring (innermost-out). |
+| `SOAKING` | Health clean but the dwell/sample floor isn't met yet | Wait — no action. |
+| `BLOCKED` + `REGRESSION` | In-window failure whose reusable blob **changed** vs the prior release | Fix + cut a new `vX.Y.Z`, which **RESETs** the rollout. |
+| `BLOCKED` + `PRE_EXISTING` | In-window failure whose reusable is **unchanged** (pre-dates the candidate) | A **human** classifies; may `promote --allow-pre-existing` to advance past it. |
+| `COMPLETE` | Candidate is already on every ring | Fully rolled out — no action. |
 
 ### Cadence
 
-[`.github/workflows/canary-rollout.yml`](../../.github/workflows/canary-rollout.yml) runs the gate on a **4-hourly** schedule
-(`cron: "0 */4 * * *"`) in **read-only `evaluate` mode only** — it emits the per-version gate + health report (#502 observability)
-and **never** promotes on the timer. Promotion and rollback are `workflow_dispatch`-only and human-gated.
+[`.github/workflows/canary-rollout.yml`](../../.github/workflows/canary-rollout.yml) runs every **4 hours** (`cron: "0 */4 * * *"`),
+ordering **autocut → promote-all → sync-issues**. `autocut` (#1069, gated by the `CANARY_AUTO_CUT` variable) cuts a new
+`<agent>/vX.Y.Z` + moves `next` whenever a registered reusable's blob on its host `main` HEAD differs from the current candidate.
+Timer promotion is **arm-gated**: when `CANARY_AUTO_PROMOTE == 'true'` the run advances every PROMOTE-ready agent one ring (BLOCKED
+agents untouched; human approval is OVERRIDE-only), otherwise it runs read-only `evaluate-all`, emitting each agent's gate + health
+report (#502). `sync-issues` then upserts one blocker issue per BLOCKED agent and renders the fleet-status table to the job summary.
+Per-agent `promote` / `rollback` remain `workflow_dispatch`-only (default `--dry-run`).
 
 ## 4. Decision 3 — promotion is a single gated channel-tag move; rollback moves the tag back
 
 The **channel tags are the rollout state.** There is no separate state store:
 
 - **Promotion** = advancing one ring by **moving one channel tag** to the candidate `vX.Y.Z`, innermost-out along the ordered list
-  `next → ring0 → ring1 → stable` (`next_channel_in_order`). The **only** mutation the orchestrator performs is `git tag -f` + push; it never writes consumer files.
+  `next → ring0 → ring1 → stable` (`next_channel_in_order`). The **only** mutation the orchestrator performs is a `gh api` ref update
+  (PATCH/POST `repos/<host>/git/refs/tags/…`) on the agent's host repo — never a local `git push`; it never writes consumer files.
 - **Rollback** = moving a channel tag **back** to a prior immutable release (`rollback <agent> <ring> --to vX.Y.Z`). Because immutable
   `vX.Y.Z` tags never move, they are the audit trail and the rollback targets.
 
-The mover credential is **`GH_PAT_WORKFLOWS`** (the workflow falls back to `GITHUB_TOKEN` when the PAT is unset, but only the PAT satisfies
-the `release-channel-tags` ruleset bypass scoped to this workflow's identity (#868)) — promotion and rollback effectively require the PAT;
-agents running only as `GITHUB_TOKEN` cannot push protected release tags.
+The mover credential is a **GitHub App installation token** (`release-manager`, minted at runtime via
+`actions/create-github-app-token`): the App is a bypass actor on the `release-channel-tags` ruleset (#868), so its `gh api` ref
+updates are authorized to move protected channel tags. Minting is a HARD requirement — the job fails rather than fall back to
+`github.token`, which cannot move `.github` tags.
 This is the sanctioned, documented exception to the SHA-pin standard for **first-party** channel tags (see
 [AGENTS.md → "Release channel tags & the mutable-ref exception"](../../AGENTS.md)); compliance audits must not flag `@<agent>/<channel>` pins
 on first-party callers as unpinned.

@@ -153,13 +153,12 @@ reusables (`agent-shield`, `auto-rebase`, `dependency-audit`, `dependabot-autome
   (the mutable-ref exception) is created **there**, not on this repo — see
   [`AGENTS.md`](../../AGENTS.md) "Release channel tags & the mutable-ref exception".
 
-> **Why not `standards/canary-rings.json` yet?** The machine-readable ring source of truth consumed by
-> the promotion automation (`scripts/canary-rollout.sh`, #501) carries only the agents whose channel
-> tags that automation can move. `cut-release.sh` now publishes cross-repo tags via `gh api` (#872), but
-> `canary-rollout.sh` does not yet use that cross-repo path, so `feature-ideation` and the six above stay
-> **absent** from `canary-rings.json` until the rollout automation is taught the same `gh api` move —
-> adding them sooner would advertise a promotion the automation cannot perform. (Manual/scripted cuts via
-> `cut-release.sh` work today.)
+> **Now registered in `standards/canary-rings.json`.** The promotion automation
+> (`scripts/canary-rollout.sh`, #501) now moves channel tags **cross-repo** via `gh api` ref updates on
+> each agent's host repo (#1054), so the six reusables above are registered under the full
+> `{next, ring0, ring1, stable}` model (#870) — the earlier "automation can't move cross-repo tags"
+> gap is closed. `feature-ideation` remains **absent** for now: its host + ring assignment aren't settled,
+> and registering an agent before then would advertise a promotion the registry can't yet describe.
 
 ### The six #482 reusables (ring assignment)
 

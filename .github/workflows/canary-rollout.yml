@@ -4,8 +4,10 @@
 # Gate standard: .github#548 (graduated dwell/sample, robust baseline, per-candidate
 # window, ring0 sample waiver, failure triage) — see scripts/canary-rollout.sh.
 #
-# The ONLY mutation this performs is moving a channel tag (`git tag -f` + push) and
-# recording a GitHub Deployment for traceability. It never writes consumer files.
+# The ONLY mutation this performs is moving a channel tag via a `gh api` ref update
+# (PATCH/POST repos/<host>/git/refs/tags/… — NOT a local `git push`, which the
+# release-channel-tags ruleset would reject) and recording a GitHub Deployment for
+# traceability. It never writes consumer files.
 #
 # Auth: the mover credential is a GitHub App installation token minted at runtime via
 # actions/create-github-app-token from RELEASE_MANAGER_APP_CLIENT_ID (variable) + RELEASE_MANAGER_APP_KEY (secret) (scoped,
@@ -118,8 +120,10 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          # Mover identity: the App token so pushing protected channel tags is
-          # authorized under the release-channel-tags ruleset bypass (#868).
+          # Tag moves go through `gh api` with the App token (GH_TOKEN env), never a
+          # local `git push`, so the checkout credential is only needed to authenticate
+          # the fetch — don't persist it into .git/config (narrows the exposure surface).
+          persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
       # FRONT END (#1069): cut a new candidate + move `next` whenever a registered reusable's
