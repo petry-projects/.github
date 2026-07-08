@@ -12,37 +12,38 @@ operate the project. The pilot itself is tracked in
 
 ## What belongs on the board
 
-The signal we filter for is **"strategic work that benefits from a roll-up
-view"**, not "every dev-lead-handled issue".
+The board is the **org-wide portfolio of issues** across every installed repo,
+each classified to an Initiative + Theme. **Issues are tracked; Ideas are not.**
 
 ### Auto-added (no manual step)
 
 | Content type | Conditions | Result |
 |---|---|---|
-| Issues / PRs in `petry-projects/.github` | Has label `dev-lead` AND none of `compliance-audit`, `health-check`, `fleet-tracker`, `daily-report` | Linked item appears on the board |
-| Discussions in `petry-projects/.github` | Category is `Ideas` | Draft `[Discussion #N] <title>` appears |
+| **Issues** (all installed repos) | **Un-gated** — every issue, minus the excluded-label noise filter (`compliance-audit`, `health-check`, `fleet-tracker`, `daily-report`) | Linked item appears on the board |
+| **Pull requests** | Has label `dev-lead` AND none of the excluded labels | Linked item appears on the board |
 
-The four excluded labels are the noise gate. They flag automation-generated
-work that, while real, doesn't belong on a strategic roll-up: routine
-compliance fixes, fleet-monitor failures, daily status reports.
+Issues are un-gated because an issue is the durable unit of work and the board
+is meant to be the full portfolio. PRs keep the `dev-lead` gate: they're
+transient, and tracking every dependabot/CI PR would drown the board. The
+excluded labels are the noise filter — automation-generated churn (routine
+compliance fixes, fleet-monitor failures, daily status reports) stays off.
 
-> **Gate is evolving.** The current `dev-lead`-as-inclusion gate is a pilot
-> shape. The org's working consensus is that `dev-lead` is a
-> *work-assignment* signal (it tells the dev-lead agent to pick up the
-> work), not a *classification* signal. The follow-on in
-> [#415](https://github.com/petry-projects/.github/issues/415) will switch
-> to topic labels (`agentic-framework`, `fleet-ops`, `compliance`,
-> `tooling`) as the qualifying signal, with `dev-lead` orthogonal.
+### Ideas are not on the board
+
+Raw ideas live in **GitHub Discussions**, where deliberation belongs. They are
+**not** drafted onto the board. When an idea is worth pursuing, it becomes an
+**Epic** — a parent Issue with story sub-issues — which auto-adds via the issue
+path (and the board rolls up its sub-issue progress). The Discussion is linked
+from the Epic for provenance. Rationale: a Projects v2 board can't hold a
+Discussion as real content (only a shadow draft with no sub-issues, status, or
+linked PRs), so an Issue is the strictly better board unit for anything being
+executed.
 
 ### Auto-cleaned
 
-| Trigger | Result |
-|---|---|
-| Ideas discussion moved to a non-Ideas category | Draft is deleted |
-| Ideas discussion deleted | Draft is deleted |
-| Ideas discussion transferred to another repo | Draft is deleted |
-
-The reconciliation is idempotent — re-delivered webhooks don't double-error.
+Reconciliation is idempotent and two-directional: an issue that is closed, or
+gains an excluded label (or a PR that loses `dev-lead`), is removed from the
+board on the next event or reconcile cycle.
 
 ### Not auto-added (manual add path)
 
@@ -56,10 +57,10 @@ The reconciliation is idempotent — re-delivered webhooks don't double-error.
   (`app/github-actions`) — GitHub does not fire workflows from default-token
   events — and runs dropped under runner congestion. **A scheduled/manual
   backlog reconcile (`add-to-project-reconcile.yml`, #518) closes both:** it
-  scans every App-installed repo's open issues/PRs + Ideas discussions daily and
-  reconciles each via the same gate/helpers, so a missed item lands within one
-  cycle. Run it manually with `dry_run` to preview. Full history (incl.
-  closed/merged) was bulk-backfilled 2026-06-07 and again 2026-06-21.
+  scans every App-installed repo's open issues/PRs daily (issues un-gated, PRs
+  gated) and reconciles each via the same gate/helpers, so a missed item lands
+  within one cycle. It also runs the Initiative/Theme classifier as its second
+  step. Run it manually with `dry_run` to preview.
 
 To add a content-linked item manually:
 
@@ -98,7 +99,7 @@ Theme. Roadmap-view grouping uses Initiative; cross-cutting filters
 | Field | Values | Use it for |
 |---|---|---|
 | **Status** | `Inbox` → `Specced` → `In Dev` → `In Review` → `Deployed` → `Verified` → `Wont do` | Stage tracking. `Inbox` is the default for auto-adds. |
-| **Theme** | `Agentic Framework`, `Fleet Operations`, `Compliance`, `Tooling`, `Ad hoc` | Top-level bucket. |
+| **Theme** | `Agentic Framework`, `Fleet Operations`, `Compliance`, `Tooling`, `Ad hoc`, + one per product (`TalkTerm`, `Broodly`, `Markets`, `Google App Scripts`, `ContentTwin`) | Top-level bucket. Each product is its own Theme; filter to the product Themes for "all product work". |
 | **Initiative** | *see Theme → Initiative table below* | Program-level bucket within a Theme. |
 | **Work type** | `Feature`, `Spike`, `Fix`, `Infra`, `Security`, `Docs` | Categorization. (Not `Type` — that name is reserved in Projects v2.) |
 | **Priority** | `P0`, `P1`, `P2`, `P3` | Triage / sequencing. |
@@ -109,11 +110,12 @@ Theme. Roadmap-view grouping uses Initiative; cross-cutting filters
 
 | Theme | Initiatives |
 |---|---|
-| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model Selection` |
-| **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards`, `Release Strategy` |
+| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model Selection`, `Business Analyst`, `BMAD` |
+| **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards`, `Release Strategy`, `Cost Observability` |
 | **Compliance** | `Compliance program`, `Compliance Blitz`, `Self-healing`, `Auto-rebase` |
 | **Tooling** | `Initiatives Project`, `Tooling` |
 | **Ad hoc** | `Ad hoc` |
+| **TalkTerm / Broodly / Markets / Google App Scripts / ContentTwin** | one same-named Initiative per product (repo-scoped; cross-cutting infra work in a product repo still classifies to its infra Initiative, e.g. Org Standards) |
 
 **`Org Standards`** specifically covers work *defined in `.github`* and
 propagated to other repos: CI baselines, CODEOWNERS, branch rulesets, push
@@ -197,10 +199,9 @@ configured manually in the UI):
 .github/workflows/add-to-project.yml             # Workflow (events → script call)
 .github/workflows/add-to-project-reconcile.yml   # Scheduled/manual backlog reconcile (#518) + classify (#415)
 .github/scripts/add-to-project/
-    lib.sh                                       # find/add/draft/delete/set-field helpers (DRY_RUN-aware)
-    add-issue-or-pr.sh                           # Noise gate + addProjectV2ItemById
-    reconcile-discussion.sh                      # Paginated find + 4-state reconciler
-    reconcile-backlog.sh                         # Scans open issues/PRs + Ideas, reconciles via the above
+    lib.sh                                       # find/add/delete/set-field helpers (DRY_RUN-aware)
+    add-issue-or-pr.sh                           # Noise gate (issues un-gated, PRs gated) + addProjectV2ItemById
+    reconcile-backlog.sh                         # Scans open issues/PRs, reconciles via the above
     classify-initiative.sh                       # Rule-driven Initiative/Theme back-fill (#415)
     initiative-rules.tsv                         # Ordered "Initiative <TAB> regex" match rules
     initiative-taxonomy.tsv                      # "Initiative <TAB> Theme" roll-up
@@ -215,9 +216,9 @@ long-lived token. App permissions: Organization Projects `Read+write`,
 Repository Issues `Read`, Repository Pull requests `Read`. Org secrets:
 `INITIATIVES_APP_ID`, `INITIATIVES_APP_PRIVATE_KEY`.
 
-**Concurrency:** Workflow runs for the same content (same issue / PR /
-discussion number) serialize via concurrency group — `created` and
-`category_changed` for the same discussion can't race against each other.
+**Concurrency:** Workflow runs for the same content (same issue / PR number)
+serialize via concurrency group, so e.g. `labeled` and `unlabeled` for the
+same item can't race against each other.
 
 **Project ID:** `PVT_kwDOD2inqs4BZq3-` (hardcoded in the workflow env).
 Multi-Project consumers of the same scripts would parameterize this.
