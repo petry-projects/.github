@@ -828,20 +828,16 @@ GHEOF
 # The front end of the canary pipeline: at each scheduled tick (gated by CANARY_AUTO_CUT), for
 # each registered agent compare the reusable blob at the host's main HEAD against the blob at the
 # current `next` candidate; if they differ, cut a new immutable vX.Y.Z (patch bump default) and
-# move `next` onto it via cut-release.sh. The stub feeds: default_branch, main HEAD, the two blob
-# SHAs, the `next` commit (git for a this-repo agent, gh api for a cross-repo one), the existing
-# release-tag versions (matching-refs), and a cut-release.sh stand-in (CUT_RELEASE) that logs args.
+# move `next` onto it INLINE via the App-token gh-api path (create annotated tag + move ref) —
+# no sibling cut-release.sh (#613). The stub feeds: default_branch, main HEAD, the two blob SHAs,
+# the `next` commit (git for a this-repo agent, gh api for a cross-repo one), the existing
+# release-tag versions (matching-refs), and LOGS every mutating gh-api call (tag/ref writes) to
+# GH_LOG so a test can assert the cut hit the right host without a cut-release.sh stand-in.
 _autocut_stub() {
   # args: agent host reusable main_blob next_blob mainsha nextsha versions_ws [bump]
   local agent="$1" host="$2" reusable="$3" MAIN_BLOB="$4" NEXT_BLOB="$5" MAINSHA="$6" NEXTSHA="$7" versions="$8" bump="${9:-}"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
-  export CUT_LOG="$STUB_BIN/cut.log"; : > "$CUT_LOG"
-  export CUT_RELEASE="$STUB_BIN/cut-release"
-  cat > "$CUT_RELEASE" <<CUTEOF
-#!/usr/bin/env bash
-echo "\$*" >> "$CUT_LOG"
-CUTEOF
-  chmod +x "$CUT_RELEASE"
+  export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
   local refs="" v
   for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
   cat > "$STUB_BIN/gh" <<GHEOF
@@ -850,9 +846,14 @@ case "\$*" in
   *".default_branch"*) echo "main" ;;
   *"contents/"*"ref=$MAINSHA"*) echo "$MAIN_BLOB" ;;
   *"contents/"*"ref=$NEXTSHA"*) echo "$NEXT_BLOB" ;;
+  # inline cut (mutating writes) — log to GH_LOG and simulate success:
+  *"-X POST"*"git/tags"*) echo "\$*" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;  # create annotated tag object
+  *"-X PATCH"*"git/refs/tags/$agent/next"*) echo "\$*" >> "$GH_LOG"; exit 0 ;;                          # move next (force PATCH)
+  *"-X POST"*"git/refs"*) echo "\$*" >> "$GH_LOG"; echo "{}" ;;                                          # publish a ref
   *"/commits/"*) echo "$MAINSHA" ;;
   *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
   *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) echo "" ;;   # release-tag existence probe (_gh_tag_commit) — not yet cut
   *"run list"*) echo "[]" ;;
   *) echo "{}" ;;
 esac
@@ -881,58 +882,62 @@ GITEOF
 @test "orchestrator: autocut is a no-op when CANARY_AUTO_CUT is not 'true' (kill-switch off)" {
   _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
     blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0"
-  run env CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut
+  run env CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
   [ "$status" -eq 0 ]
   [[ "$output" == *"DISABLED"* ]]
-  [ ! -s "$CUT_LOG" ]   # nothing cut when the kill-switch is off
+  [ ! -s "$GH_LOG" ]   # nothing cut when the kill-switch is off
 }
 
 @test "orchestrator: autocut cuts a patch-bumped version + moves next when the reusable blob differs on main" {
   _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
     blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0"
-  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
   [ "$status" -eq 0 ]
-  # Highest existing tag is v2.1.0 → patch bump → v2.1.1, cut from main HEAD, channel next, pushed.
-  grep -q "dev-lead 2.1.1 --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --channel next --push" "$CUT_LOG"
+  # Highest existing tag is v2.1.0 → patch bump → v2.1.1, annotated tag cut from main HEAD on the
+  # HOST repo (.github-private for dev-lead), then `next` force-moved onto the same commit — all gh-api.
+  grep -q "repos/petry-projects/.github-private/git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
 }
 
 @test "orchestrator: autocut is idempotent — identical blob on main and next is a clean no-op" {
   _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
     sameBLOB sameBLOB aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0"
-  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
   [ "$status" -eq 0 ]
   [[ "$output" == *"no cut"* ]]
-  [ ! -s "$CUT_LOG" ]   # nothing cut when the blob is unchanged
+  [ ! -s "$GH_LOG" ]   # nothing cut when the blob is unchanged
 }
 
-@test "orchestrator: autocut --dry-run prints the intended cut without invoking cut-release --push" {
+@test "orchestrator: autocut --dry-run prints the intended cut without writing any tag" {
   _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
     blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0"
-  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut --dry-run
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"DRY-RUN"* ]]
   [[ "$output" == *"2.1.1"* ]]
-  [ ! -s "$CUT_LOG" ]   # dry-run never pushes a real cut
+  [ ! -s "$GH_LOG" ]   # dry-run never writes a real cut
 }
 
 @test "orchestrator: autocut honors the registry autocut.bump override (minor)" {
   _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
     blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" minor
-  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
   [ "$status" -eq 0 ]
   # minor bump of v2.1.0 → v2.2.0
-  grep -q "dev-lead 2.2.0 --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --channel next --push" "$CUT_LOG"
+  grep -q "repos/petry-projects/.github-private/git/tags .*tag=dev-lead/v2.2.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
 }
 
-@test "orchestrator: autocut is cross-repo aware — cuts v2.1.1 for auto-rebase from the host main HEAD (#1069)" {
+@test "orchestrator: autocut is cross-repo aware — cuts v2.1.1 for auto-rebase on the host repo (#1069)" {
   # auto-rebase is hosted in petry-projects/.github; its next candidate + release tags live there,
-  # so the next commit is resolved via gh api (not local git) and the cut is cross-repo.
+  # so the next commit is resolved via gh api (not local git) and BOTH the tag create and the
+  # next move are written to that host — not GITHUB_REPOSITORY.
   _autocut_stub auto-rebase petry-projects/.github .github/workflows/auto-rebase-reusable.yml \
     ece45480ece45480ece45480ece45480ece45480 2763750027637500276375002763750027637500 \
     ece45480ece45480ece45480ece45480ece45480 2763750027637500276375002763750027637500 "2.1.0"
-  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" CUT_RELEASE="$CUT_RELEASE" bash "$ORCH" autocut
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
   [ "$status" -eq 0 ]
-  grep -q "auto-rebase 2.1.1 --ref ece45480ece45480ece45480ece45480ece45480 --channel next --push" "$CUT_LOG"
+  grep -q "repos/petry-projects/.github/git/tags .*tag=auto-rebase/v2.1.1 .*object=ece45480ece45480ece45480ece45480ece45480" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github/git/refs/tags/auto-rebase/next .*sha=ece45480ece45480ece45480ece45480ece45480" "$GH_LOG"
 }
 
 # ── set_difference (pure set-diff core for drift detection, #1082) ─────────────
