@@ -326,6 +326,18 @@ check_reusable_workflows_disabled() {
       continue   # hybrid (workflow_call + real trigger) — exempt, must stay active
     fi
 
+    # Naming lint — a pure reusable must carry the `-reusable.yml` suffix so its
+    # "library, safe to disable, never runnable" nature is legible from the
+    # filename. Detection above is by triggers, never by name (a name can lie);
+    # this is a separate readability finding. Grandfathered: the legacy
+    # `pr-review.yml` engine is tracked for rename in .github-private#1127 —
+    # suppress its naming finding until the rename lands.
+    if [[ "$wf" != *-reusable.yml && "$repo/$wf" != ".github-private/pr-review.yml" ]]; then
+      add_finding "$repo" "reusable-workflows" "reusable-naming-$wf" "warning" \
+        "Pure reusable workflow \`$wf\` (workflow_call-only) does not use the required \`-reusable.yml\` name suffix; rename it to \`<purpose>-reusable.yml\` so its reusable nature is legible from the filename" \
+        "standards/ci-standards.md#pure-reusable-workflows-must-be-disabled"
+    fi
+
     # Pure reusable — check its enabled/disabled state.
     local state
     state=$(gh_api "repos/$ORG/$repo/actions/workflows/$wf" --jq '.state' 2>/dev/null || echo "")
