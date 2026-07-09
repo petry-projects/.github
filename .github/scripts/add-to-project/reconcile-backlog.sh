@@ -48,6 +48,56 @@ if [ "${#repos[@]}" -eq 0 ]; then
   exit 64
 fi
 
+# Prefetch board membership ONCE so the per-item hot paths (add / find-to-remove
+# in reconcile_content_with_project) can answer "already on the board?" from
+# memory instead of an API round-trip each. Without this, an un-gated fleet
+# scan makes ~one GraphQL call per open issue/PR every cycle and overruns the
+# job timeout; with it, only genuine changes (new adds, real removes) touch the
+# API. The map + ready flag are consumed by _atp_on_board / _atp_membership_ready
+# in lib.sh; the event path never sets them and keeps its always-network path.
+declare -gA _ATP_ON_BOARD=()
+prefetch_board_membership() {
+  local cursor="" json count=0
+  while true; do
+    # shellcheck disable=SC2016  # $projectId/$pageSize/$cursor are GraphQL variables
+    if [ -n "${cursor}" ]; then
+      json=$(gh api graphql \
+        -F projectId="${PROJECT_ID}" -F pageSize="${PAGE_SIZE:-100}" -F cursor="${cursor}" \
+        -f query='query($projectId:ID!,$pageSize:Int!,$cursor:String!){
+          node(id:$projectId){ ... on ProjectV2 {
+            items(first:$pageSize, after:$cursor){
+              pageInfo{ endCursor hasNextPage }
+              nodes{ content{ ... on Issue{ id } ... on PullRequest{ id } } }
+            } } } }')
+    else
+      # shellcheck disable=SC2016
+      json=$(gh api graphql \
+        -F projectId="${PROJECT_ID}" -F pageSize="${PAGE_SIZE:-100}" \
+        -f query='query($projectId:ID!,$pageSize:Int!){
+          node(id:$projectId){ ... on ProjectV2 {
+            items(first:$pageSize){
+              pageInfo{ endCursor hasNextPage }
+              nodes{ content{ ... on Issue{ id } ... on PullRequest{ id } } }
+            } } } }')
+    fi
+    if [ "$(printf '%s' "${json}" | jq -r '.data.node')" = "null" ]; then
+      echo "::error::[reconcile] membership prefetch got data.node:null for PROJECT_ID=${PROJECT_ID} — token access or PROJECT_ID drift" >&2
+      return 75
+    fi
+    local id
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      _ATP_ON_BOARD["$id"]=1
+      count=$((count + 1))
+    done < <(printf '%s' "${json}" | jq -r '.data.node.items.nodes[].content.id // empty')
+    [ "$(printf '%s' "${json}" | jq -r '.data.node.items.pageInfo.hasNextPage')" = "true" ] || break
+    cursor=$(printf '%s' "${json}" | jq -r '.data.node.items.pageInfo.endCursor // ""')
+  done
+  echo "Prefetched ${count} board item(s) for membership fast-path."
+}
+prefetch_board_membership
+_ATP_MEMBERSHIP_READY=1
+
 scanned=0
 echo "Reconciling ${#repos[@]} repo(s) into ${PROJECT_URL:-the project}${DRY_RUN:+ (DRY RUN)}"
 for repo in "${repos[@]}"; do

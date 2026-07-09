@@ -10,15 +10,29 @@ bats_require_minimum_version 1.5.0
 load 'helpers/setup'
 
 # Write a gh stub whose /issues endpoint returns the given TSV rows
-# (node_id<TAB>url<TAB>labels-json<TAB>kind) and "not found" for project lookups.
+# (node_id<TAB>url<TAB>labels-json<TAB>kind). GraphQL responses:
+#   - the membership prefetch query (contains "items(first") returns a single
+#     page whose content ids come from STUB_BOARD_IDS (space/comma-separated,
+#     default none) — this is what drives the on-board fast path;
+#   - any other graphql call returns an empty page (no match / no-op).
 write_issue_stub() {
   local rows="$1" bin="${TT_TMP}/bin"; mkdir -p "$bin"
   export STUB_ROWS="$rows"
+  export STUB_BOARD_IDS="${STUB_BOARD_IDS:-}"
   cat > "$bin/gh" <<'STUB'
 #!/usr/bin/env bash
+emit_board() {
+  # Build an items page whose nodes carry the STUB_BOARD_IDS as Issue content.
+  local nodes="" id
+  for id in ${STUB_BOARD_IDS//,/ }; do
+    nodes="${nodes:+${nodes},}$(printf '{"content":{"id":"%s"}}' "$id")"
+  done
+  printf '{"data":{"node":{"items":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[%s]}}}}' "$nodes"
+}
 case "$*" in
   *"repos/"*"/issues"*) printf '%b' "$STUB_ROWS" ;;
-  *graphql*) printf '' ;;
+  *"items(first"*) emit_board ;;
+  *graphql*) printf '{"data":{"node":{"items":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}' ;;
 esac
 STUB
   chmod +x "$bin/gh"; PATH="${bin}:${PATH}"; export PATH
@@ -67,4 +81,36 @@ run_recon() { run bash "${TT_SCRIPTS_DIR}/reconcile-backlog.sh"; }
   run_recon
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'would add content PR_devlead'
+}
+
+# --- membership prefetch fast-path (perf: skip per-item API round-trips) ---
+
+@test "prefetch: logs the board item count it cached" {
+  STUB_BOARD_IDS="I_node1" run_recon
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Prefetched 1 board item(s)'
+}
+
+@test "fast-path: a qualifying item already on the board is NOT re-added" {
+  # Membership prefetch reports I_node1 already on the board → no add attempt
+  # (dry-run reports accurate intent: nothing to do).
+  STUB_BOARD_IDS="I_node1" run_recon
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'would add content I_node1'
+}
+
+@test "fast-path: a qualifying item NOT on the board is still added" {
+  # Board has some other item; I_node1 is absent → add proceeds as before.
+  STUB_BOARD_IDS="I_other" run_recon
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'would add content I_node1'
+}
+
+@test "fast-path: a disqualified item absent from the board skips the find" {
+  # Excluded label → disqualifies; with membership showing it absent, the
+  # removal find is skipped and it's reported as a clean not-on-board skip.
+  STUB_BOARD_IDS="" write_issue_stub 'I_excl\thttps://example.invalid/issues/9\t[{"name":"compliance-audit"}]\tissue\n'
+  run_recon
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Skip https://example.invalid/issues/9 (not on board)'
 }

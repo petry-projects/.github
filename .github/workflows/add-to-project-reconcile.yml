@@ -46,7 +46,12 @@ concurrency:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30 min covers a cold catch-up cycle (many genuine adds after a gap). Steady
+    # state is far under this: the membership prefetch in reconcile-backlog.sh
+    # skips a per-item API call for everything already on the board, so only real
+    # changes touch the API. Raised from 20 (which the un-gated backlog overran,
+    # starving the classify step) — see reconcile-backlog.sh prefetch_board_membership.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

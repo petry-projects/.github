@@ -145,6 +145,14 @@ reconcile_content_with_project() {
       add_content_to_project "${content_node_id}"
       ;;
     1)
+      # Batch reconcile: if the prefetched membership cache says this content
+      # is NOT on the board, the desired state (absent) already holds — skip
+      # the find-to-remove lookup. Gated on _atp_membership_ready so the event
+      # path (no cache) still performs the find + conditional remove.
+      if _atp_membership_ready && ! _atp_on_board "${content_node_id}"; then
+        printf 'Skip %s (not on board): %s\n' "${content_url}" "${reason}"
+        return 0
+      fi
       local existing
       existing=$(find_content_item_id "${content_node_id}")
       if [ -n "${existing}" ]; then

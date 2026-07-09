@@ -29,6 +29,25 @@ _atp_require_env() {
   fi
 }
 
+# Prefetched board-membership cache (optional; batch reconcile only).
+# reconcile-backlog.sh scans the whole fleet's open issues/PRs and would
+# otherwise hit the API once PER item on both hot paths — a redundant
+# idempotent add for items already on the board, and a find-to-remove for
+# items that aren't on it. With the un-gated issue backlog (~450+ items) those
+# per-item round-trips overrun the job timeout. So reconcile-backlog.sh
+# populates `_ATP_ON_BOARD` (content_node_id -> 1) once, then sets
+# `_ATP_MEMBERSHIP_READY=1`; the helpers below let the hot paths answer
+# "is it already on the board?" from memory and skip the API call unless a
+# genuine change is needed. The event path leaves both unset, so it always
+# falls through to the network and its behavior is unchanged.
+_atp_membership_ready() { [ "${_ATP_MEMBERSHIP_READY:-}" = "1" ]; }
+
+# _atp_on_board <content_node_id>
+#   Returns 0 if the cache says the content IS on the board, 1 if the cache
+#   says it is NOT. MUST be gated by `_atp_membership_ready` — when no cache
+#   has been populated the result is meaningless (there is nothing to consult).
+_atp_on_board() { [ -n "${_ATP_ON_BOARD[$1]:-}" ]; }
+
 # find_project_item <kind> <value>
 #   kind=title-prefix  → match items whose content.title startswith <value>
 #   kind=content-id    → match items whose content.id equals <value>
@@ -185,6 +204,16 @@ add_content_to_project() {
   fi
   local content_node_id="$1"
 
+  # Batch reconcile: if the prefetched membership cache already lists this
+  # content, the add is a no-op (addProjectV2ItemById is idempotent) — skip it
+  # entirely. Checked before DRY_RUN so dry-run reports accurate intent (no
+  # "would add" for items already present) and a live run skips the network
+  # round-trip. Gated on _atp_membership_ready so the event path (no cache)
+  # always performs the add.
+  if _atp_membership_ready && _atp_on_board "${content_node_id}"; then
+    return 0
+  fi
+
   if [ "${DRY_RUN:-}" = "1" ]; then
     printf '[dry-run] would add content %s to project\n' "${content_node_id}"
     return 0
@@ -287,12 +316,17 @@ set_item_single_select_value() {
     return 0
   fi
 
+  # optionId MUST use -f (raw string), NOT -F: `-F` does type inference, so an
+  # all-numeric single-select option id (e.g. "91479014") is coerced to a JSON
+  # number and the String! parameter rejects it ("provided invalid value").
+  # The ID! args stay -F (node ids always carry a non-numeric prefix, so they
+  # are never mis-coerced) — but optionId is plain hex and can be all-digits.
   # shellcheck disable=SC2016  # $projectId/$itemId/$fieldId/$optionId are GraphQL variables
   gh api graphql \
     -F projectId="${PROJECT_ID}" \
     -F itemId="${item_id}" \
     -F fieldId="${field_id}" \
-    -F optionId="${option_id}" \
+    -f optionId="${option_id}" \
     -f query='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){
       updateProjectV2ItemFieldValue(input:{
         projectId:$projectId, itemId:$itemId, fieldId:$fieldId,

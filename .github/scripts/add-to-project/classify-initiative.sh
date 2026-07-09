@@ -199,9 +199,9 @@ resolve_fields() {
   done < <(printf '%s' "${json}" | jq -r '.data.node.theme.options?[]? | "\(.id)\t\(.name)"')
 }
 
-# _ci_report <total> <already> <matched> <unmatched> <skipped>
+# _ci_report <total> <already> <matched> <unmatched> <skipped> <failed>
 _ci_report() {
-  local total="$1" already="$2" matched="$3" unmatched="$4" skipped="$5"
+  local total="$1" already="$2" matched="$3" unmatched="$4" skipped="$5" failed="${6:-0}"
   local mode="apply"; [ "${DRY_RUN:-}" = "1" ] && mode="dry-run"
   printf '\n=== classify-initiative summary (%s) ===\n' "${mode}"
   printf '  board items scanned : %d\n' "${total}"
@@ -209,12 +209,13 @@ _ci_report() {
   printf '  newly matched       : %d\n' "${matched}"
   printf '  unmatched (blank)   : %d\n' "${unmatched}"
   printf '  option-missing skip : %d\n' "${skipped}"
+  printf '  transient set fails : %d (left blank; refilled next sweep)\n' "${failed}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       printf '### classify-initiative (%s)\n\n' "${mode}"
-      printf '| scanned | already | matched | unmatched | skipped |\n'
-      printf '|--:|--:|--:|--:|--:|\n'
-      printf '| %d | %d | %d | %d | %d |\n' "${total}" "${already}" "${matched}" "${unmatched}" "${skipped}"
+      printf '| scanned | already | matched | unmatched | skipped | failed |\n'
+      printf '|--:|--:|--:|--:|--:|--:|\n'
+      printf '| %d | %d | %d | %d | %d | %d |\n' "${total}" "${already}" "${matched}" "${unmatched}" "${skipped}" "${failed}"
     } >> "${GITHUB_STEP_SUMMARY}"
   fi
 }
@@ -253,7 +254,7 @@ sweep_project() {
       }
     }' | jq -s '[.[].data.node.items.nodes?[]?]')
 
-  local total=0 already=0 matched=0 unmatched=0 skipped=0
+  local total=0 already=0 matched=0 unmatched=0 skipped=0 failed=0
   local node
   while IFS= read -r node; do
     [ -n "${node}" ] || continue
@@ -290,18 +291,30 @@ sweep_project() {
     fi
 
     printf 'MATCH  %-22s <- %-20s «%s»\n' "${init}" "${repo:-draft}" "${title}"
-    set_item_single_select_value "${item_id}" "${CI_INIT_FIELD_ID}" "${optid}"
+    # Per-item resilience: a transient API error (network blip, secondary rate
+    # limit) on one item must NOT abort a sweep of hundreds. Log it, count it,
+    # and carry on — the next scheduled run refills whatever stayed blank
+    # (this is a fill-blanks-only sweep, so retries are idempotent). Mirrors
+    # reconcile-backlog.sh's per-item error isolation.
+    if ! set_item_single_select_value "${item_id}" "${CI_INIT_FIELD_ID}" "${optid}"; then
+      printf '::warning::failed to set Initiative %q on «%s» (transient?); will retry next sweep\n' "${init}" "${title}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
     matched=$((matched + 1))
 
     # Theme is best-effort: co-assign only when the field and matching option
-    # both exist live. A missing Theme field/option is silently tolerated.
+    # both exist live. A missing Theme field/option is silently tolerated, and
+    # a transient set failure is non-fatal (Initiative already landed).
     if [ -n "${theme}" ] && [ -n "${CI_THEME_FIELD_ID}" ]; then
       local topt="${CI_THEME_OPT[${theme}]:-}"
-      [ -n "${topt}" ] && set_item_single_select_value "${item_id}" "${CI_THEME_FIELD_ID}" "${topt}"
+      if [ -n "${topt}" ] && ! set_item_single_select_value "${item_id}" "${CI_THEME_FIELD_ID}" "${topt}"; then
+        printf '::warning::failed to set Theme %q on «%s» (transient?); will retry next sweep\n' "${theme}" "${title}" >&2
+      fi
     fi
   done < <(printf '%s' "${items}" | jq -c '.[]')
 
-  _ci_report "${total}" "${already}" "${matched}" "${unmatched}" "${skipped}"
+  _ci_report "${total}" "${already}" "${matched}" "${unmatched}" "${skipped}" "${failed}"
 }
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
