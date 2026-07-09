@@ -41,8 +41,8 @@
 name: Canary Rollout
 
 on:
-  # schedule:  # DISABLED until epic #613 step-4 cutover — see PR (relocated from .github-private, must not double-run)
-  #   - cron: "0 */4 * * *"   # every 4 hours — evaluate only (RE-ENABLE at cutover)
+  schedule:
+    - cron: "0 */4 * * *"   # every 4 hours — autocut → promote-all → sync-issues
   workflow_dispatch:
     inputs:
       command:
