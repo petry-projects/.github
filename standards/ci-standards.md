@@ -166,9 +166,21 @@ release-strategy initiative
 
 **Standard.** A **pure reusable workflow** — one whose `on:` block declares
 **`workflow_call` and nothing else** — MUST be set to `disabled_manually` in the
-Actions UI. This applies to the single-source-of-truth `*-reusable.yml`
-definition files hosted in `petry-projects/.github` and
-`petry-projects/.github-private`.
+Actions UI, and MUST be named with a **`-reusable.yml`** suffix. Both apply to
+the single-source-of-truth reusable definition files hosted in
+`petry-projects/.github` and `petry-projects/.github-private`.
+
+**Naming.** The `-reusable.yml` suffix makes the "this is a library, safe to
+disable, never runnable on its own" property legible from the filename alone — a
+reader (or an auditor) should not have to open the file and parse its `on:` block
+to know it is a reusable. The suffix is a **readability aid, not the detection
+mechanism**: compliance tooling classifies by triggers, never by name (a name can
+lie — see the `pr-review.yml` engine, a pure reusable that predates this rule).
+When you extract logic into a new reusable, name it `<purpose>-reusable.yml` from
+the start. *Grandfathered exception:* `.github-private/.github/workflows/pr-review.yml`
+is a pure reusable that keeps its legacy name until it can be renamed in lockstep
+with its caller path and `pr-review/*` release-channel tags — tracked in
+`petry-projects/.github-private#1127`.
 
 **Why.** A pure reusable has no independent event triggers, so it can never run
 on its own — it executes **only** when another workflow invokes it via `uses:`.
