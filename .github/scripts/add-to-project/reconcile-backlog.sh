@@ -80,20 +80,22 @@ prefetch_board_membership() {
               nodes{ content{ ... on Issue{ id } ... on PullRequest{ id } } }
             } } } }')
     fi
-    if [ "$(printf '%s' "${json}" | jq -r '.data.node')" = "null" ]; then
+    if [ "$(printf '%s' "${json}" | jq -r '.data?.node?')" = "null" ]; then
       echo "::error::[reconcile] membership prefetch got data.node:null for PROJECT_ID=${PROJECT_ID} — token access or PROJECT_ID drift" >&2
       return 75
     fi
     local id
-    while IFS= read -r id; do
+    while IFS= read -r id || [ -n "${id}" ]; do
+      id="${id%$'\r'}"
       [ -n "$id" ] || continue
       _ATP_ON_BOARD["$id"]=1
       count=$((count + 1))
-    done < <(printf '%s' "${json}" | jq -r '.data.node.items.nodes[].content.id // empty')
-    [ "$(printf '%s' "${json}" | jq -r '.data.node.items.pageInfo.hasNextPage')" = "true" ] || break
-    cursor=$(printf '%s' "${json}" | jq -r '.data.node.items.pageInfo.endCursor // ""')
+    done < <(printf '%s' "${json}" | jq -r '.data.node?.items?.nodes?[]?.content?.id? // empty')
+    [ "$(printf '%s' "${json}" | jq -r '.data.node?.items?.pageInfo?.hasNextPage?')" = "true" ] || break
+    cursor=$(printf '%s' "${json}" | jq -r '.data.node?.items?.pageInfo?.endCursor? // ""')
   done
   echo "Prefetched ${count} board item(s) for membership fast-path."
+  return 0
 }
 prefetch_board_membership
 _ATP_MEMBERSHIP_READY=1

@@ -290,7 +290,6 @@ sweep_project() {
       continue
     fi
 
-    printf 'MATCH  %-22s <- %-20s «%s»\n' "${init}" "${repo:-draft}" "${title}"
     # Per-item resilience: a transient API error (network blip, secondary rate
     # limit) on one item must NOT abort a sweep of hundreds. Log it, count it,
     # and carry on — the next scheduled run refills whatever stayed blank
@@ -301,6 +300,7 @@ sweep_project() {
       failed=$((failed + 1))
       continue
     fi
+    printf 'MATCH  %-22s <- %-20s «%s»\n' "${init}" "${repo:-draft}" "${title}"
     matched=$((matched + 1))
 
     # Theme is best-effort: co-assign only when the field and matching option
