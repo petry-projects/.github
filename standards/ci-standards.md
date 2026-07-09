@@ -226,6 +226,10 @@ finding. Note that disabled state is **not** captured in git — a newly added
 reusable is born `active` and must be disabled explicitly, which is exactly what
 this check catches on the next audit.
 
+It also flags, as a separate `warning` finding, any pure reusable whose
+filename doesn't carry the `-reusable.yml` suffix (grandfathered exception:
+`pr-review.yml`, tracked in `petry-projects/.github-private#1127`).
+
 ### Available templates
 
 | Template | Tier | Purpose |

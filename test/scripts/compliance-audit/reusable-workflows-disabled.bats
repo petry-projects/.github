@@ -156,7 +156,7 @@ _should_flag() {
 # ---------------------------------------------------------------------------
 _should_flag_naming() {
   local repo="$1" wf="$2"
-  [[ "$wf" != *-reusable.yml ]] && [ "$repo/$wf" != ".github-private/pr-review.yml" ]
+  [[ "$wf" != *-reusable.yml && "$repo/$wf" != ".github-private/pr-review.yml" ]]
 }
 
 # ===========================================================================
