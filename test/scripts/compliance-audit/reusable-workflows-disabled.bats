@@ -149,3 +149,41 @@ _should_flag() {
   run _should_flag "unknown"
   [ "$status" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Mirror the naming-suffix check from check_reusable_workflows_disabled.
+# Returns 0 when a reusable-naming finding should be emitted.
+# ---------------------------------------------------------------------------
+_should_flag_naming() {
+  local repo="$1" wf="$2"
+  [[ "$wf" != *-reusable.yml && "$repo/$wf" != ".github-private/pr-review.yml" ]]
+}
+
+# ===========================================================================
+# Naming suffix check — pure reusable must end in -reusable.yml
+# ===========================================================================
+
+@test "naming: compliant suffix (-reusable.yml) is NOT flagged" {
+  run _should_flag_naming "my-repo" "dev-lead-reusable.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "naming: missing suffix is flagged" {
+  run _should_flag_naming ".github-private" "some-workflow.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "naming: grandfathered pr-review.yml in .github-private is NOT flagged" {
+  run _should_flag_naming ".github-private" "pr-review.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "naming: pr-review.yml in a different repo IS flagged (grandfathering is repo-scoped)" {
+  run _should_flag_naming "some-other-repo" "pr-review.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "naming: -reusable.yaml extension (not .yml) is flagged" {
+  run _should_flag_naming "my-repo" "foo-reusable.yaml"
+  [ "$status" -eq 0 ]
+}
