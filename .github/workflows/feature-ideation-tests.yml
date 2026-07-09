@@ -82,7 +82,7 @@ jobs:
       - name: Lint direct prompt blocks
         run: bash .github/scripts/feature-ideation/lint-prompt.sh
 
-      - name: Lint caller stubs for the #571 inputs-context startup failure
+      - name: "Lint caller stubs for the #571 inputs-context startup failure"
         run: bash .github/scripts/feature-ideation/lint-caller.sh
 
       - name: Validate schema fixtures
