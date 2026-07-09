@@ -137,8 +137,11 @@ _gh_create_annotated_tag() {
   local repo="$1" tag="$2" sha="$3" message="$4" obj
   obj="$(gh api -X POST "repos/$repo/git/tags" \
       -f tag="$tag" -f message="$message" -f object="$sha" -f type=commit \
-      --jq '.sha' 2>/dev/null)" || return 1
-  [ -z "$obj" ] && return 1
+      --jq '.sha // empty')"
+  if [ $? -ne 0 ] || [ -z "$obj" ]; then
+      echo "Error: Failed to create git tag or retrieve SHA" >&2
+      return 1
+  fi
   gh api -X POST "repos/$repo/git/refs" \
       -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null 2>&1
 }
