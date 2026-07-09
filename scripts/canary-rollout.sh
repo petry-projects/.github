@@ -927,8 +927,16 @@ _autocut_agent() {
   # Cut inline (no sibling cut-release.sh, #613): create the immutable annotated release tag,
   # then advance `next` onto the same commit — both on the agent's HOST via the App token. If
   # the release tag already exists (e.g. a retry after a partial move), skip the create and just
-  # re-point next so the operation stays idempotent.
-  if [ -n "$(_gh_tag_commit "$host" "$relver")" ]; then
+  # re-point next so the operation stays idempotent. Guard the invariant: if the existing tag
+  # resolves to a different commit (manual retag, concurrent run, prior bad state), skip the
+  # next move entirely rather than advancing next to an untagged commit.
+  local existing_sha
+  existing_sha="$(_gh_tag_commit "$host" "$relver")"
+  if [ -n "$existing_sha" ]; then
+    if [ "$existing_sha" != "$mainsha" ]; then
+      echo "::warning::autocut $agent: release $relver on $host points to ${existing_sha:0:12}, not ${mainsha:0:12} — skipping next move to preserve invariant."
+      return 0
+    fi
     echo "autocut $agent: release $relver already exists on $host — re-pointing next only."
   elif ! _gh_create_annotated_tag "$host" "$relver" "$mainsha" "$agent release v$newver"; then
     echo "::warning::autocut $agent: could not create $relver on $host (best-effort, continuing)"; return 0

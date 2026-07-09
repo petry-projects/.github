@@ -834,12 +834,17 @@ GHEOF
 # release-tag versions (matching-refs), and LOGS every mutating gh-api call (tag/ref writes) to
 # GH_LOG so a test can assert the cut hit the right host without a cut-release.sh stand-in.
 _autocut_stub() {
-  # args: agent host reusable main_blob next_blob mainsha nextsha versions_ws [bump]
-  local agent="$1" host="$2" reusable="$3" MAIN_BLOB="$4" NEXT_BLOB="$5" MAINSHA="$6" NEXTSHA="$7" versions="$8" bump="${9:-}"
+  # args: agent host reusable main_blob next_blob mainsha nextsha versions_ws [bump [existing_tag_sha]]
+  # existing_tag_sha: if set, the release-tag existence probe returns this sha (simulates a prior
+  # partial cut); if empty (default), the probe returns nothing (fresh cut path).
+  local agent="$1" host="$2" reusable="$3" MAIN_BLOB="$4" NEXT_BLOB="$5" MAINSHA="$6" NEXTSHA="$7" versions="$8" bump="${9:-}" existing_tag_sha="${10:-}"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
   local refs="" v
   for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
+  # Build the probe response: empty → tag not yet cut; "<sha>\tcommit" → existing tag at that sha.
+  local tag_probe_resp=""
+  [ -n "$existing_tag_sha" ] && tag_probe_resp="${existing_tag_sha}"$'\t'"commit"
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
 case "\$*" in
@@ -853,7 +858,7 @@ case "\$*" in
   *"/commits/"*) echo "$MAINSHA" ;;
   *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
   *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
-  *"git/ref/tags/$agent/v"*) echo "" ;;   # release-tag existence probe (_gh_tag_commit) — not yet cut
+  *"git/ref/tags/$agent/v"*) printf '%s\n' "$tag_probe_resp" ;;
   *"run list"*) echo "[]" ;;
   *) echo "{}" ;;
 esac
@@ -938,6 +943,38 @@ GITEOF
   [ "$status" -eq 0 ]
   grep -q "repos/petry-projects/.github/git/tags .*tag=auto-rebase/v2.1.1 .*object=ece45480ece45480ece45480ece45480ece45480" "$GH_LOG"
   grep -q "PATCH repos/petry-projects/.github/git/refs/tags/auto-rebase/next .*sha=ece45480ece45480ece45480ece45480ece45480" "$GH_LOG"
+}
+
+@test "orchestrator: autocut — existing release tag matching mainsha skips create and still moves next (idempotent retry)" {
+  # Simulate a partial retry: the release tag was already created on a prior run (pointing to
+  # mainsha), but `next` was not yet moved. The idempotency branch must skip POST git/tags
+  # and proceed straight to the PATCH for next without calling _gh_create_annotated_tag.
+  local mainsha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    blobMAIN blobNEXT "$mainsha" cccccccccccccccccccccccccccccccccccccccc "2.1.0" "" "$mainsha"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already exists"* ]]
+  [[ "$output" == *"re-pointing next only"* ]]
+  # The annotated tag create (POST git/tags) must NOT be called — tag already exists.
+  ! grep -q "POST.*git/tags" "$GH_LOG"
+  # The next move (PATCH) must still happen to complete the idempotent operation.
+  grep -q "PATCH.*git/refs/tags/dev-lead/next" "$GH_LOG"
+}
+
+@test "orchestrator: autocut — existing release tag pointing to a different commit emits warning and skips next move" {
+  # If vX.Y.Z already exists but points to a different commit (manual retag, concurrent run,
+  # prior bad state), moving next to mainsha would violate the "release tag + next → same commit"
+  # invariant. The engine must warn and skip rather than advance next to an untagged commit.
+  local mainsha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  local stale_sha="dddddddddddddddddddddddddddddddddddddddd"
+  _autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    blobMAIN blobNEXT "$mainsha" cccccccccccccccccccccccccccccccccccccccc "2.1.0" "" "$stale_sha"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::"* ]]
+  # Neither tag create nor next move may be written when the invariant check fails.
+  [ ! -s "$GH_LOG" ]
 }
 
 # ── set_difference (pure set-diff core for drift detection, #1082) ─────────────
