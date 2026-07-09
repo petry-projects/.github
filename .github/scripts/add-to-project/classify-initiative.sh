@@ -309,7 +309,7 @@ sweep_project() {
     if [ -n "${theme}" ] && [ -n "${CI_THEME_FIELD_ID}" ]; then
       local topt="${CI_THEME_OPT[${theme}]:-}"
       if [ -n "${topt}" ] && ! set_item_single_select_value "${item_id}" "${CI_THEME_FIELD_ID}" "${topt}"; then
-        printf '::warning::failed to set Theme %q on «%s» (transient?); will retry next sweep\n' "${theme}" "${title}" >&2
+        printf '::warning::failed to set Theme %q on «%s» (transient?); retry requires RECLASSIFY=all (Initiative already set)\n' "${theme}" "${title}" >&2
       fi
     fi
   done < <(printf '%s' "${items}" | jq -c '.[]')

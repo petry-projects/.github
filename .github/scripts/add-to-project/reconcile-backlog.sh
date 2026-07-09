@@ -80,8 +80,8 @@ prefetch_board_membership() {
               nodes{ content{ ... on Issue{ id } ... on PullRequest{ id } } }
             } } } }')
     fi
-    if [ "$(printf '%s' "${json}" | jq -r '.data?.node?')" = "null" ]; then
-      echo "::error::[reconcile] membership prefetch got data.node:null for PROJECT_ID=${PROJECT_ID} — token access or PROJECT_ID drift" >&2
+    if [ "$(printf '%s' "${json}" | jq -r '.data?.node?.items? // "null"')" = "null" ]; then
+      echo "::error::[reconcile] membership prefetch got no items for PROJECT_ID=${PROJECT_ID} — token access, PROJECT_ID drift, or non-ProjectV2 node" >&2
       return 75
     fi
     local id
@@ -93,6 +93,10 @@ prefetch_board_membership() {
     done < <(printf '%s' "${json}" | jq -r '.data.node?.items?.nodes?[]?.content?.id? // empty')
     [ "$(printf '%s' "${json}" | jq -r '.data.node?.items?.pageInfo?.hasNextPage?')" = "true" ] || break
     cursor=$(printf '%s' "${json}" | jq -r '.data.node?.items?.pageInfo?.endCursor? // ""')
+    if [ -z "${cursor}" ]; then
+      echo "::error::[reconcile] membership prefetch got hasNextPage=true with empty endCursor — API inconsistency, aborting" >&2
+      return 75
+    fi
   done
   echo "Prefetched ${count} board item(s) for membership fast-path."
   return 0
