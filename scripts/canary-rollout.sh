@@ -143,7 +143,10 @@ _gh_create_annotated_tag() {
       return 1
   fi
   gh api -X POST "repos/$repo/git/refs" \
-      -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null 2>&1
+      -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null 2>&1 || {
+      echo "::error::_gh_create_annotated_tag: created tag object $obj on $repo but could not publish ref refs/tags/$tag" >&2
+      return 1
+  }
 }
 
 # channel_commit <agent> <channel> — commit the channel tag <agent>/<channel> resolves to
