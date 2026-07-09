@@ -139,7 +139,7 @@ _gh_create_annotated_tag() {
       -f tag="$tag" -f message="$message" -f object="$sha" -f type=commit \
       --jq '.sha // empty')"
   if [ $? -ne 0 ] || [ -z "$obj" ]; then
-      echo "Error: Failed to create git tag or retrieve SHA" >&2
+      echo "::error::_gh_create_annotated_tag: could not create the annotated release tag on $repo or read back its object SHA" >&2
       return 1
   fi
   gh api -X POST "repos/$repo/git/refs" \
