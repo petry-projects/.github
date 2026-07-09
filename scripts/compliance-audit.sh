@@ -271,6 +271,75 @@ check_reusable_workflow_paths() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Pure reusable workflows must be disabled
+# ---------------------------------------------------------------------------
+# A "pure reusable" is a workflow whose `on:` block declares workflow_call and
+# NOTHING else — it has no independent event triggers and can never run on its
+# own, only when invoked via `uses:`. Per ci-standards.md such workflows must be
+# disabled in the Actions UI. GitHub ignores a reusable's enabled/disabled state
+# when it is called via workflow_call, so disabling has zero effect on callers.
+# Hybrid workflows that ALSO declare a real trigger (schedule/workflow_dispatch/
+# push/pull_request/...) are exempt and must stay active.
+#
+# Three YAML forms of `on:` are handled: block form, inline scalar
+# (`on: workflow_call`), and inline sequence (`on: [workflow_call]`).
+check_reusable_workflows_disabled() {
+  local repo="$1"
+
+  local workflows
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+
+  for wf in $workflows; do
+    [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
+
+    local content decoded
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+    decoded=$(printf '%s' "$content" | base64 -d 2>/dev/null) || continue
+    [ -z "$decoded" ] && continue
+
+    # Extract the top-level trigger keys from the `on:` declaration.
+    # Handles block form, inline scalar (`on: workflow_call`), and
+    # inline sequence (`on: [workflow_call, push]`).
+    local triggers on_line
+    on_line=$(echo "$decoded" | grep -m1 '^on:')
+    if echo "$on_line" | grep -qE '^on:[[:space:]]+[a-zA-Z_]+[[:space:]]*(#.*)?$'; then
+      # Inline scalar: on: workflow_call
+      triggers=$(echo "$on_line" | sed 's/^on:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '[:space:]')
+    elif echo "$on_line" | grep -qE '^on:[[:space:]]*\['; then
+      # Inline sequence: on: [workflow_call, push]
+      triggers=$(echo "$on_line" | sed 's/^on:[[:space:]]*//' | tr -d '[]"'"'"' ' | tr ',' '\n' | tr -d '[:space:]')
+    else
+      # Block form: on:\n  key:\n  ...
+      triggers=$(echo "$decoded" | awk '
+        /^on:/                     { inblock=1; next }
+        inblock && /^[^[:space:]#]/ { exit }          # dedent -> left the on: block
+        inblock && /^  [a-zA-Z_]/  {                   # exactly-2-space-indented key
+          key=$1; sub(/:.*/,"",key); gsub(/[[:space:]]/,"",key); print key
+        }
+      ')
+    fi
+
+    # Pure reusable = workflow_call present AND no other trigger key.
+    echo "$triggers" | grep -qx "workflow_call" || continue
+    if [ "$(echo "$triggers" | grep -vx "workflow_call" | grep -c .)" -ne 0 ]; then
+      continue   # hybrid (workflow_call + real trigger) — exempt, must stay active
+    fi
+
+    # Pure reusable — check its enabled/disabled state.
+    local state
+    state=$(gh_api "repos/$ORG/$repo/actions/workflows/$wf" --jq '.state' 2>/dev/null || echo "")
+    [ -z "$state" ] && continue   # not registered (e.g. absent from default branch)
+
+    if [ "$state" != "disabled_manually" ]; then
+      add_finding "$repo" "reusable-workflows" "reusable-not-disabled-manually-$wf" "warning" \
+        "Pure reusable workflow \`$wf\` (workflow_call-only) is in state \`$state\` (expected \`disabled_manually\`); it must be intentionally disabled in the Actions UI. Disable with: \`gh workflow disable $wf -R $ORG/$repo\`" \
+        "standards/ci-standards.md#pure-reusable-workflows-must-be-disabled"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -1968,6 +2037,7 @@ create_umbrella_issue() {
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
+    "reusable-workflows|Reusable Workflows (disabled_manually)|gh workflow disable <workflow> -R <repo>"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
     "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
@@ -2178,7 +2248,7 @@ HEREDOC
 
 HEREDOC
 
-  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
+  for category in ci-workflows reusable-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -2351,6 +2421,7 @@ main() {
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_reusable_workflow_paths "$repo"
+    check_reusable_workflows_disabled "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"
