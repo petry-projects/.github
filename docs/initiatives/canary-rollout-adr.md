@@ -19,7 +19,8 @@ The machine-readable ring map is `standards/canary-rings.json`; the gate logic i
 The release-strategy initiative ([#495](https://github.com/petry-projects/.github-private/issues/495)) replaced a floating-`@main` deploy —
 where a merge was instantly live across the agents' own self-review duty *and* every consumer repo, with no canary and no rollback —
 with a **versioned-release model**: immutable `<agent>/vX.Y.Z` releases plus **moving channel tags** (`<agent>/next`, `/ring0`, `/ring1`, `/stable`) that callers pin to.
-See [`agentic-release-strategy.md`](./agentic-release-strategy.md) for the full analysis and [`docs/release/versioning.md`](../release/versioning.md) for the tag mechanics.
+See [`agentic-release-strategy.md`](./agentic-release-strategy.md) for the full analysis and
+[`docs/release/versioning.md`](https://github.com/petry-projects/.github-private/blob/main/docs/release/versioning.md) for the tag mechanics.
 
 Once #499–#502 and #868 landed, the concentric rings, the soak gate, and the promotion/rollback workflow were **built and machine-backed** — no longer aspirational.
 This ADR records the decisions those artifacts encode so the public-repo standard can be promoted to match (and link here) instead of carrying a "not yet built" note.
@@ -126,7 +127,8 @@ matching the ring map in [`standards/canary-rings.json`](../../standards/canary-
 - Initiative [#495](https://github.com/petry-projects/.github-private/issues/495) — safe release strategy for agentic workflows.
 - [`docs/initiatives/agentic-release-strategy.md`](./agentic-release-strategy.md) — the initiative analysis (rings, channels, health-gated promotion); §5.1 mutable-ref exception.
 - [`docs/initiatives/agentic-release-strategy-orchestration.md`](./agentic-release-strategy-orchestration.md) — how the child issues (#496–#503) were delivered; the dependency DAG.
-- [`docs/release/versioning.md`](../release/versioning.md) — immutable-release vs. moving-channel-tag mechanics; cross-repo reusables.
+- [`docs/release/versioning.md`](https://github.com/petry-projects/.github-private/blob/main/docs/release/versioning.md) —
+  immutable-release vs. moving-channel-tag mechanics; cross-repo reusables (canonical copy in `.github-private`).
 - [`standards/canary-rings.json`](../../standards/canary-rings.json) — machine-readable ring map (source of truth).
 - [`scripts/lib/canary-rollout.sh`](../../scripts/lib/canary-rollout.sh) / [`scripts/canary-rollout.sh`](../../scripts/canary-rollout.sh) /
   [`.github/workflows/canary-rollout.yml`](../../.github/workflows/canary-rollout.yml) — gate core, orchestrator, and scheduler.
