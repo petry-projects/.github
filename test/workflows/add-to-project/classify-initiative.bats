@@ -357,3 +357,69 @@ setup_sweep_stub() {
   [[ "$blob" == *"-f optionId=91479014"* ]]
   [[ "$blob" != *"-F optionId="* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Expanded rule coverage (petry-projects/.github initiative back-fill round 2):
+# new patterns that closed the largest unmatched clusters, plus the
+# Agent Shield -> Security rename, plus a greediness regression guard.
+# ---------------------------------------------------------------------------
+
+@test "classify_by_rules: gemini/pricing model work → Model Selection" {
+  run classify_by_rules "prepare a date-versioned gemini-3.5-pro pricing row in model-pricing.tsv |  | petry-projects/.github-private"
+  [ "$output" = "Model Selection" ]
+}
+
+@test "classify_by_rules: deep-review + rubber-duck tier work → pr-review agent" {
+  run classify_by_rules "rewire the deep-review + duck-tier prompts to consume pre-fed-context |  | petry-projects/.github-private"
+  [ "$output" = "pr-review agent" ]
+}
+
+@test "classify_by_rules: concentric rings / stable tag → Release Strategy" {
+  run classify_by_rules "define concentric rings (0 self-host) + keep production duty on stable-tag |  | petry-projects/.github-private"
+  [ "$output" = "Release Strategy" ]
+}
+
+@test "classify_by_rules: reusable-workflow shim identity → Org Standards" {
+  run classify_by_rules "epic: enforce identical reusable-workflow shims across the fleet |  | petry-projects/.github"
+  [ "$output" = "Org Standards" ]
+}
+
+@test "classify_by_rules: spec-drift detector → Org Standards" {
+  run classify_by_rules "spec-drift detector script + pure-classifier unit tests |  | petry-projects/.github-private"
+  [ "$output" = "Org Standards" ]
+}
+
+@test "classify_by_rules: off-peak scheduling standard → Org Standards" {
+  run classify_by_rules "move all scheduled workflows off the top-of-the-hour |  | petry-projects/.github-private"
+  [ "$output" = "Org Standards" ]
+}
+
+@test "classify_by_rules: agent rate-limit / circuit-breaker → Self-healing" {
+  run classify_by_rules "adr: agent rate-limit & circuit-breaker taxonomy |  | petry-projects/.github-private"
+  [ "$output" = "Self-healing" ]
+}
+
+@test "classify_by_rules: kiro reconciliation → Tooling" {
+  run classify_by_rules "kiro capability reconciliation + gap decision record |  | petry-projects/.github-private"
+  [ "$output" = "Tooling" ]
+}
+
+@test "classify_by_rules: deepsec org scan → Security (renamed from Agent Shield)" {
+  run classify_by_rules "implement deepsec org scan |  | petry-projects/.github-private"
+  [ "$output" = "Security" ]
+}
+
+@test "classify_by_rules: existing agent-security signal still routes to Security" {
+  run classify_by_rules "agent shield v2: ci prompt injection sentinel |  | petry-projects/.github-private"
+  [ "$output" = "Security" ]
+}
+
+@test "classify_by_rules: copilot cli triage failure → dev-lead agent" {
+  run classify_by_rules "fix: copilot cli triage command rejected with invalid command format |  | petry-projects/.github-private"
+  [ "$output" = "dev-lead agent" ]
+}
+
+@test "classify_by_rules: canary-rollout item is NOT stolen by shim/reusable patterns (stays Release Strategy)" {
+  run classify_by_rules "make canary-rollout semver-major aware — major-version channels + per-major shim pins |  | petry-projects/.github-private"
+  [ "$output" = "Release Strategy" ]
+}
