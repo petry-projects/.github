@@ -342,3 +342,18 @@ setup_sweep_stub() {
   [ "$status" -eq 64 ]
   [[ "$stderr" == *"GH_TOKEN is empty"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# set_item_single_select_value — option-id must be sent as a String, not a
+# type-inferred number (regression: all-numeric option ids like "91479014"
+# were coerced by `gh api -F` and rejected against String!).
+# ---------------------------------------------------------------------------
+
+@test "set_item_single_select_value: all-numeric option id is sent as a string (-f, not -F)" {
+  run set_item_single_select_value "PVTI_X" "F_INIT" "91479014"
+  [ "$status" -eq 0 ]
+  local blob; blob=$(sed 's/\\//g' "${GH_STUB_LOG}")
+  # -f forces a raw string; -F would infer a JSON number and GitHub rejects it.
+  [[ "$blob" == *"-f optionId=91479014"* ]]
+  [[ "$blob" != *"-F optionId="* ]]
+}
