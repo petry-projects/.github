@@ -110,7 +110,7 @@ Theme. Roadmap-view grouping uses Initiative; cross-cutting filters
 
 | Theme | Initiatives |
 |---|---|
-| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Agent Shield`, `Model Selection`, `Business Analyst`, `BMAD` |
+| **Agentic Framework** | `dev-lead agent`, `pr-review agent`, `GH-AW`, `Copilot Instructions`, `Security`, `Model Selection`, `Business Analyst`, `BMAD` |
 | **Fleet Operations** | `Fleet Monitor`, `Daily Reports`, `Org Standards`, `Release Strategy`, `Cost Observability` |
 | **Compliance** | `Compliance program`, `Compliance Blitz`, `Self-healing`, `Auto-rebase` |
 | **Tooling** | `Initiatives Project`, `Tooling` |
