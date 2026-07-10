@@ -17,7 +17,7 @@ guidelines for the `petry-projects` organization.
 The org maintains a single **Initiatives project** at
 <https://github.com/orgs/petry-projects/projects/1> that tracks cross-repo
 work across the following initiative buckets: Compliance Blitz, Security,
-Self-healing, Auto-rebase, Model fallback, Tooling, and Compliance program.
+Self-healing, Auto-rebase, Model Selection, Tooling, and Compliance program.
 
 ### What gets added automatically
 

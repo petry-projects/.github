@@ -370,12 +370,12 @@ setup_sweep_stub() {
 }
 
 @test "classify_by_rules: deep-review + rubber-duck tier work → pr-review agent" {
-  run classify_by_rules "rewire the deep-review + rubber-duck tier prompts to consume pre-fed context |  | petry-projects/.github-private"
+  run classify_by_rules "rewire the deep-review + duck-tier prompts to consume pre-fed-context |  | petry-projects/.github-private"
   [ "$output" = "pr-review agent" ]
 }
 
 @test "classify_by_rules: concentric rings / stable tag → Release Strategy" {
-  run classify_by_rules "define concentric rings (0 self-host) + keep production duty on stable |  | petry-projects/.github-private"
+  run classify_by_rules "define concentric rings (0 self-host) + keep production duty on stable-tag |  | petry-projects/.github-private"
   [ "$output" = "Release Strategy" ]
 }
 
@@ -390,7 +390,7 @@ setup_sweep_stub() {
 }
 
 @test "classify_by_rules: off-peak scheduling standard → Org Standards" {
-  run classify_by_rules "move all scheduled workflows off the top of the hour |  | petry-projects/.github-private"
+  run classify_by_rules "move all scheduled workflows off the top-of-the-hour |  | petry-projects/.github-private"
   [ "$output" = "Org Standards" ]
 }
 
