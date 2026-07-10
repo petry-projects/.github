@@ -48,9 +48,12 @@ source "${_HERE}/lib/canary-rollout.sh"
 DEFAULT_RINGS="$(cd "${_HERE}/.." && pwd)/standards/canary-rings.json"
 CANARY_RINGS="${CANARY_RINGS:-$DEFAULT_RINGS}"
 
-# CUT_RELEASE — the cut-release.sh invoked by `autocut` to cut a new candidate. A
-# sibling of this script by default; overridable so tests can stub the cut (#1069).
-CUT_RELEASE="${CUT_RELEASE:-${_HERE}/cut-release.sh}"
+# The `autocut` front end (#1069) cuts new candidates INLINE via the App-token gh-api path
+# (_gh_create_annotated_tag + _gh_move_tag against the agent's registry host) — it no longer
+# shells out to a sibling cut-release.sh. That coupling broke when the engine relocated to
+# .github (#613): cut-release.sh stayed in .github-private as the human/runbook CLI and does
+# not travel with this checkout. Cutting inline keeps the engine self-contained and writes to
+# the correct host for every agent (incl. dev-lead, hosted in .github-private).
 
 # THIS_REPO — the repo this checkout belongs to. Agents hosted HERE (dev-lead, pr-review)
 # keep their channel/release tags in this checkout and resolve them via local git. A
@@ -118,6 +121,32 @@ _gh_move_tag() {
       -f sha="$sha" -F force=true >/dev/null 2>&1 && return 0
   gh api -X POST "repos/$repo/git/refs" \
       -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null 2>&1
+}
+
+# _gh_create_annotated_tag <repo> <tag> <sha> <message> — create the immutable annotated
+# tag object <tag> pointing at commit <sha> on <repo> and publish its ref, via the GitHub
+# API with the release-manager App token (mirrors cut-release.sh's gh_create_annotated_tag).
+# This is the CUT primitive for `autocut` (#1069): once the engine relocated to .github the
+# sibling cut-release.sh no longer travels with it, so the cut runs inline through the same
+# App-token path used for every other tag write — no dependency on a script left behind in
+# another repo, and it writes to the agent's registry HOST (correct for the this-repo
+# dev-lead agent whose reusable lives in .github-private, #613 relocation). Returns non-zero
+# on API failure so the caller can degrade best-effort.
+_gh_create_annotated_tag() {
+  [ $# -lt 4 ] && return 1
+  local repo="$1" tag="$2" sha="$3" message="$4" obj
+  obj="$(gh api -X POST "repos/$repo/git/tags" \
+      -f tag="$tag" -f message="$message" -f object="$sha" -f type=commit \
+      --jq '.sha // empty')"
+  if [ $? -ne 0 ] || [ -z "$obj" ]; then
+      echo "::error::_gh_create_annotated_tag: could not create the annotated release tag on $repo or read back its object SHA" >&2
+      return 1
+  fi
+  gh api -X POST "repos/$repo/git/refs" \
+      -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null 2>&1 || {
+      echo "::error::_gh_create_annotated_tag: created tag object $obj on $repo but could not publish ref refs/tags/$tag" >&2
+      return 1
+  }
 }
 
 # channel_commit <agent> <channel> — commit the channel tag <agent>/<channel> resolves to
@@ -810,9 +839,11 @@ cmd_sync_issues() {
 # tick — gated by CANARY_AUTO_CUT — for each registered agent it compares the reusable
 # blob at the host's default-branch HEAD against the blob at the current `next` candidate;
 # if they differ it cuts a new immutable <agent>/vX.Y.Z (patch bump by default) and moves
-# `next` onto it via cut-release.sh, seeding the candidate into the existing soak/promote
-# pipeline. Detection is done here in .github-private via the App token (which reads every
-# host), so no cross-repo Actions plumbing is needed. Best-effort: never fails the run.
+# `next` onto it INLINE via the App-token gh-api path (_gh_create_annotated_tag + _gh_move_tag),
+# seeding the candidate into the existing soak/promote pipeline. Detection AND the cut both run
+# against the agent's registry host via the App token (which reads/writes every host), so no
+# cross-repo Actions plumbing — and no sibling cut-release.sh — is needed. Best-effort: never
+# fails the run.
 #
 # Scope/limitation (v1): detection is on the reusable FILE blob only (the registry
 # `reusable` path). A change to a shared library the reusable sources — without the
@@ -891,13 +922,31 @@ _autocut_agent() {
   bump="$(_autocut_bump "$agent")"
   newver="$(_next_release_version "$agent" "$bump")"
   echo "autocut $agent: reusable changed on $host ($defbranch ${mainsha:0:12}) vs next ${next_commit:0:12} — cutting v$newver (bump=$bump), moving next."
+  local relver="$agent/v$newver"
   if [ "$dry" = true ]; then
-    echo "[DRY-RUN] would: cut-release.sh $agent $newver --ref $mainsha --channel next --push"
+    echo "[DRY-RUN] would: cut $relver at ${mainsha:0:12} on $host + move $agent/next (gh-api, App token)"
     return 0
   fi
-  bash "$CUT_RELEASE" "$agent" "$newver" --ref "$mainsha" --channel next --push \
-    || { echo "::warning::autocut $agent: cut-release failed for v$newver (best-effort, continuing)"; return 0; }
-  echo "autocut $agent: cut v$newver from ${mainsha:0:12} and moved next."
+  # Cut inline (no sibling cut-release.sh, #613): create the immutable annotated release tag,
+  # then advance `next` onto the same commit — both on the agent's HOST via the App token. If
+  # the release tag already exists (e.g. a retry after a partial move), skip the create and just
+  # re-point next so the operation stays idempotent. Guard the invariant: if the existing tag
+  # resolves to a different commit (manual retag, concurrent run, prior bad state), skip the
+  # next move entirely rather than advancing next to an untagged commit.
+  local existing_sha
+  existing_sha="$(_gh_tag_commit "$host" "$relver")"
+  if [ -n "$existing_sha" ]; then
+    if [ "$existing_sha" != "$mainsha" ]; then
+      echo "::warning::autocut $agent: release $relver on $host points to ${existing_sha:0:12}, not ${mainsha:0:12} — skipping next move to preserve invariant."
+      return 0
+    fi
+    echo "autocut $agent: release $relver already exists on $host — re-pointing next only."
+  elif ! _gh_create_annotated_tag "$host" "$relver" "$mainsha" "$agent release v$newver"; then
+    echo "::warning::autocut $agent: could not create $relver on $host (best-effort, continuing)"; return 0
+  fi
+  _gh_move_tag "$host" "$agent/next" "$mainsha" \
+    || { echo "::warning::autocut $agent: could not move $agent/next on $host (best-effort, continuing)"; return 0; }
+  echo "autocut $agent: cut v$newver from ${mainsha:0:12} and moved next (on $host)."
 }
 
 # cmd_autocut [--dry-run] — the scheduled front end. Gated by CANARY_AUTO_CUT (the single
