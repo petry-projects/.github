@@ -210,6 +210,34 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "canary-rings.json: idea->initiative pipeline agents onboarded (standard rings + gate, #1008)" {
+  # initiative-planner + idea-triage are host=.github agents with sparse, event-driven
+  # traffic. They ride the STANDARD ring model + gate — NO synthetic canary: the empty
+  # inner rings waive on dwell (no caller), and ring1->stable soaks until real
+  # TalkTerm/bmad traffic (organic or human-triggered) arrives.
+  local a
+  for a in initiative-planner idea-triage; do
+    run jq -e --arg a "$a" '.agents[$a].host == "petry-projects/.github"' "$RINGS"
+    [ "$status" -eq 0 ]
+    run bash -c "jq -r --arg a '$a' '.agents[\$a].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+    [ "$output" = "next,ring0,ring1,stable" ]
+    # ring1 = the real consumers that gate ring1->stable
+    run jq -e --arg a "$a" '.agents[$a].rings[] | select(.channel=="ring1") | (.members|index("petry-projects/TalkTerm")) and (.members|index("petry-projects/bmad-bgreat-suite"))' "$RINGS"
+    [ "$status" -eq 0 ]
+    # standard #548 gate: inner rings waive, ring1->stable needs >=1 real run
+    run jq -e --arg a "$a" '.agents[$a].gate.transitions["next->ring0"].waive_sample_if_no_caller == true and .agents[$a].gate.transitions["ring0->ring1"].waive_sample == true and .agents[$a].gate.transitions["ring1->stable"].sample_min == 1' "$RINGS"
+    [ "$status" -eq 0 ]
+    # NO synthetic-canary machinery — organic traffic drives the rollout (design decision #1008)
+    run jq -e --arg a "$a" '.agents[$a] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+    [ "$status" -eq 0 ]
+  done
+  # run_workflow names = what the gate samples on the ring tiers
+  run jq -e '.agents["initiative-planner"].run_workflow | startswith("Initiative Planner")' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["idea-triage"].run_workflow | startswith("Idea Triage")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: gate block carries #548 per-transition defaults" {
   # baseline window + spike cap
   run jq -e '.agents["dev-lead"].gate.baseline_window_days == 14' "$RINGS"
