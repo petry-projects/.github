@@ -219,7 +219,7 @@ setup() {
   for a in initiative-planner idea-triage; do
     run jq -e --arg a "$a" '.agents[$a].host == "petry-projects/.github"' "$RINGS"
     [ "$status" -eq 0 ]
-    run bash -c "jq -r --arg a '$a' '.agents[\$a].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+    run jq -r --arg a "$a" '.agents[$a].rings | sort_by(.order) | map(.channel) | join(",")' "$RINGS"
     [ "$output" = "next,ring0,ring1,stable" ]
     # ring1 = the real consumers that gate ring1->stable
     run jq -e --arg a "$a" '.agents[$a].rings[] | select(.channel=="ring1") | (.members|index("petry-projects/TalkTerm")) and (.members|index("petry-projects/bmad-bgreat-suite"))' "$RINGS"
