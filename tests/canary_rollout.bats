@@ -201,6 +201,19 @@ setup() {
 }
 
 # ── canary-rings.json SoT shape (rings + gate knobs) ──────────────────────────
+@test "canary-rings.json: feature-ideation onboarded (cross-repo host, standard rings, #614)" {
+  run jq -e '.agents["feature-ideation"].host == "petry-projects/.github"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["feature-ideation"].reusable == ".github/workflows/feature-ideation-reusable.yml"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run bash -c "jq -r '.agents[\"feature-ideation\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  run jq -e '.agents["feature-ideation"].gate.transitions["ring1->stable"].sample_min == 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["feature-ideation"] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: ci-failure-analyst onboarded (this-repo host, standard rings, #1159)" {
   run jq -e '.agents["ci-failure-analyst"].host == "petry-projects/.github-private"' "$RINGS"
   [ "$status" -eq 0 ]
