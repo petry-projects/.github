@@ -201,6 +201,18 @@ setup() {
 }
 
 # ── canary-rings.json SoT shape (rings + gate knobs) ──────────────────────────
+@test "canary-rings.json: pr-auto-review onboarded to canary; unmanaged block emptied" {
+  run jq -e '.agents["pr-auto-review"].host == "petry-projects/.github"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["pr-auto-review"].run_workflow == "PR Auto-Review — Ready Check"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run bash -c "jq -r '.agents[\"pr-auto-review\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  # every reusable is now a managed agent — the unmanaged block holds nothing
+  run jq -e '(.unmanaged // {}) | length == 0' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: add-to-project onboarded to full ring model (#651)" {
   run jq -e '.agents["add-to-project"].host == "petry-projects/.github"' "$RINGS"
   [ "$status" -eq 0 ]
