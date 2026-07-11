@@ -1022,7 +1022,7 @@ _registered_reusables_for_host() {
 # frozen-major `@vN` infra, or dispatch-only workflows. drift excludes these so its
 # "unregistered" signal only flags reusables that genuinely still need onboarding.
 _unmanaged_reusables_for_host() {
-  _jq -r --arg h "$1" '[.unmanaged[]? | select(.host==$h) | .reusable // empty] | unique | .[]'
+  _jq -r --arg h "$1" '[.unmanaged?[]? | select(.host==$h) | .reusable // empty] | unique | .[]'
 }
 
 # _agents_for_reusable <host> <path> — the registry agent name(s) whose (host,reusable)
@@ -1089,7 +1089,7 @@ cmd_drift() {
     echo "  present *-reusable.yml (${#pres_arr[@]}):$pres_str"
     [ "${#um_arr[@]}" -gt 0 ] && echo "  unmanaged (intentional, out of ring gate) (${#um_arr[@]}):$um_str"
     # unregistered = present on the host, minus registered agents AND intentionally-unmanaged (#651).
-    unregistered="$(set_difference "$(set_difference "$present" "$registered")" "$unmanaged_r")"
+    unregistered="$(set_difference "$present" "$(printf '%s\n%s' "$registered" "$unmanaged_r")")"
     while IFS= read -r p; do
       [ -z "$p" ] && continue
       echo "::warning::DRIFT[unregistered] $host: $p present on host but absent from canary-rings.json (no cut/soak/gate/dashboard until registered)"
