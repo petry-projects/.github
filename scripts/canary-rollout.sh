@@ -1017,6 +1017,14 @@ _registered_reusables_for_host() {
   _jq -r --arg h "$1" '[.agents[]? | select(.host==$h) | .reusable // empty] | unique | .[]'
 }
 
+# _unmanaged_reusables_for_host <host> — reusable paths on <host> INTENTIONALLY out of the
+# ring-gate model, recorded in the `unmanaged` block (#651): single-hop channel reusables,
+# frozen-major `@vN` infra, or dispatch-only workflows. drift excludes these so its
+# "unregistered" signal only flags reusables that genuinely still need onboarding.
+_unmanaged_reusables_for_host() {
+  _jq -r --arg h "$1" '[.unmanaged[]? | select(.host==$h) | .reusable // empty] | unique | .[]'
+}
+
 # _agents_for_reusable <host> <path> — the registry agent name(s) whose (host,reusable)
 # match, joined by ", " (for the missing-file finding message).
 _agents_for_reusable() {
@@ -1061,7 +1069,7 @@ cmd_drift() {
   while IFS= read -r host; do
     [ -z "$host" ] && continue
     echo "──────── host: $host ────────"
-    local present registered unregistered missing p agents
+    local present registered unmanaged_r unregistered missing p agents
     if ! present="$(_gh_list_reusables "$host")"; then
       # Could not read the host's workflows dir — skip it rather than false-flag every
       # registered reusable as missing-file. Read-only + best-effort: a warning, not a failure.
@@ -1069,15 +1077,19 @@ cmd_drift() {
       continue
     fi
     registered="$(_registered_reusables_for_host "$host")"
-    local reg_arr=() pres_arr=() reg_str="" pres_str=""
+    unmanaged_r="$(_unmanaged_reusables_for_host "$host")"
+    local reg_arr=() pres_arr=() um_arr=() reg_str="" pres_str="" um_str=""
     if [ -n "$registered" ]; then mapfile -t reg_arr <<< "$registered"; fi
     if [ -n "$present" ]; then mapfile -t pres_arr <<< "$present"; fi
+    if [ -n "$unmanaged_r" ]; then mapfile -t um_arr <<< "$unmanaged_r"; fi
     [ "${#reg_arr[@]}" -gt 0 ] && reg_str=" ${reg_arr[*]}"
     [ "${#pres_arr[@]}" -gt 0 ] && pres_str=" ${pres_arr[*]}"
+    [ "${#um_arr[@]}" -gt 0 ] && um_str=" ${um_arr[*]}"
     echo "  registered reusables (${#reg_arr[@]}):$reg_str"
     echo "  present *-reusable.yml (${#pres_arr[@]}):$pres_str"
-    # unregistered = present on the host but not in the registry.
-    unregistered="$(set_difference "$present" "$registered")"
+    [ "${#um_arr[@]}" -gt 0 ] && echo "  unmanaged (intentional, out of ring gate) (${#um_arr[@]}):$um_str"
+    # unregistered = present on the host, minus registered agents AND intentionally-unmanaged (#651).
+    unregistered="$(set_difference "$(set_difference "$present" "$registered")" "$unmanaged_r")"
     while IFS= read -r p; do
       [ -z "$p" ] && continue
       echo "::warning::DRIFT[unregistered] $host: $p present on host but absent from canary-rings.json (no cut/soak/gate/dashboard until registered)"

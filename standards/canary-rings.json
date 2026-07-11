@@ -593,5 +593,22 @@
         }
       }
     }
+  },
+  "unmanaged": {
+    "add-to-project": {
+      "host": "petry-projects/.github",
+      "reusable": ".github/workflows/add-to-project-reusable.yml",
+      "reason": "Single-hop @add-to-project/stable channel (5 consumers); low-risk project-automation plumbing, intentionally out of the full ring gate (#651)."
+    },
+    "claude-code": {
+      "host": "petry-projects/.github",
+      "reusable": ".github/workflows/claude-code-reusable.yml",
+      "reason": "Frozen-major @v2 base wrapper \u2014 not a canary-promoted agent."
+    },
+    "pr-auto-review": {
+      "host": "petry-projects/.github",
+      "reusable": ".github/workflows/pr-auto-review-reusable.yml",
+      "reason": "Frozen-major @v2 review-dispatcher infra \u2014 not a canary-promoted agent."
+    }
   }
 }

@@ -1094,6 +1094,29 @@ _drift_rings_one_agent() {
   [[ "$output" != *"ci.yml present on host"* ]]
 }
 
+@test "orchestrator: drift excludes an intentionally-unmanaged reusable (#651)" {
+  # Registry: dev-lead agent + an `unmanaged` entry for foo-reusable.yml on .github-private.
+  DRIFT_RINGS="$BATS_TEST_TMPDIR/drift-rings-um.json"
+  jq '{version, description, org_infra_repos, member_tokens,
+       agents: {"dev-lead": .agents["dev-lead"]},
+       unmanaged: {"foo": {"host":"petry-projects/.github-private","reusable":".github/workflows/foo-reusable.yml","reason":"single-hop infra (#651)"}}}' \
+    "$RINGS" > "$DRIFT_RINGS"
+  # host has dev-lead (registered) + foo (unmanaged) + bar (genuinely unregistered)
+  _drift_stub '[
+    {"type":"file","name":"dev-lead-reusable.yml","path":".github/workflows/dev-lead-reusable.yml"},
+    {"type":"file","name":"foo-reusable.yml","path":".github/workflows/foo-reusable.yml"},
+    {"type":"file","name":"bar-reusable.yml","path":".github/workflows/bar-reusable.yml"}
+  ]' '[]'
+  run env CANARY_RINGS="$DRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  # foo is reported as unmanaged, NOT flagged as unregistered drift
+  [[ "$output" == *"unmanaged (intentional"* ]]
+  [[ "$output" != *"DRIFT[unregistered] petry-projects/.github-private: .github/workflows/foo-reusable.yml"* ]]
+  # bar (neither registered nor unmanaged) IS still flagged, and it's the ONLY one
+  [[ "$output" == *"DRIFT[unregistered] petry-projects/.github-private: .github/workflows/bar-reusable.yml"* ]]
+  [[ "$output" == *"1 unregistered"* ]]
+}
+
 @test "orchestrator: drift flags a registry entry whose reusable file no longer exists on the host (missing-file)" {
   # Registry has 'ghost' pointing at a reusable that is NOT present on the host.
   DRIFT_RINGS="$BATS_TEST_TMPDIR/drift-ghost.json"
