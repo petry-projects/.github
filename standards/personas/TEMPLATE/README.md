@@ -7,7 +7,7 @@ against [`persona.schema.json`](../persona.schema.json).
 
 ## What's here
 
-```
+```text
 persona.yml            # the manifest (index-of-record) — fill every CHANGE-ME
 README.md              # this file — replace with a short note about your persona
 agents/                # (optional) drop a copilot-profile <id>.md here, or delete

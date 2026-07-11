@@ -77,7 +77,7 @@ always exactly one manifest.
 
 ### Canonical instance layout (in `.github-private`)
 
-```
+```text
 personas/<id>/
   persona.yml            # the manifest (required)
   README.md              # short human note: what this persona is, how to invoke
