@@ -1,0 +1,138 @@
+# Persona manifest — the single index-of-record for one agentic persona.
+# Copy this directory to `.github-private/personas/<id>/` and fill it in.
+# Validate: it must conform to petry-projects/.github standards/personas/persona.schema.json
+# Standard: petry-projects/.github standards/persona-standards.md
+#
+# Golden rules while editing:
+#   • The manifest POINTS AT things; it does not duplicate them.
+#   • Ring membership + gate knobs live ONLY in canary-rings.json — reference, never restate.
+#   • Vendored framework files are never hand-edited — layer overrides instead.
+#   • Advisory is the default; every `write` surface must carry a gate_label.
+
+schema_version: 1
+
+# Stable kebab-case id. MUST equal this directory's name AND the agents.<key>
+# in canary-rings.json AND the channel-tag agent name.
+id: CHANGE-ME
+
+name: CHANGE-ME              # display name, e.g. "Murat"
+title: CHANGE-ME             # role title, e.g. "Master Test Architect & Quality Advisor"
+summary: >-
+  One sentence: what this persona is for and where it helps
+  (design / build / test / deliver / operate).
+
+# Lifecycle: draft → canary → ring0 → ring1 → stable (→ retired).
+# Set to the furthest channel this persona has actually reached.
+status: draft
+
+# Owning team, org/team form (matches CODEOWNERS). Team ownership only.
+owner: petry-projects/CHANGE-ME
+
+# --- How the persona is actually implemented ------------------------------
+definition:
+  layers:
+    # Pick one or more. Delete the kinds you do not use.
+
+    # A) Backed by a vendored framework agent (BMAD etc.) — the preferred path
+    #    where a good upstream exists and we intend to contribute back.
+    - kind: framework-agent
+      path: frameworks/CHANGE-ME/src/agents/CHANGE-ME       # the SKILL.md dir
+      framework:
+        name: CHANGE-ME                                     # dir under frameworks/
+        upstream_repo: CHANGE-ME/CHANGE-ME
+        vendor_pin: vX.Y.Z                                  # MUST match VENDOR.md
+        skill: CHANGE-ME                                    # framework agent id
+      # local_overrides:                                    # optional
+      #   path: prompts/CHANGE-ME/wrapper.md
+      #   upstream_candidate: false                         # true if it belongs upstream
+      #   notes: why this override exists
+
+    # B) A human-invocable Copilot profile
+    # - kind: copilot-profile
+    #   path: agents/CHANGE-ME.md
+
+    # C) An automated workflow prompt library (like dev-lead)
+    # - kind: workflow-prompts
+    #   path: prompts/CHANGE-ME/
+
+    # D) A self-contained GitHub Agentic Workflow
+    # - kind: gh-aw
+    #   path: .github/workflows/CHANGE-ME.md
+
+# --- Capabilities the persona can invoke (advisory index) -----------------
+skills: []
+  # - name: CHANGE-ME
+  #   path: frameworks/CHANGE-ME/src/…/SKILL.md
+  #   source: vendored          # vendored | first-party
+
+# --- The trigger matrix: one row per surface the persona acts on ----------
+# default_mode governs any surface not listed. It MUST be advisory or off.
+# Write is never a default — it is an explicit per-surface opt-in with a gate_label.
+triggers:
+  default_mode: advisory
+  opt_out_label: CHANGE-ME:hands-off
+  surfaces:
+    - surface: pull_request
+      events: [opened, ready_for_review, synchronize]
+      enabled: true
+      mode: advisory            # advisory = comments/reviews only; write = opens/pushes PRs
+      # gate_label: CHANGE-ME   # REQUIRED if mode: write
+      # trust_floor: [OWNER, MEMBER, COLLABORATOR]   # defaults to trust.author_association_floor
+      notes: ""
+
+    - surface: issues
+      events: [labeled, commented]
+      enabled: true
+      mode: advisory
+
+    - surface: mention
+      events: []
+      enabled: true
+      mode: advisory
+      notes: "e.g. @<bot> weigh in"
+
+    # discussion surfaces cannot run the agent inline — declare the bridge:
+    # - surface: discussion
+    #   events: [labeled]
+    #   enabled: true
+    #   mode: advisory
+    #   bridge: repository_dispatch
+
+    # - surface: check_run
+    #   events: [completed]
+    #   enabled: false
+    #   mode: advisory
+
+    # - surface: schedule
+    #   events: []
+    #   enabled: false
+    #   mode: advisory
+
+# --- Trust boundary (checked before spending agent quota) -----------------
+trust:
+  author_association_floor: [OWNER, MEMBER, COLLABORATOR]
+
+# --- CI wiring (omit entirely for advisory personas that run inside an
+#     existing workflow and ship no reusable of their own) ------------------
+# runtime:
+#   host: petry-projects/.github-private
+#   reusable: .github/workflows/CHANGE-ME-reusable.yml
+#   caller_stub: .github/workflows/CHANGE-ME.yml
+#   run_workflow: CHANGE-ME                 # MUST match canary-rings.json run_workflow
+#   permissions: [contents:read, pull-requests:write]   # caller stub grants a superset
+
+# --- Held-out eval gate ----------------------------------------------------
+evals:
+  required_before: stable       # ring0 | ring1 | stable
+  path: evals/CHANGE-ME/         # under the repo eval tree (validate-cases.py + holdout-guard.yml)
+  judge: evals/judge.md
+  min_cases: 5
+
+# --- Canary pointer (single source of truth is canary-rings.json) ---------
+# Do NOT restate rings/members/gate here — reference the registry entry by id.
+canary:
+  registry: petry-projects/.github/standards/canary-rings.json
+  agent: CHANGE-ME              # MUST equal `id`
+
+references: []
+  # - "ADR: docs/initiatives/CHANGE-ME-adr.md"
