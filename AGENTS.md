@@ -574,17 +574,8 @@ The `dependabot-automerge.yml` workflow handles automatic merging of Dependabot 
 | **Eligible updates** | Patch, minor, and indirect dependency bumps |
 | **Major version bumps** | Require manual review and approval |
 | **Merge strategy** | `gh pr merge --squash --auto` (queues merge until all checks pass) |
-| **AI reviewers** | Claude Code job is skipped on Dependabot PRs (job-level `if`); Copilot/CodeRabbit threads are auto-resolved by the workflow |
+| **AI reviewers** | Copilot/CodeRabbit threads are auto-resolved by the workflow |
 | **Approval** | GitHub App token provides the required approving review |
-
-#### Claude Code Workflow on Dependabot PRs
-
-The `claude-code-reusable.yml` workflow skips the entire `claude` job for Dependabot PRs
-via a job-level `if` condition (`github.event.pull_request.user.login != 'dependabot[bot]'`).
-The job shows as **skipped** (not failed) in GitHub, which satisfies required status checks. The job is skipped because:
-
-- `CLAUDE_CODE_OAUTH_TOKEN` is an Actions secret, not a Dependabot secret
-- AI code review on automated version bumps adds cost without value
 
 #### Pull Request Limits (automation open-PR cap)
 
