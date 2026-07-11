@@ -201,6 +201,18 @@ setup() {
 }
 
 # ── canary-rings.json SoT shape (rings + gate knobs) ──────────────────────────
+@test "canary-rings.json: add-to-project onboarded to full ring model (#651)" {
+  run jq -e '.agents["add-to-project"].host == "petry-projects/.github"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run bash -c "jq -r '.agents[\"add-to-project\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  # moved OUT of the unmanaged block (now a managed ring agent)
+  run jq -e '.unmanaged | has("add-to-project") | not' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["add-to-project"] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: feature-ideation onboarded (cross-repo host, standard rings, #614)" {
   run jq -e '.agents["feature-ideation"].host == "petry-projects/.github"' "$RINGS"
   [ "$status" -eq 0 ]
