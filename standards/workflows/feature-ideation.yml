@@ -182,7 +182,7 @@ jobs:
       discussions: write
       id-token: write
       actions: read
-    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@e20a8fac1b6a10bd6ad0999258e88a423f890ba6 # v1
+    uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@feature-ideation/stable  # NOSONAR(githubactions:S7637) first-party channel ref
     with:
       # All values below come from `needs.prep.outputs.*` (resolved in the `prep`
       # job) — NOT the `inputs` context — so this reusable `with:` compiles on the
