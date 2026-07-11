@@ -232,7 +232,7 @@ setup() {
   # inner rings waive on dwell (no caller), and ring1->stable soaks until real
   # TalkTerm/bmad traffic (organic or human-triggered) arrives.
   local a
-  for a in initiative-planner idea-triage; do
+  for a in initiative-planner idea-triage idea-enhancer; do
     run jq -e --arg a "$a" '.agents[$a].host == "petry-projects/.github"' "$RINGS"
     [ "$status" -eq 0 ]
     run bash -c "jq -r --arg a '$a' '.agents[\$a].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"

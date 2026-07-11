@@ -668,6 +668,69 @@
           }
         }
       }
+    },
+    "idea-enhancer": {
+      "host": "petry-projects/.github",
+      "reusable": ".github/workflows/idea-enhancer-reusable.yml",
+      "run_workflow": "Idea Enhancer \u2014 Enrich Ideas",
+      "rings": [
+        {
+          "channel": "next",
+          "order": 0,
+          "members": [
+            "petry-projects/.github-private"
+          ]
+        },
+        {
+          "channel": "ring0",
+          "order": 1,
+          "members": [
+            "petry-projects/.github"
+          ]
+        },
+        {
+          "channel": "ring1",
+          "order": 2,
+          "members": [
+            "petry-projects/TalkTerm",
+            "petry-projects/bmad-bgreat-suite"
+          ]
+        },
+        {
+          "channel": "stable",
+          "order": 3,
+          "members": [
+            "*"
+          ]
+        }
+      ],
+      "gate": {
+        "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
+        "baseline_window_days": 14,
+        "baseline_spike_cap_multiple": 3,
+        "benign_failure_classes": [],
+        "control": {
+          "allow_pre_existing": false
+        },
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "transitions": {
+          "next->ring0": {
+            "dwell_hours": 4,
+            "sample_fraction_permille": 250,
+            "sample_clamp_min": 3,
+            "sample_clamp_max": 15,
+            "waive_sample_if_no_caller": true
+          },
+          "ring0->ring1": {
+            "dwell_hours": 8,
+            "waive_sample": true
+          },
+          "ring1->stable": {
+            "dwell_hours": 12,
+            "sample_min": 1
+          }
+        }
+      }
     }
   },
   "unmanaged": {
