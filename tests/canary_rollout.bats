@@ -201,6 +201,22 @@ setup() {
 }
 
 # ── canary-rings.json SoT shape (rings + gate knobs) ──────────────────────────
+@test "canary-rings.json: ci-failure-analyst onboarded (this-repo host, standard rings, #1159)" {
+  run jq -e '.agents["ci-failure-analyst"].host == "petry-projects/.github-private"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["ci-failure-analyst"].reusable == ".github/workflows/ci-failure-analyst-reusable.yml"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["ci-failure-analyst"].run_workflow == "CI Failure Analyst"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run bash -c "jq -r '.agents[\"ci-failure-analyst\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  # standard #548 gate + organic-traffic model (no synthetic-canary fields)
+  run jq -e '.agents["ci-failure-analyst"].gate.transitions["ring1->stable"].sample_min == 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["ci-failure-analyst"] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: valid JSON + dev-lead host + ordered rings" {
   run jq -e '.agents["dev-lead"].host == "petry-projects/.github-private"' "$RINGS"
   [ "$status" -eq 0 ]
