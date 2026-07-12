@@ -1507,3 +1507,68 @@ GITEOF
   [[ "$output" == *"needs-human"* ]]
   [[ "$output" == *"override"* ]]   # the guidance names the fast path when unrelated
 }
+
+# ── sync-issues needs-human label routing for SUSPECT triage ─────────────────────────
+# The create path applies needs-human for both REGRESSION and SUSPECT (fixed in 4cd379b).
+# The update path must match: when an existing open blocker is refreshed with SUSPECT
+# triage, needs-human must be re-applied so escalation routing is not lost on re-runs.
+#
+# _sync_suspect_stub — like _sync_stub but with differs=1 blobs (reuseAAAA vs reuseBBBB)
+# and failure runs whose failed step matches the dev-lead workload-timeout suspect class.
+_sync_suspect_stub() {
+  local blocker_list="${1:-[]}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)    echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*)               printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"failure",createdAt:\$d,databaseId:88002,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  "issue list"*) echo '$blocker_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  SYNC_RINGS="$BATS_TEST_TMPDIR/sync-rings-suspect.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$SYNC_RINGS"
+}
+
+@test "orchestrator: sync-issues CREATE path applies needs-human for SUSPECT triage" {
+  # No existing issue → create path; SUSPECT (differs=1 + suspect step) must add needs-human.
+  _sync_suspect_stub '[]'
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened blocker issue #777 for dev-lead"* ]]
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-issues UPDATE path applies needs-human for SUSPECT triage" {
+  # Existing open blocker #501 → update path; SUSPECT triage must still add needs-human.
+  # The create path was fixed in 4cd379b; this test pins the update-path parity contract.
+  _sync_suspect_stub '[{"number":501,"state":"OPEN","body":"<!-- canary-blocker:dev-lead -->"}]'
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated blocker issue #501 for dev-lead"* ]]
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+}

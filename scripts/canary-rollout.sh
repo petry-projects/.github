@@ -879,7 +879,7 @@ cmd_sync_issues() {
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
           gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-          [ "$triage" = "REGRESSION" ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
           echo "  updated blocker issue #$num for $agent"; blk="#$num"
         fi
       fi
