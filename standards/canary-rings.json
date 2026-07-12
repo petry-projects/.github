@@ -902,6 +902,13 @@
           "allow_pre_existing": false
         },
         "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "correctness": {
+          "decision_step_prefix": "decision: ",
+          "min_candidate_sample": 10,
+          "min_baseline_sample": 20,
+          "max_shift_permille": 400
+        },
+        "_correctness_note": "correctness (#668 increment 4, Layer 2): opt-in DECISION telemetry on organic runs \u2014 the actual correctness signal. pr-auto-review emits one no-op `decision: <class>` step per outcome branch (dispatched / skip-draft / skip-checks-pending / skip-changes-requested / skip-unresolved-threads); only the taken branch runs, the rest skip. The engine tallies the candidate's decision mix on the source tier (per-candidate window) against a prior-version baseline (source tier, pre-cut trailing window) \u2014 both read from `gh run view --json jobs` step names, prefix-matched by `decision_step_prefix`. `decide_decision_shift` returns OK|SHIFT|INSUFFICIENT: INSUFFICIENT (either sample below its min, or absent/unparseable decision steps) is a NO-OP that degrades to reliability-only, so low-traffic agents never stall on a signal they can't produce; SHIFT (any decision class's share moves \u2265 max_shift_permille per-mille) HOLDS the promotion with triage SUSPECT (correctness variant) and sync-issues renders a candidate-vs-baseline decision-mix table in the blocker issue; OK is a no-op. Never rolls back, never auto-acts \u2014 SHIFT only holds (worst case: a few hours of human latency). Gross always/never/gross shifts only, by design (n=10\u201325). Default-absent (this key omitted) = today's behaviour, byte-identical for agents that do not opt in.",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,

@@ -257,3 +257,77 @@ gate_summary_line() {
   printf '%-14s %-9s dwell=%sh/%sh  sample=%s/%s  cum_fail=%s startup=%s benign=%s\n' \
     "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-0}"
 }
+
+# ── decision telemetry: gross decision-mix shift (#668 Layer 2, increment 4) ────
+# A canary doesn't need the *right* answer — it needs to detect the candidate answering
+# DIFFERENTLY than the incumbent on comparable traffic. Both #668 pathologies (dispatching
+# when it shouldn't; never dispatching) are DISTRIBUTION pathologies: a decision class's
+# share swings toward ~100% or ~0% vs a stable-tier baseline. These pure cores tally the
+# decision mix (from emitted `decision: <class>` step names) and decide a gross shift.
+# jq is used as a pure, deterministic transform only — no gh/git/network I/O.
+
+# decision_class <prefix> <run_jobs_json> — the decision class a run TOOK: the first step
+# whose name starts with <prefix> AND did not skip (conclusion != "skipped"), with the prefix
+# stripped. <run_jobs_json> is the `gh run view --json jobs` payload; non-`<prefix>` and
+# skipped steps are ignored (the reusable emits one `decision: <class>` no-op step per outcome
+# branch, only the taken branch runs). Empty when no decision step ran (absent/unparseable).
+decision_class() {
+  local prefix="$1" json="$2"
+  [ -z "$json" ] && json='{}'
+  jq -r --arg p "$prefix" '
+    [ (.jobs[]?.steps[]?)
+      | select((.conclusion // "") != "skipped")
+      | (.name // "")
+      | select(startswith($p))
+      | .[($p|length):] ]
+    | .[0] // ""
+  ' <<< "$json" 2>/dev/null || echo ""
+}
+
+# decide_decision_shift <cand_counts_json> <base_counts_json> <knobs_json> — gate the
+# candidate's decision mix against a prior-version baseline. Counts are objects of
+# decision-class → run count, e.g. {"dispatched":6,"skip-draft":4}. Knobs:
+#   {min_candidate_sample, min_baseline_sample, max_shift_permille}. Echoes exactly one of:
+#   INSUFFICIENT — either side is below its min, or a side is empty/unparseable (no decision
+#                  steps produced) → NO EFFECT: the caller degrades to reliability-only, so a
+#                  low-traffic agent never stalls on a signal it cannot produce.
+#   SHIFT        — some decision class's share (per-mille of that side's total) moved by at
+#                  least max_shift_permille between candidate and baseline → HOLD (SUSPECT).
+#   OK           — every class's share is within threshold → no effect.
+# Shares are integer per-mille, rounded half-up; the max absolute per-class delta is compared
+# to max_shift_permille (inclusive). Gross always/never/gross shifts only — by design (n=10–25).
+decide_decision_shift() {
+  local cand="$1" base="$2" knobs="$3"
+  [ -z "$cand" ] && cand='{}'
+  [ -z "$base" ] && base='{}'
+  [ -z "$knobs" ] && knobs='{}'
+  local min_c min_b max_shift
+  min_c="$(jq -r '.min_candidate_sample // 0' <<< "$knobs" 2>/dev/null || echo 0)"
+  min_b="$(jq -r '.min_baseline_sample // 0' <<< "$knobs" 2>/dev/null || echo 0)"
+  max_shift="$(jq -r '.max_shift_permille // 0' <<< "$knobs" 2>/dev/null || echo 0)"
+  local cand_total base_total
+  cand_total="$(jq -r 'if type=="object" then ([.[]?]|add // 0) else "x" end' <<< "$cand" 2>/dev/null || echo x)"
+  base_total="$(jq -r 'if type=="object" then ([.[]?]|add // 0) else "x" end' <<< "$base" 2>/dev/null || echo x)"
+  # Unparseable / non-object / empty → INSUFFICIENT (no decision steps to compare).
+  case "$cand_total" in ''|*[!0-9]*) echo "INSUFFICIENT"; return 0 ;; esac
+  case "$base_total" in ''|*[!0-9]*) echo "INSUFFICIENT"; return 0 ;; esac
+  if [ "$cand_total" -lt "$min_c" ] || [ "$base_total" -lt "$min_b" ]; then
+    echo "INSUFFICIENT"; return 0
+  fi
+  if [ "$cand_total" -eq 0 ] || [ "$base_total" -eq 0 ]; then
+    echo "INSUFFICIENT"; return 0
+  fi
+  # Max absolute per-class share delta, in integer per-mille (round half-up), over the union
+  # of decision classes seen on either side (a class absent on one side counts as 0 there).
+  local max_delta
+  max_delta="$(jq -nr --argjson c "$cand" --argjson b "$base" \
+    --argjson ct "$cand_total" --argjson bt "$base_total" '
+    (($c|keys) + ($b|keys) | unique) as $classes
+    | [ $classes[]
+        | ((( ($c[.]//0)*1000 + ($ct/2) ) / $ct) | floor) as $cs
+        | ((( ($b[.]//0)*1000 + ($bt/2) ) / $bt) | floor) as $bs
+        | (($cs - $bs) | if . < 0 then -. else . end) ]
+    | max // 0' 2>/dev/null || echo 0)"
+  case "$max_delta" in ''|*[!0-9]*) max_delta=0 ;; esac
+  if [ "$max_delta" -ge "$max_shift" ]; then echo "SHIFT"; else echo "OK"; fi
+}
