@@ -77,6 +77,7 @@ jobs:
               if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
                 echo "PR is a draft — skipping"
                 echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "decision=skip-draft" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               PR_URL="${{ github.event.pull_request.html_url }}"
@@ -147,6 +148,7 @@ jobs:
           if [ "$STATE" != "OPEN" ] || [ "$IS_DRAFT" = "true" ]; then
             echo "PR is $STATE (draft=$IS_DRAFT) — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "decision=skip-draft" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "PR is open and not a draft ✓"
@@ -163,6 +165,7 @@ jobs:
           if [ "$TOTAL" -eq 0 ]; then
             echo "No CI checks found on this PR — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "decision=skip-checks-pending" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -192,6 +195,7 @@ jobs:
           if ! REASON=$(echo "$CHECKS" | pr_auto_review_checks_ready "$REQUIRED_JSON" "$SELF_CHECK"); then
             echo "$REASON"
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "decision=skip-checks-pending" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "$REASON ✓"
@@ -203,6 +207,7 @@ jobs:
           if [ "$REVIEW_DECISION" = "CHANGES_REQUESTED" ]; then
             echo "Effective review decision is CHANGES_REQUESTED — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "decision=skip-changes-requested" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "No CHANGES_REQUESTED review decision ✓"
@@ -224,12 +229,14 @@ jobs:
           if [ "$UNRESOLVED" -gt 0 ]; then
             echo "$UNRESOLVED unresolved review thread(s) — skipping"
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "decision=skip-unresolved-threads" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "No unresolved review threads ✓"
 
           echo "All readiness criteria met — dispatching review agent"
           echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "decision=dispatched" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch review agent
         if: steps.criteria.outputs.ready == 'true'
@@ -244,3 +251,27 @@ jobs:
             --field event_type=pr-review-mention \
             --field "client_payload[pr_url]=$PR_URL"
           echo "::notice::Auto-review dispatched for $PR_URL"
+
+      # Decision telemetry (#668 increment 4, Layer 2). Each outcome branch is a no-op
+      # step whose NAME encodes the decision the gate reached; exactly one condition is
+      # true per run, so the taken branch runs (conclusion=success) and the rest are
+      # `skipped`. The canary-rollout engine reads these names off `gh run view --json
+      # jobs` (decision_class / _sample_decision_counts) to tally the decision-mix and
+      # detect a distribution shift in a candidate. Additive + side-effect-free: a run
+      # that short-circuits before a decision (n/a event, no PR) emits none, and no
+      # consumer other than the opt-in gate.correctness block reads them.
+      - name: 'decision: dispatched'
+        if: steps.criteria.outputs.decision == 'dispatched'
+        run: 'true'
+      - name: 'decision: skip-draft'
+        if: steps.pr.outputs.decision == 'skip-draft' || steps.criteria.outputs.decision == 'skip-draft'
+        run: 'true'
+      - name: 'decision: skip-checks-pending'
+        if: steps.criteria.outputs.decision == 'skip-checks-pending'
+        run: 'true'
+      - name: 'decision: skip-changes-requested'
+        if: steps.criteria.outputs.decision == 'skip-changes-requested'
+        run: 'true'
+      - name: 'decision: skip-unresolved-threads'
+        if: steps.criteria.outputs.decision == 'skip-unresolved-threads'
+        run: 'true'
