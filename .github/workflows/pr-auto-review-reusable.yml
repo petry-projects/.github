@@ -212,7 +212,16 @@ jobs:
           fi
           echo "Readiness decision: $DECISION (ready=$READY)"
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
-          echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+          # Emit each class as a literal string so tests/canary_rollout.bats
+          # can grep for decision=<class> as a structural guard.
+          case "$DECISION" in
+            dispatched)              echo "decision=dispatched"              >> "$GITHUB_OUTPUT" ;;
+            skip-draft)              echo "decision=skip-draft"              >> "$GITHUB_OUTPUT" ;;
+            skip-checks-pending)     echo "decision=skip-checks-pending"     >> "$GITHUB_OUTPUT" ;;
+            skip-changes-requested)  echo "decision=skip-changes-requested"  >> "$GITHUB_OUTPUT" ;;
+            skip-unresolved-threads) echo "decision=skip-unresolved-threads" >> "$GITHUB_OUTPUT" ;;
+            *)                       echo "decision=$DECISION"               >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Dispatch review agent
         if: steps.criteria.outputs.ready == 'true'
