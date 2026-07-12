@@ -261,11 +261,19 @@ _tier_sample() {
   echo "$executed ${earliest:--}"
 }
 
-# _benign_patterns <agent> — emit the per-reusable known-benign failure-class allowlist
-# (#1025 P2) as TSV "<workflow_regex>\t<step_regex>", one entry per line. Empty if none.
+# _benign_patterns <agent> <differs 0|1> — emit the per-reusable known-benign
+# failure-class allowlist (#1025 P2) as TSV "<workflow_regex>\t<step_regex>", one entry
+# per line. Empty if none apply. differs-aware (#668): when the candidate CHANGED the
+# reusable (differs=1) only classes explicitly marked `version_independent: true` are
+# emitted — a failure that occurs before/independent of the candidate's own code (e.g. a
+# Dependabot-context secrets failure at startup) can never be candidate-caused, so it may
+# be excluded even for a changed reusable. Every OTHER class stays disabled at differs=1,
+# preserving the invariant that the allowlist cannot mask a candidate-introduced regression.
 _benign_patterns() {
-  _jq -r --arg a "$1" \
-    '.agents[$a].gate?.benign_failure_classes // [] | .[] | [(.workflow // ""), (.step // "")] | @tsv'
+  _jq -r --arg a "$1" --arg d "${2:-0}" \
+    '.agents[$a].gate?.benign_failure_classes // []
+     | map(select($d == "0" or .version_independent == true))
+     | .[] | [(.workflow // ""), (.step // "")] | @tsv'
 }
 
 # Memoization cache for _run_signature: keyed by "repo:run_id".
@@ -304,16 +312,17 @@ _failure_benign() {
   return 1
 }
 
-# _cumulative_health <agent> <since_z> <apply_benign 0|1> <repo...> — failures +
-# startup_failures across EVERY given tier repo since the candidate cut. When
-# apply_benign=1, failures matching the per-reusable known-benign allowlist (#1025 P2)
-# are counted separately and excluded from the blocking total. Prints
+# _cumulative_health <agent> <since_z> <differs 0|1> <repo...> — failures +
+# startup_failures across EVERY given tier repo since the candidate cut. Failures
+# matching the per-reusable known-benign allowlist (#1025 P2) are counted separately and
+# excluded from the blocking total; which allowlist entries apply depends on whether the
+# candidate changed the reusable (differs — see _benign_patterns, #668). Prints
 # "<failures> <startup_failures> <benign_excluded>".
 _cumulative_health() {
-  local agent="$1" since="$2" apply_benign="$3"; shift 3
+  local agent="$1" since="$2" differs="$3"; shift 3
   local wf repo json fail=0 startup=0 benign=0 patterns="" rid rwf
   wf="$(_agent_field "$agent" run_workflow)"
-  [ "$apply_benign" = "1" ] && patterns="$(_benign_patterns "$agent")"
+  patterns="$(_benign_patterns "$agent" "$differs")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
@@ -429,12 +438,13 @@ _frontier_state() {
   [ "$dwell_h" -lt 0 ] && dwell_h=0
 
   # Whether the candidate changed the agent's reusable vs the prior channel on the frontier.
-  # The known-benign allowlist is applied ONLY when the reusable is byte-identical (differs=0),
-  # so it can never mask a candidate-introduced regression (#1025 P2).
-  local prior differs apply_benign=1
+  # At differs=1 the known-benign allowlist narrows to classes marked version_independent
+  # (#668) — inherently context-caused failures that can never be candidate-introduced —
+  # and every other class is disabled, so the allowlist can never mask a candidate-introduced
+  # regression (#1025 P2).
+  local prior differs
   prior="$(channel_commit "$agent" "$frontier")"
   differs="$(_reusable_differs "$agent" "$cand" "$prior")"
-  if [ "$differs" = "1" ]; then apply_benign=0; fi
 
   # Cumulative health across EVERY concrete tier repo since the candidate's own cut.
   local all_repos=() ch3
@@ -443,7 +453,7 @@ _frontier_state() {
       < <(resolve_members "$agent" "$ch3")
   done
   local cum_fail cum_startup cum_benign
-  read -r cum_fail cum_startup cum_benign < <(_cumulative_health "$agent" "$cut_z" "$apply_benign" "${all_repos[@]}")
+  read -r cum_fail cum_startup cum_benign < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_repos[@]}")
 
   # Per-transition knobs (registry-configurable; #548 defaults live in the ring SoT).
   local dwell_floor waived="false" target=0

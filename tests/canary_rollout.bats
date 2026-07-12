@@ -1245,3 +1245,106 @@ _drift_rings_one_agent() {
   grep -q "Canary Rollout — reusable drift" "$summ"
   grep -q "foo-reusable.yml" "$summ"
 }
+
+# ── differs-aware benign classes: version_independent (#668) ────────────────────
+# At differs=1 (candidate changed the reusable) the benign allowlist normally disables
+# entirely — which chronically false-blocked actively-developed agents on inherently
+# environmental failures (#864 Dependabot-context startup failures, #664 workload
+# timeouts). A class marked `version_independent: true` fails before/independent of the
+# candidate's own code, so it stays excluded from cum_fail even at differs=1; every
+# unmarked class still disables, preserving the can't-mask-a-regression invariant.
+
+@test "_benign_patterns: differs=0 emits every benign class (unchanged behaviour)" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _benign_patterns dev-lead 0"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 2 ]
+  [[ "$output" == *"[Dd]ependabot"* ]]
+  [[ "$output" == *"[Pp]ush"* ]]
+}
+
+@test "_benign_patterns: differs=1 emits ONLY version_independent classes" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _benign_patterns dev-lead 1"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 1 ]
+  [[ "$output" == *"[Dd]ependabot"* ]]
+  [[ "$output" != *"[Pp]ush"* ]]
+}
+
+@test "_benign_patterns: differs defaults to 0 (all classes) when omitted" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _benign_patterns dev-lead"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 2 ]
+}
+
+# _vi_benign_stub <failed_step_name> — the _graduated_stub layout (next=cccc candidate,
+# ring0..stable=bbbb prior, reusable DIFFERS) but every source-tier run is a FAILURE whose
+# failed step is <failed_step_name>, so the benign matcher is exercised at differs=1.
+_vi_benign_stub() {
+  local failed_step="$1"
+  STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'case "$*" in'
+    printf '  *"run list"*) jq -nc --arg d "%s" '"'"'[range(20)|{conclusion:"failure",createdAt:$d,databaseId:99001,workflowName:"Dev-Lead Agent"}]'"'"' ;;\n' "$run_iso"
+    printf '  *"run view"*) jq -nc --arg s "%s" '"'"'{jobs:[{steps:[{name:$s,conclusion:"failure"}]}]}'"'"' ;;\n' "$failed_step"
+    echo '  *) echo "{}" ;;'
+    echo 'esac'
+  } > "$STUB_BIN/gh"
+  chmod +x "$STUB_BIN/gh"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'case "$*" in'
+    printf '  *"for-each-ref"*) echo "cccccccccccccccccccccccccccccccccccccccc||%s" ;;\n' "$cut_iso"
+    echo '  *"rev-parse"*"cccccccccccccccccccccccccccccccccccccccc:"*) echo "reuseAAAA" ;;'
+    echo '  *"rev-parse"*"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:"*) echo "reuseBBBB" ;;'
+    echo '  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
+    echo '  *"rev-parse"*"dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
+    echo '  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
+    echo '  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
+    echo '  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
+    echo '  *) : ;;'
+    echo 'esac'
+  } > "$STUB_BIN/git"
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: differs=1 failure matching a version_independent class → excluded → PROMOTE (#668)" {
+  # Every in-window failure is the #864 Dependabot-context class (version_independent) —
+  # even though the candidate changed the reusable, cum_fail stays 0 and the gate promotes.
+  _vi_benign_stub "Dependabot context guard"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"PROMOTE"* ]]
+  [[ "$output" == *"benign=80"* ]]   # 20 failures on each of the 4 concrete tier repos, all excluded
+  [[ "$output" != *"BLOCKED"* ]]
+}
+
+@test "orchestrator: differs=1 failure matching a NON-version_independent class → still BLOCKED+REGRESSION" {
+  # The fix-review push class is NOT version_independent (a candidate COULD change push
+  # behaviour), so at differs=1 it stays disabled and the failure blocks as a regression.
+  _vi_benign_stub "Push fix-review branch"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"REGRESSION"* ]]
+}
+
+@test "canary-rings.json: dev-lead dependabot class is version_independent; push class is not (#668)" {
+  run jq -e '.agents["dev-lead"].gate.benign_failure_classes[]
+             | select(.id=="dependabot-context-dispatch") | .version_independent == true' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '[.agents["dev-lead"].gate.benign_failure_classes[]
+              | select(.id=="fix-review-git-push-permission")] | all(has("version_independent") | not)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rings.json: ci-failure-analyst no longer carries dev-lead's cloned (inert) benign classes" {
+  # The onboarding clone copied dev-lead's classes verbatim — their workflow regex
+  # 'Dev-Lead Agent' could never match a ci-failure-analyst run, so they were dead config.
+  run jq -e '.agents["ci-failure-analyst"].gate.benign_failure_classes == []' "$RINGS"
+  [ "$status" -eq 0 ]
+}
