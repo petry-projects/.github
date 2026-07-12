@@ -60,7 +60,10 @@ on:
         type: boolean
         default: false
       confirm:
-        description: "promote: clear an AWAITING_CONFIRMATION hold at a require_confirmation ring boundary (#668 Layer 3). This is the human go/no-go — NOT --override: it advances only a reliability-clean state and cannot bypass a failing gate."
+        description: >-
+          promote: clear an AWAITING_CONFIRMATION hold at a require_confirmation ring boundary
+          (#668 Layer 3). This is the human go/no-go — NOT --override: it advances only a
+          reliability-clean state and cannot bypass a failing gate.
         type: boolean
         default: false
       dry_run:
