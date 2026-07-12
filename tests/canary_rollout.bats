@@ -134,8 +134,8 @@ setup() {
   [ "$(decide_graduated 5 8 0 0 true 0 0)" = "SOAKING" ]
 }
 
-# ── classify_failure (triage: regression vs pre-existing/environmental) ────────
-# args: <reusable_differs 0|1> <category>
+# ── classify_failure (triage: regression vs pre-existing/environmental/suspect) ─
+# args: <reusable_differs 0|1> <category> [suspect_match 0|1]
 @test "classify_failure: reusable changed + non-environmental → REGRESSION" {
   [ "$(classify_failure 1 unknown)" = "REGRESSION" ]
 }
@@ -147,6 +147,25 @@ setup() {
   [ "$(classify_failure 1 rate-limit)" = "PRE_EXISTING" ]
   [ "$(classify_failure 1 infra)" = "PRE_EXISTING" ]
   [ "$(classify_failure 1 data)" = "PRE_EXISTING" ]
+}
+
+# ── classify_failure: SUSPECT third verdict (#668 increment 2, #675) ────────────
+# A suspect-class match at differs=1 becomes SUSPECT instead of REGRESSION — it still
+# BLOCKS + needs a human, but carries a discriminating question so the confirm is fast.
+@test "classify_failure: suspect match + reusable changed → SUSPECT (not REGRESSION)" {
+  [ "$(classify_failure 1 unknown 1)" = "SUSPECT" ]
+}
+@test "classify_failure: NO suspect match + reusable changed → still REGRESSION" {
+  [ "$(classify_failure 1 unknown 0)" = "REGRESSION" ]
+}
+@test "classify_failure: suspect match but reusable identical → PRE_EXISTING (can't be candidate-caused)" {
+  [ "$(classify_failure 0 unknown 1)" = "PRE_EXISTING" ]
+}
+@test "classify_failure: environmental category beats a suspect match → PRE_EXISTING" {
+  [ "$(classify_failure 1 infra 1)" = "PRE_EXISTING" ]
+}
+@test "classify_failure: suspect arg defaults to 0 (omitted) → REGRESSION at differs=1" {
+  [ "$(classify_failure 1 unknown)" = "REGRESSION" ]
 }
 
 # ── _reusable_differs: cross-repo host-aware blob compare (#613) ───────────────
@@ -1352,4 +1371,139 @@ GITEOF
   # 'Dev-Lead Agent' could never match a ci-failure-analyst run, so they were dead config.
   run jq -e '.agents["ci-failure-analyst"].gate.benign_failure_classes == []' "$RINGS"
   [ "$status" -eq 0 ]
+}
+
+# ── SUSPECT triage: suspect_failure_classes (#668 increment 2, #675) ─────────────
+# A *possibly-candidate-caused* failure class (dev-lead exit-124 workload timeouts) gets
+# the full REGRESSION verdict at differs=1 today, forcing ad-hoc human diagnosis each time.
+# A `suspect_failure_classes` entry (matched even at differs=1, unlike benign) instead
+# yields SUSPECT: still BLOCKS + needs a human, but carries a discriminating question so the
+# confirm is a 30-second check. Default-absent = today's behaviour for agents without it.
+
+@test "_suspect_patterns: emits the dev-lead workload-timeout class (wf/step TSV)" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _suspect_patterns dev-lead"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 1 ]
+  [[ "$output" == *"Dev-Lead Agent"* ]]
+  [[ "$output" == *"Stage timeout"* ]]
+}
+
+@test "_suspect_patterns: unknown agent key → empty output, no crash (null-safety)" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _suspect_patterns __nonexistent_agent__"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "_suspect_patterns: agent with no gate field → empty output, no crash (null-safety)" {
+  local tmp_rings
+  tmp_rings="$(mktemp "$BATS_TEST_TMPDIR/rings-nogate.XXXXXX.json")"
+  jq '.agents["no-gate-agent"] = {}' "$RINGS" > "$tmp_rings"
+  run env CANARY_RINGS="$tmp_rings" bash -c "source '$ORCH' && _suspect_patterns no-gate-agent"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "_suspect_patterns: agent without suspect_failure_classes → empty (default-off, byte-identical)" {
+  # agent-shield opts out entirely (no suspect_failure_classes key) → today's behaviour.
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _suspect_patterns agent-shield"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# _suspect_stub <failed_step_name> — like _vi_benign_stub: dev-lead is cross-repo
+# (host=.github-private), reusable DIFFERS (reuseAAAA vs reuseBBBB → _reusable_differs=1),
+# every tier repo returns failure runs whose failed step is <failed_step_name>. Feeds the
+# suspect-class check at differs=1 (where the benign allowlist would otherwise disable).
+_suspect_stub() {
+  local failed_step="$1"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(20)|{conclusion:"failure",createdAt:\$d,databaseId:88002,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) jq -nc --arg s "$failed_step" '{jobs:[{steps:[{name:\$s,conclusion:"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # no local refs for a cross-repo agent
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: differs=1 failure matching the suspect class → BLOCKED + SUSPECT (not REGRESSION)" {
+  # The exit-124 workload-timeout signature is a suspect class → even though the candidate
+  # changed the reusable, it triages SUSPECT (still blocks + needs a human), not REGRESSION.
+  _suspect_stub "Stage timeout (exit code 124)"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"REGRESSION"* ]]
+}
+
+@test "orchestrator: differs=1 non-suspect failure → still BLOCKED + REGRESSION" {
+  # A failure that matches no suspect class stays a full REGRESSION at differs=1.
+  _suspect_stub "Compile TypeScript"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"REGRESSION"* ]]
+  [[ "$output" != *"SUSPECT"* ]]
+}
+
+@test "orchestrator: SUSPECT still BLOCKS — promote refuses without --override" {
+  _suspect_stub "Stage timeout (exit code 124)"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"DRY-RUN"* ]]   # no move planned — the gate held
+}
+
+@test "orchestrator: SUSPECT is NOT advanced by --allow-pre-existing (only --override)" {
+  _suspect_stub "Stage timeout (exit code 124)"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --allow-pre-existing --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"DRY-RUN"* ]]
+}
+
+@test "canary-rings.json: dev-lead gate carries a suspect_failure_classes allowlist with guidance" {
+  run jq -e '.agents["dev-lead"].gate.suspect_failure_classes | type == "array" and length >= 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["dev-lead"].gate.suspect_failure_classes
+             | all(has("id") and has("workflow") and has("step") and has("reason") and has("guidance"))' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["dev-lead"].gate.suspect_failure_classes[]
+             | select(.id=="workload-timeout") | .step | test("124")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rings.json: suspect_failure_classes is default-absent for opted-out agents (byte-identical)" {
+  run jq -e '.agents["agent-shield"].gate | has("suspect_failure_classes") | not' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "_blocker_body: SUSPECT triage renders the class guidance (discriminating question)" {
+  # The blocker body must surface the workload-timeout discriminating question prominently
+  # so a human confirm is a fast check, and keep the SUSPECT label + needs-human routing.
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _blocker_body dev-lead 'next->ring0' cccccccccccc 1 0 SUSPECT petry-projects/.github-private '_(evidence)_'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" == *"needs-human"* ]]
+  [[ "$output" == *"override"* ]]   # the guidance names the fast path when unrelated
 }

@@ -158,19 +158,29 @@ decide_graduated() {
   echo "SOAKING"
 }
 
-# classify_failure <reusable_differs 0|1> <category> — triage an in-window failure
-# (called only when decide_graduated returns BLOCKED). Echoes:
+# classify_failure <reusable_differs 0|1> <category> [suspect_match 0|1] — triage an
+# in-window failure (called only when decide_graduated returns BLOCKED). Echoes:
 #   REGRESSION   — the candidate changed the reusable (differs=1) AND the failure is
-#                  not a known environmental class → HALT, auto-hold, recommend rollback.
+#                  not a known environmental class and not a suspect class → HALT,
+#                  auto-hold, recommend rollback.
+#   SUSPECT      — the candidate changed the reusable (differs=1) AND the failure matches
+#                  a `suspect_failure_classes` entry (#668 increment 2): a possibly-
+#                  candidate-caused class (e.g. an exit-124 workload timeout) that COULD be
+#                  a real regression, so it still BLOCKS + needs a human — but carries a
+#                  per-class discriminating question so the human confirm is fast. Unlike a
+#                  `version_independent` benign class it is NOT auto-cleared.
 #   PRE_EXISTING — the reusable is byte-identical to the prior channel (differs=0), OR
 #                  the failure is environmental (comment-cap / rate-limit / infra / data)
 #                  → report, do NOT rollback, do NOT advance.
+# Precedence: environmental category first, then differs=0 (can't be candidate-caused),
+# then a suspect match narrows an otherwise-REGRESSION verdict to SUSPECT.
 classify_failure() {
-  local differs="${1:-0}" category="${2:-unknown}"
+  local differs="${1:-0}" category="${2:-unknown}" suspect="${3:-0}"
   case "$category" in
     comment-cap|rate-limit|infra|data) echo "PRE_EXISTING"; return 0 ;;
   esac
-  if [ "$differs" = "1" ]; then echo "REGRESSION"; else echo "PRE_EXISTING"; fi
+  if [ "$differs" != "1" ]; then echo "PRE_EXISTING"; return 0; fi
+  if [ "$suspect" = "1" ]; then echo "SUSPECT"; else echo "REGRESSION"; fi
 }
 
 # benign_match <workflow_name> <failure_signature> <workflow_regex> <step_regex>
