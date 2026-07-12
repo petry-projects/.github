@@ -6,6 +6,12 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "name", "title", "summary", "status", "owner", "definition", "triggers", "trust", "canary"],
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "stable"}}, "required": ["status"]},
+      "then": {"required": ["evals"], "description": "A persona at status 'stable' MUST carry an evals block (the held-out gate). See persona-standards.md §1."}
+    }
+  ],
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -127,6 +133,7 @@
         },
         "opt_out_label": {
           "type": "string",
+          "minLength": 1,
           "description": "Label that opts an item out of this persona entirely (convention: '<id>:hands-off')."
         },
         "surfaces": {
@@ -155,6 +162,7 @@
               },
               "gate_label": {
                 "type": "string",
+                "minLength": 1,
                 "description": "REQUIRED when mode == 'write': the label that arms the persona on this surface (e.g. 'dev-lead')."
               },
               "trust_floor": {

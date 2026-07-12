@@ -1,39 +1,52 @@
 # Persona scaffold — copy me
 
-Copy this directory to **`.github-private/personas/<id>/`** to onboard a new
+Copy `persona.yml` into **`.github-private/personas/<id>/`** to onboard a new
 agentic persona. It is governed by
-[`standards/persona-standards.md`](../../persona-standards.md) and validated
-against [`persona.schema.json`](../persona.schema.json).
+[`standards/persona-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md)
+and validated against
+[`persona.schema.json`](https://github.com/petry-projects/.github/blob/main/standards/personas/persona.schema.json).
+(Links are absolute so they still resolve after this file is copied into the
+`.github-private` repo.)
 
 ## What's here
 
 ```text
 persona.yml            # the manifest (index-of-record) — fill every CHANGE-ME
 README.md              # this file — replace with a short note about your persona
-agents/                # (optional) drop a copilot-profile <id>.md here, or delete
-prompts/               # (optional) workflow prompt library, or delete
-evals/                 # STARTER dev/ + holdout/ pair — move it to .github-private
-                       #   evals/<id>/ (NOT into personas/) so validate-cases.py
-                       #   and holdout-guard.yml cover it. Do not keep it here.
+evals/                 # STARTER dev/ + holdout/ pair — copy it OUT to the repo
+                       #   eval tree (see below); do not keep it in personas/<id>/
 ```
 
-Delete the layer directories you do not use — most personas use one or two.
-The `evals/` starter is copied out to the repo `evals/<id>/` tree, not kept
+A persona **instance directory** (`.github-private/personas/<id>/`) holds only
+`persona.yml` + `README.md`. Every implementation layer lives in its **canonical
+repo-level home**, and the manifest just points at it:
+
+| Layer | Canonical home (in `.github-private`) |
+|---|---|
+| Framework agent | `frameworks/<framework>/…` (vendored) |
+| Copilot profile | `agents/<id>.md` |
+| Workflow prompt library | `prompts/<id>/` |
+| Eval set | `evals/<id>/` (`dev/` + `holdout/`) |
+
+Author those files directly in their homes — don't nest `agents/` or `prompts/`
 inside `personas/<id>/`.
 
 ## Onboarding order
 
-1. **Copy & rename.** `cp -r standards/personas/TEMPLATE .github-private/personas/<id>`.
-2. **Pick your definition layer(s)** in `persona.yml` `definition.layers[]`.
-   Prefer wrapping a vendored framework agent where a good upstream exists
-   (pin `vendor_pin` to its `VENDOR.md`); layer local behavior via
-   `local_overrides`, never by hand-editing `frameworks/`.
+1. **Copy & rename.** `cp standards/personas/TEMPLATE/persona.yml .github-private/personas/<id>/persona.yml` (and add a short `README.md`).
+2. **Pick your definition layer(s)** in `persona.yml` `definition.layers[]`, each
+   `path` pointing at its canonical home above. Prefer wrapping a vendored
+   framework agent where a good upstream exists (pin `vendor_pin` to its
+   `VENDOR.md`); layer local behavior via `local_overrides`, never by
+   hand-editing `frameworks/`. A Copilot profile goes at
+   `.github-private/agents/<id>.md`; a prompt library at
+   `.github-private/prompts/<id>/`.
 3. **Fill the trigger matrix.** One row per surface. `default_mode: advisory`.
    Every `write` surface needs a `gate_label`. Define an `opt_out_label`.
 4. **Set the trust floor** (`[OWNER, MEMBER, COLLABORATOR]` unless you have a
    reason to differ).
-5. **Add evals.** Move the starter into `.github-private` `evals/<id>/`: ≥
-   `min_cases` held-out cases under `evals/<id>/holdout/` and proposer-visible
+5. **Add evals.** Copy the `evals/` starter into `.github-private` `evals/<id>/`:
+   ≥ `min_cases` held-out cases under `evals/<id>/holdout/` and proposer-visible
    cases under `evals/<id>/dev/`. See `.github-private` `evals/README.md`.
 6. **Register the canary entry** — one `agents.<id>` block in
    `standards/canary-rings.json` (the *only* place rings are written). Point
@@ -43,7 +56,7 @@ inside `personas/<id>/`.
 8. **Roll out** `next → ring0 → ring1 → stable`, eval gate green before `stable`.
 
 The full gate is the **Definition of Done** checklist in
-[`persona-standards.md` §7](../../persona-standards.md).
+[`persona-standards.md` §7](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md).
 
 ## Worked example
 
