@@ -183,6 +183,22 @@ jobs:
             REQUIRED_JSON="[]"
           fi
 
+          # Resolve the base branch's required status-check contexts. The gate
+          # counts ONLY these — non-required and cancelled advisory contexts
+          # (e.g. a superseded "dev-lead / ci-relay" run) must not block dispatch
+          # (issue #680). An empty set falls back to a fail/pending-only gate.
+          # gh api writes the error body to stdout on a 4xx (e.g. no ruleset), so
+          # capture it inside the `if` condition — a failing pipeline concatenated
+          # with a fallback would otherwise yield two JSON values.
+          if RULES_JSON=$(gh api "/repos/${REPO}/rules/branches/${BASE_BRANCH}" 2>/dev/null); then
+            REQUIRED_JSON=$(printf '%s' "$RULES_JSON" | pr_auto_review_required_contexts 2>/dev/null || echo "[]")
+          else
+            REQUIRED_JSON="[]"
+          fi
+          if [ -z "${REQUIRED_JSON}" ]; then
+            REQUIRED_JSON="[]"
+          fi
+
           # Get the name of this workflow's own check run so it can be excluded
           # from the gate — an in-progress run shows as "pending" and would
           # otherwise block itself on every trigger.
