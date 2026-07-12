@@ -126,6 +126,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # This step is thin I/O glue: it gathers the PR facts via gh / GraphQL
+          # and hands them to the pure decision core (pr_auto_review_ready). All
+          # readiness logic — and the decision class it returns — lives in the
+          # unit-tested lib (test/workflows/pr-auto-review/). See #668 increment 5.
+
           # shellcheck source=/dev/null
           . .pr-auto-review-tooling/.github/scripts/pr-auto-review/lib/ready-check.sh
 
@@ -134,8 +139,13 @@ jobs:
           # is simpler and works for both same-repo and fork PRs.
           REPO=$(echo "$PR_URL" | sed 's|https://github.com/||; s|/pull/.*||')
 
+          # ── Gather PR facts ──────────────────────────────────────────────────
+
           # Fetch PR metadata in one call, including the effective review decision
           # and the base branch (needed to resolve required status checks).
+          # reviewDecision reflects the aggregate current state (accounts for
+          # dismissals and superseding reviews), unlike the REST reviews list
+          # which returns full history and can produce false positives.
           PR_META=$(gh pr view "$PR_URL" \
             --json state,isDraft,number,reviewDecision,baseRefName)
           STATE=$(echo "$PR_META" | jq -r '.state')
@@ -144,29 +154,12 @@ jobs:
           REVIEW_DECISION=$(echo "$PR_META" | jq -r '.reviewDecision // ""')
           BASE_BRANCH=$(echo "$PR_META" | jq -r '.baseRefName')
 
-          # 1. PR must be open and not a draft.
-          if [ "$STATE" != "OPEN" ] || [ "$IS_DRAFT" = "true" ]; then
-            echo "PR is $STATE (draft=$IS_DRAFT) — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "decision=skip-draft" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "PR is open and not a draft ✓"
-
-          # 2. All REQUIRED CI checks must be completed and passing.
-          #    gh pr checks --json may exit non-zero when checks are
-          #    failing/pending but still writes the JSON payload to stdout;
-          #    use || true so set -e doesn't discard that output.
+          # gh pr checks --json may exit non-zero when checks are failing/pending
+          # but still writes the JSON payload to stdout; use || true so set -e
+          # doesn't discard that output.
           CHECKS=$(gh pr checks "$PR_URL" --json bucket,name 2>/dev/null || true)
           if [ -z "${CHECKS}" ]; then
             CHECKS="[]"
-          fi
-          TOTAL=$(echo "$CHECKS" | jq 'length')
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "No CI checks found on this PR — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "decision=skip-checks-pending" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
 
           # Resolve the base branch's required status-check contexts. The gate
@@ -192,27 +185,7 @@ jobs:
             "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
 
-          if ! REASON=$(echo "$CHECKS" | pr_auto_review_checks_ready "$REQUIRED_JSON" "$SELF_CHECK"); then
-            echo "$REASON"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "decision=skip-checks-pending" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "$REASON ✓"
-
-          # 3. Effective review decision must not be CHANGES_REQUESTED.
-          #    reviewDecision reflects the aggregate current state (accounts for
-          #    dismissals and superseding reviews), unlike the REST reviews list
-          #    which returns full history and can produce false positives.
-          if [ "$REVIEW_DECISION" = "CHANGES_REQUESTED" ]; then
-            echo "Effective review decision is CHANGES_REQUESTED — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "decision=skip-changes-requested" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "No CHANGES_REQUESTED review decision ✓"
-
-          # 4. No unresolved review threads.
+          # Count unresolved review threads.
           #    REST API has no resolved field on review comments; GraphQL is
           #    required. \$owner/\$repo/\$number are GraphQL variable references;
           #    the backslash-dollar escaping prevents shell expansion while
@@ -226,17 +199,20 @@ jobs:
             -f repo="${REPO##*/}" \
             -F number="${PR_NUMBER}" \
             --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length")
-          if [ "$UNRESOLVED" -gt 0 ]; then
-            echo "$UNRESOLVED unresolved review thread(s) — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "decision=skip-unresolved-threads" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "No unresolved review threads ✓"
 
-          echo "All readiness criteria met — dispatching review agent"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-          echo "decision=dispatched" >> "$GITHUB_OUTPUT"
+          # ── Decide (pure core) ───────────────────────────────────────────────
+          # The lib returns the decision class on stdout and exit 0 iff ready;
+          # the glue only echoes it to $GITHUB_OUTPUT (Layer 2 telemetry reads it).
+          if DECISION=$(pr_auto_review_ready \
+                "$STATE" "$IS_DRAFT" "$CHECKS" "$REQUIRED_JSON" \
+                "$SELF_CHECK" "$REVIEW_DECISION" "$UNRESOLVED"); then
+            READY=true
+          else
+            READY=false
+          fi
+          echo "Readiness decision: $DECISION (ready=$READY)"
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch review agent
         if: steps.criteria.outputs.ready == 'true'

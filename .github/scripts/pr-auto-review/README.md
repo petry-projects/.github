@@ -19,6 +19,29 @@ Pure, side-effect-free helpers. Source the file, then call:
 |----------|-------|---------|
 | `pr_auto_review_required_contexts` | branch-rules JSON on stdin (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) | prints a compact JSON array of required status-check context names (`[]` if none / non-array) |
 | `pr_auto_review_checks_ready REQUIRED_JSON SELF_NAME` | checks JSON on stdin (`gh pr checks --json bucket,name`) | prints a one-line reason; `0` ready, `1` not ready |
+| `pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME REVIEW_DECISION UNRESOLVED_COUNT` | the PR facts the workflow gathers (all as arguments — no stdin) | prints the **decision class** on stdout; `0` ready, `1` not ready |
+
+### The unified decision core — `pr_auto_review_ready`
+
+`pr_auto_review_ready` is the single pure core the reusable workflow calls. It
+evaluates all four readiness criteria, in gate order, and **prints the decision
+class** on stdout — one of the classes Layer 2 decision-telemetry (issue #668
+increment 4) consumes:
+
+| Class | Meaning | Criterion |
+|-------|---------|-----------|
+| `skip-draft` | PR is not `OPEN`, or is a draft | #1 |
+| `skip-checks-pending` | a required check is missing / not yet passing, or no checks reported at all | #2 |
+| `skip-changes-requested` | effective review decision is `CHANGES_REQUESTED` | #3 |
+| `skip-unresolved-threads` | ≥1 unresolved review thread | #4 |
+| `dispatched` | all criteria satisfied — dispatch the review agent | — |
+
+Exit status is `0` iff the class is `dispatched`. Criteria are checked in order,
+so an earlier skip wins (a draft PR that also has `CHANGES_REQUESTED` reports
+`skip-draft`). The required-checks gate (#2) is delegated verbatim to
+`pr_auto_review_checks_ready`, so the required-vs-non-required behaviour of issue
+#680 is unchanged. The function makes **no** external calls — the workflow does
+all the gh / GraphQL I/O and echoes the returned class to `$GITHUB_OUTPUT`.
 
 ### Passing-gate semantics (issue #680)
 
