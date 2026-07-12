@@ -1259,6 +1259,24 @@ _drift_rings_one_agent() {
   [ "$(wc -l <<< "$output")" -eq 2 ]
 }
 
+@test "_benign_patterns: unknown agent key → empty output, no crash (null-safety)" {
+  # .agents[$a]? evaluates to null for an absent key; the ?-chain prevents
+  # a fatal 'Cannot index null' jq error and returns [] via the // [] fallback.
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH' && _benign_patterns __nonexistent_agent__ 0"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "_benign_patterns: agent with no gate field → empty output, no crash (null-safety)" {
+  # Construct a minimal rings file where the agent key exists but has no .gate.
+  local tmp_rings
+  tmp_rings="$(mktemp "$BATS_TEST_TMPDIR/rings-nogate.XXXXXX.json")"
+  jq '.agents["no-gate-agent"] = {}' "$RINGS" > "$tmp_rings"
+  run env CANARY_RINGS="$tmp_rings" bash -c "source '$ORCH' && _benign_patterns no-gate-agent 0"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # _vi_benign_stub <failed_step_name> — dev-lead is a cross-repo agent (host=.github-private),
 # so channel and release tags resolve via gh api (not local git). Layout: next=cccc candidate,
 # ring0..stable=bbbb prior; reusable DIFFERS (reuseAAAA vs reuseBBBB → _reusable_differs=1).
