@@ -39,8 +39,8 @@ increment 4) consumes:
 Exit status is `0` iff the class is `dispatched`. Criteria are checked in order,
 so an earlier skip wins (a draft PR that also has `CHANGES_REQUESTED` reports
 `skip-draft`). The required-checks gate (#2) is delegated verbatim to
-`pr_auto_review_checks_ready`, so the required-vs-non-required behaviour of issue
-#680 is unchanged. The function makes **no** external calls — the workflow does
+`pr_auto_review_checks_ready`, so the required-vs-non-required behaviour of
+issue #680 is unchanged. The function makes **no** external calls — the workflow does
 all the gh / GraphQL I/O and echoes the returned class to `$GITHUB_OUTPUT`.
 
 ### Passing-gate semantics (issue #680)
