@@ -21,7 +21,7 @@ set -euo pipefail
 #   canary-rollout.sh autocut      [--dry-run]         # cut+seed new candidates for changed reusables (gated by CANARY_AUTO_CUT)
 #   canary-rollout.sh evaluate     <agent>             # read-only gate + health report (also the #502 report)
 #   canary-rollout.sh evaluate-all                     # read-only evaluate for EVERY registry agent (fleet-wide; the 4h timer)
-#   canary-rollout.sh promote  <agent> [--override] [--allow-pre-existing] [--dry-run]
+#   canary-rollout.sh promote  <agent> [--override] [--confirm] [--allow-pre-existing] [--dry-run]  # --confirm clears an AWAITING_CONFIRMATION hold (#668 Layer 3); NOT --override
 #   canary-rollout.sh promote-all [--override] [--allow-pre-existing] [--dry-run]  # gated fleet auto-promote (the SCHEDULED arm, #1045b)
 #   canary-rollout.sh rollback <agent> <ring> --to <vX.Y.Z> [--dry-run]
 #   canary-rollout.sh resolve  <agent> <channel>       # debug: print resolved member repos
@@ -518,6 +518,16 @@ _frontier_state() {
 
   local state; state="$(decide_graduated "$dwell_h" "$dwell_floor" "$sample" "$target" "$waived" "$cum_fail" "$cum_startup")"
 
+  # Layer 3 (#668 increment 3): opt-in human confirmation at a ring boundary. When the
+  # reliability verdict is PROMOTE but the frontier transition sets require_confirmation, hold
+  # in a distinct AWAITING_CONFIRMATION state — SOAKING-like: the scheduled promote-all never
+  # auto-advances it. It is cleared only by a deliberate `promote <agent> --confirm` (the
+  # dispatch IS the confirmation; no state store). The overlay fires ONLY from an otherwise-
+  # PROMOTE (reliability-clean) verdict, so `--confirm` can never bypass a BLOCKED gate.
+  if [ "$state" = "PROMOTE" ] && [ "$(_gate_knob "$agent" "$transition" require_confirmation)" = "true" ]; then
+    state="AWAITING_CONFIRMATION"
+  fi
+
   local triage="-"
   if [ "$state" = "BLOCKED" ]; then
     triage="$(classify_failure "$differs" "${CANARY_FAILURE_CATEGORY:-unknown}" "$cum_suspect")"
@@ -554,6 +564,8 @@ cmd_evaluate() {
       else
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback, do NOT advance."
       fi
+    elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
+      echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
     fi
   fi
 }
@@ -579,10 +591,11 @@ cmd_evaluate_all() {
 
 cmd_promote() {
   local agent="$1"; shift
-  local override=false dry=false allow_pre_flag=false
+  local override=false dry=false allow_pre_flag=false confirm=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --override) override=true ;;
+      --confirm)  confirm=true ;;
       --dry-run)  dry=true ;;
       --allow-pre-existing) allow_pre_flag=true ;;
       *) echo "::error::unknown promote flag: $1" >&2; return 2 ;;
@@ -610,11 +623,24 @@ cmd_promote() {
   [ "$state" = "PROMOTE" ] && advance=true
   [ "$override" = true ] && advance=true
   [ "$state" = "BLOCKED" ] && [ "$triage" = "PRE_EXISTING" ] && [ "$allow_pre" = true ] && advance=true
+  # Layer 3 (#668 increment 3): a human --confirm advances an AWAITING_CONFIRMATION frontier
+  # (reliability is already PROMOTE — the state is only ever set from an otherwise-PROMOTE
+  # verdict). --confirm is NOT --override: it clears ONLY this state and can never advance a
+  # BLOCKED gate, so it cannot bypass reliability.
+  [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ] && advance=true
   if [ "$advance" != true ]; then
-    echo "gate=$state for ring '$frontier' [$transition] (cum_fail=$cum_fail, triage=$triage) — not promoting. (use --override, or --allow-pre-existing for a PRE_EXISTING triage, after investigating)"
+    if [ "$state" = "AWAITING_CONFIRMATION" ]; then
+      echo "gate=AWAITING_CONFIRMATION for ring '$frontier' [$transition] — reliability PASSED; holding for an opt-in human go/no-go. Review the canary-confirm issue, then dispatch: promote $agent --confirm  (--confirm advances ONLY this reliability-clean state; it is NOT --override)."
+    else
+      echo "gate=$state for ring '$frontier' [$transition] (cum_fail=$cum_fail, triage=$triage) — not promoting. (use --override, or --allow-pre-existing for a PRE_EXISTING triage, after investigating)"
+    fi
     return 0
   fi
-  [ "$state" != "PROMOTE" ] && echo "::warning::advancing $agent/$frontier despite gate state '$state' (triage=$triage)"
+  if [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ]; then
+    echo "::notice::human confirmation received (--confirm) — advancing $agent/$frontier [$transition] past the confirmation go/no-go (reliability was already PROMOTE)."
+  elif [ "$state" != "PROMOTE" ]; then
+    echo "::warning::advancing $agent/$frontier despite gate state '$state' (triage=$triage)"
+  fi
   # Consistent move (#1076): EVERY agent moves its channel tag via `gh api` on its HOST
   # repo — never a local `git push`. A local force-push is NOT granted the release-manager
   # App's ruleset bypass for a tag UPDATE, so it 013s on a protected channel tag such as
@@ -807,6 +833,54 @@ _Whole-fleet status is in the Canary Rollout workflow run's job summary (Actions
 EOF
 }
 
+# _confirm_body <agent> <transition> <cand> <prior> <host> <sample> <target> — the body of the
+# evidence-carrying human-confirmation issue for an AWAITING_CONFIRMATION frontier (#668 Layer 3).
+# Reliability has PASSED; a human confirms the candidate is behaving CORRECTLY (not merely exiting
+# green) before it reaches the stable tier (all consumers). Marker-keyed (canary-confirm:<agent>)
+# so sync-issues upserts it idempotently and auto-closes it on promote/candidate change.
+_confirm_body() {
+  local agent="$1" transition="$2" cand="$3" prior="$4" host="$5" sample="$6" target="$7"
+  local suspect; suspect="$(_suspect_guidance "$agent")"
+  local watch=""
+  [ -n "$suspect" ] && watch="
+
+### Watch for (suspect classes registered for this agent)
+$suspect"
+  local diff_link
+  if [ -n "$prior" ]; then
+    diff_link="https://github.com/$host/compare/${prior}...${cand}"
+  else
+    diff_link="(no prior stable release)"
+  fi
+  local display_prior="${prior:0:12}"
+  display_prior="${display_prior:-none}"
+  cat <<EOF
+<!-- canary-confirm:$agent -->
+**Canary rollout — human confirmation requested (\`$transition\`).**
+
+The release gate holds \`$agent\` in **AWAITING_CONFIRMATION**: reliability has PASSED (dwell + sample + cumulative health all clean), but this transition is flagged \`require_confirmation\` (#668 Layer 3), so a human confirms the candidate is behaving *correctly* — not merely exiting green — before it reaches the stable tier (all consumers). Filed + maintained by the Canary Rollout workflow; **regenerated each run and auto-closes** when the promotion is confirmed or the candidate changes — do not edit by hand.
+
+| field | value |
+|---|---|
+| agent | \`$agent\` |
+| transition | \`$transition\` |
+| candidate | \`${cand:0:12}\` |
+| current stable | \`$display_prior\` |
+| host repo | \`$host\` |
+| reliability | ✅ PROMOTE — source-tier sample **$sample** (target ≥ $target), cumulative health clean |
+
+### Review the candidate
+- **Diff (current stable → candidate):** $diff_link
+- Skim the changed reusable logic and the recent green runs on the ring1 tier before confirming.$watch
+
+### Confirm or hold
+- **Go:** dispatch the **Canary Rollout** workflow → command \`promote\`, agent \`$agent\`, **confirm = true** (or run \`promote $agent --confirm\` locally). \`--confirm\` advances ONLY this reliability-clean state; it is **not** \`--override\` and cannot bypass a failing gate.
+- **No-go:** if the candidate looks wrong, roll back instead of confirming (\`rollback $agent <ring> --to <prior release>\`).
+---
+_Whole-fleet status is in the Canary Rollout workflow run's job summary (Actions → Canary Rollout → latest run → Summary)._
+EOF
+}
+
 # _dashboard_md <rows_md> <timestamp> — the fleet-status table. This is a read-only snapshot
 # (not a work item), so it is rendered into the GitHub Actions run's job summary — NOT filed
 # as an issue: it needs no Issues:write, spawns no synthetic pinned issue, and shows on the
@@ -822,7 +896,7 @@ Last updated: \`$2\` · auto-promote armed: \`${CANARY_AUTO_PROMOTE:-unset}\` ·
 |---|---|---|---|---|---|
 $1
 
-\`PROMOTE\`/\`COMPLETE\`/\`SOAKING\` need no action. \`BLOCKED\` opens a per-agent issue (label \`canary-blocker\`) with the failing-run evidence; it auto-closes when the gate clears.
+\`PROMOTE\`/\`COMPLETE\`/\`SOAKING\` need no action. \`BLOCKED\` opens a per-agent issue (label \`canary-blocker\`) with the failing-run evidence; it auto-closes when the gate clears. \`AWAITING_CONFIRMATION\` (reliability passed, held for a human go/no-go at a \`require_confirmation\` boundary, #668 Layer 3) opens a \`canary-confirm\` issue with the diff link; confirm via \`promote <agent> --confirm\`.
 EOF
 }
 
@@ -845,6 +919,9 @@ cmd_sync_issues() {
     # question then --override, rather than a blind --override).
     gh label create dev-lead --repo "$ISSUE_REPO" --color 5319e7 --description "Route to the dev-lead agent for action" >/dev/null 2>&1 || true
     gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
+    # canary-confirm (#668 Layer 3): the human go/no-go issue for an AWAITING_CONFIRMATION
+    # frontier — a SEPARATE label/issue from canary-blocker so the two concerns never collide.
+    gh label create canary-confirm --repo "$ISSUE_REPO" --color fbca04 --description "canary-rollout: human go/no-go at a require_confirmation ring boundary" >/dev/null 2>&1 || true
   fi
   local rows="" agent
   while IFS= read -r agent; do
@@ -894,6 +971,49 @@ cmd_sync_issues() {
         blk="#$num (closed)"
       fi
     fi
+
+    # Layer 3 (#668 increment 3): the human go/no-go issue for an AWAITING_CONFIRMATION frontier.
+    # A SEPARATE marker/label from the blocker issue (the two concerns are independent), upserted
+    # idempotently and auto-closed once the agent is no longer awaiting confirmation (promoted,
+    # rolled back, or a new candidate cut). Labelled needs-human — a human confirms, dev-lead does
+    # not action it. Best-effort under set -e, like the blocker path (`|| true`).
+    local cnum_state cnum cistate
+    cnum_state="$(_issue_find canary-confirm "<!-- canary-confirm:$agent -->" || true)"
+    cnum="${cnum_state%%$'\t'*}"; cistate="${cnum_state##*$'\t'}"
+    if [ "$state" = "AWAITING_CONFIRMATION" ]; then
+      local prior cbody ctitle
+      prior="$(channel_commit "$agent" "$frontier" || true)"
+      cbody="$(_confirm_body "$agent" "$transition" "$cand" "$prior" "$host" "$_s" "$_t" || true)"
+      ctitle="Canary confirm: $agent $transition — human go/no-go before stable"
+      if [ -z "$cnum" ]; then
+        if [ "$dry" = true ]; then echo "  [DRY] would OPEN confirm issue for $agent"; blk="(new confirm)"; else
+          cnum="$(_gh_issue_create "$ctitle" "$cbody" "canary-confirm" || true)"
+          if [ -n "$cnum" ]; then
+            gh issue edit "$cnum" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+            echo "  opened confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"
+          else echo "::warning::could not open confirm issue for $agent (Issues:write on the App?)"; fi
+        fi
+      else
+        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"; else
+          [ "$cistate" = "OPEN" ] || gh issue reopen "$cnum" --repo "$ISSUE_REPO" >/dev/null 2>&1 || true
+          gh issue edit "$cnum" --repo "$ISSUE_REPO" --title "$ctitle" --body "$cbody" >/dev/null 2>&1 \
+            || echo "::warning::could not update confirm issue #$cnum for $agent"
+          gh issue edit "$cnum" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          echo "  updated confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"
+        fi
+      fi
+    else
+      # No longer awaiting — close a stale open confirm issue (confirmed, rolled back, or recut).
+      if [ -n "$cnum" ] && [ "$cistate" = "OPEN" ]; then
+        if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared confirm issue #$cnum for $agent ($state)"; else
+          gh issue close "$cnum" --repo "$ISSUE_REPO" \
+            --comment "✅ No longer awaiting confirmation — \`$agent\` is now \`$state\`. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
+          echo "  closed cleared confirm issue #$cnum for $agent"
+        fi
+        blk="#$cnum (confirm closed)"
+      fi
+    fi
+
     rows+="| \`$agent\` | $state | \`$transition\` | $cum_fail | $triage | $blk |"$'\n'
   done <<< "$agents"
 
@@ -1236,7 +1356,7 @@ main() {
   case "$sub" in
     evaluate)     [ $# -ge 1 ] || { echo "usage: evaluate <agent>" >&2; return 2; }; cmd_evaluate "$@" ;;
     evaluate-all) cmd_evaluate_all ;;
-    promote)      [ $# -ge 1 ] || { echo "usage: promote <agent> [--override] [--allow-pre-existing] [--dry-run]" >&2; return 2; }; cmd_promote "$@" ;;
+    promote)      [ $# -ge 1 ] || { echo "usage: promote <agent> [--override] [--confirm] [--allow-pre-existing] [--dry-run]" >&2; return 2; }; cmd_promote "$@" ;;
     promote-all)  cmd_promote_all "$@" ;;
     rollback)     [ $# -ge 2 ] || { echo "usage: rollback <agent> <ring> --to <vX.Y.Z>" >&2; return 2; }; cmd_rollback "$@" ;;
     resolve)      [ $# -ge 2 ] || { echo "usage: resolve <agent> <channel>" >&2; return 2; }; resolve_members "$@" ;;
