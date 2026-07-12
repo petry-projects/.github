@@ -863,6 +863,9 @@ GHEOF
   grep -q -- "--label canary-blocker" "$ISSUE_LOG"
   ! grep -q -- "--label canary-dashboard" "$ISSUE_LOG"
   ! grep -q "^PIN|" "$ISSUE_LOG"
+  # Blocker is ROUTED to the dev-lead agent for action (label applied via the App token,
+  # so the `issues: labeled` event triggers dev-lead) — not left sitting unowned.
+  grep -q -- "--add-label dev-lead" "$ISSUE_LOG"
   # The fleet-status table landed in the job summary file.
   grep -q "Canary Rollout — fleet status" "$summ"
   grep -q "dev-lead" "$summ"
