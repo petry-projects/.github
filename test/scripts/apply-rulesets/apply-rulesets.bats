@@ -49,6 +49,15 @@ EOF
   done
 }
 
+@test "pr-quality.json: omits 'automatic_copilot_code_review_enabled' (Free-plan API rejects it)" {
+  # GitHub's rulesets API 422s ("Unexpected parameter") on this pull_request
+  # parameter for Free-plan orgs, which blocks apply-rulesets from creating or
+  # updating pr-quality fleet-wide. It must stay out of the codified ruleset.
+  run jq -e '.rules[] | select(.type=="pull_request") | .parameters | has("automatic_copilot_code_review_enabled")' "$RULESETS_DIR/pr-quality.json"
+  # jq `has` prints false and exits 1 when the key is absent — that is the pass condition.
+  [ "$status" -ne 0 ]
+}
+
 @test "release-channel-tags.json: tag ruleset, generic refs/tags/** include, update+deletion only" {
   run jq -er '.target == "tag"
     and (.conditions.ref_name.include == ["refs/tags/**"])
