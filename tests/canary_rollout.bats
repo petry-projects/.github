@@ -332,20 +332,12 @@ setup() {
 # ── orchestrator: evaluate / promote (read-only + dry-run) with stubs ─────────
 _make_stub_bin() {
   STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
+  # dev-lead is cross-repo (host=.github-private, THIS_REPO=.github): channel tags resolve
+  # via gh api on the host — the git stub is a no-op; the default gh stub (added by each test)
+  # must include git/ref/tags/dev-lead/* cases for channel commits to resolve correctly.
   cat > "$STUB_BIN/git" <<'GITEOF'
 #!/usr/bin/env bash
-case "$*" in
-  *"for-each-ref"*) : ;;   # no release-tag date available in the stub
-  *"rev-parse"*"dev-lead/v1.4.0"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-  *"rev-parse"*"dev-lead/ring0"*)  echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"tag -f"*) : ;;
-  *"push"*)   : ;;
-  *"fetch"*)  : ;;
-  *) : ;;
-esac
+: # dev-lead is cross-repo; all tag resolution goes via gh api
 GITEOF
   chmod +x "$STUB_BIN/git"
 }
@@ -372,9 +364,15 @@ GHEOF
 
 @test "orchestrator: promote --override --dry-run shows the move but never pushes" {
   _make_stub_bin
+  # dev-lead is cross-repo (host=.github-private): channel tags resolve via gh api;
+  # the dry-run output must show the API PATCH, never a local `git tag -f`/`git push` (#1076).
   cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 case "$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
   *"run list"*) echo "[]" ;;
   *) echo "{}" ;;
 esac
@@ -384,10 +382,6 @@ GHEOF
   cat > "$STUB_BIN/git" <<GITEOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"for-each-ref"*) : ;;
-  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
   *"push"*) echo "\$*" >> "$pushlog" ;;
   *) : ;;
 esac
@@ -399,8 +393,6 @@ GITEOF
   [ ! -f "$pushlog" ]
   [[ "$output" == *"DRY-RUN"* ]]
   [[ "$output" == *"ring1"* ]]
-  # dev-lead is a this-repo agent, but the move now goes through gh api on its host — the
-  # dry-run must show the API PATCH, never a local `git tag -f`/`git push` (#1076).
   [[ "$output" == *"gh api PATCH"* ]]
   [[ "$output" != *"git tag -f"* ]]
 }
@@ -416,40 +408,35 @@ GITEOF
 # Lay out next = candidate (cccc); ring0/ring1/stable = prior (bbbb): frontier = ring0,
 # transition next->ring0, source = next. The release tag cccc is dated `cut_days` ago,
 # so the per-candidate window (and the robust sample target) are exercised end to end.
+# dev-lead is cross-repo (host=.github-private, THIS_REPO=.github): channel tags, release
+# date, and reusable blobs all resolve via gh api on the host — the git stub is a no-op.
 _graduated_stub() {
   local cut_days="$1" run_days_ago="$2" conclusion="$3" reusable_diff="$4"
-  STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
-  local cut_iso run_iso
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso cand_blob="reuseAAAA" prior_blob="reuseAAAA"
+  [ "$reusable_diff" = "1" ] && prior_blob="reuseBBBB"
   cut_iso="$(date -u -d "-${cut_days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-${run_days_ago} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_days_ago}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  # gh: every run-list query returns 20 runs at run_iso with the given conclusion.
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    printf '  *"run list"*) jq -nc --arg d "%s" --arg c "%s" '"'"'[range(20)|{conclusion:$c,createdAt:$d}]'"'"' ;;\n' "$run_iso" "$conclusion"
-    echo '  *) echo "{}" ;;'
-    echo 'esac'
-  } > "$STUB_BIN/gh"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "$cand_blob" ;;
+  *"ref=bbbb"*) echo "$prior_blob" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d}]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
   chmod +x "$STUB_BIN/gh"
-  # git: only `next` is on the candidate (cccc); ring0/ring1/stable stay on the prior
-  # version (bbbb). for-each-ref yields the cccc release tag dated cut_iso; the reusable
-  # blob is identical (reusable_diff=0) or differs (=1) between cand and prior.
-  local cand_blob="reuseAAAA" prior_blob="reuseAAAA"
-  [ "$reusable_diff" = "1" ] && prior_blob="reuseBBBB"
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    printf '  *"for-each-ref"*) echo "cccccccccccccccccccccccccccccccccccccccc||%s" ;;\n' "$cut_iso"
-    printf '  *"rev-parse"*"cccccccccccccccccccccccccccccccccccccccc:"*) echo "%s" ;;\n' "$cand_blob"
-    printf '  *"rev-parse"*"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:"*) echo "%s" ;;\n' "$prior_blob"
-    echo '  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *) : ;;'
-    echo 'esac'
-  } > "$STUB_BIN/git"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
   chmod +x "$STUB_BIN/git"
 }
 
@@ -539,36 +526,33 @@ GHEOF
 _benign_stub() {
   local cut_days="$1" run_days_ago="$2" step="$3" reusable_diff="$4"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
-  local cut_iso run_iso
+  local cut_iso run_iso cand_blob="reuseAAAA" prior_blob="reuseAAAA"
+  [ "$reusable_diff" = "1" ] && prior_blob="reuseBBBB"
   cut_iso="$(date -u -d "-${cut_days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-${run_days_ago} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_days_ago}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    echo '  *"run list"*)'
-    printf '    if [[ "$*" == *"databaseId"* ]]; then jq -nc --arg d "%s" '"'"'[range(3)|{conclusion:"failure",createdAt:$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]'"'"'; else jq -nc --arg d "%s" '"'"'[range(3)|{conclusion:"failure",createdAt:$d}]'"'"'; fi\n' "$run_iso" "$run_iso"
-    echo '    ;;'
-    printf '  *"run view"*) jq -nc --arg s "%s" '"'"'{jobs:[{steps:[{name:$s,conclusion:"failure"}]}]}'"'"' ;;\n' "$step"
-    echo '  *) echo "{}" ;;'
-    echo 'esac'
-  } > "$STUB_BIN/gh"
+  # dev-lead is cross-repo (host=.github-private, THIS_REPO=.github): channel tags, release
+  # date, and reusable blobs all resolve via gh api; run-list/run-view feed the benign check.
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "$cand_blob" ;;
+  *"ref=bbbb"*) echo "$prior_blob" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"failure",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) jq -nc --arg s "$step" '{jobs:[{steps:[{name:\$s,conclusion:"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
   chmod +x "$STUB_BIN/gh"
-  local cand_blob="reuseAAAA" prior_blob="reuseAAAA"
-  [ "$reusable_diff" = "1" ] && prior_blob="reuseBBBB"
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    printf '  *"for-each-ref"*) echo "cccccccccccccccccccccccccccccccccccccccc||%s" ;;\n' "$cut_iso"
-    printf '  *"rev-parse"*"cccccccccccccccccccccccccccccccccccccccc:"*) echo "%s" ;;\n' "$cand_blob"
-    printf '  *"rev-parse"*"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:"*) echo "%s" ;;\n' "$prior_blob"
-    echo '  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *) : ;;'
-    echo 'esac'
-  } > "$STUB_BIN/git"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
   chmod +x "$STUB_BIN/git"
 }
 
@@ -627,7 +611,9 @@ _benign_stub() {
 # cross-repo agent that is actually ring1 with stable on an old baseline (READY to promote).
 _crossrepo_stub() {
   # next=ring0=ring1 on the candidate (cccc); stable on the OLD baseline (bbbb):
-  # frontier = ring1, transition = ring1->stable — the ring1->stable promotion is pending.
+  # frontier = stable, transition = ring1->stable — the ring1->stable promotion is pending.
+  # auto-rebase is a this-repo agent (host=.github == THIS_REPO): channel tags and release
+  # date resolve via local git; gh handles run-list only.
   local cut_days="$1" run_days_ago="$2" conclusion="$3"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   local cand="cccccccccccccccccccccccccccccccccccccccc"
@@ -635,31 +621,27 @@ _crossrepo_stub() {
   local cut_iso run_iso
   cut_iso="$(date -u -d "-${cut_days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-${run_days_ago} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_days_ago}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  # gh: channel tags + the release tag are resolved via the API on the HOST repo; run-list
-  # feeds the sample/health. Channel/release tag responses are pre-computed strings; the
-  # run-list branch invokes jq to generate timestamped records from the injected parameters.
-  # The channel tags are lightweight (object.type=commit); the release tag is annotated
-  # (object.type=tag), so its commit + tagger date come from a second git/tags/<obj> call.
+  # gh: run-list only — channel/release tag resolution is handled by git below.
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"git/ref/tags/auto-rebase/next"*)   echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/ring0"*)  echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/ring1"*)  echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/stable"*) echo "$old commit" ;;
-  *"matching-refs/tags/auto-rebase/v"*) printf 'refs/tags/auto-rebase/v1.0.0\ttagobj\ttag\n' ;;
-  *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
   *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d}]' ;;
   *) echo "{}" ;;
 esac
 GHEOF
   chmod +x "$STUB_BIN/gh"
-  # git: a cross-repo agent has NO local refs — every git call resolves empty. If the code
-  # regressed to the local path, channel_commit would be empty for every ring → the frontier
-  # would collapse to "fully rolled out" and this test would fail (that is exactly #1049).
-  cat > "$STUB_BIN/git" <<'GITEOF'
+  # git: auto-rebase is this-repo — channel tags and the release tag date live in the local
+  # checkout. The for-each-ref simulates a lightweight release tag at the candidate commit.
+  cat > "$STUB_BIN/git" <<GITEOF
 #!/usr/bin/env bash
-: # no local refs for a cross-repo agent
+case "\$*" in
+  *"for-each-ref"*) printf '%s||%s\n' "$cand" "$cut_iso" ;;
+  *"rev-parse"*"auto-rebase/next"*)   echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/ring0"*)  echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/ring1"*)  echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/stable"*) echo "$old" ;;
+  *) : ;;
+esac
 GITEOF
   chmod +x "$STUB_BIN/git"
 }
@@ -723,7 +705,9 @@ GITEOF
 
 _crossrepo_promote_stub() {
   # Like _crossrepo_stub but the gh stub LOGS any ref mutation (PATCH/POST) to $MOVE_LOG so
-  # a REAL promote can be asserted to move the tag on the host (never touching local git).
+  # a REAL promote can be asserted to move the tag via gh api (never via local git tag/push).
+  # auto-rebase is this-repo (host=.github == THIS_REPO): channel tags resolve via git;
+  # all tag WRITES still go through gh api (_gh_move_tag applies to all agents, #1076).
   local cut_days="$1" run_days_ago="$2" conclusion="$3"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export MOVE_LOG="$STUB_BIN/move.log"
@@ -737,22 +721,21 @@ _crossrepo_promote_stub() {
 case "\$*" in
   *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
   *"-X POST"*"git/refs"*)        echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
-  *"git/ref/tags/auto-rebase/next"*)   echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/ring0"*)  echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/ring1"*)  echo "$cand commit" ;;
-  *"git/ref/tags/auto-rebase/stable"*) echo "$old commit" ;;
-  *"matching-refs/tags/auto-rebase/v"*) printf 'refs/tags/auto-rebase/v1.0.0\ttagobj\ttag\n' ;;
-  *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
   *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d}]' ;;
   *) echo "{}" ;;
 esac
 GHEOF
   chmod +x "$STUB_BIN/gh"
-  # A cross-repo agent has NO local refs; if the code regressed to `git tag -f`, this stub
-  # would record the attempt (and the move.log would stay empty) — the test would fail.
+  # git: channel tags and release date resolve locally (this-repo); any local tag/push attempt
+  # (which should never happen — all writes go via gh api) is recorded for the regression guard.
   cat > "$STUB_BIN/git" <<GITEOF
 #!/usr/bin/env bash
 case "\$*" in
+  *"for-each-ref"*) printf '%s||%s\n' "$cand" "$cut_iso" ;;
+  *"rev-parse"*"auto-rebase/next"*)   echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/ring0"*)  echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/ring1"*)  echo "$cand" ;;
+  *"rev-parse"*"auto-rebase/stable"*) echo "$old" ;;
   *"tag -f"*|*"push"*) echo "LOCAL:\$*" >> "$MOVE_LOG" ;;
   *) : ;;
 esac
@@ -797,30 +780,30 @@ GITEOF
 # summary. dev-lead-only registry keeps the fleet loop to one agent; the gh stub logs issue ops.
 _sync_stub() {
   # $1 conclusion (failure→BLOCKED | success→cleared); $2 blocker-list JSON returned by `gh issue list`
+  # dev-lead is cross-repo (host=.github-private, THIS_REPO=.github): channel tags, release
+  # date, and reusable blobs resolve via gh api; git is a no-op.
   local concl="$1" blocker_list="${2:-[]}"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
   local cut_iso run_iso
   cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  cat > "$STUB_BIN/git" <<GITEOF
+  cat > "$STUB_BIN/git" <<'GITEOF'
 #!/usr/bin/env bash
-case "\$*" in
-  *"for-each-ref"*) echo "cccccccccccccccccccccccccccccccccccccccc||$cut_iso" ;;
-  *"rev-parse"*"cccc"*":"*) echo "blobAAAA" ;;
-  *"rev-parse"*"bbbb"*":"*) echo "blobAAAA" ;;
-  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-  *"rev-parse"*"dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
-  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
-  *) : ;;
-esac
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
 GITEOF
   chmod +x "$STUB_BIN/git"
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
 case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "blobAAAA" ;;
+  *"ref=bbbb"*) echo "blobAAAA" ;;
   *"run list"*) jq -nc --arg d "$run_iso" --arg c "$concl" '[range(3)|{conclusion:\$c,createdAt:\$d,databaseId:12345,workflowName:"Dev-Lead Agent"}]' ;;
   *"run view"*) echo '{"jobs":[{"steps":[{"name":"Some step","conclusion":"failure"}]}]}' ;;
   "issue list"*) echo '$blocker_list' ;;
