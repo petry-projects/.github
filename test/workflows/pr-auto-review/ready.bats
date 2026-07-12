@@ -97,6 +97,16 @@ REQUIRED='["Lint"]'
   [ "$output" = "skip-checks-pending" ]
 }
 
+@test "not ready: null or malformed checks string → skip-checks-pending" {
+  run pr_auto_review_ready "OPEN" "false" "null" "$REQUIRED" "" "APPROVED" "0"
+  [ "$status" -eq 1 ]
+  [ "$output" = "skip-checks-pending" ]
+
+  run pr_auto_review_ready "OPEN" "false" "invalid-json" "$REQUIRED" "" "APPROVED" "0"
+  [ "$status" -eq 1 ]
+  [ "$output" = "skip-checks-pending" ]
+}
+
 # #680: a NON-required failing/cancelled advisory must NOT block dispatch.
 @test "ready: required green + NON-required cancelled/failing advisory → dispatched" {
   run pr_auto_review_ready "OPEN" "false" \

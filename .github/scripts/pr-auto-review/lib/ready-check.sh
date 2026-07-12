@@ -133,10 +133,9 @@ pr_auto_review_ready() {
   # 2. All REQUIRED CI checks must be completed and passing. No checks reported
   #    at all is treated as still-pending. The required-vs-non-required gate is
   #    delegated to pr_auto_review_checks_ready (issue #680, unchanged).
-  [ -z "$checks_json" ] && checks_json="[]"
   local total
-  total=$(printf '%s' "$checks_json" | jq 'length')
-  if [ "$total" -eq 0 ] \
+  total=$(printf '%s' "$checks_json" | jq 'if type == "array" then length else 0 end' 2>/dev/null)
+  if [ -z "$total" ] || [ "$total" -eq 0 ] \
      || ! printf '%s' "$checks_json" \
           | pr_auto_review_checks_ready "$required_json" "$self_name" >/dev/null; then
     echo "skip-checks-pending"
