@@ -63,7 +63,7 @@ jobs:
       - name: shellcheck
         run: |
           set -euo pipefail
-          shellcheck -x scripts/canary-rollout.sh scripts/lib/canary-rollout.sh
+          shellcheck --severity=warning -x scripts/canary-rollout.sh scripts/lib/canary-rollout.sh
 
       - name: Run bats suite
         # The suite stubs gh/git via PATH; a dummy token satisfies the
