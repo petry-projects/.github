@@ -1360,7 +1360,7 @@
         "control": {
           "allow_pre_existing": false
         },
-        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,
@@ -1423,7 +1423,7 @@
         "control": {
           "allow_pre_existing": false
         },
-        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,
@@ -1482,24 +1482,11 @@
         "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
         "baseline_window_days": 14,
         "baseline_spike_cap_multiple": 3,
-        "benign_failure_classes": [
-          {
-            "id": "dependabot-context-dispatch",
-            "workflow": "Dev-Lead Agent",
-            "step": "[Dd]ependabot",
-            "reason": "#864 \u2014 a Dev-Lead run dispatched in a Dependabot context cannot read repo secrets; version-independent benign failure, not a candidate regression."
-          },
-          {
-            "id": "fix-review-git-push-permission",
-            "workflow": "Dev-Lead Agent",
-            "step": "[Pp]ush",
-            "reason": "fix-review git push denied by branch protection / missing write scope; version-independent benign failure, not a candidate regression."
-          }
-        ],
+        "benign_failure_classes": [],
         "control": {
           "allow_pre_existing": false
         },
-        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,
@@ -1562,7 +1549,7 @@
         "control": {
           "allow_pre_existing": false
         },
-        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,
@@ -1625,7 +1612,7 @@
         "control": {
           "allow_pre_existing": false
         },
-        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
         "transitions": {
           "next->ring0": {
             "dwell_hours": 4,
