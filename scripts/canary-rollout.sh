@@ -766,6 +766,13 @@ cmd_sync_issues() {
   echo "== canary-rollout sync-issues: repo=$ISSUE_REPO dry=$dry (gate standard: .github#548) =="
   if [ "$dry" != true ]; then
     gh label create canary-blocker --repo "$ISSUE_REPO" --color ededed --description "canary-rollout automation" >/dev/null 2>&1 || true
+    # Route blockers so they get ACTIONED, not left sitting: `dev-lead` (dev-lead-intent
+    # treats a `dev-lead`-labelled issue as an actionable "issue" intent and picks it up —
+    # the App token applies the label, so the `issues: labeled` event DOES trigger the agent,
+    # unlike a github.token edit). `needs-human` additionally flags REGRESSION blockers, which
+    # the gate escalates to a human (roll back rather than blind --override).
+    gh label create dev-lead --repo "$ISSUE_REPO" --color 5319e7 --description "Route to the dev-lead agent for action" >/dev/null 2>&1 || true
+    gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
   fi
   local rows="" agent
   while IFS= read -r agent; do
@@ -789,6 +796,7 @@ cmd_sync_issues() {
         if [ "$dry" = true ]; then echo "  [DRY] would OPEN blocker issue for $agent ($triage)"; blk="(new)"; else
           num="$(_gh_issue_create "$title" "$body" "canary-blocker" || true)"
           if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
             [ "$triage" = "REGRESSION" ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
             echo "  opened blocker issue #$num for $agent"; blk="#$num"
           else echo "::warning::could not open blocker issue for $agent (Issues:write on the App?)"; fi
@@ -798,6 +806,7 @@ cmd_sync_issues() {
           [ "$istate" = "OPEN" ] || gh issue reopen "$num" --repo "$ISSUE_REPO" >/dev/null 2>&1 || true
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
+          gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
           [ "$triage" = "REGRESSION" ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
           echo "  updated blocker issue #$num for $agent"; blk="#$num"
         fi
