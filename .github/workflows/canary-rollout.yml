@@ -59,6 +59,10 @@ on:
         description: "promote: advance even if the gate is not PROMOTE (records a warning)"
         type: boolean
         default: false
+      confirm:
+        description: "promote: clear an AWAITING_CONFIRMATION hold at a require_confirmation ring boundary (#668 Layer 3). This is the human go/no-go — NOT --override: it advances only a reliability-clean state and cannot bypass a failing gate."
+        type: boolean
+        default: false
       dry_run:
         description: "promote/rollback: show the tag move but do not push"
         type: boolean
@@ -152,6 +156,10 @@ jobs:
           CMD: ${{ github.event_name == 'schedule' && (vars.CANARY_AUTO_PROMOTE == 'true' && 'promote-all' || 'evaluate-all') || github.event.inputs.command }}
           AGENT: ${{ github.event.inputs.agent || 'dev-lead' }}
           OVERRIDE: ${{ github.event.inputs.override }}
+          # Human go/no-go at a require_confirmation ring boundary (#668 Layer 3). Only meaningful
+          # on a `promote` dispatch — the scheduled sweep never sets it, so AWAITING_CONFIRMATION
+          # holds until a human deliberately confirms.
+          CONFIRM: ${{ github.event.inputs.confirm }}
           # Scheduled promote-all is a REAL move (DRY_RUN=false); dispatch honours the input
           # (which defaults to true — dispatch promote/promote-all are dry unless set false).
           DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event.inputs.dry_run }}
@@ -176,6 +184,7 @@ jobs:
             promote)
               args=(promote "$AGENT")
               [ "$OVERRIDE" = "true" ] && args+=(--override)
+              [ "$CONFIRM" = "true" ] && args+=(--confirm)     # human go/no-go for AWAITING_CONFIRMATION (#668 Layer 3)
               [ "$DRY_RUN" != "false" ] && args+=(--dry-run)   # default-safe: dry unless explicitly false
               ;;
             promote-all)                                       # gated fleet auto-promote (the SCHEDULED arm, #1045b)
