@@ -1276,38 +1276,42 @@ _drift_rings_one_agent() {
   [ "$(wc -l <<< "$output")" -eq 2 ]
 }
 
-# _vi_benign_stub <failed_step_name> — the _graduated_stub layout (next=cccc candidate,
-# ring0..stable=bbbb prior, reusable DIFFERS) but every source-tier run is a FAILURE whose
-# failed step is <failed_step_name>, so the benign matcher is exercised at differs=1.
+# _vi_benign_stub <failed_step_name> — dev-lead is a cross-repo agent (host=.github-private),
+# so channel and release tags resolve via gh api (not local git). Layout: next=cccc candidate,
+# ring0..stable=bbbb prior; reusable DIFFERS (reuseAAAA vs reuseBBBB → _reusable_differs=1).
+# Every tier repo returns failure runs whose failed step is <failed_step_name>, exercising
+# _benign_patterns at differs=1 (only version_independent classes active).
 _vi_benign_stub() {
   local failed_step="$1"
   STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
   local cut_iso run_iso
   cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    printf '  *"run list"*) jq -nc --arg d "%s" '"'"'[range(20)|{conclusion:"failure",createdAt:$d,databaseId:99001,workflowName:"Dev-Lead Agent"}]'"'"' ;;\n' "$run_iso"
-    printf '  *"run view"*) jq -nc --arg s "%s" '"'"'{jobs:[{steps:[{name:$s,conclusion:"failure"}]}]}'"'"' ;;\n' "$failed_step"
-    echo '  *) echo "{}" ;;'
-    echo 'esac'
-  } > "$STUB_BIN/gh"
+  # gh: channel tags + annotated release tag resolved via api on host (.github-private);
+  # blob SHAs differ (reuseAAAA vs reuseBBBB) so _reusable_differs returns 1; run-list
+  # feeds 20 failures per repo; run-view returns the injected failed step name.
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(20)|{conclusion:"failure",createdAt:\$d,databaseId:99001,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) jq -nc --arg s "$failed_step" '{jobs:[{steps:[{name:\$s,conclusion:"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
   chmod +x "$STUB_BIN/gh"
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$*" in'
-    printf '  *"for-each-ref"*) echo "cccccccccccccccccccccccccccccccccccccccc||%s" ;;\n' "$cut_iso"
-    echo '  *"rev-parse"*"cccccccccccccccccccccccccccccccccccccccc:"*) echo "reuseAAAA" ;;'
-    echo '  *"rev-parse"*"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:"*) echo "reuseBBBB" ;;'
-    echo '  *"rev-parse"*"dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*"dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;'
-    echo '  *"rev-parse"*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;'
-    echo '  *) : ;;'
-    echo 'esac'
-  } > "$STUB_BIN/git"
+  # Cross-repo agent: no local refs; all resolution goes via gh api above.
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # no local refs for a cross-repo agent
+GITEOF
   chmod +x "$STUB_BIN/git"
 }
 
