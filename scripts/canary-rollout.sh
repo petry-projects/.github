@@ -427,10 +427,148 @@ _reusable_differs() {
   echo 0
 }
 
+# ── decision telemetry sampling (#668 Layer 2, increment 4) ─────────────────────
+# Feeds the pure decision-shift core (decide_decision_shift / decision_class in the lib)
+# with real decision-mix tallies gathered from `gh run view --json jobs` step names — the
+# same surface the benign/suspect check already fetches. Reserved for agents that opt into
+# gate.correctness; every other agent skips this path entirely (byte-identical).
+
+# Memoization for _run_decision_class, keyed "repo:run_id" (the decision class is
+# prefix-independent given the run, so the prefix is not part of the key). Distinct from
+# _RUN_SIG_CACHE: decision sampling hits SUCCESS runs, the signature cache hits FAILED runs,
+# so the two never fetch the same run twice.
+declare -A _RUN_DECISION_CACHE=()
+
+# _run_decision_class <repo> <run_id> <prefix> — the decision class a run took (the taken
+# `<prefix><class>` no-op step; skipped branches ignored), via `gh run view --json jobs`.
+# Empty on missing repo/id or any gh error (fail-open: a run with no decision step simply
+# contributes nothing to the tally, degrading toward INSUFFICIENT, never a false SHIFT).
+_run_decision_class() {
+  local repo="$1" id="$2" prefix="$3" cache_key json cls
+  { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
+  cache_key="${repo}:${id}"
+  if [[ -v _RUN_DECISION_CACHE["$cache_key"] ]]; then
+    echo "${_RUN_DECISION_CACHE[$cache_key]}"; return 0
+  fi
+  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null || echo '{}')"
+  cls="$(decision_class "$prefix" "$json")"
+  _RUN_DECISION_CACHE["$cache_key"]="$cls"
+  echo "$cls"
+}
+
+# _sample_decision_counts <agent> <prefix> <max_k> <since_z> <before_z|-> <repo...> — tally the
+# decision-class mix of up to <max_k> EXECUTED runs (newest first) on the given tier repos in
+# the window [since_z, before_z). before_z="-" means no upper bound (all runs since <since_z>).
+# Runs with no decision step are skipped (they do not consume a sample slot). Echoes a compact
+# JSON object "<class>":<count>; "{}" when nothing qualifies. Pure-core (decide_decision_shift)
+# reads the object; the min-sample knobs gate sufficiency.
+_sample_decision_counts() {
+  local agent="$1" prefix="$2" max_k="$3" since="$4" before="$5"; shift 5
+  local wf repo json rid cls sampled=0
+  wf="$(_agent_field "$agent" run_workflow)"
+  declare -A counts=()
+  local filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
+  [ "$before" != "-" ] && filter="$filter|select(.createdAt < \"$before\")"
+  for repo in "$@"; do
+    [ "$sampled" -ge "$max_k" ] && break
+    { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
+    json="$(_run_json "$repo" "$wf" "$since")"
+    while IFS= read -r rid; do
+      [ -z "$rid" ] && continue
+      [ "$sampled" -ge "$max_k" ] && break
+      cls="$(_run_decision_class "$repo" "$rid" "$prefix")"
+      [ -z "$cls" ] && continue
+      counts["$cls"]=$(( ${counts["$cls"]:-0} + 1 ))
+      sampled=$(( sampled + 1 ))
+    done < <(jq -r "[${filter}]|sort_by(.createdAt)|reverse|.[]|(.databaseId|tostring)" 2>/dev/null <<< "$json")
+  done
+  # Build the counts object in a SINGLE jq pass (one process, not one per key) —
+  # jq does the key/value escaping so arbitrary class names stay valid JSON.
+  local out k
+  out="$(for k in "${!counts[@]}"; do printf '%s\t%s\n' "$k" "${counts[$k]}"; done \
+    | jq -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber)}] | add // {}' 2>/dev/null)"
+  [ -n "$out" ] || out='{}'
+  echo "$out"
+}
+
+# _correctness_verdict <agent> <cand_commit> <cut_z> <src_repos_csv> — OK|SHIFT|INSUFFICIENT for
+# an agent that opts into gate.correctness (empty when it does not). Candidate mix = source-tier
+# runs since the candidate cut; baseline mix = source-tier runs in the trailing window BEFORE the
+# cut (the prior version on identical traffic — the enumerable stand-in for "the incumbent on
+# comparable traffic", since the stable ring is often the unenumerable `*`). Delegates the gate
+# to the pure decide_decision_shift.
+_correctness_verdict() {
+  local agent="$1" cand="$2" cut_z="$3" src_csv="$4"
+  local knobs prefix
+  knobs="$(_jq -c --arg a "$agent" '.agents[$a].gate.correctness')"
+  prefix="$(jq -r '.decision_step_prefix // "decision: "' <<< "$knobs" 2>/dev/null || echo "decision: ")"
+  local src_repos=() r
+  IFS=, read -r -a src_repos <<< "$src_csv"
+  local win base_since cand_counts base_counts
+  win="${SOAK_WINDOW_DAYS:-$(_gate_field "$agent" baseline_window_days)}"; win="${win:-14}"
+  base_since="$(_iso_now_minus_days "$win")"
+  # K=15 candidate / K=25 baseline — n in the 10–25 band the design targets; the min-sample
+  # knobs (below the caps) gate sufficiency, so a thin sample degrades to INSUFFICIENT.
+  cand_counts="$(_sample_decision_counts "$agent" "$prefix" 15 "$cut_z" "-" "${src_repos[@]}")"
+  base_counts="$(_sample_decision_counts "$agent" "$prefix" 25 "$base_since" "$cut_z" "${src_repos[@]}")"
+  decide_decision_shift "$cand_counts" "$base_counts" "$knobs"
+}
+
+# _decision_mix_table <agent> <cand_commit> — a markdown table of the candidate vs prior-version
+# baseline decision-class share (permille, rounded like decide_decision_shift), for the blocker
+# body of a correctness-SHIFT hold (#668 L2). Recomputes the same source-tier samples as
+# _correctness_verdict (the per-run classes are memoized in _RUN_DECISION_CACHE, so the second
+# pass is cache-warm). Empty when the agent has no gate.correctness or the frontier is resolved.
+_decision_mix_table() {
+  local agent="$1" cand="$2"
+  local knobs; knobs="$(_jq -c --arg a "$agent" '.agents[$a].gate.correctness // ""')"
+  [ -z "$knobs" ] || [ "$knobs" = '""' ] && return 0
+  local chans frontier="" ch c
+  chans="$(ordered_channels "$agent")"
+  local chan_array=(); IFS=, read -r -a chan_array <<< "$chans"
+  for ch in "${chan_array[@]}"; do
+    c="$(channel_commit "$agent" "$ch")"
+    if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
+  done
+  [ -z "$frontier" ] && return 0
+  local transition source cut_z prefix
+  transition="$(transition_key "$frontier" "$chans")"
+  source="${transition%%->*}"
+  cut_z="$(candidate_cut_date "$agent" "$cand")"
+  [ -z "$cut_z" ] && return 0
+  prefix="$(jq -r '.decision_step_prefix // "decision: "' <<< "$knobs" 2>/dev/null || echo "decision: ")"
+  local src_repos=() r
+  while IFS= read -r r; do [ -n "$r" ] && src_repos+=("$r"); done < <(resolve_members "$agent" "$source")
+  local win base_since cand_counts base_counts
+  win="${SOAK_WINDOW_DAYS:-$(_gate_field "$agent" baseline_window_days)}"; win="${win:-14}"
+  base_since="$(_iso_now_minus_days "$win")"
+  cand_counts="$(_sample_decision_counts "$agent" "$prefix" 15 "$cut_z" "-" "${src_repos[@]}")"
+  base_counts="$(_sample_decision_counts "$agent" "$prefix" 25 "$base_since" "$cut_z" "${src_repos[@]}")"
+  # Guard against an empty sample string — --argjson rejects empty input.
+  # (A `${var:-{}}` inline default is NOT usable: the inner `}` closes the
+  #  parameter expansion, appending a stray brace and producing invalid JSON.)
+  [ -n "$cand_counts" ] || cand_counts='{}'
+  [ -n "$base_counts" ] || base_counts='{}'
+  jq -nr --argjson c "$cand_counts" --argjson b "$base_counts" --arg win "$win" '
+    ([$c[]?]|add // 0) as $ct | ([$b[]?]|add // 0) as $bt
+    | (($c|keys) + ($b|keys) | unique) as $classes
+    | "| decision class | candidate | baseline | Δ |",
+      "|---|---|---|---|",
+      ( $classes[]
+        | ( if $ct>0 then ((( ($c[.]//0)*1000 + ($ct/2) ) / $ct) | floor) else 0 end ) as $cs
+        | ( if $bt>0 then ((( ($b[.]//0)*1000 + ($bt/2) ) / $bt) | floor) else 0 end ) as $bs
+        | (($cs - $bs) | if . < 0 then -. else . end) as $d
+        | "| `\(.)` | \($cs/10)% (\($c[.]//0)) | \($bs/10)% (\($b[.]//0)) | \($d/10)pp |" ),
+      "",
+      "_candidate n=\($ct) (source tier since cut) · baseline n=\($bt) (prior version, trailing \($win) d). Share = rounded per-mille; Δ is the absolute shift the gate compares to `max_shift_permille`._"
+  ' 2>/dev/null || return 0
+}
+
 # _frontier_state <agent> — compute the rollout frontier and graduated gate, echoing:
-#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <triage>"
+#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift>"
 # frontier = first ring (after next) not yet on the candidate commit; triage is "-"
-# unless state is BLOCKED (then REGRESSION | PRE_EXISTING).
+# unless state is BLOCKED (then REGRESSION | PRE_EXISTING | SUSPECT). mix_shift is "SHIFT"
+# when a gate.correctness decision-mix shift is holding the promotion (#668 L2), else "-".
 _frontier_state() {
   local agent="$1"
   local cand chans frontier=""
@@ -445,7 +583,7 @@ _frontier_state() {
     if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
   done
   if [ -z "$frontier" ]; then
-    echo "$cand - - COMPLETE 0 0 0 0 0 0 0 -"; return 0
+    echo "$cand - - COMPLETE 0 0 0 0 0 0 0 - -"; return 0
   fi
 
   local transition source cut_z now_epoch
@@ -454,7 +592,7 @@ _frontier_state() {
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   if [ -z "$cut_z" ]; then
     # Cannot determine the per-candidate window start — fail closed to prevent unbounded history queries.
-    echo "$cand $frontier $transition BLOCKED 0 0 0 0 0 0 0 -"; return 0
+    echo "$cand $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
   fi
   now_epoch="$(date -u +%s)"
 
@@ -518,6 +656,23 @@ _frontier_state() {
 
   local state; state="$(decide_graduated "$dwell_h" "$dwell_floor" "$sample" "$target" "$waived" "$cum_fail" "$cum_startup")"
 
+  # Layer 2 (#668 increment 4): opt-in DECISION telemetry. When the reliability verdict is
+  # PROMOTE and the agent opts into gate.correctness, tally the candidate's decision mix vs a
+  # prior-version baseline; a gross distribution SHIFT HOLDS the promotion (BLOCKED, triage
+  # SUSPECT — the correctness variant, flagged by mix_shift). INSUFFICIENT/OK are no-ops, so an
+  # agent that produces no comparable signal degrades to reliability-only. The overlay fires
+  # ONLY from an otherwise-PROMOTE verdict — it never masks or bypasses a reliability BLOCK, and
+  # it never rolls back or auto-acts (worst case: a few hours of human latency).
+  local mix_shift="-"
+  if [ "$state" = "PROMOTE" ] && [ -n "$(_gate_field "$agent" correctness)" ]; then
+    local src_csv verdict
+    src_csv="$(IFS=,; echo "${src_repos[*]}")"
+    verdict="$(_correctness_verdict "$agent" "$cand" "$cut_z" "$src_csv")"
+    if [ "$verdict" = "SHIFT" ]; then
+      state="BLOCKED"; mix_shift="SHIFT"
+    fi
+  fi
+
   # Layer 3 (#668 increment 3): opt-in human confirmation at a ring boundary. When the
   # reliability verdict is PROMOTE but the frontier transition sets require_confirmation, hold
   # in a distinct AWAITING_CONFIRMATION state — SOAKING-like: the scheduled promote-all never
@@ -528,12 +683,16 @@ _frontier_state() {
     state="AWAITING_CONFIRMATION"
   fi
 
+  # Triage: a correctness SHIFT is SUSPECT (correctness variant, distinguished by mix_shift);
+  # any other BLOCK is classified from the failure evidence.
   local triage="-"
-  if [ "$state" = "BLOCKED" ]; then
+  if [ "$state" = "BLOCKED" ] && [ "$mix_shift" = "SHIFT" ]; then
+    triage="SUSPECT"
+  elif [ "$state" = "BLOCKED" ]; then
     triage="$(classify_failure "$differs" "${CANARY_FAILURE_CATEGORY:-unknown}" "$cum_suspect")"
   fi
 
-  echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage"
+  echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift"
 }
 
 cmd_evaluate() {
@@ -549,7 +708,7 @@ cmd_evaluate() {
     local mark="  "; [ -n "$cand" ] && [ "$c" = "$cand" ] && mark="* "
     printf '  %s%-7s -> %s\n' "$mark" "$ch" "${c:0:12}"
   done
-  read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage < <(_frontier_state "$agent")
+  read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift < <(_frontier_state "$agent")
   echo "----"
   if [ "$frontier" = "-" ]; then
     echo "frontier: none — fully rolled out (all rings on candidate)."
@@ -559,6 +718,8 @@ cmd_evaluate() {
     if [ "$state" = "BLOCKED" ]; then
       if [ "$triage" = "REGRESSION" ]; then
         echo "::error::triage=REGRESSION — candidate changed the reusable and a run failed since cut. HALT + hold; recommend rollback."
+      elif [ "$triage" = "SUSPECT" ] && [ "$mix_shift" = "SHIFT" ]; then
+        echo "::warning::triage=SUSPECT (decision-mix shift, #668 Layer 2) — the candidate's decision distribution moved ≥ threshold vs the prior-version baseline. HOLDS the promotion; review the decision-mix table in the blocker issue. Composition drift (e.g. a draft-PR burst) is the usual false positive → promote --override to dismiss; a genuine always/never shift → roll back."
       elif [ "$triage" = "SUSPECT" ]; then
         echo "::warning::triage=SUSPECT — failure matches a suspect class (possibly candidate-caused). BLOCKS + needs a human; see the blocker issue's discriminating question, then promote --override if unrelated or roll back if a real regression."
       else
@@ -601,7 +762,7 @@ cmd_promote() {
       *) echo "::error::unknown promote flag: $1" >&2; return 2 ;;
     esac; shift
   done
-  read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage < <(_frontier_state "$agent")
+  read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift < <(_frontier_state "$agent")
   if [ "$frontier" = "-" ]; then
     echo "nothing to promote — $agent is fully rolled out."; return 0
   fi
@@ -796,9 +957,35 @@ _suspect_guidance() {
      | "- **\(.id):** \(.guidance)"'
 }
 
-# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence>
+# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>]
 _blocker_body() {
-  local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" note
+  local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" mix_shift="${9:--}" mix_table="${10:-}" note
+  # Correctness variant (#668 L2): a decision-mix SHIFT holds as SUSPECT but is NOT a reliability
+  # failure — the candidate exited green yet its decision distribution moved. Distinct note + a
+  # candidate-vs-baseline mix table replace the failing-runs evidence (there are none).
+  if [ "$triage" = "SUSPECT" ] && [ "$mix_shift" = "SHIFT" ]; then
+    note="> ⚠️ **SUSPECT (decision-mix shift, #668 Layer 2)** — reliability PASSED (the candidate exits green), but its decision-class distribution shifted materially vs the prior version on comparable traffic. This HOLDS and needs a human (labelled \`needs-human\`): decide whether the shift is an intended behaviour change (\`promote --override\`) or a correctness regression (roll back). The gate never rolls back on its own."
+    cat <<EOF
+<!-- canary-blocker:$agent -->
+**Automated canary-rollout blocker.** The release gate is holding \`$agent\` and will not promote it until this clears. Filed + maintained by the Canary Rollout workflow (gate standard: .github#548); this issue is **regenerated each run and auto-closes** when the gate passes — do not edit the table below by hand.
+
+| field | value |
+|---|---|
+| agent | \`$agent\` |
+| transition | \`$transition\` |
+| candidate | \`${cand:0:12}\` |
+| host repo | \`$host\` |
+| triage | **SUSPECT** (decision-mix shift) |
+
+$note
+
+### Decision-mix (candidate vs prior-version baseline)
+${mix_table:-_(mix table unavailable — samples could not be resolved)_}
+---
+_Whole-fleet status is in the Canary Rollout workflow run's job summary (Actions → Canary Rollout → latest run → Summary)._
+EOF
+    return 0
+  fi
   if [ "$triage" = "REGRESSION" ]; then
     note="> ⛔ **REGRESSION** — the candidate changed the reusable and a run failed since its cut. HALT + hold; investigate and roll back rather than \`--override\`. (labelled \`needs-human\`)"
   elif [ "$triage" = "SUSPECT" ]; then
@@ -926,8 +1113,8 @@ cmd_sync_issues() {
   local rows="" agent
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
-    local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage host
-    read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage < <(_frontier_state "$agent")
+    local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift host
+    read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift < <(_frontier_state "$agent")
     host="$(_agent_field "$agent" host)"
     local blk="—" num_state num istate
     # Best-effort (#1081): these substitutions call gh/jq. Under `set -euo pipefail`
@@ -937,10 +1124,15 @@ cmd_sync_issues() {
     num_state="$(_issue_find canary-blocker "<!-- canary-blocker:$agent -->" || true)"
     num="${num_state%%$'\t'*}"; istate="${num_state##*$'\t'}"
     if [ "$state" = "BLOCKED" ]; then
-      local evidence body title
+      local evidence body title mix_table=""
       evidence="$(_blocker_evidence "$agent" "$cand" || true)"
-      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence")"
-      title="Canary blocker: $agent $transition (cum_fail=$cum_fail, $triage)"
+      [ "$mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$cand" || true)"
+      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table")"
+      if [ "$mix_shift" = "SHIFT" ]; then
+        title="Canary blocker: $agent $transition (decision-mix shift, SUSPECT)"
+      else
+        title="Canary blocker: $agent $transition (cum_fail=$cum_fail, $triage)"
+      fi
       if [ -z "$num" ]; then
         if [ "$dry" = true ]; then echo "  [DRY] would OPEN blocker issue for $agent ($triage)"; blk="(new)"; else
           num="$(_gh_issue_create "$title" "$body" "canary-blocker" || true)"

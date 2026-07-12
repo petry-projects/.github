@@ -1752,3 +1752,240 @@ GHEOF
   [[ "$output" == *"closed cleared confirm issue #502 for dev-lead"* ]]
   grep -q "CLOSE|.*502" "$ISSUE_LOG"
 }
+
+# ── #668 increment 4 (Layer 2): decision telemetry — pure core + engine overlay ──
+# decision_class(): the taken `decision: <class>` no-op step (skipped branches ignored, prefix
+# stripped) off a `gh run view --json jobs` payload. decide_decision_shift(): the pure gate over
+# a candidate vs prior-version decision-mix. Both are pure (no gh/git) → sourced $LIB, no stubs.
+@test "decision_class: returns the taken decision (skipped branches ignored, prefix stripped)" {
+  json='{"jobs":[{"steps":[
+    {"name":"Resolve PR URL","conclusion":"success"},
+    {"name":"decision: dispatched","conclusion":"skipped"},
+    {"name":"decision: skip-draft","conclusion":"skipped"},
+    {"name":"decision: skip-checks-pending","conclusion":"success"}
+  ]}]}'
+  [ "$(decision_class 'decision: ' "$json")" = "skip-checks-pending" ]
+}
+@test "decision_class: a run with no decision step → empty (degrades to INSUFFICIENT upstream)" {
+  [ "$(decision_class 'decision: ' '{"jobs":[{"steps":[{"name":"Build","conclusion":"success"}]}]}')" = "" ]
+}
+@test "decision_class: empty / absent / non-object json → empty (never errs)" {
+  [ "$(decision_class 'decision: ' '')" = "" ]
+  [ "$(decision_class 'decision: ' '{}')" = "" ]
+  [ "$(decision_class 'decision: ' 'not json')" = "" ]
+}
+
+DECISION_KNOBS='{"min_candidate_sample":10,"min_baseline_sample":20,"max_shift_permille":400}'
+@test "decide_decision_shift: a gross share move ≥ threshold → SHIFT" {
+  # candidate is all skip-checks-pending (0‰ dispatched) vs an all-dispatched baseline → 1000‰ move
+  [ "$(decide_decision_shift '{"skip-checks-pending":12}' '{"dispatched":22}' "$DECISION_KNOBS")" = "SHIFT" ]
+}
+@test "decide_decision_shift: shares within threshold → OK (no effect)" {
+  # ~917‰/83‰ vs ~909‰/91‰ dispatched/skip-draft — max per-class delta 8‰ ≪ 400‰
+  [ "$(decide_decision_shift '{"dispatched":11,"skip-draft":1}' '{"dispatched":20,"skip-draft":2}' "$DECISION_KNOBS")" = "OK" ]
+}
+@test "decide_decision_shift: a move exactly at max_shift_permille → SHIFT (inclusive)" {
+  # 500‰ dispatched (cand) vs 900‰ (base) → delta 400‰ == threshold
+  [ "$(decide_decision_shift '{"dispatched":10,"skip-draft":10}' '{"dispatched":18,"skip-draft":2}' "$DECISION_KNOBS")" = "SHIFT" ]
+}
+@test "decide_decision_shift: candidate below min_candidate_sample → INSUFFICIENT" {
+  [ "$(decide_decision_shift '{"dispatched":5}' '{"dispatched":22}' "$DECISION_KNOBS")" = "INSUFFICIENT" ]
+}
+@test "decide_decision_shift: baseline below min_baseline_sample → INSUFFICIENT" {
+  [ "$(decide_decision_shift '{"dispatched":12}' '{"dispatched":5}' "$DECISION_KNOBS")" = "INSUFFICIENT" ]
+}
+@test "decide_decision_shift: empty / unparseable side → INSUFFICIENT (no decision steps to compare)" {
+  [ "$(decide_decision_shift '{}' '{"dispatched":22}' "$DECISION_KNOBS")" = "INSUFFICIENT" ]
+  [ "$(decide_decision_shift '{"dispatched":12}' '' "$DECISION_KNOBS")" = "INSUFFICIENT" ]
+  [ "$(decide_decision_shift 'garbage' '{"dispatched":22}' "$DECISION_KNOBS")" = "INSUFFICIENT" ]
+}
+
+@test "canary-rings.json: pr-auto-review opts into gate.correctness (#668 L2); no other agent does" {
+  run jq -e '.agents["pr-auto-review"].gate.correctness | .decision_step_prefix=="decision: " and .min_candidate_sample==10 and .min_baseline_sample==20 and .max_shift_permille==400' "$RINGS"
+  [ "$status" -eq 0 ]
+  # default-off everywhere else: pr-auto-review is the ONLY agent carrying a correctness block
+  run bash -c "jq -r '[.agents|to_entries[]|select(.value.gate.correctness)|.key]|sort|join(\",\")' '$RINGS'"
+  [ "$output" = "pr-auto-review" ]
+}
+
+# The reusable emits one `decision: <class>` no-op step per outcome branch — the engine reads
+# their names off `gh run view --json jobs` (decision_class). Structural guard on the workflow.
+@test "pr-auto-review-reusable: emits a decision no-op step per outcome branch + writes the output" {
+  local wf="$SCRIPT_DIR/.github/workflows/pr-auto-review-reusable.yml" c
+  for c in dispatched skip-draft skip-checks-pending skip-changes-requested skip-unresolved-threads; do
+    run grep -F "name: 'decision: $c'" "$wf"
+    [ "$status" -eq 0 ]
+    run grep -F "decision=$c" "$wf"
+    [ "$status" -eq 0 ]
+  done
+  # each decision step is a side-effect-free no-op
+  run grep -c "run: 'true'" "$wf"
+  [ "$output" -ge 5 ]
+}
+
+# ── #668 L2: engine — sample the decision mix + overlay the gate (with gh stubs) ─
+# dev-lead layout (next=cand cccc, rings=prior bbbb, cut 3d ago, reusable identical → differs=0)
+# PLUS a decision-mix sample: source-tier (next=.github-private) CANDIDATE runs (createdAt 1d ago,
+# ids ≥2000, class=<cand_class>) and prior-version BASELINE runs (createdAt 7d ago, ids <2000,
+# class=<base_class>). `run view` returns the taken decision no-op step for a run id. gate.correctness
+# is injected onto the dev-lead clone in $CORR_RINGS so the opt-in overlay fires.
+_correctness_stub() {
+  local cand_class="$1" cand_n="$2" base_class="$3" base_n="$4"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "blobAAAA" ;;
+  *"ref=bbbb"*) echo "blobAAAA" ;;
+  *"run view"*)
+    id="\$3"; cls="$base_class"
+    [ "\$id" -ge 2000 ] 2>/dev/null && cls="$cand_class"
+    jq -nc --arg cls "\$cls" '{jobs:[{steps:[
+      {name:"Resolve PR URL",conclusion:"success"},
+      {name:"decision: skip-unresolved-threads",conclusion:"skipped"},
+      {name:("decision: "+\$cls),conclusion:"success"}
+    ]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" \
+      --argjson cn "$cand_n" --argjson bn "$base_n" '
+      ( [range(2001;2001+\$cn)|{databaseId:.,conclusion:"success",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(1001;1001+\$bn)|{databaseId:.,conclusion:"success",createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  CORR_RINGS="$BATS_TEST_TMPDIR/corr-rings.json"
+  jq '.agents["dev-lead"].gate.correctness = {decision_step_prefix:"decision: ",min_candidate_sample:10,min_baseline_sample:20,max_shift_permille:400}' "$RINGS" > "$CORR_RINGS"
+}
+
+_CORR_CAND="cccccccccccccccccccccccccccccccccccccccc"
+_corr_cut() { date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
+
+@test "_correctness_verdict: a gross candidate decision-mix shift → SHIFT" {
+  _correctness_stub skip-checks-pending 20 dispatched 22
+  run env CANARY_RINGS="$CORR_RINGS" bash -c "source '$ORCH' && _correctness_verdict dev-lead $_CORR_CAND '$(_corr_cut)' petry-projects/.github-private"
+  [ "$status" -eq 0 ]; [ "$output" = "SHIFT" ]
+}
+@test "_correctness_verdict: candidate mix matches the baseline → OK (no effect)" {
+  _correctness_stub dispatched 20 dispatched 22
+  run env CANARY_RINGS="$CORR_RINGS" bash -c "source '$ORCH' && _correctness_verdict dev-lead $_CORR_CAND '$(_corr_cut)' petry-projects/.github-private"
+  [ "$status" -eq 0 ]; [ "$output" = "OK" ]
+}
+@test "_correctness_verdict: candidate sample below the minimum → INSUFFICIENT (no-op)" {
+  _correctness_stub dispatched 5 dispatched 22
+  run env CANARY_RINGS="$CORR_RINGS" bash -c "source '$ORCH' && _correctness_verdict dev-lead $_CORR_CAND '$(_corr_cut)' petry-projects/.github-private"
+  [ "$status" -eq 0 ]; [ "$output" = "INSUFFICIENT" ]
+}
+
+@test "orchestrator: evaluate — a decision-mix SHIFT holds an otherwise-PROMOTE candidate as BLOCKED/SUSPECT (#668 L2)" {
+  _correctness_stub skip-checks-pending 20 dispatched 22
+  run env CANARY_RINGS="$CORR_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" == *"decision-mix shift"* ]]
+}
+@test "orchestrator: evaluate — an in-threshold decision mix leaves the PROMOTE verdict untouched (#668 L2)" {
+  _correctness_stub dispatched 20 dispatched 22
+  run env CANARY_RINGS="$CORR_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMOTE"* ]]
+  ! [[ "$output" == *"decision-mix shift"* ]]
+}
+@test "orchestrator: evaluate — an agent WITHOUT gate.correctness never runs the overlay (byte-identical, #668 L2)" {
+  # Same PROMOTE layout, default registry (dev-lead has no correctness block) → no sampling, no SUSPECT.
+  _graduated_stub 3 2 success 0
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMOTE"* ]]
+  ! [[ "$output" == *"decision-mix"* ]]
+  ! [[ "$output" == *"SUSPECT"* ]]
+}
+
+# sync-issues renders the candidate-vs-baseline decision-mix table into the blocker body for a
+# correctness SHIFT (dev-lead-only registry keeps the fleet loop to one agent; gh logs issue ops).
+_correctness_sync_stub() {
+  local cand_class="$1" cand_n="$2" base_class="$3" base_n="$4" blocker_list="${5:-[]}"
+  _correctness_stub "$cand_class" "$cand_n" "$base_class" "$base_n"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  # Extend the gh stub with issue ops (append the new cases BEFORE the catch-all).
+  local cut_iso cand_iso base_iso
+  cut_iso="$(_corr_cut)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "blobAAAA" ;;
+  *"ref=bbbb"*) echo "blobAAAA" ;;
+  *"run view"*)
+    id="\$3"; cls="$base_class"
+    [ "\$id" -ge 2000 ] 2>/dev/null && cls="$cand_class"
+    jq -nc --arg cls "\$cls" '{jobs:[{steps:[
+      {name:"Resolve PR URL",conclusion:"success"},
+      {name:"decision: skip-unresolved-threads",conclusion:"skipped"},
+      {name:("decision: "+\$cls),conclusion:"success"}
+    ]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" \
+      --argjson cn "$cand_n" --argjson bn "$base_n" '
+      ( [range(2001;2001+\$cn)|{databaseId:.,conclusion:"success",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(1001;1001+\$bn)|{databaseId:.,conclusion:"success",createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  "issue list"*)   echo '$blocker_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  # dev-lead-only registry (with the correctness block) so the fleet loop stays a single agent.
+  CORR_RINGS="$BATS_TEST_TMPDIR/corr-sync-rings.json"
+  jq '{org_infra_repos, agents: {"dev-lead": (.agents["dev-lead"] | .gate.correctness = {decision_step_prefix:"decision: ",min_candidate_sample:10,min_baseline_sample:20,max_shift_permille:400})}}' "$RINGS" > "$CORR_RINGS"
+}
+
+@test "orchestrator: sync-issues renders the decision-mix table in the blocker for a correctness SHIFT (#668 L2)" {
+  _correctness_sync_stub skip-checks-pending 20 dispatched 22 '[]'
+  run env CANARY_RINGS="$CORR_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened blocker issue #777 for dev-lead"* ]]
+  # The blocker body (passed to `gh issue create --body`) carries the correctness note + mix table.
+  grep -q "decision-mix shift" "$ISSUE_LOG"
+  grep -q "decision class" "$ISSUE_LOG"
+  grep -q "candidate" "$ISSUE_LOG"
+  grep -q "skip-checks-pending" "$ISSUE_LOG"
+  # SUSPECT → routed to a human (needs-human) as well as the dev-lead agent.
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+}
