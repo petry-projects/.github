@@ -637,7 +637,7 @@ cmd_promote() {
     return 0
   fi
   if [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ]; then
-    echo "::notice::human confirmation received (--confirm) — advancing $agent/$frontier [$transition] past the ring1->stable go/no-go (reliability was already PROMOTE)."
+    echo "::notice::human confirmation received (--confirm) — advancing $agent/$frontier [$transition] past the confirmation go/no-go (reliability was already PROMOTE)."
   elif [ "$state" != "PROMOTE" ]; then
     echo "::warning::advancing $agent/$frontier despite gate state '$state' (triage=$triage)"
   fi
@@ -1010,6 +1010,7 @@ cmd_sync_issues() {
             --comment "✅ No longer awaiting confirmation — \`$agent\` is now \`$state\`. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
           echo "  closed cleared confirm issue #$cnum for $agent"
         fi
+        blk="#$cnum (confirm closed)"
       fi
     fi
 
