@@ -13,7 +13,8 @@ schema_version: 1
 
 # Stable kebab-case id. MUST equal this directory's name AND the agents.<key>
 # in canary-rings.json AND the channel-tag agent name.
-id: CHANGE-ME
+# (lowercase kebab-case — the schema enforces ^[a-z0-9]+(-[a-z0-9]+)*$)
+id: change-me
 
 name: CHANGE-ME              # display name, e.g. "Murat"
 title: CHANGE-ME             # role title, e.g. "Master Test Architect & Quality Advisor"
@@ -61,16 +62,18 @@ definition:
 
 # --- Capabilities the persona can invoke (advisory index) -----------------
 skills: []
-  # - name: CHANGE-ME
-  #   path: frameworks/CHANGE-ME/src/…/SKILL.md
-  #   source: vendored          # vendored | first-party
+# To add skills, replace the empty array above with a block sequence:
+# skills:
+#   - name: change-me
+#     path: frameworks/change-me/src/…/SKILL.md
+#     source: vendored          # vendored | first-party
 
 # --- The trigger matrix: one row per surface the persona acts on ----------
 # default_mode governs any surface not listed. It MUST be advisory or off.
 # Write is never a default — it is an explicit per-surface opt-in with a gate_label.
 triggers:
   default_mode: advisory
-  opt_out_label: CHANGE-ME:hands-off
+  opt_out_label: change-me:hands-off
   surfaces:
     - surface: pull_request
       events: [opened, ready_for_review, synchronize]
@@ -86,7 +89,7 @@ triggers:
       mode: advisory
 
     - surface: mention
-      events: []
+      events: [created]
       enabled: true
       mode: advisory
       notes: "e.g. @<bot> weigh in"
@@ -124,7 +127,7 @@ trust:
 # --- Held-out eval gate ----------------------------------------------------
 evals:
   required_before: stable       # ring0 | ring1 | stable
-  path: evals/CHANGE-ME/         # under the repo eval tree (validate-cases.py + holdout-guard.yml)
+  path: evals/change-me/         # under the repo eval tree (validate-cases.py + holdout-guard.yml)
   judge: evals/judge.md
   min_cases: 5
 
@@ -132,7 +135,9 @@ evals:
 # Do NOT restate rings/members/gate here — reference the registry entry by id.
 canary:
   registry: petry-projects/.github/standards/canary-rings.json
-  agent: CHANGE-ME              # MUST equal `id`
+  agent: change-me              # MUST equal `id`
 
 references: []
-  # - "ADR: docs/initiatives/CHANGE-ME-adr.md"
+# To add references, replace the empty array above with a block sequence:
+# references:
+#   - "ADR: docs/initiatives/change-me-adr.md"

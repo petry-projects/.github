@@ -89,7 +89,13 @@
                   "notes": {"type": "string"}
                 }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"kind": {"const": "framework-agent"}}},
+                "then": {"required": ["framework"]}
+              }
+            ]
           }
         }
       }
