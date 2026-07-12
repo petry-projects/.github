@@ -482,10 +482,12 @@ _sample_decision_counts() {
       sampled=$(( sampled + 1 ))
     done < <(jq -r "[${filter}]|sort_by(.createdAt)|reverse|.[]|(.databaseId|tostring)" 2>/dev/null <<< "$json")
   done
-  local out='{}' k
-  for k in "${!counts[@]}"; do
-    out="$(jq -c --arg k "$k" --argjson v "${counts[$k]}" '. + {($k):$v}' <<< "$out")"
-  done
+  # Build the counts object in a SINGLE jq pass (one process, not one per key) —
+  # jq does the key/value escaping so arbitrary class names stay valid JSON.
+  local out k
+  out="$(for k in "${!counts[@]}"; do printf '%s\t%s\n' "$k" "${counts[$k]}"; done \
+    | jq -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber)}] | add // {}' 2>/dev/null)"
+  [ -n "$out" ] || out='{}'
   echo "$out"
 }
 
@@ -542,6 +544,11 @@ _decision_mix_table() {
   base_since="$(_iso_now_minus_days "$win")"
   cand_counts="$(_sample_decision_counts "$agent" "$prefix" 15 "$cut_z" "-" "${src_repos[@]}")"
   base_counts="$(_sample_decision_counts "$agent" "$prefix" 25 "$base_since" "$cut_z" "${src_repos[@]}")"
+  # Guard against an empty sample string — --argjson rejects empty input.
+  # (A `${var:-{}}` inline default is NOT usable: the inner `}` closes the
+  #  parameter expansion, appending a stray brace and producing invalid JSON.)
+  [ -n "$cand_counts" ] || cand_counts='{}'
+  [ -n "$base_counts" ] || base_counts='{}'
   jq -nr --argjson c "$cand_counts" --argjson b "$base_counts" --arg win "$win" '
     ([$c[]?]|add // 0) as $ct | ([$b[]?]|add // 0) as $bt
     | (($c|keys) + ($b|keys) | unique) as $classes
