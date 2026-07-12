@@ -20,8 +20,9 @@ pr_auto_review_required_contexts() {
     if type == "array" then
       [ .[]
         | select(.type == "required_status_checks")
-        | .parameters.required_status_checks[]?
+        | .parameters?.required_status_checks?[]?
         | .context
+        | select(type == "string")
       ]
     else
       []
@@ -52,16 +53,18 @@ pr_auto_review_required_contexts() {
 #       block only when a non-self check is failing or pending; "cancel",
 #       "skipping" and "pass" are treated as non-blocking.
 pr_auto_review_checks_ready() {
-  local required_json="$1" self_name="$2" decision reason
+  local required_json="${1:-[]}" self_name="$2" decision reason
   local result
   result=$(jq -r \
     --argjson required "$required_json" \
     --arg self "$self_name" '
       def matches($ctx):
         .name as $n
-        | ($n == $ctx)
-        or ($n | endswith(" / " + $ctx))
-        or ($ctx | endswith(" / " + $n));
+        | ($n | type == "string") and (
+            ($n == $ctx)
+            or ($n | endswith(" / " + $ctx))
+            or ($ctx | endswith(" / " + $n))
+          );
 
       (map(select(.name != $self))) as $checks
       | if ($required | length) == 0 then

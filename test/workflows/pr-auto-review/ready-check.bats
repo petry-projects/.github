@@ -37,6 +37,21 @@ JSON
   [ "$output" = '[]' ]
 }
 
+@test "required_contexts: rule with missing/null parameters or non-string contexts → empty array" {
+  run pr_auto_review_required_contexts <<'JSON'
+[
+  {"type":"required_status_checks"},
+  {"type":"required_status_checks","parameters":null},
+  {"type":"required_status_checks","parameters":{"required_status_checks":[
+    {"context":null},
+    {"context":123}
+  ]}}
+]
+JSON
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+}
+
 @test "required_contexts: empty rules array → empty array" {
   run pr_auto_review_required_contexts <<<'[]'
   [ "$status" -eq 0 ]
