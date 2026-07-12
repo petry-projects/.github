@@ -846,6 +846,14 @@ _confirm_body() {
 
 ### Watch for (suspect classes registered for this agent)
 $suspect"
+  local diff_link
+  if [ -n "$prior" ]; then
+    diff_link="https://github.com/$host/compare/${prior}...${cand}"
+  else
+    diff_link="(no prior stable release)"
+  fi
+  local display_prior="${prior:0:12}"
+  display_prior="${display_prior:-none}"
   cat <<EOF
 <!-- canary-confirm:$agent -->
 **Canary rollout — human confirmation requested (\`$transition\`).**
@@ -857,12 +865,12 @@ The release gate holds \`$agent\` in **AWAITING_CONFIRMATION**: reliability has 
 | agent | \`$agent\` |
 | transition | \`$transition\` |
 | candidate | \`${cand:0:12}\` |
-| current stable | \`${prior:0:12}\` |
+| current stable | \`$display_prior\` |
 | host repo | \`$host\` |
 | reliability | ✅ PROMOTE — source-tier sample **$sample** (target ≥ $target), cumulative health clean |
 
 ### Review the candidate
-- **Diff (current stable → candidate):** https://github.com/$host/compare/${prior}...${cand}
+- **Diff (current stable → candidate):** $diff_link
 - Skim the changed reusable logic and the recent green runs on the ring1 tier before confirming.$watch
 
 ### Confirm or hold

@@ -1678,6 +1678,16 @@ GITEOF
   [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
 }
 
+@test "_confirm_body: gracefully handles empty prior (no prior stable release)" {
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _confirm_body dev-lead 'ring1->stable' cccccccccccc '' petry-projects/.github-private 5 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canary-confirm:dev-lead"* ]]
+  [[ "$output" == *"(no prior stable release)"* ]]                           # fallback diff link
+  [[ "$output" != *"compare/..."* ]]                                         # no broken URL
+  [[ "$output" == *"none"* ]]                                                # fallback display_prior
+}
+
 # _confirm_sync_stub <issue_list_json> — dev-lead-only sync fixture at the ring1->stable frontier
 # (next/ring0/ring1 = cand, stable = prior), clean success runs → AWAITING_CONFIRMATION; logs
 # every gh issue op to ISSUE_LOG so a test can assert the confirmation-issue upsert.
