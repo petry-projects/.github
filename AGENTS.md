@@ -111,6 +111,24 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 - Integration tests are allowed but MUST be clearly marked. They may be skipped locally during rapid iteration, but CI MUST always run them (for example, in a separate job or scheduled workflow).
 - Mock external services using project-provided helpers where available.
 
+### Decision Logic Lives in a Pure, Tested Script
+
+**A decision-making reusable keeps its decision logic in a pure, side-effect-free, unit-tested script (e.g. `scripts/**` or `.github/scripts/**`), with the workflow as thin I/O glue.**
+The workflow gathers facts (via `gh`, GraphQL, git, etc.) and passes them to a `source`-able function that computes the verdict with
+no external calls; the glue only echoes the result to `$GITHUB_OUTPUT` or acts on it. **Gate the script with bats in CI on any PR that changes the reusable.**
+
+Exemplars in this org:
+
+- **Canary rollout engine** — `scripts/lib/canary-rollout.sh` (pure gate core) + `tests/canary_rollout.bats`, CI-gated by `canary-rollout-tests.yml` (#685).
+  The orchestrator `scripts/canary-rollout.sh` feeds it numbers gathered from `gh`.
+- **PR auto-review readiness gate** — `.github/scripts/pr-auto-review/lib/ready-check.sh` (`pr_auto_review_ready` + helpers) + `test/workflows/pr-auto-review/`, CI-gated by
+  the **PR Auto-Review Tests** workflow. The reusable `pr-auto-review-reusable.yml` is thin glue that gathers PR state and calls the pure core.
+
+Why it pays off: correctness bugs are caught **pre-merge** by fast unit tests instead of at canary time or in production;
+the **whole decision matrix** is covered (every branch, precedence, edge cases) rather than the single fixture point a live run exercises;
+and it adds **zero canary-time cost** because the logic is verified before a version ever ships.
+Inline bash trapped in YAML can be exercised only by triggering the workflow — extract it.
+
 ---
 
 ## End-to-End Testing — Validate Real Functional Requirements

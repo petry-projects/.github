@@ -109,6 +109,11 @@ For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
 
+## Decision-Making Reusables — Pure, Tested Decision Cores
+
+See [AGENTS.md § Decision Logic Lives in a Pure, Tested Script](../AGENTS.md#decision-logic-lives-in-a-pure-tested-script)
+for the full standard, exemplars, and rationale.
+
 ## BMAD Method Workflows
 
 Repositories with BMAD Method installed (presence of `_bmad/`, `_bmad-output/`,
