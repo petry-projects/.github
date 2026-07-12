@@ -1283,7 +1283,7 @@ _drift_rings_one_agent() {
 # _benign_patterns at differs=1 (only version_independent classes active).
 _vi_benign_stub() {
   local failed_step="$1"
-  STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   local cut_iso run_iso
   cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"

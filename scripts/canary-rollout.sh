@@ -271,7 +271,7 @@ _tier_sample() {
 # preserving the invariant that the allowlist cannot mask a candidate-introduced regression.
 _benign_patterns() {
   _jq -r --arg a "$1" --arg d "${2:-0}" \
-    '.agents[$a].gate?.benign_failure_classes // []
+    '.agents[$a]?.gate?.benign_failure_classes? // []
      | map(select($d == "0" or .version_independent == true))
      | .[] | [(.workflow // ""), (.step // "")] | @tsv'
 }
