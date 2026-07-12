@@ -1572,3 +1572,183 @@ GHEOF
   [[ "$output" == *"updated blocker issue #501 for dev-lead"* ]]
   grep -q -- "--add-label needs-human" "$ISSUE_LOG"
 }
+
+# ── AWAITING_CONFIRMATION: opt-in human go/no-go at ring1->stable (#668 increment 3, #677) ─
+# Layer 3 of the #668 design. A correctness-sensitive agent (dev-lead) flagged
+# require_confirmation on its ring1->stable transition holds in AWAITING_CONFIRMATION once
+# reliability PASSES: the scheduled promote-all never auto-advances it; a deliberate
+# `promote <agent> --confirm` dispatch (the confirmation IS the dispatch — no state store)
+# clears it. `--confirm` is NOT `--override`: it advances ONLY a reliability-clean
+# AWAITING_CONFIRMATION state and can never bypass a BLOCKED gate. sync-issues files an
+# evidence-carrying `canary-confirm` issue (compare diff link; needs-human). Default-absent
+# (transition without the key) = fully autonomous, byte-identical for opted-out agents.
+
+@test "canary-rings.json: dev-lead ring1->stable opts into require_confirmation; opted-out agents default-off" {
+  run jq -e '.agents["dev-lead"].gate.transitions["ring1->stable"].require_confirmation == true' "$RINGS"
+  [ "$status" -eq 0 ]
+  # Every OTHER agent's ring1->stable must NOT carry the key (absent → today's autonomous behaviour).
+  run jq -e '[.agents | to_entries[] | select(.key != "dev-lead")
+             | .value.gate.transitions["ring1->stable"].require_confirmation] | all(. == null)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+# _confirm_stub <conclusion> <reusable_diff> [failed_step] — dev-lead (cross-repo) laid out with
+# next/ring0/ring1 = candidate (cccc) and stable = prior (bbbb): frontier = stable, transition
+# ring1->stable (which opts into require_confirmation). cut 2 days ago (dwell >> 12h), runs 1 day
+# ago. conclusion=success + reusable_diff=0 → reliability PROMOTE → overlaid to AWAITING_CONFIRMATION;
+# conclusion=failure + reusable_diff=1 + a non-suspect step → BLOCKED + REGRESSION.
+_confirm_stub() {
+  local conclusion="${1:-success}" reusable_diff="${2:-0}" failed_step="${3:-Compile TypeScript}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso cand_blob="reuseAAAA" prior_blob="reuseAAAA"
+  [ "$reusable_diff" = "1" ] && prior_blob="reuseBBBB"
+  cut_iso="$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)    echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/stable"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*)               printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "$cand_blob" ;;
+  *"ref=bbbb"*) echo "$prior_blob" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d,databaseId:88003,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) jq -nc --arg s "$failed_step" '{jobs:[{steps:[{name:\$s,conclusion:"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: reliability PROMOTE at ring1->stable holds as AWAITING_CONFIRMATION (not PROMOTE)" {
+  # Clean window, dwell >> 12h, sample >= 1 → reliability PROMOTE — but require_confirmation
+  # overlays it to AWAITING_CONFIRMATION so the scheduled sweep will not auto-advance.
+  _confirm_stub success 0
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ring1->stable"* ]]
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+  [[ "$output" == *"--confirm"* ]]   # the report names the exact clearing action
+}
+
+@test "orchestrator: AWAITING_CONFIRMATION does NOT advance without --confirm (scheduled sweep holds)" {
+  # promote with no flags (the promote-all sweep forwards none) must NOT move the tag.
+  _confirm_stub success 0
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+  [[ "$output" != *"DRY-RUN"* ]]     # no move planned — held for confirmation
+  [[ "$output" == *"--confirm"* ]]   # tells the human how to confirm
+}
+
+@test "orchestrator: promote --confirm advances a reliability-clean AWAITING_CONFIRMATION frontier" {
+  _confirm_stub success 0
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --confirm --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRY-RUN"* ]]         # the move IS planned once confirmed
+  [[ "$output" == *"stable"* ]]
+  [[ "$output" == *"gh api PATCH"* ]]
+}
+
+@test "orchestrator: --confirm is NOT --override — it cannot advance a BLOCKED gate" {
+  # A real regression (failure + differs=1, non-suspect step) is BLOCKED+REGRESSION. --confirm
+  # must refuse it: confirmation only clears a reliability-clean AWAITING_CONFIRMATION state.
+  _confirm_stub failure 1 "Compile TypeScript"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --confirm --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REGRESSION"* ]]
+  [[ "$output" != *"DRY-RUN"* ]]     # no move — --confirm did not bypass reliability
+}
+
+@test "_confirm_body: renders the compare diff link + the promote --confirm instruction" {
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _confirm_body dev-lead 'ring1->stable' cccccccccccc bbbbbbbbbbbb petry-projects/.github-private 5 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canary-confirm:dev-lead"* ]]                              # idempotency marker
+  [[ "$output" == *"compare/bbbbbbbbbbbb...cccccccccccc"* ]]                  # stable -> candidate diff
+  [[ "$output" == *"--confirm"* ]]                                           # the go action
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+}
+
+@test "_confirm_body: gracefully handles empty prior (no prior stable release)" {
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _confirm_body dev-lead 'ring1->stable' cccccccccccc '' petry-projects/.github-private 5 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canary-confirm:dev-lead"* ]]
+  [[ "$output" == *"(no prior stable release)"* ]]                           # fallback diff link
+  [[ "$output" != *"compare/..."* ]]                                         # no broken URL
+  [[ "$output" == *"none"* ]]                                                # fallback display_prior
+}
+
+# _confirm_sync_stub <issue_list_json> — dev-lead-only sync fixture at the ring1->stable frontier
+# (next/ring0/ring1 = cand, stable = prior), clean success runs → AWAITING_CONFIRMATION; logs
+# every gh issue op to ISSUE_LOG so a test can assert the confirmation-issue upsert.
+_confirm_sync_stub() {
+  local issue_list="${1:-[]}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)    echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/stable"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*)               printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(20)|{conclusion:"success",createdAt:\$d,databaseId:88004,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) echo '{"jobs":[{"steps":[]}]}' ;;
+  "issue list"*) echo '$issue_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  SYNC_RINGS="$BATS_TEST_TMPDIR/sync-rings-confirm.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$SYNC_RINGS"
+}
+
+@test "orchestrator: sync-issues opens a canary-confirm issue for an AWAITING_CONFIRMATION agent" {
+  _confirm_sync_stub '[]'
+  local summ="$BATS_TEST_TMPDIR/summary-confirm.md"; : > "$summ"
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened confirm issue #777 for dev-lead"* ]]
+  # A SEPARATE issue keyed by the canary-confirm label + marker (not the blocker issue).
+  grep -q -- "--label canary-confirm" "$ISSUE_LOG"
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+  grep -q "compare/" "$ISSUE_LOG"                       # evidence: the stable -> candidate diff link
+  grep -q "AWAITING_CONFIRMATION" "$summ"               # the fleet dashboard surfaces the new state
+}
+
+@test "orchestrator: sync-issues auto-closes a stale canary-confirm issue once the agent is no longer awaiting" {
+  # dev-lead is at next->ring0 (PROMOTE, NOT require_confirmation) but an OPEN confirm issue
+  # #502 lingers → it must be closed (the go/no-go no longer applies).
+  _sync_stub success '[{"number":502,"state":"OPEN","body":"<!-- canary-confirm:dev-lead -->"}]'
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"closed cleared confirm issue #502 for dev-lead"* ]]
+  grep -q "CLOSE|.*502" "$ISSUE_LOG"
+}
