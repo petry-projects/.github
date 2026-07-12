@@ -114,3 +114,70 @@ teardown() {
   # The generic "review manually" catch-all must no longer be used here.
   ! grep -q 'review manually' "$report_dir/skipped.md"
 }
+
+# ---------------------------------------------------------------------------
+# standards/copilot-instructions-missing-* (wildcard siblings)
+# ---------------------------------------------------------------------------
+
+@test "copilot-instructions-missing-tech-stack routes to the content-agent path" {
+  findings="$(tt_write_finding "broodminder-export" "standards" "copilot-instructions-missing-tech-stack")"
+  report_dir="${TT_TMP}/report"
+
+  GH_TOKEN=fake \
+    FINDINGS_FILE="$findings" \
+    REPORT_DIR="$report_dir" \
+    DRY_RUN=false \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  grep -q 'copilot-instructions-missing-tech-stack' "$report_dir/skipped.md"
+  ! grep -q 'copilot-instructions-missing-tech-stack' "$report_dir/remediation-report.md"
+
+  grep -q 'copilot-instructions-standard.md' "$report_dir/skipped.md"
+  grep -q 'Claude agent' "$report_dir/skipped.md"
+
+  ! grep -q 'review manually' "$report_dir/skipped.md"
+}
+
+@test "copilot-instructions-missing-local-dev-commands routes to the content-agent path" {
+  findings="$(tt_write_finding "broodminder-export" "standards" "copilot-instructions-missing-local-dev-commands")"
+  report_dir="${TT_TMP}/report"
+
+  GH_TOKEN=fake \
+    FINDINGS_FILE="$findings" \
+    REPORT_DIR="$report_dir" \
+    DRY_RUN=false \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  grep -q 'copilot-instructions-missing-local-dev-commands' "$report_dir/skipped.md"
+  ! grep -q 'copilot-instructions-missing-local-dev-commands' "$report_dir/remediation-report.md"
+
+  grep -q 'copilot-instructions-standard.md' "$report_dir/skipped.md"
+  grep -q 'Claude agent' "$report_dir/skipped.md"
+
+  ! grep -q 'review manually' "$report_dir/skipped.md"
+}
+
+@test "copilot-instructions-missing-language-links routes to the content-agent path" {
+  findings="$(tt_write_finding "broodminder-export" "standards" "copilot-instructions-missing-language-links")"
+  report_dir="${TT_TMP}/report"
+
+  GH_TOKEN=fake \
+    FINDINGS_FILE="$findings" \
+    REPORT_DIR="$report_dir" \
+    DRY_RUN=false \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  grep -q 'copilot-instructions-missing-language-links' "$report_dir/skipped.md"
+  ! grep -q 'copilot-instructions-missing-language-links' "$report_dir/remediation-report.md"
+
+  grep -q 'copilot-instructions-standard.md' "$report_dir/skipped.md"
+  grep -q 'Claude agent' "$report_dir/skipped.md"
+
+  ! grep -q 'review manually' "$report_dir/skipped.md"
+}

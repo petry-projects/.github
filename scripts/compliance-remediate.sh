@@ -749,7 +749,7 @@ remediate_finding() {
       report_skip "$repo" "$check" \
         "AGENTS.md creation/update requires content knowledge — trigger Claude agent on the finding issue"
       ;;
-    standards/missing-copilot-instructions)
+    standards/missing-copilot-instructions | standards/copilot-instructions-missing-*)
       report_skip "$repo" "$check" \
         "\`.github/copilot-instructions.md\` must be created from standards/copilot-instructions-standard.md and tailored to the repo's stack — trigger Claude agent on the finding issue"
       ;;
