@@ -333,7 +333,9 @@ _failure_suspect() {
   local repo="$1" rid="$2" rwf="$3" patterns="$4" sig wf_re step_re
   sig="$(_run_signature "$repo" "$rid")"
   [ -z "$sig" ] && return 1
-  while IFS=$'\t' read -r wf_re step_re; do
+  while IFS=$'\t' read -r wf_re step_re || [ -n "$wf_re" ]; do
+    wf_re="${wf_re%$'\r'}"
+    step_re="${step_re%$'\r'}"
     [ -z "$step_re" ] && continue
     if [ "$(benign_match "$rwf" "$sig" "$wf_re" "$step_re")" = "yes" ]; then return 0; fi
   done <<< "$patterns"
