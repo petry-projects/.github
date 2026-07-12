@@ -726,6 +726,17 @@ remediate_finding() {
     push-protection/non_provider_patterns_enabled | push-protection/secret_scanning_non_provider_patterns)
       remediate_security_analysis_setting "$repo" "secret_scanning_non_provider_patterns" "enabled" "$check"
       ;;
+    # The two file-based push-protection checks below are NOT settings PATCHes,
+    # so apply-repo-settings.sh (security_and_analysis only) cannot fix them.
+    # Route each to its real manual step instead of the settings catch-all.
+    push-protection/secret_scan_ci_job_present)
+      report_skip "$repo" "$check" \
+        "Adding the \`secret-scan\` gitleaks job to \`.github/workflows/ci.yml\` requires \`workflow\` token scope — copy the CI secret-scan job from standards/push-protection.md using a PAT"
+      ;;
+    push-protection/gitignore_secrets_block)
+      report_skip "$repo" "$check" \
+        "\`.gitignore\` is missing baseline secret patterns — copy the org baseline from /.gitignore (\`.env\`, \`*.pem\`, \`*.key\`) into the repo's root \`.gitignore\`"
+      ;;
     push-protection/*)
       report_skip "$repo" "$check" \
         "Push protection settings require security_and_analysis API scope — run scripts/apply-repo-settings.sh"
@@ -737,6 +748,10 @@ remediate_finding() {
     standards/missing-agents-md | standards/agents-md-missing-org-ref)
       report_skip "$repo" "$check" \
         "AGENTS.md creation/update requires content knowledge — trigger Claude agent on the finding issue"
+      ;;
+    standards/missing-copilot-instructions)
+      report_skip "$repo" "$check" \
+        "\`.github/copilot-instructions.md\` must be created from standards/copilot-instructions-standard.md and tailored to the repo's stack — trigger Claude agent on the finding issue"
       ;;
     settings/check-suite-prefs-unreadable)
       report_skip "$repo" "$check" \
