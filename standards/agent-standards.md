@@ -111,26 +111,8 @@ The AgentShield action adds the agent-specific security layer on top.
 
 ## Decision-Making Reusables — Pure, Tested Decision Cores
 
-A reusable workflow that makes a **decision** (dispatch or not, promote or not,
-merge or not) MUST keep its decision logic in a **pure, side-effect-free,
-unit-tested script** under `scripts/**`, with the workflow acting as thin I/O
-glue. The workflow gathers facts (`gh`, GraphQL, git) and passes them to a
-`source`-able function that returns the verdict with **no external calls**; the
-glue only echoes the result to `$GITHUB_OUTPUT` or acts on it.
-
-**Gate the script with bats in CI on any PR that changes the reusable.**
-
-| Exemplar | Pure core | Tests | CI gate |
-|----------|-----------|-------|---------|
-| Canary rollout engine | `scripts/lib/canary-rollout.sh` | `tests/canary_rollout.bats` | `canary-rollout-tests.yml` (#685) |
-| PR auto-review readiness | `.github/scripts/pr-auto-review/lib/ready-check.sh` | `test/workflows/pr-auto-review/` | **PR Auto-Review Tests** |
-
-**Payoff:** correctness bugs are caught pre-merge by fast unit tests instead of
-at run time; the whole decision matrix is covered (every branch and precedence
-edge) rather than the single fixture point a live trigger exercises; and it adds
-zero run-time cost because the logic is verified before the workflow ever fires.
-Decision logic trapped as inline bash in YAML can only be exercised by triggering
-the workflow — extract it into a tested script.
+See [AGENTS.md § Decision Logic Lives in a Pure, Tested Script](../AGENTS.md#decision-logic-lives-in-a-pure-tested-script)
+for the full standard, exemplars, and rationale.
 
 ## BMAD Method Workflows
 

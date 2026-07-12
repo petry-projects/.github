@@ -113,7 +113,7 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 
 ### Decision Logic Lives in a Pure, Tested Script
 
-**A decision-making reusable keeps its decision logic in a pure, side-effect-free, unit-tested script (`scripts/**`), with the workflow as thin I/O glue.**
+**A decision-making reusable keeps its decision logic in a pure, side-effect-free, unit-tested script (e.g. `scripts/**` or `.github/scripts/**`), with the workflow as thin I/O glue.**
 The workflow gathers facts (via `gh`, GraphQL, git, etc.) and passes them to a `source`-able function that computes the verdict with
 no external calls; the glue only echoes the result to `$GITHUB_OUTPUT` or acts on it. **Gate the script with bats in CI on any PR that changes the reusable.**
 
