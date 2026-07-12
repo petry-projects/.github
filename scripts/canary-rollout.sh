@@ -276,6 +276,18 @@ _benign_patterns() {
      | .[] | [(.workflow // ""), (.step // "")] | @tsv'
 }
 
+# _suspect_patterns <agent> — emit the per-reusable SUSPECT failure-class allowlist
+# (#668 increment 2) as TSV "<workflow_regex>\t<step_regex>", one entry per line. Empty if
+# none. Unlike benign, suspect classes are emitted regardless of differs: a SUSPECT verdict
+# only surfaces at differs=1 (see classify_failure), but the class always participates so a
+# differs=1 counted failure is triaged SUSPECT (blocks + carries guidance) instead of a bare
+# REGRESSION. Suspect classes are NEVER excluded from cum_fail — they still block.
+_suspect_patterns() {
+  _jq -r --arg a "$1" \
+    '.agents[$a]?.gate?.suspect_failure_classes? // []
+     | .[] | [(.workflow // ""), (.step // "")] | @tsv'
+}
+
 # Memoization cache for _run_signature: keyed by "repo:run_id".
 # Avoids duplicate gh run view calls for the same (repo, run_id) across agents
 # in evaluate-all (where multiple agents can share repos).
@@ -312,35 +324,60 @@ _failure_benign() {
   return 1
 }
 
+# _failure_suspect <repo> <run_id> <workflow_name> <patterns_tsv> — return 0 if this
+# in-window failure matches any SUSPECT allowlist entry (#668 increment 2), else 1. Reuses
+# the benign_match pure matcher against the run's failed-step signature; fail-closed on an
+# empty signature (an unknown signature is never treated as suspect). A suspect match does
+# NOT exclude the failure — it narrows the triage verdict (SUSPECT vs REGRESSION) only.
+_failure_suspect() {
+  local repo="$1" rid="$2" rwf="$3" patterns="$4" sig wf_re step_re
+  sig="$(_run_signature "$repo" "$rid")"
+  [ -z "$sig" ] && return 1
+  while IFS=$'\t' read -r wf_re step_re || [ -n "$wf_re" ]; do
+    wf_re="${wf_re%$'\r'}"
+    step_re="${step_re%$'\r'}"
+    [ -z "$step_re" ] && continue
+    if [ "$(benign_match "$rwf" "$sig" "$wf_re" "$step_re")" = "yes" ]; then return 0; fi
+  done <<< "$patterns"
+  return 1
+}
+
 # _cumulative_health <agent> <since_z> <differs 0|1> <repo...> — failures +
 # startup_failures across EVERY given tier repo since the candidate cut. Failures
 # matching the per-reusable known-benign allowlist (#1025 P2) are counted separately and
 # excluded from the blocking total; which allowlist entries apply depends on whether the
-# candidate changed the reusable (differs — see _benign_patterns, #668). Prints
-# "<failures> <startup_failures> <benign_excluded>".
+# candidate changed the reusable (differs — see _benign_patterns, #668). A counted (non-
+# benign) failure that matches a `suspect_failure_classes` entry sets the suspect flag
+# (#668 increment 2) — it still counts toward the blocking total (SUSPECT blocks like
+# REGRESSION), but downstream triage renders SUSPECT + guidance instead of a bare
+# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect 0|1>".
 _cumulative_health() {
   local agent="$1" since="$2" differs="$3"; shift 3
-  local wf repo json fail=0 startup=0 benign=0 patterns="" rid rwf
+  local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf
   wf="$(_agent_field "$agent" run_workflow)"
   patterns="$(_benign_patterns "$agent" "$differs")"
+  suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
-    if [ -z "$patterns" ]; then
-      # No benign patterns to match — count all failures with one jq pass,
+    if [ -z "$patterns" ] && [ -z "$suspect_patterns" ]; then
+      # No benign or suspect patterns to match — count all failures with one jq pass,
       # avoiding a gh run view call per failure.
       fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
     else
       while IFS=$'\t' read -r rid rwf; do
-        if _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
+        if [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
           benign=$(( benign + 1 ))
         else
           fail=$(( fail + 1 ))
+          if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
+            suspect=1
+          fi
         fi
       done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
     fi
   done
-  echo "$fail $startup $benign"
+  echo "$fail $startup $benign $suspect"
 }
 
 # _baseline_daily <agent> <window_days> <repo...> — per-day EXECUTED counts on the
@@ -452,8 +489,8 @@ _frontier_state() {
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \
       < <(resolve_members "$agent" "$ch3")
   done
-  local cum_fail cum_startup cum_benign
-  read -r cum_fail cum_startup cum_benign < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_repos[@]}")
+  local cum_fail cum_startup cum_benign cum_suspect
+  read -r cum_fail cum_startup cum_benign cum_suspect < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_repos[@]}")
 
   # Per-transition knobs (registry-configurable; #548 defaults live in the ring SoT).
   local dwell_floor waived="false" target=0
@@ -483,7 +520,7 @@ _frontier_state() {
 
   local triage="-"
   if [ "$state" = "BLOCKED" ]; then
-    triage="$(classify_failure "$differs" "${CANARY_FAILURE_CATEGORY:-unknown}")"
+    triage="$(classify_failure "$differs" "${CANARY_FAILURE_CATEGORY:-unknown}" "$cum_suspect")"
   fi
 
   echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage"
@@ -512,6 +549,8 @@ cmd_evaluate() {
     if [ "$state" = "BLOCKED" ]; then
       if [ "$triage" = "REGRESSION" ]; then
         echo "::error::triage=REGRESSION — candidate changed the reusable and a run failed since cut. HALT + hold; recommend rollback."
+      elif [ "$triage" = "SUSPECT" ]; then
+        echo "::warning::triage=SUSPECT — failure matches a suspect class (possibly candidate-caused). BLOCKS + needs a human; see the blocker issue's discriminating question, then promote --override if unrelated or roll back if a real regression."
       else
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback, do NOT advance."
       fi
@@ -558,8 +597,13 @@ cmd_promote() {
   local allow_pre
   allow_pre="$(_jq -r --arg a "$agent" '.agents[$a].gate?.control?.allow_pre_existing // false')"
   [ "$allow_pre_flag" = true ] && allow_pre=true
-  if [ "$state" = "BLOCKED" ] && [ "$triage" = "REGRESSION" ] && [ "$override" != true ]; then
-    echo "::error::gate=BLOCKED (triage=REGRESSION) for '$frontier' [$transition] — candidate regression suspected; not promoting. Investigate + rollback, do not --override blindly."
+  # REGRESSION and SUSPECT both HALT + need a human: neither advances without --override,
+  # and --allow-pre-existing (which only unblocks PRE_EXISTING) never advances them. For a
+  # SUSPECT the human answers the class's discriminating question first — `--override` when
+  # the timeout is unrelated to the diff, or roll back when the candidate got materially
+  # slower (#668 increment 2).
+  if [ "$state" = "BLOCKED" ] && { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && [ "$override" != true ]; then
+    echo "::error::gate=BLOCKED (triage=$triage) for '$frontier' [$transition] — candidate regression suspected; not promoting. Investigate + rollback, do not --override blindly."
     return 0
   fi
   local advance=false
@@ -716,11 +760,28 @@ _blocker_evidence() {
   printf '%s' "$out"
 }
 
+# _suspect_guidance <agent> — emit the discriminating question(s) for the agent's
+# suspect_failure_classes (#668 increment 2), one bullet per class, so a SUSPECT blocker
+# tells the human exactly how to confirm in ~30 seconds. Empty if the agent has none.
+_suspect_guidance() {
+  _jq -r --arg a "$1" \
+    '.agents[$a]?.gate?.suspect_failure_classes? // []
+     | .[] | select((.guidance // "") != "")
+     | "- **\(.id):** \(.guidance)"'
+}
+
 # _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence>
 _blocker_body() {
   local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" note
   if [ "$triage" = "REGRESSION" ]; then
     note="> ⛔ **REGRESSION** — the candidate changed the reusable and a run failed since its cut. HALT + hold; investigate and roll back rather than \`--override\`. (labelled \`needs-human\`)"
+  elif [ "$triage" = "SUSPECT" ]; then
+    local guidance; guidance="$(_suspect_guidance "$agent")"
+    [ -z "$guidance" ] && guidance="- _(no per-class guidance registered)_"
+    note="> ⚠️ **SUSPECT** — the candidate changed the reusable and a run failed with a *possibly-candidate-caused* signature. This still BLOCKS and needs a human (labelled \`needs-human\`), but answer the discriminating question below to confirm fast: if unrelated to the diff, \`promote --override\`; if the candidate is materially responsible, treat it as a real regression and roll back.
+>
+> **Discriminating question:**
+$(printf '%s\n' "$guidance" | sed 's/^/> /')"
   else
     note="> ⚠️ **PRE_EXISTING** — the failure is pre-existing/environmental (reusable byte-identical to the prior channel). Report only; the gate will not roll back or advance. Fix-forward, and the armed timer auto-promotes once clean."
   fi
@@ -779,8 +840,9 @@ cmd_sync_issues() {
     # Route blockers so they get ACTIONED, not left sitting: `dev-lead` (dev-lead-intent
     # treats a `dev-lead`-labelled issue as an actionable "issue" intent and picks it up —
     # the App token applies the label, so the `issues: labeled` event DOES trigger the agent,
-    # unlike a github.token edit). `needs-human` additionally flags REGRESSION blockers, which
-    # the gate escalates to a human (roll back rather than blind --override).
+    # unlike a github.token edit). `needs-human` additionally flags REGRESSION and SUSPECT
+    # blockers, which the gate escalates to a human (roll back, or confirm the discriminating
+    # question then --override, rather than a blind --override).
     gh label create dev-lead --repo "$ISSUE_REPO" --color 5319e7 --description "Route to the dev-lead agent for action" >/dev/null 2>&1 || true
     gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
   fi
@@ -807,7 +869,7 @@ cmd_sync_issues() {
           num="$(_gh_issue_create "$title" "$body" "canary-blocker" || true)"
           if [ -n "$num" ]; then
             gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-            [ "$triage" = "REGRESSION" ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+            { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
             echo "  opened blocker issue #$num for $agent"; blk="#$num"
           else echo "::warning::could not open blocker issue for $agent (Issues:write on the App?)"; fi
         fi
@@ -817,7 +879,7 @@ cmd_sync_issues() {
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
           gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-          [ "$triage" = "REGRESSION" ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
           echo "  updated blocker issue #$num for $agent"; blk="#$num"
         fi
       fi
