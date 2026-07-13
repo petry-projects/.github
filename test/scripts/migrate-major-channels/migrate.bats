@@ -98,7 +98,7 @@ STUB
   [ "$status" -eq 0 ]
   echo "$output" | grep -qiE 'foo/v2-stable.*(exist|skip)'
   # nothing planned for creation since all exist
-  echo "$output" | grep -viq 'would create'
+  ! grep -qi 'would create' <<< "$output"
 }
 
 @test "--retire-bare refuses while an enrolled consumer still pins bare" {
@@ -121,4 +121,14 @@ STUB
   [ "$status" -eq 0 ]
   echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
   ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
+}
+
+@test "--emit-repins lists enrolled consumers still on a bare tier with the v-form to move to" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export CONSUMER_REF="foo/ring1"   # consumerX still on the bare tier
+  install_gh_stub
+  run env GH_TOKEN=x CANARY_RINGS="$RINGS" bash "$SCRIPT" --emit-repins --agent foo
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'consumerX'
+  echo "$output" | grep -qF 'foo/v2-ring1'
 }

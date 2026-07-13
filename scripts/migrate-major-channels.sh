@@ -122,7 +122,11 @@ _consumer_pinned_ref() {
 # _is_bare_tier_ref <agent> <ref> -> 0 if <ref> is a bare `<agent>/<tier>` pin
 # (i.e. carries no `v<M>-` major scope).
 _is_bare_tier_ref() {
-  [[ "$2" =~ ^$1/(next|ring0|ring1|stable)$ ]]
+  local agent="$1" ref="$2" tier
+  while IFS= read -r tier; do
+    [ "$ref" = "${agent}/${tier}" ] && return 0
+  done < <(_agent_tiers "$agent")
+  return 1
 }
 
 # ── operations ────────────────────────────────────────────────────────────────
@@ -173,7 +177,10 @@ emit_repins() {
   fi
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    ref="$(_consumer_pinned_ref "$c" "$agent")"
+    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+      err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
+      return 1
+    fi
     [ -z "$ref" ] && continue
     if _is_bare_tier_ref "$agent" "$ref"; then
       tier="${ref##*/}"
@@ -187,10 +194,14 @@ emit_repins() {
 retire_bare() {
   local agent="$1" host c ref tier
   host="$(_agent_host "$agent")"
+  [[ -z "$host" ]] && { err "unknown agent: $agent"; return 1; }
   local -a offenders=()
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    ref="$(_consumer_pinned_ref "$c" "$agent")"
+    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+      err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
+      return 1
+    fi
     [ -z "$ref" ] && continue
     if _is_bare_tier_ref "$agent" "$ref"; then
       offenders+=("${c} (@${ref})")
@@ -234,7 +245,7 @@ main() {
           exit 1
         fi
         mode="retire-bare"; retire_agent="$2"; shift 2 ;;
-      -h|--help)     sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help)     sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) err "Unknown option: $1"; exit 1 ;;
     esac
   done

@@ -71,7 +71,7 @@ refs/tags/auto-rebase/v1.0.0"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF '@auto-rebase/stable'
-  echo "$output" | grep -vqF '@auto-rebase/v'
+  ! echo "$output" | grep -qF '@auto-rebase/v'
 }
 
 @test "drift check treats a tier-correct v<M>-tier stub as compliant (no PR)" {
@@ -81,7 +81,7 @@ refs/tags/auto-rebase/v1.0.0"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'already compliant'
-  echo "$output" | grep -vq 'Would open PR'
+  ! echo "$output" | grep -q 'Would open PR'
 }
 
 @test "drift check still flags a WRONG-tier v<M>-tier stub" {
