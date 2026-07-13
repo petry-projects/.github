@@ -160,7 +160,7 @@ fetch_existing() {
 # `<base>/ring1`). For those reusables the stub is compliant when it pins ANY ref
 # the shared ring model accepts for THIS repo (its tier channel + the transitional
 # legacy grace) — so the sweep never reverts an intentional ring/next pin. Non-ring
-# templates (e.g. add-to-project, feature-ideation@v1) keep the exact-match rule.
+# templates (e.g. add-to-project, not in RING_REUSABLES) keep the exact-match rule.
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses

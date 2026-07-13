@@ -63,10 +63,41 @@ R="petry-projects/.github/.github/workflows/agent-shield-reusable.yml"
 }
 
 @test "with no legacy grace, only the canonical ref is accepted" {
-  # mirrors the feature-ideation entry (canonical @v1, empty legacy)
+  # A fixed-pin entry with an empty legacy CSV: only the exact canonical ref
+  # passes. (feature-ideation used this shape before #606 channel-ified it.)
   accept "    uses: $R@v1" "v1" ""
   [ "$status" -eq 0 ]
   accept "    uses: $R@v2" "v1" ""
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# #606 — feature-ideation and pr-auto-review are now RING reusables. Their
+# stubs resolve the canonical pin through the same ring model as the others,
+# so a `<name>/stable` channel pin on a stable-tier repo is accepted and the
+# pre-ring @v1/@v2 pin is rejected (grace dropped, #870).
+# ---------------------------------------------------------------------------
+accept_reusable() {
+  local reusable="$1" line="$2" canonical="$3" legacy="$4"
+  run bash -c 'source "$1" >/dev/null 2>&1; stub_pin_acceptable "$2" "$3" "$4" "$5"' \
+    _ "$SCRIPT" "$line" "$reusable" "$canonical" "$legacy"
+}
+
+@test "feature-ideation stub: @feature-ideation/stable accepted, @v1 rejected (#606)" {
+  local reusable="feature-ideation-reusable"
+  local ref="petry-projects/.github/.github/workflows/${reusable}.yml"
+  accept_reusable "$reusable" "    uses: $ref@feature-ideation/stable" "feature-ideation/stable" ""
+  [ "$status" -eq 0 ]
+  accept_reusable "$reusable" "    uses: $ref@v1" "feature-ideation/stable" ""
+  [ "$status" -ne 0 ]
+}
+
+@test "pr-auto-review stub: @pr-auto-review/stable accepted, @v2 rejected (#606)" {
+  local reusable="pr-auto-review-reusable"
+  local ref="petry-projects/.github/.github/workflows/${reusable}.yml"
+  accept_reusable "$reusable" "    uses: $ref@pr-auto-review/stable" "pr-auto-review/stable" ""
+  [ "$status" -eq 0 ]
+  accept_reusable "$reusable" "    uses: $ref@v2" "pr-auto-review/stable" ""
   [ "$status" -ne 0 ]
 }
 
