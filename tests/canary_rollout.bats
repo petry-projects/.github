@@ -2397,6 +2397,21 @@ GHEOF
   [ -z "$(major_component '')" ]
   [ -z "$(major_component v2.0.0)" ]
 }
+@test "_looks_like_oid: accepts valid 7-char and 40-char lowercase hex" {
+  _looks_like_oid "a1b2c3d"
+  _looks_like_oid "abc1234def5678901234567890123456789012345678901234567890123456"
+  _looks_like_oid "0000000000000000000000000000000000000000"
+}
+@test "_looks_like_oid: accepts 64-char hex (max length)" {
+  _looks_like_oid "$(printf '%064x' 255)"
+}
+@test "_looks_like_oid: rejects uppercase hex, short ids, and non-hex tokens" {
+  run _looks_like_oid "A1B2C3D"; [ "$status" -ne 0 ]
+  run _looks_like_oid "abc123"; [ "$status" -ne 0 ]
+  run _looks_like_oid ""; [ "$status" -ne 0 ]
+  run _looks_like_oid "{}"; [ "$status" -ne 0 ]
+  run _looks_like_oid "dev-lead/next"; [ "$status" -ne 0 ]
+}
 
 # ── a fleet whose v2 major line EXISTS: v2-next=cand(cccc), v2-ring0/ring1/stable=old(bbbb) →
 #    frontier ring0, transition next->ring0. Bare tags resolve to a DIFFERENT sha (aaaa) so a test

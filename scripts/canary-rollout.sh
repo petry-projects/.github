@@ -149,12 +149,6 @@ _gh_create_annotated_tag() {
   }
 }
 
-# _looks_like_oid <s> — return 0 iff <s> is a bare git object id (7–64 lowercase hex).
-# The v-form-prefer guard (major-scoped-channels epic #657, Phase F4): an absent tag
-# resolves to empty (or a `{}` sentinel under stubs), so only a real commit id may be
-# preferred over the legacy bare form — that keeps today's bare-tier fleet byte-identical.
-_looks_like_oid() { [[ "$1" =~ ^[0-9a-f]{7,64}$ ]]; }
-
 # _agent_current_major <agent> — the MAJOR of the agent's highest vX.Y.Z release on its
 # host, empty if none (major-scoped-channels epic #657, Phase F4). This is the "current
 # major line" a v-scoped channel tag is derived against; there is no new registry field —
@@ -1504,7 +1498,8 @@ _autocut_agent() {
   if [ -z "$main_blob" ]; then
     echo "::warning::autocut $agent: reusable '$reusable' not found at $host@${mainsha:0:12} — skipping"; return 0
   fi
-  next_commit="$(channel_commit "$agent" next)"
+  local next_resolved_tag
+  IFS=$'\t' read -r next_resolved_tag next_commit < <(_resolved_channel "$agent" next)
   next_blob=""
   [ -n "$next_commit" ] && next_blob="$(_gh_blob_sha "$host" "$reusable" "$next_commit")"
   # Idempotency: nothing to cut when main HEAD already IS the candidate, or the reusable blob
@@ -1524,7 +1519,7 @@ _autocut_agent() {
   if [ "$bump" = major ]; then
     next_tag="$(channel_tag "$agent" next "$newmajor")"
   else
-    next_tag="$(_resolved_channel_tag "$agent" next)"
+    next_tag="$next_resolved_tag"
   fi
   echo "autocut $agent: reusable changed on $host ($defbranch ${mainsha:0:12}) vs next ${next_commit:0:12} — cutting v$newver (bump=$bump), moving $next_tag."
   local relver="$agent/v$newver"

@@ -123,7 +123,9 @@ max_semver() {
 # otherwise. Pure. Used (major-scoped-channels epic #657, Phase F4) to derive an
 # agent's current major line from its highest vX.Y.Z release for v-form tagging.
 major_component() {
-  [[ "$1" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]] && printf '%s' "${BASH_REMATCH[1]}" || true
+  if [[ "$1" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
 }
 
 # channel_tag <agent> <tier> [major] — build a channel tag name. With a MAJOR the
@@ -134,6 +136,9 @@ channel_tag() {
   if [ -n "$major" ]; then printf '%s/v%s-%s' "$agent" "$major" "$tier"
   else printf '%s/%s' "$agent" "$tier"; fi
 }
+
+# _looks_like_oid <s> — return 0 iff <s> is a bare git object id (7–64 lowercase hex). Pure.
+_looks_like_oid() { [[ "$1" =~ ^[0-9a-f]{7,64}$ ]]; }
 
 # dwell_met <dwell_hours> <floor_hours> — echo 1 if the candidate has dwelled at
 # least floor_hours on the source tier, else 0.
