@@ -180,7 +180,7 @@ classify_failure() {
     comment-cap|rate-limit|infra|data) echo "PRE_EXISTING"; return 0 ;;
   esac
   if [ "$differs" != "1" ]; then echo "PRE_EXISTING"; return 0; fi
-  if [ "$suspect" = "1" ]; then echo "SUSPECT"; else echo "REGRESSION"; fi
+  if [ "$suspect" -gt 0 ]; then echo "SUSPECT"; else echo "REGRESSION"; fi
 }
 
 # decide_suspect_downgrade <cand_rate_permille> <base_rate_permille> <base_sample> <knobs_json>

@@ -304,15 +304,18 @@ _suspect_downgrade_patterns() {
 }
 
 # _suspect_class_counts <agent> <since_z> <before_z|-> <wf_re> <step_re> <repo...> — over the
-# window [since_z, before_z) on the given tier repos, echo "<matched_failures> <executed>":
+# window [since_z, before_z) on the given tier repos, echo "<matched_failures> <executed> <incomplete>":
 # executed = success+failure runs; matched = the failures whose failed-step signature matches
-# THIS one suspect class (via benign_match, the same matcher triage uses). before_z="-" means
-# no upper bound. Powers the candidate-vs-baseline SUSPECT-class failure RATE that the
-# auto-downgrade core compares (#668 increment 6). Reuses _run_json / _run_signature (the
-# signature cache is warm from the cumulative-health pass on the candidate window).
+# THIS one suspect class (via benign_match, the same matcher triage uses); incomplete = the
+# count of failure runs whose signature could not be retrieved (gh run view error — callers
+# treat incomplete>0 as HOLD, not DOWNGRADE, since an unreadable run could be a non-match).
+# before_z="-" means no upper bound. Powers the candidate-vs-baseline SUSPECT-class failure
+# RATE that the auto-downgrade core compares (#668 increment 6). Reuses _run_json /
+# _run_signature (the signature cache is warm from the cumulative-health pass on the
+# candidate window).
 _suspect_class_counts() {
   local agent="$1" since="$2" before="$3" wf_re="$4" step_re="$5"; shift 5
-  local wf repo json rid rwf sig matched=0 executed=0 count
+  local wf repo json rid rwf sig sig_rc matched=0 executed=0 incomplete=0 count
   wf="$(_agent_field "$agent" run_workflow)"
   local exec_filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
   local fail_filter='.[]?|select(.conclusion=="failure")'
@@ -329,14 +332,18 @@ _suspect_class_counts() {
       rid="${rid%$'\r'}"
       rwf="${rwf%$'\r'}"
       [ -z "$rid" ] && continue
-      sig="$(_run_signature "$repo" "$rid")"
-      [ -z "$sig" ] && continue
+      sig_rc=0
+      sig="$(_run_signature "$repo" "$rid")" || sig_rc=$?  # || prevents set -e on lookup failure
+      if [ -z "$sig" ]; then
+        [ "$sig_rc" -ne 0 ] && incomplete=$(( incomplete + 1 ))  # lookup failed; genuine empty sig is fine
+        continue
+      fi
       if [ "$(benign_match "$rwf" "$sig" "$wf_re" "$step_re")" = "yes" ]; then
         matched=$(( matched + 1 ))
       fi
     done < <(jq -r "[${fail_filter}]|.[]|[(.databaseId // \"\"|tostring),(.workflowName // \"\")]|@tsv" 2>/dev/null <<< "$json")
   done
-  echo "$matched $executed"
+  echo "$matched $executed $incomplete"
 }
 
 # Memoization cache for _run_signature: keyed by "repo:run_id".
@@ -346,16 +353,28 @@ declare -A _RUN_SIG_CACHE=()
 
 # _run_signature <repo> <run_id> — the failed step names of a run, joined by newlines
 # (the "step/error signature" the allowlist matches against). Empty repo/wildcard/id or
-# any gh error → "" (fail-closed: an unknown signature is never treated as benign).
+# any gh error → "" with exit 1 (fail-closed: an unknown signature is never treated as
+# benign, and callers that need to distinguish a lookup failure from a genuine empty
+# signature check the exit code). A successful lookup with no failed steps → "" exit 0.
+# The $'\x01' sentinel in the cache marks a prior lookup failure so it is not retried.
 _run_signature() {
   local repo="$1" id="$2" cache_key sig json
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
   cache_key="${repo}:${id}"
   if [[ -v _RUN_SIG_CACHE["$cache_key"] ]]; then
+    if [ "${_RUN_SIG_CACHE[$cache_key]}" = $'\x01' ]; then
+      echo ""; return 1  # cached lookup failure — signal to caller
+    fi
     echo "${_RUN_SIG_CACHE[$cache_key]}"
     return 0
   fi
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null || echo '{}')"
+  # Use || { } so set -e does not trigger on a failing gh run view; the block caches the
+  # sentinel and returns 1 to signal the lookup failure to callers that care (e.g.
+  # _suspect_class_counts tracks incomplete evidence and HOLDs the downgrade).
+  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" || {
+    _RUN_SIG_CACHE["$cache_key"]=$'\x01'
+    echo ""; return 1
+  }
   sig="$(jq -r '[.jobs[]?|.steps[]?|select(.conclusion=="failure")|.name] | join("\n")' \
     2>/dev/null <<< "$json" || echo "")"
   _RUN_SIG_CACHE["$cache_key"]="$sig"
@@ -401,7 +420,7 @@ _failure_suspect() {
 # benign) failure that matches a `suspect_failure_classes` entry sets the suspect flag
 # (#668 increment 2) — it still counts toward the blocking total (SUSPECT blocks like
 # REGRESSION), but downstream triage renders SUSPECT + guidance instead of a bare
-# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect 0|1>".
+# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count>".
 _cumulative_health() {
   local agent="$1" since="$2" differs="$3"; shift 3
   local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf
@@ -422,7 +441,7 @@ _cumulative_health() {
         else
           fail=$(( fail + 1 ))
           if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
-            suspect=1
+            suspect=$(( suspect + 1 ))
           fi
         fi
       done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
@@ -757,15 +776,21 @@ _frontier_state() {
   local downgrade="-" dg_cand_rate=0 dg_cand_sample=0 dg_base_rate=0 dg_base_sample=0
   if [ "$triage" = "SUSPECT" ] && [ "$mix_shift" = "-" ]; then
     local dg_patterns; dg_patterns="$(_suspect_downgrade_patterns "$agent")"
-    if [ -n "$dg_patterns" ]; then
-      local dg_win dg_base_since dwf dsr dmin dmargin cm ce bm be crate brate knobs decision
+    # Guard (Thread 1): only attempt per-class rate comparison when EVERY blocking failure
+    # has been attributed to a suspect class. If any failure had no matching suspect class,
+    # that unrelated failure is an independent regression and must keep the gate blocked.
+    if [ -n "$dg_patterns" ] && [ "${cum_suspect:-0}" -ge "$cum_fail" ]; then
+      local dg_win dg_base_since dwf dsr dmin dmargin cm ce cmi bm be bei crate brate knobs decision
       dg_win="${SOAK_WINDOW_DAYS:-$(_gate_field "$agent" baseline_window_days)}"; dg_win="${dg_win:-14}"
       dg_base_since="$(_iso_now_minus_days "$dg_win")"
       while IFS=$'\t' read -r dwf dsr dmin dmargin || [ -n "$dwf" ]; do
         dwf="${dwf%$'\r'}"; dsr="${dsr%$'\r'}"; dmin="${dmin%$'\r'}"; dmargin="${dmargin%$'\r'}"
         [ -z "$dsr" ] && continue
-        read -r cm ce < <(_suspect_class_counts "$agent" "$cut_z" "-" "$dwf" "$dsr" "${src_repos[@]}")
-        read -r bm be < <(_suspect_class_counts "$agent" "$dg_base_since" "$cut_z" "$dwf" "$dsr" "${src_repos[@]}")
+        read -r cm ce cmi < <(_suspect_class_counts "$agent" "$cut_z" "-" "$dwf" "$dsr" "${src_repos[@]}")
+        read -r bm be bei < <(_suspect_class_counts "$agent" "$dg_base_since" "$cut_z" "$dwf" "$dsr" "${src_repos[@]}")
+        # Guard (Thread 2): if any signature lookup failed, baseline class evidence is
+        # incomplete. A missing run could be a non-match; fail-closed and skip DOWNGRADE.
+        [ "${cmi:-0}" -gt 0 ] || [ "${bei:-0}" -gt 0 ] && continue
         if [ "${ce:-0}" -gt 0 ]; then crate="$(round_div $(( ${cm:-0} * 1000 )) "$ce")"; else crate=0; fi
         if [ "${be:-0}" -gt 0 ]; then brate="$(round_div $(( ${bm:-0} * 1000 )) "$be")"; else brate=0; fi
         knobs="$(printf '{"min_baseline_sample":%s,"margin_permille":%s}' "${dmin:-0}" "${dmargin:-0}")"
@@ -1248,7 +1273,11 @@ cmd_sync_issues() {
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
           gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-          { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          if [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; then
+            gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          else
+            gh issue edit "$num" --repo "$ISSUE_REPO" --remove-label needs-human >/dev/null 2>&1 || true
+          fi
           echo "  updated blocker issue #$num for $agent"; blk="#$num"
         fi
       fi

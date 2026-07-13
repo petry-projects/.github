@@ -1707,6 +1707,176 @@ GHEOF
   ! grep -q -- "--add-label needs-human" "$ISSUE_LOG"
 }
 
+# _downgrade_sync_update_stub — like _downgrade_sync_stub but the issue list returns
+# an existing open blocker so the UPDATE path (not CREATE) is exercised.
+_downgrade_sync_update_stub() {
+  local cand_fail="$1" cand_total="$2" base_fail="$3" base_total="$4"
+  _downgrade_stub "$cand_fail" "$cand_total" "$base_fail" "$base_total"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" \
+      --argjson cf "$cand_fail" --argjson ct "$cand_total" --argjson bf "$base_fail" --argjson bt "$base_total" '
+      ( [range(0;\$ct)|{databaseId:(2001+.),conclusion:(if . < \$cf then "failure" else "success" end),createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(0;\$bt)|{databaseId:(1001+.),conclusion:(if . < \$bf then "failure" else "success" end),createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  "issue list"*)   echo '[{"number":501,"state":"OPEN","body":"<!-- canary-blocker:dev-lead -->"}]' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  DG_RINGS="$BATS_TEST_TMPDIR/dg-sync-update-rings.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$DG_RINGS"
+}
+
+@test "orchestrator: sync-issues UPDATE path removes needs-human when SUSPECT is auto-downgraded to PRE_EXISTING (#668 inc6)" {
+  # Existing open blocker #501 (was SUSPECT, has needs-human). Now auto-downgraded → PRE_EXISTING.
+  # The update path must explicitly REMOVE needs-human so stale routing is cleared.
+  _downgrade_sync_update_stub 1 10 1 10
+  run env CANARY_RINGS="$DG_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated blocker issue #501 for dev-lead"* ]]
+  # PRE_EXISTING → must NOT add needs-human
+  ! grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+  # PRE_EXISTING → must REMOVE needs-human (clear stale routing from the SUSPECT era)
+  grep -q -- "--remove-label needs-human" "$ISSUE_LOG"
+}
+
+# _downgrade_mixed_stub — two candidate failures: run 2001 is a workload-timeout (suspect
+# class match) and run 2002 is an unrelated failure. The baseline has 1 workload-timeout.
+# Used to verify that mixed-failure candidates are NOT auto-downgraded (#668 inc6 guard).
+_downgrade_mixed_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run view"*" 2002 "*) echo '{"jobs":[{"steps":[{"name":"Some unrelated test failure","conclusion":"failure"}]}]}' ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" '
+      ( [{databaseId:2001,conclusion:"failure",createdAt:\$cc,workflowName:"Dev-Lead Agent"},
+         {databaseId:2002,conclusion:"failure",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(0;8)|{databaseId:(2003+.),conclusion:"success",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [{databaseId:1001,conclusion:"failure",createdAt:\$bb,workflowName:"Dev-Lead Agent"}]
+      + [range(0;9)|{databaseId:(1002+.),conclusion:"success",createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "orchestrator: mixed-failure (workload-timeout + unrelated) is NOT auto-downgraded — unrelated failures keep gate SUSPECT (#668 inc6 per-failure attribution guard)" {
+  # Candidate: 2 failures — run 2001 (workload-timeout, suspect class, rate OK) +
+  # run 2002 (unrelated failure, not suspect-attributed). Even though the workload-timeout
+  # rate compares no-worse to baseline, the unrelated failure must block downgrade.
+  _downgrade_mixed_stub
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"auto-downgraded"* ]]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+}
+
+# _downgrade_baseline_incomplete_stub — like _downgrade_stub 1 10 1 10 but the single
+# baseline failure (run 1001) returns a non-zero exit from `gh run view`, simulating an
+# API error. Used to verify fail-closed behaviour on incomplete baseline evidence (#668 inc6).
+_downgrade_baseline_incomplete_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run view"*" 1001 "*) exit 1 ;;  # simulate API failure for the only baseline failure
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" '
+      ( [{databaseId:2001,conclusion:"failure",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(0;9)|{databaseId:(2002+.),conclusion:"success",createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [{databaseId:1001,conclusion:"failure",createdAt:\$bb,workflowName:"Dev-Lead Agent"}]
+      + [range(0;9)|{databaseId:(1002+.),conclusion:"success",createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "orchestrator: baseline signature lookup failure → stays SUSPECT (fail-closed on incomplete baseline evidence, #668 inc6)" {
+  # Candidate: 1 workload-timeout (rate OK). Baseline: 1 failure but gh run view returns
+  # exit 1 for it (API error). Incomplete baseline evidence → must HOLD, not DOWNGRADE.
+  _downgrade_baseline_incomplete_stub
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"auto-downgraded"* ]]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+}
+
 @test "_blocker_body: SUSPECT triage renders the class guidance (discriminating question)" {
   # The blocker body must surface the workload-timeout discriminating question prominently
   # so a human confirm is a fast check, and keep the SUSPECT label + needs-human routing.
