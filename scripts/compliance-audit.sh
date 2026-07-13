@@ -1458,7 +1458,7 @@ stub_extract_blocks() {
 # retune the cron without it counting as trigger-surface drift — see
 # feature-ideation.yml's header). Pure: stdin -> stdout.
 stub_normalize_surface() {
-  sed -E \
+  tr -d '\r' | sed -E \
     -e 's/[[:space:]]+#.*$//' \
     -e 's/^[[:space:]]*#.*$//' \
     -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
@@ -1491,8 +1491,8 @@ check_stub_surface_drift() {
 
   # .github is the source of truth for the templates; .github-private runs these
   # workflows inline rather than as caller stubs.
-  [ "$repo" = ".github" ] && return
-  [ "$repo" = ".github-private" ] && return
+  [ "$repo" = ".github" ] && return 0
+  [ "$repo" = ".github-private" ] && return 0
 
   # "workflow.yml:comma-separated-surfaces". Keep in lockstep with the RING list
   # in check_centralized_workflow_stubs() and RING_REUSABLES in lib/ring-pins.sh.
@@ -1518,7 +1518,7 @@ check_stub_surface_drift() {
       warn "No canonical template at $template — skipping surface-drift check for $wf"
       continue
     fi
-    canonical="$(cat "$template")"
+    canonical="$(< "$template")"
 
     content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
     [ -z "$content" ] && continue  # repo hasn't adopted this stub — nothing to check
