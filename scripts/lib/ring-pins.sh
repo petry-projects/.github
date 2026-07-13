@@ -59,11 +59,38 @@ ring_is_ring_reusable() {
   return 1
 }
 
-# ring_canonical_ref <channel-base> <repo> -> the org-standard ref a stub in
-# <repo> should pin: the channel tag for the repo's ring tier, e.g.
+# ring_canonical_ref <channel-base> <repo> [major] -> the org-standard ref a stub
+# in <repo> should pin: the channel tag for the repo's ring tier, e.g.
 # `agent-shield/ring1` on a ring1 repo.
+#
+# With an optional MAJOR argument (major-scoped-channels epic #657, Phase F3) the
+# ref becomes the major-scoped form `<channel>/v<major>-<tier>`, e.g.
+# `agent-shield/v2-ring1`. Omit MAJOR for the legacy bare-tier form — consumers
+# are still pinned to bare `<tier>` today and only migrate to the `v<M>-` form in
+# F5, so the no-major call site behavior is unchanged.
 ring_canonical_ref() {
-  printf '%s/%s' "$1" "$(ring_tier_for_repo "$2")"
+  local name="$1" repo="$2" major="${3:-}"
+  local tier; tier="$(ring_tier_for_repo "$repo")"
+  if [ -n "$major" ]; then
+    printf '%s/v%s-%s' "$name" "$major" "$tier"
+  else
+    printf '%s/%s' "$name" "$tier"
+  fi
+  return 0
+}
+
+# ring_pinned_major <ref> -> the major a consumer's channel ref has opted into, or
+# empty for a legacy/unmajored bare-tier ref (major-scoped-channels epic #657,
+# Phase F3). Pure. Given a `uses: …@<agent>/<channel>` ref (or bare channel):
+#   `<agent>/v<M>-<tier>` -> `M`   (e.g. agent/v3-stable -> 3)
+#   `<agent>/<tier>`      -> ``    (e.g. agent/stable    -> empty)
+# Only the channel segment (after the last `/`) is inspected, so the agent/repo
+# prefix is irrelevant.
+ring_pinned_major() {
+  local channel="${1##*/}"
+  if [[ "$channel" =~ ^v([0-9]+)- ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
   return 0
 }
 

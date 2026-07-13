@@ -102,6 +102,67 @@ accept_reusable() {
 }
 
 # ---------------------------------------------------------------------------
+# #657 F3 — ring_major_form_acceptable(): the RING branch of
+# check_centralized_workflow_stubs additionally accepts a stub pinned to the
+# major-scoped form <agent>/v<M>-<tier-for-repo> for ANY major M, as long as the
+# TIER matches the repo's ring tier. This is backward-compatible: it ADDS the
+# v<M>- form without removing the bare-tier grace (F5 migrates consumers later),
+# so today's bare-tier fleet keeps passing. Wrong tier in the v-form is drift.
+#
+# The helper returns status 0 when the v-form ref is acceptable, non-zero
+# otherwise (bare-tier refs are handled by stub_pin_acceptable, not here).
+# ---------------------------------------------------------------------------
+maj_accept() {
+  local reusable="$1" line="$2" repo="$3"
+  local chan="${reusable%-reusable}"
+  run bash -c 'source "$1" >/dev/null 2>&1; ring_major_form_acceptable "$2" "$3" "$4" "$5"' \
+    _ "$SCRIPT" "$line" "$reusable" "$chan" "$repo"
+}
+
+@test "v-form: v1-<tier> on a stable-tier repo is accepted (#657 F3)" {
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-stable" "markets"
+  [ "$status" -eq 0 ]
+}
+
+@test "v-form: any major M with the correct tier is accepted (#657 F3)" {
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v7-stable" "markets"
+  [ "$status" -eq 0 ]
+  # An older major on the correct tier is NOT drift.
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-ring1" "TalkTerm"
+  [ "$status" -eq 0 ]
+}
+
+@test "v-form: wrong tier for the repo is drift even in the v-form (#657 F3)" {
+  # v1-ring0 on a stable-tier repo — right form, wrong tier → not accepted here.
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-ring0" "markets"
+  [ "$status" -ne 0 ]
+}
+
+@test "v-form: a bare-tier pin is not matched by the v-form helper (#657 F3)" {
+  # Bare <tier> carries no major, so the v-form helper declines it; the bare
+  # grace (stub_pin_acceptable) is what keeps it clean during the transition.
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/stable" "markets"
+  [ "$status" -ne 0 ]
+}
+
+@test "v-form: a commented-out v-form line does not satisfy the helper (#657 F3)" {
+  maj_accept "agent-shield-reusable" "    # uses: $R@agent-shield/v1-stable" "markets"
+  [ "$status" -ne 0 ]
+}
+
+@test "transition: bare <tier> stays clean while v-form is added (#657 F3)" {
+  # The two acceptance paths together: a stable-tier repo is clean whether it
+  # pins the bare tier (legacy) OR the v-form of its tier, but a v-form on the
+  # wrong tier is drift. Mirrors the issue's audit acceptance cases.
+  accept "    uses: $R@agent-shield/stable" "$C" "$L"          # bare → clean
+  [ "$status" -eq 0 ]
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-stable" "markets"  # v-form → clean
+  [ "$status" -eq 0 ]
+  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-ring0" "markets"   # wrong tier → drift
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # ring_tier_for_repo() — maps a repo to its canary-ring tier (epic #495).
 # ---------------------------------------------------------------------------
 tier() {
