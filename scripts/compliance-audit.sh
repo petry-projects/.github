@@ -144,6 +144,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/ring-pins.sh
 . "$SCRIPT_DIR/lib/ring-pins.sh"
 
+# Canonical workflow-stub templates — the source of truth the caller-stub
+# surface-drift guard (check_stub_surface_drift) compares deployed stubs against.
+STANDARDS_WF_DIR="$SCRIPT_DIR/../standards/workflows"
+
 # ---------------------------------------------------------------------------
 # Ecosystem detection
 # ---------------------------------------------------------------------------
@@ -1402,6 +1406,141 @@ check_dev_lead_stub() {
 }
 
 # ---------------------------------------------------------------------------
+# Caller-stub surface-drift guard (#607)
+#
+# The centralized caller stubs (dev-lead + the RING reusables) are thin: their
+# behavior lives in the reusable, so three surfaces are NOT repo-adjustable — the
+# `on:` trigger set, the `permissions:` grants, and the (usually absent)
+# `concurrency:` block. The field-allowlist pin checks above (stub_pin_acceptable,
+# check_dev_lead_stub) validate the channel pin / agent_ref but never look at
+# those surfaces, so a stub that trims a trigger, widens/narrows a permission, or
+# injects a per-stub concurrency group drifts SILENTLY (root cause of #607).
+#
+# These surfaces carry NO channel pin — the tier pin lives only on the
+# jobs.<id>.uses / agent_ref lines. So the comparison is tier-invariant by
+# construction: a stub that differs from the canonical ONLY by its correct tier
+# channel pin has identical surfaces and is never flagged. This is the "explicit
+# sub-checks" branch of #607 (vs a full-file byte guard, which would false-positive
+# on the per-repo `with:` liberties agent-shield / feature-ideation document, and
+# on feature-ideation's documented per-repo cron retune).
+#
+# The helpers below are PURE (args in, stdout out) and unit-tested by
+# test/scripts/compliance-audit/stub-surface-drift.bats.
+# ---------------------------------------------------------------------------
+
+# stub_extract_blocks <content> <key> — print every YAML block whose key line, at
+# ANY indentation, is `<indent><key>:`, including all lines indented deeper than
+# the key line (the block body). A key can appear more than once (e.g. dev-lead's
+# top-level `permissions: {}` plus its job-level `permissions:`), so all matches
+# are concatenated in file order. Comment/blank lines inside a body are kept and
+# stripped later by stub_normalize_surface; a `# concurrency:` comment never
+# starts a block (the key must be the first non-space token).
+stub_extract_blocks() {
+  local content="$1" key="$2"
+  printf '%s\n' "$content" | awk -v key="$key" '
+    function indent(s,   n) { n = match(s, /[^ ]/); return n == 0 ? 0 : n - 1 }
+    {
+      if (capturing) {
+        if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) { print; next }
+        if (indent($0) > keyindent) { print; next }
+        capturing = 0
+      }
+      if ($0 ~ ("^[[:space:]]*" key ":")) {
+        capturing = 1; keyindent = indent($0); print; next
+      }
+    }
+  '
+}
+
+# stub_normalize_surface — read a surface block on stdin and canonicalize it for
+# comparison: strip trailing ` #…` inline comments and whole-line comments, drop
+# blank lines, and collapse schedule cron VALUES to a placeholder (a repo MAY
+# retune the cron without it counting as trigger-surface drift — see
+# feature-ideation.yml's header). Pure: stdin -> stdout.
+stub_normalize_surface() {
+  sed -E \
+    -e 's/[[:space:]]+#.*$//' \
+    -e 's/^[[:space:]]*#.*$//' \
+    -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
+    | grep -vE '^[[:space:]]*$' || true
+}
+
+# stub_surface_drift <canonical> <deployed> <key> — return 0 (success) when the
+# given surface has DRIFTED between the canonical template and the deployed stub,
+# 1 when it is clean. Success-means-drift so `if stub_surface_drift …; then
+# add_finding …; fi` reads naturally.
+stub_surface_drift() {
+  local canonical="$1" deployed="$2" key="$3" c d
+  c="$(stub_extract_blocks "$canonical" "$key" | stub_normalize_surface)"
+  d="$(stub_extract_blocks "$deployed" "$key" | stub_normalize_surface)"
+  [ "$c" = "$d" ] && return 1 || return 0
+}
+
+# ---------------------------------------------------------------------------
+# Check: caller-stub on:/permissions/concurrency surfaces match the canonical
+#
+# For each enrolled shim, compares the deployed stub's guarded surfaces against
+# the on-disk canonical in standards/workflows/. dev-lead's `permissions`
+# (statuses: read) and `concurrency` surfaces already have dedicated, higher-signal
+# checks in check_dev_lead_stub() (specific #402 / startup_failure remediation), so
+# this check owns dev-lead's previously-unguarded `on:` surface only, plus all
+# three surfaces for the RING shims (whose permissions/concurrency were unguarded).
+# ---------------------------------------------------------------------------
+check_stub_surface_drift() {
+  local repo="$1"
+
+  # .github is the source of truth for the templates; .github-private runs these
+  # workflows inline rather than as caller stubs.
+  [ "$repo" = ".github" ] && return
+  [ "$repo" = ".github-private" ] && return
+
+  # "workflow.yml:comma-separated-surfaces". Keep in lockstep with the RING list
+  # in check_centralized_workflow_stubs() and RING_REUSABLES in lib/ring-pins.sh.
+  local shims=(
+    "dev-lead.yml:on"
+    "agent-shield.yml:on,permissions,concurrency"
+    "auto-rebase.yml:on,permissions,concurrency"
+    "dependency-audit.yml:on,permissions,concurrency"
+    "dependabot-automerge.yml:on,permissions,concurrency"
+    "dependabot-rebase.yml:on,permissions,concurrency"
+    "pr-review-mention.yml:on,permissions,concurrency"
+    "feature-ideation.yml:on,permissions,concurrency"
+    "pr-auto-review.yml:on,permissions,concurrency"
+  )
+
+  local entry wf surfaces template canonical content deployed surface severity
+  local -a surface_list
+  for entry in "${shims[@]}"; do
+    IFS=':' read -r wf surfaces <<< "$entry"
+
+    template="$STANDARDS_WF_DIR/$wf"
+    if [ ! -f "$template" ]; then
+      warn "No canonical template at $template — skipping surface-drift check for $wf"
+      continue
+    fi
+    canonical="$(cat "$template")"
+
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue  # repo hasn't adopted this stub — nothing to check
+    deployed=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$deployed" ] && continue
+
+    IFS=',' read -r -a surface_list <<< "$surfaces"
+    for surface in "${surface_list[@]}"; do
+      stub_surface_drift "$canonical" "$deployed" "$surface" || continue
+      # An injected/removed concurrency block degrades but does not hard-break the
+      # run (it can cancel lanes — #402); a trimmed trigger or altered permission
+      # breaks functionality, so those are errors.
+      severity="error"
+      [ "$surface" = "concurrency" ] && severity="warning"
+      add_finding "$repo" "ci-workflows" "stub-surface-drift-$wf-$surface" "$severity" \
+        "The \`$wf\` caller stub's \`$surface:\` surface has drifted from the canonical \`standards/workflows/$wf\`. These stubs are thin callers — the \`on:\` triggers, \`permissions:\` grants, and \`concurrency:\` block are owned centrally and are not repo-adjustable (only the documented \`with:\` inputs and the tier channel pin may differ per repo). Re-sync \`$surface:\` from \`standards/workflows/$wf\`." \
+        "standards/ci-standards.md#centralization-tiers"
+    done
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: required-status-check rulesets reference current names
 #
 # After centralizing workflows into reusables (#87, #88), GitHub composes
@@ -2448,6 +2587,7 @@ main() {
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
     check_dev_lead_stub "$repo"
+    check_stub_surface_drift "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
