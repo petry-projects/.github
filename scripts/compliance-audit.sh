@@ -2047,6 +2047,8 @@ check_centralized_workflow_stubs() {
   for entry in "${centralized[@]}"; do
     IFS=':' read -r wf reusable canonical legacy <<< "$entry"
     [ -z "$canonical" ] && { echo "::error::centralized entry '$entry' missing canonical pin — expected format 'wf:reusable:canonical:legacy-csv'" >&2; exit 1; }
+    is_ring=0
+    chan=""
 
     # RING sentinel: this reusable is on the canary-ring model. The canonical
     # ref is the channel for THIS repo's ring tier (next/ring0/ring1/stable),
@@ -2057,7 +2059,7 @@ check_centralized_workflow_stubs() {
     # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
     # /stable) is never flagged — only @main / inline / off-channel pins are.
     if [ "$canonical" = "RING" ]; then
-      local chan
+      is_ring=1
       chan="${reusable%-reusable}"
       canonical="$(ring_canonical_ref "$chan" "$repo")"
       legacy="$(ring_legacy_csv "$chan" "$repo")"
@@ -2081,8 +2083,12 @@ check_centralized_workflow_stubs() {
     # Compliant if a non-comment `uses:` line pins the reusable at the canonical
     # channel or — transitionally, during the #482 migration — an accepted legacy
     # @vN ref. stub_pin_acceptable anchors to start-of-line so a `# uses: …`
-    # comment never satisfies the check.
-    if stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; then
+    # comment never satisfies the check. For RING reusables, also accept the
+    # major-scoped `<name>/v<M>-<tier>` form (major-scoped-channels epic #657 F3)
+    # for any major M whose tier matches the repo — backward-compatible with the
+    # bare-tier pins the fleet still carries; the wrong tier stays drift.
+    if stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy" \
+      || { [ "$is_ring" = 1 ] && ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; then
       continue
     fi
 
