@@ -149,20 +149,79 @@ _gh_create_annotated_tag() {
   }
 }
 
-# channel_commit <agent> <channel> — commit the channel tag <agent>/<channel> resolves to
-# (empty if the tag does not exist). Agents hosted in THIS repo resolve against the local
-# checkout; a cross-repo agent's channel tags live on ITS host, so they are resolved there
-# via the GitHub API — reading local refs resolves empty and the frontier falsely reports
-# "fully rolled out" (#1049).
-channel_commit() {
-  local agent="$1" channel="$2" host
-  host="$(_agent_field "$agent" host)"
-  if [ -n "$host" ] && [ "$host" != "$THIS_REPO" ]; then
-    _gh_tag_commit "$host" "$agent/$channel"
+# _agent_current_major <agent> — the MAJOR of the agent's highest vX.Y.Z release on its
+# host, empty if none (major-scoped-channels epic #657, Phase F4). This is the "current
+# major line" a v-scoped channel tag is derived against; there is no new registry field —
+# it is derived from the release tags already present (mirrors _next_release_version).
+declare -A _AGENT_MAJOR_CACHE=()
+
+_agent_current_major() {
+  local agent="$1"
+  if [[ -v _AGENT_MAJOR_CACHE["$agent"] ]]; then
+    echo "${_AGENT_MAJOR_CACHE["$agent"]}"
     return 0
   fi
-  git rev-parse -q --verify "refs/tags/$agent/$channel^{commit}" 2>/dev/null \
-    || git rev-parse -q --verify "$agent/$channel^{commit}" 2>/dev/null || true
+  local versions highest major=""
+  versions="$(_host_release_versions "$agent")"
+  # shellcheck disable=SC2086
+  highest="$(max_semver $versions)"
+  if [ -n "$highest" ]; then
+    major="$(major_component "$highest")"
+  fi
+  _AGENT_MAJOR_CACHE["$agent"]="$major"
+  echo "$major"
+}
+
+# _channel_tag_commit <agent> <suffix> — commit the tag <agent>/<suffix> resolves to
+# (empty if absent). Same host-vs-local resolution as channel_commit, generalized to an
+# arbitrary channel suffix so a v-scoped `v<M>-<tier>` can be probed (epic #657 F4).
+declare -A _CHANNEL_COMMIT_CACHE=()
+
+_channel_tag_commit() {
+  local agent="$1" suffix="$2" host key="${1}:${2}"
+  if [[ -v _CHANNEL_COMMIT_CACHE["$key"] ]]; then
+    echo "${_CHANNEL_COMMIT_CACHE["$key"]}"
+    return 0
+  fi
+  local commit=""
+  host="$(_agent_field "$agent" host)"
+  if [ -n "$host" ] && [ "$host" != "$THIS_REPO" ]; then
+    commit="$(_gh_tag_commit "$host" "$agent/$suffix")"
+  else
+    commit="$(git rev-parse -q --verify "refs/tags/$agent/$suffix^{commit}" 2>/dev/null \
+      || git rev-parse -q --verify "$agent/$suffix^{commit}" 2>/dev/null || true)"
+  fi
+  _CHANNEL_COMMIT_CACHE["$key"]="$commit"
+  echo "$commit"
+}
+
+# _resolved_channel <agent> <tier> — echo "<tag>\t<commit>" for the channel <agent> uses on
+# <tier>, fall-back-safe (major-scoped-channels epic #657, Phase F4): PREFER the v-scoped
+# `<agent>/v<M>-<tier>` when it exists (its commit is a real oid), else the legacy bare
+# `<agent>/<tier>`. On today's bare-tier fleet (no v-tags) this is byte-identical to pre-F4.
+_resolved_channel() {
+  local agent="$1" tier="$2" major tag suffix commit
+  major="$(_agent_current_major "$agent")"
+  if [ -n "$major" ]; then
+    tag="$(channel_tag "$agent" "$tier" "$major")"; suffix="${tag#"$agent"/}"
+    commit="$(_channel_tag_commit "$agent" "$suffix")"
+    if _looks_like_oid "$commit"; then printf '%s\t%s\n' "$tag" "$commit"; return 0; fi
+  fi
+  tag="$(channel_tag "$agent" "$tier")"; suffix="${tag#"$agent"/}"
+  printf '%s\t%s\n' "$tag" "$(_channel_tag_commit "$agent" "$suffix")"
+}
+
+# _resolved_channel_tag <agent> <tier> — just the resolved tag name (no commit).
+_resolved_channel_tag() { _resolved_channel "$1" "$2" | cut -f1; }
+
+# channel_commit <agent> <channel> — commit the channel <agent> uses on <channel> resolves
+# to (empty if the tag does not exist). Resolution is fall-back-safe on the major dimension
+# (epic #657 F4): prefer the v-scoped tag, else the bare tier. Agents hosted in THIS repo
+# resolve against the local checkout; a cross-repo agent's channel tags live on ITS host, so
+# they are resolved there via the GitHub API — reading local refs resolves empty and the
+# frontier falsely reports "fully rolled out" (#1049).
+channel_commit() {
+  _resolved_channel "$1" "$2" | cut -f2
 }
 
 # _gate_field <agent> <field> — read .agents[a].gate.<field> (empty if absent).
@@ -810,15 +869,17 @@ _frontier_state() {
 cmd_evaluate() {
   local agent="$1"
   echo "== canary-rollout evaluate: $agent (gate standard: .github#548) =="
-  local cand; cand="$(channel_commit "$agent" next)"
-  echo "candidate (next) = ${cand:0:12}  cut=$(candidate_cut_date "$agent" "$cand")"
+  local cand_tag cand
+  IFS=$'\t' read -r cand_tag cand < <(_resolved_channel "$agent" next)
+  echo "candidate (${cand_tag#"$agent"/}) = ${cand:0:12}  cut=$(candidate_cut_date "$agent" "$cand")"
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
   local ch
   for ch in "${chan_array[@]}"; do
-    local c; c="$(channel_commit "$agent" "$ch")"
+    local ch_tag c
+    IFS=$'\t' read -r ch_tag c < <(_resolved_channel "$agent" "$ch")
     local mark="  "; [ -n "$cand" ] && [ "$c" = "$cand" ] && mark="* "
-    printf '  %s%-7s -> %s\n' "$mark" "$ch" "${c:0:12}"
+    printf '  %s%-7s -> %s\n' "$mark" "${ch_tag#"$agent"/}" "${c:0:12}"
   done
   read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample < <(_frontier_state "$agent")
   echo "----"
@@ -924,14 +985,19 @@ cmd_promote() {
   local host
   host="$(_jq -r --arg a "$agent" '.agents[$a].host // "" | tostring')"
   host="${host:-$THIS_REPO}"
-  echo "advancing $agent/$frontier -> ${cand:0:12} on $host"
+  # Move the RESOLVED frontier tag (major-scoped-channels epic #657, F4): advance the
+  # v-scoped `<agent>/v<M>-<tier>` within its major line when it exists, else the legacy
+  # bare `<agent>/<tier>`. A v2 promotion never touches a v1 tag. The logical tier
+  # ($frontier) is unchanged — it still drives the gate + is reported as promoted_ring.
+  local frontier_tag; frontier_tag="$(_resolved_channel_tag "$agent" "$frontier")"
+  echo "advancing $frontier_tag -> ${cand:0:12} on $host"
   if [ "$dry" = true ]; then
-    echo "[DRY-RUN] would: gh api PATCH repos/$host/git/refs/tags/$agent/$frontier sha=$cand (force)"
+    echo "[DRY-RUN] would: gh api PATCH repos/$host/git/refs/tags/$frontier_tag sha=$cand (force)"
     return 0
   fi
-  _gh_move_tag "$host" "$agent/$frontier" "$cand" \
-    || { echo "::error::failed to move $agent/$frontier -> ${cand:0:12} on $host" >&2; return 1; }
-  echo "promoted $agent/$frontier -> ${cand:0:12}"
+  _gh_move_tag "$host" "$frontier_tag" "$cand" \
+    || { echo "::error::failed to move $frontier_tag -> ${cand:0:12} on $host" >&2; return 1; }
+  echo "promoted $frontier_tag -> ${cand:0:12}"
   # Expose the move for the workflow's GitHub Deployment (traceability, #502). The
   # deployment must be created on the repo that OWNS the moved commit: a cross-repo agent's
   # candidate SHA lives on its host, NOT on THIS_REPO — creating the deployment against
@@ -1432,7 +1498,8 @@ _autocut_agent() {
   if [ -z "$main_blob" ]; then
     echo "::warning::autocut $agent: reusable '$reusable' not found at $host@${mainsha:0:12} — skipping"; return 0
   fi
-  next_commit="$(channel_commit "$agent" next)"
+  local next_resolved_tag
+  IFS=$'\t' read -r next_resolved_tag next_commit < <(_resolved_channel "$agent" next)
   next_blob=""
   [ -n "$next_commit" ] && next_blob="$(_gh_blob_sha "$host" "$reusable" "$next_commit")"
   # Idempotency: nothing to cut when main HEAD already IS the candidate, or the reusable blob
@@ -1443,10 +1510,21 @@ _autocut_agent() {
   fi
   bump="$(_autocut_bump "$agent")"
   newver="$(_next_release_version "$agent" "$bump")"
-  echo "autocut $agent: reusable changed on $host ($defbranch ${mainsha:0:12}) vs next ${next_commit:0:12} — cutting v$newver (bump=$bump), moving next."
+  # Seed/advance the correct `next` line on the major dimension (major-scoped-channels epic
+  # #657, F4): a MAJOR bump opens a FRESH `<agent>/v<newmajor>-next` line (a brand-new major
+  # never reuses the prior major's next), whereas a minor/patch bump advances the CURRENT
+  # major's `v<M>-next` — falling back to the legacy bare `<agent>/next` on today's bare-tier
+  # fleet where no v-line exists yet, so the move stays byte-identical until F5 migrates tags.
+  local next_tag newmajor; newmajor="$(major_component "$newver")"
+  if [ "$bump" = major ]; then
+    next_tag="$(channel_tag "$agent" next "$newmajor")"
+  else
+    next_tag="$next_resolved_tag"
+  fi
+  echo "autocut $agent: reusable changed on $host ($defbranch ${mainsha:0:12}) vs next ${next_commit:0:12} — cutting v$newver (bump=$bump), moving $next_tag."
   local relver="$agent/v$newver"
   if [ "$dry" = true ]; then
-    echo "[DRY-RUN] would: cut $relver at ${mainsha:0:12} on $host + move $agent/next (gh-api, App token)"
+    echo "[DRY-RUN] would: cut $relver at ${mainsha:0:12} on $host + move $next_tag (gh-api, App token)"
     return 0
   fi
   # Cut inline (no sibling cut-release.sh, #613): create the immutable annotated release tag,
@@ -1466,9 +1544,9 @@ _autocut_agent() {
   elif ! _gh_create_annotated_tag "$host" "$relver" "$mainsha" "$agent release v$newver"; then
     echo "::warning::autocut $agent: could not create $relver on $host (best-effort, continuing)"; return 0
   fi
-  _gh_move_tag "$host" "$agent/next" "$mainsha" \
-    || { echo "::warning::autocut $agent: could not move $agent/next on $host (best-effort, continuing)"; return 0; }
-  echo "autocut $agent: cut v$newver from ${mainsha:0:12} and moved next (on $host)."
+  _gh_move_tag "$host" "$next_tag" "$mainsha" \
+    || { echo "::warning::autocut $agent: could not move $next_tag on $host (best-effort, continuing)"; return 0; }
+  echo "autocut $agent: cut v$newver from ${mainsha:0:12} and moved $next_tag (on $host)."
 }
 
 # cmd_autocut [--dry-run] — the scheduled front end. Gated by CANARY_AUTO_CUT (the single
