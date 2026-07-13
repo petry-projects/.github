@@ -20,8 +20,10 @@ on:
     paths:
       - 'scripts/deploy-standard-workflows.sh'
       - 'scripts/lib/standards-deploy.sh'
+      - 'scripts/lib/ring-pins.sh'
       - 'test/scripts/deploy-standard-workflows/**'
       - 'test/scripts/lib/standards-deploy.bats'
+      - 'test/scripts/lib/ring-pins.bats'
       - '.github/workflows/standards-deploy-tests.yml'
   push:
     branches:
@@ -29,8 +31,10 @@ on:
     paths:
       - 'scripts/deploy-standard-workflows.sh'
       - 'scripts/lib/standards-deploy.sh'
+      - 'scripts/lib/ring-pins.sh'
       - 'test/scripts/deploy-standard-workflows/**'
       - 'test/scripts/lib/standards-deploy.bats'
+      - 'test/scripts/lib/ring-pins.bats'
       - '.github/workflows/standards-deploy-tests.yml'
 
 permissions:
@@ -62,10 +66,12 @@ jobs:
           set -euo pipefail
           shellcheck --severity=warning -x \
             scripts/deploy-standard-workflows.sh \
-            scripts/lib/standards-deploy.sh
+            scripts/lib/standards-deploy.sh \
+            scripts/lib/ring-pins.sh
 
       - name: Run bats suite
         run: |
           bats --print-output-on-failure \
             test/scripts/lib/standards-deploy.bats \
+            test/scripts/lib/ring-pins.bats \
             test/scripts/deploy-standard-workflows/

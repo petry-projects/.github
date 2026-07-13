@@ -177,11 +177,59 @@ is_already_compliant() {
       while IFS= read -r ref; do
         [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
       done < <(ring_accepted_refs "$base" "$repo")
+      # Transition to major-scoped channels (#657 F5): a stub already pinned to the
+      # repo's tier-correct `v<M>-<tier>` form (any major) is compliant too, so the
+      # sweep accepts both the bare and the v-form during migration. A WRONG-tier
+      # v-form is not accepted here and stays drift.
+      local existing_ref
+      existing_ref=$(grep -oE "@${base}/[^[:space:]\"']+" <<< "$existing_content" | head -1)
+      existing_ref="${existing_ref#@}"
+      if [[ -n "$existing_ref" ]] && ring_vform_tier_aligned "$existing_ref" "$base" "$repo"; then
+        return 0
+      fi
       return 1
     fi
   fi
 
   grep -qF "$expected_uses" <<< "$existing_content" && return 0 || return 1
+}
+
+# reusable_uses_of <template> -> the template's first reusable `uses:` value
+# (org/repo/…/<base>-reusable.yml@<ref>), comment/CR stripped, or empty.
+reusable_uses_of() {
+  grep -E '^[[:space:]]*uses:' "$1" | head -1 \
+    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r'
+}
+
+# reusable_base_of <template> -> the ring channel base (e.g. `auto-rebase`) of the
+# template's reusable, or empty if the template does not call a `-reusable.yml`.
+reusable_base_of() {
+  local prefix; prefix="$(reusable_uses_of "$1")"; prefix="${prefix%@*}"
+  [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]] && printf '%s' "${BASH_REMATCH[1]}"
+  return 0
+}
+
+# reusable_host_of <template> -> the org/repo that HOSTS the reusable (and thus
+# carries its release tags), e.g. `petry-projects/.github-private` for dev-lead.
+reusable_host_of() {
+  local prefix; prefix="$(reusable_uses_of "$1")"; prefix="${prefix%@*}"
+  cut -d/ -f1-2 <<< "$prefix"
+  return 0
+}
+
+# emit_ref_for <template> <repo> -> the channel ref a (re)deployed stub in <repo>
+# should pin (#657 F5). For a ring-managed reusable it is the repo's tier channel,
+# major-scoped `v<M>-<tier>` when the agent has a release, else the bare `<tier>`
+# form. Empty for a non-ring template (deployed verbatim). Requires GH_TOKEN.
+emit_ref_for() {
+  local template="$1" repo="$2" base host major
+  base="$(reusable_base_of "$template")"
+  [[ -z "$base" ]] && return 0
+  ring_is_ring_reusable "$base" || return 0
+  host="$(reusable_host_of "$template")"
+  major="$(ring_host_current_major "$host" "$base")"
+  ring_canonical_ref "$base" "$repo" "$major"
+  return 0
 }
 
 # Build the PR body for a batched stub deployment (one PR per repo).
@@ -207,10 +255,14 @@ deploy_repo() {
     if [[ "$opts_in_any" == "false" ]]; then skip "$repo (exempt)"; return; fi
   fi
 
-  # Collect the drifted stubs for this repo (path/template pairs + names).
-  local -a paths=() templates=() names=()
-  local workflow template target_path raw existing_sha existing_content
+  # Collect the drifted stubs for this repo (path/template pairs + names). For
+  # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
+  # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
+  # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
+  local -a paths=() templates=() names=() emits=() tmpfiles=()
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base
   for workflow in "${WORKFLOWS[@]}"; do
+    base=""
     if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
       skip "$repo/$workflow (exempt)"
       continue
@@ -228,7 +280,15 @@ deploy_repo() {
       skip "$repo/$target_path already compliant"
       continue
     fi
-    paths+=("$target_path"); templates+=("$template"); names+=("$workflow")
+    emit="$(emit_ref_for "$template" "$repo")"
+    deploy_template="$template"
+    if [[ -n "$emit" ]] && [[ "$DRY_RUN" != "true" ]]; then
+      base="$(reusable_base_of "$template")"
+      deploy_template="$(mktemp)"
+      ring_repin_uses "$base" "$emit" < "$template" > "$deploy_template"
+      tmpfiles+=("$deploy_template")
+    fi
+    paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit")
   done
 
   [[ "${#names[@]}" -eq 0 ]] && return  # nothing drifted for this repo
@@ -239,6 +299,10 @@ deploy_repo() {
   local title="chore: sync ${n} org-standard workflow stub(s) from ${ORG}/.github"
 
   if [[ "$DRY_RUN" == "true" ]]; then
+    local i
+    for (( i = 0; i < n; i++ )); do
+      [[ -n "${emits[i]}" ]] && dry "$repo/${names[i]} would pin @${emits[i]}"
+    done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
     return
   fi
@@ -250,6 +314,8 @@ deploy_repo() {
   local body outcome
   body=$(batch_pr_body "${names[@]}")
   outcome=$(sd_deploy_files_via_pr "$ORG/$repo" "$branch" "$SYNC_LABEL" "$title" "$body" "${filepairs[@]}") || true
+
+  [[ "${#tmpfiles[@]}" -gt 0 ]] && rm -f "${tmpfiles[@]}"
 
   case "$outcome" in
     "OPENED "*)       ok   "$repo — opened ${outcome#OPENED } (${n} stub(s): $list)" ;;
