@@ -78,3 +78,48 @@ setup() {
   [[ "$output" != *"v1"* ]]
   [[ "$output" != *"v2"* ]]
 }
+
+# ══ major-scoped channels tooling: F5 shared helpers (epic #657) ═══════════════
+
+@test "ring_highest_major: picks the MAJOR of the highest strict semver" {
+  [ "$(ring_highest_major 1.2.3 2.0.1 1.9.9)" = "2" ]
+  [ "$(ring_highest_major 10.0.0 9.9.9)" = "10" ]
+  # tolerate a leading v on the token
+  [ "$(ring_highest_major v3.1.0 v2.9.9)" = "3" ]
+}
+
+@test "ring_highest_major: ignores non-semver tokens; empty when none valid" {
+  [ "$(ring_highest_major 2.0.0 not-a-version 1.0.0)" = "2" ]
+  [ -z "$(ring_highest_major)" ]
+  [ -z "$(ring_highest_major 2-next latest '')" ]
+}
+
+@test "ring_repin_uses: rewrites the reusable uses: ref, preserving the trailing comment" {
+  local stub="jobs:
+  auto-rebase:
+    uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@auto-rebase/stable  # NOSONAR keep
+    secrets: inherit"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_repin_uses auto-rebase auto-rebase/v2-stable <<<"$1"' _ "$stub"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"auto-rebase-reusable.yml@auto-rebase/v2-stable  # NOSONAR keep"* ]]
+  [[ "$output" != *"@auto-rebase/stable "* ]]
+}
+
+@test "ring_repin_uses: also rewrites a matching agent_ref (dev-lead stub)" {
+  local stub="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable
+    with:
+      agent_ref: dev-lead/stable"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_repin_uses dev-lead dev-lead/v4-ring1 <<<"$1"' _ "$stub"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dev-lead-reusable.yml@dev-lead/v4-ring1"* ]]
+  [[ "$output" == *"agent_ref: dev-lead/v4-ring1"* ]]
+}
+
+@test "ring_vform_tier_aligned: true only for the repo's tier v-form (any major)" {
+  ring_vform_tier_aligned auto-rebase/v2-ring1 auto-rebase TalkTerm    # ring1 repo
+  ring_vform_tier_aligned auto-rebase/v9-stable auto-rebase markets    # stable repo
+  # wrong tier for the repo → not aligned
+  ! ring_vform_tier_aligned auto-rebase/v2-ring0 auto-rebase TalkTerm
+  # bare tier (no v<M>-) → not a v-form
+  ! ring_vform_tier_aligned auto-rebase/ring1 auto-rebase TalkTerm
+}
