@@ -288,6 +288,64 @@ _suspect_patterns() {
      | .[] | [(.workflow // ""), (.step // "")] | @tsv'
 }
 
+# _suspect_downgrade_patterns <agent> — emit the per-reusable SUSPECT classes that OPT INTO
+# auto_downgrade (#668 increment 6) as TSV
+# "<workflow_regex>\t<step_regex>\t<min_baseline_sample>\t<margin_permille>", one per line;
+# empty when no suspect class carries `auto_downgrade` (byte-identical increment-2 behaviour:
+# an un-flagged SUSPECT is never downgraded). The knobs travel WITH the pattern so the
+# orchestrator feeds decide_suspect_downgrade per class without a second registry read.
+_suspect_downgrade_patterns() {
+  _jq -r --arg a "$1" \
+    '.agents[$a]?.gate?.suspect_failure_classes? // []
+     | .[] | select(.auto_downgrade? != null)
+     | [(.workflow // ""), (.step // ""),
+        (.auto_downgrade?.min_baseline_sample? // 0), (.auto_downgrade?.margin_permille? // 0)]
+     | @tsv'
+}
+
+# _suspect_class_counts <agent> <since_z> <before_z|-> <wf_re> <step_re> <repo...> — over the
+# window [since_z, before_z) on the given tier repos, echo "<matched_failures> <executed> <incomplete>":
+# executed = success+failure runs; matched = the failures whose failed-step signature matches
+# THIS one suspect class (via benign_match, the same matcher triage uses); incomplete = the
+# count of failure runs whose signature could not be retrieved (gh run view error — callers
+# treat incomplete>0 as HOLD, not DOWNGRADE, since an unreadable run could be a non-match).
+# before_z="-" means no upper bound. Powers the candidate-vs-baseline SUSPECT-class failure
+# RATE that the auto-downgrade core compares (#668 increment 6). Reuses _run_json /
+# _run_signature (the signature cache is warm from the cumulative-health pass on the
+# candidate window).
+_suspect_class_counts() {
+  local agent="$1" since="$2" before="$3" wf_re="$4" step_re="$5"; shift 5
+  local wf repo json rid rwf sig sig_rc matched=0 executed=0 incomplete=0 count
+  wf="$(_agent_field "$agent" run_workflow)"
+  local exec_filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
+  local fail_filter='.[]?|select(.conclusion=="failure")'
+  if [ "$before" != "-" ]; then
+    exec_filter="$exec_filter|select(.createdAt < \"$before\")"
+    fail_filter="$fail_filter|select(.createdAt < \"$before\")"
+  fi
+  for repo in "$@"; do
+    { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
+    json="$(_run_json "$repo" "$wf" "$since")"
+    count="$(jq "[${exec_filter}]|length" 2>/dev/null <<< "$json" || echo 0)"
+    executed=$(( executed + ${count:-0} ))
+    while IFS=$'\t' read -r rid rwf || [ -n "$rid" ]; do
+      rid="${rid%$'\r'}"
+      rwf="${rwf%$'\r'}"
+      [ -z "$rid" ] && continue
+      sig_rc=0
+      sig="$(_run_signature "$repo" "$rid")" || sig_rc=$?  # || prevents set -e on lookup failure
+      if [ -z "$sig" ]; then
+        [ "$sig_rc" -ne 0 ] && incomplete=$(( incomplete + 1 ))  # lookup failed; genuine empty sig is fine
+        continue
+      fi
+      if [ "$(benign_match "$rwf" "$sig" "$wf_re" "$step_re")" = "yes" ]; then
+        matched=$(( matched + 1 ))
+      fi
+    done < <(jq -r "[${fail_filter}]|.[]|[(.databaseId // \"\"|tostring),(.workflowName // \"\")]|@tsv" 2>/dev/null <<< "$json")
+  done
+  echo "$matched $executed $incomplete"
+}
+
 # Memoization cache for _run_signature: keyed by "repo:run_id".
 # Avoids duplicate gh run view calls for the same (repo, run_id) across agents
 # in evaluate-all (where multiple agents can share repos).
@@ -295,16 +353,28 @@ declare -A _RUN_SIG_CACHE=()
 
 # _run_signature <repo> <run_id> — the failed step names of a run, joined by newlines
 # (the "step/error signature" the allowlist matches against). Empty repo/wildcard/id or
-# any gh error → "" (fail-closed: an unknown signature is never treated as benign).
+# any gh error → "" with exit 1 (fail-closed: an unknown signature is never treated as
+# benign, and callers that need to distinguish a lookup failure from a genuine empty
+# signature check the exit code). A successful lookup with no failed steps → "" exit 0.
+# The $'\x01' sentinel in the cache marks a prior lookup failure so it is not retried.
 _run_signature() {
   local repo="$1" id="$2" cache_key sig json
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
   cache_key="${repo}:${id}"
   if [[ -v _RUN_SIG_CACHE["$cache_key"] ]]; then
+    if [ "${_RUN_SIG_CACHE[$cache_key]}" = $'\x01' ]; then
+      echo ""; return 1  # cached lookup failure — signal to caller
+    fi
     echo "${_RUN_SIG_CACHE[$cache_key]}"
     return 0
   fi
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null || echo '{}')"
+  # Use || { } so set -e does not trigger on a failing gh run view; the block caches the
+  # sentinel and returns 1 to signal the lookup failure to callers that care (e.g.
+  # _suspect_class_counts tracks incomplete evidence and HOLDs the downgrade).
+  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" || {
+    _RUN_SIG_CACHE["$cache_key"]=$'\x01'
+    echo ""; return 1
+  }
   sig="$(jq -r '[.jobs[]?|.steps[]?|select(.conclusion=="failure")|.name] | join("\n")' \
     2>/dev/null <<< "$json" || echo "")"
   _RUN_SIG_CACHE["$cache_key"]="$sig"
@@ -350,7 +420,7 @@ _failure_suspect() {
 # benign) failure that matches a `suspect_failure_classes` entry sets the suspect flag
 # (#668 increment 2) — it still counts toward the blocking total (SUSPECT blocks like
 # REGRESSION), but downstream triage renders SUSPECT + guidance instead of a bare
-# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect 0|1>".
+# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count>".
 _cumulative_health() {
   local agent="$1" since="$2" differs="$3"; shift 3
   local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf
@@ -371,7 +441,7 @@ _cumulative_health() {
         else
           fail=$(( fail + 1 ))
           if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
-            suspect=1
+            suspect=$(( suspect + 1 ))
           fi
         fi
       done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
@@ -565,10 +635,13 @@ _decision_mix_table() {
 }
 
 # _frontier_state <agent> — compute the rollout frontier and graduated gate, echoing:
-#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift>"
+#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift> <downgrade> <dg_cand_rate> <dg_cand_sample> <dg_base_rate> <dg_base_sample>"
 # frontier = first ring (after next) not yet on the candidate commit; triage is "-"
 # unless state is BLOCKED (then REGRESSION | PRE_EXISTING | SUSPECT). mix_shift is "SHIFT"
 # when a gate.correctness decision-mix shift is holding the promotion (#668 L2), else "-".
+# downgrade is "DOWNGRADE" when a SUSPECT was auto-downgraded to PRE_EXISTING (#668 inc6) —
+# then triage already reads PRE_EXISTING and dg_* carry the candidate-vs-baseline permille
+# rates + sample sizes that drove it; "-"/0 otherwise.
 _frontier_state() {
   local agent="$1"
   local cand chans frontier=""
@@ -692,7 +765,46 @@ _frontier_state() {
     triage="$(classify_failure "$differs" "${CANARY_FAILURE_CATEGORY:-unknown}" "$cum_suspect")"
   fi
 
-  echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift"
+  # SUSPECT → PRE_EXISTING auto-downgrade (#668 increment 6, opt-in per suspect class). Only the
+  # failure-class SUSPECT variant is eligible — mix_shift="-" excludes the correctness variant,
+  # which is never rate-comparable. For each suspect class carrying `auto_downgrade`, compare the
+  # candidate's failure RATE for that class (matched/executed over the per-candidate window) with
+  # the prior version's over the trailing baseline window; the pure decide_suspect_downgrade
+  # decides. DOWNGRADE re-triages PRE_EXISTING (report-only: no needs-human, advances with
+  # --allow-pre-existing); HOLD stays SUSPECT (increment-2 behaviour — worse/ambiguous/thin cases
+  # keep the human). Byte-identical for a suspect class with no auto_downgrade (empty set → skip).
+  local downgrade="-" dg_cand_rate=0 dg_cand_sample=0 dg_base_rate=0 dg_base_sample=0
+  if [ "$triage" = "SUSPECT" ] && [ "$mix_shift" = "-" ]; then
+    local dg_patterns; dg_patterns="$(_suspect_downgrade_patterns "$agent")"
+    # Guard (Thread 1): only attempt per-class rate comparison when EVERY blocking failure
+    # has been attributed to a suspect class. If any failure had no matching suspect class,
+    # that unrelated failure is an independent regression and must keep the gate blocked.
+    if [ -n "$dg_patterns" ] && [ "${cum_suspect:-0}" -ge "$cum_fail" ]; then
+      local dg_win dg_base_since dwf dsr dmin dmargin cm ce cmi bm be bei crate brate knobs decision
+      dg_win="${SOAK_WINDOW_DAYS:-$(_gate_field "$agent" baseline_window_days)}"; dg_win="${dg_win:-14}"
+      dg_base_since="$(_iso_now_minus_days "$dg_win")"
+      while IFS=$'\t' read -r dwf dsr dmin dmargin || [ -n "$dwf" ]; do
+        dwf="${dwf%$'\r'}"; dsr="${dsr%$'\r'}"; dmin="${dmin%$'\r'}"; dmargin="${dmargin%$'\r'}"
+        [ -z "$dsr" ] && continue
+        read -r cm ce cmi < <(_suspect_class_counts "$agent" "$cut_z" "-" "$dwf" "$dsr" "${src_repos[@]}")
+        read -r bm be bei < <(_suspect_class_counts "$agent" "$dg_base_since" "$cut_z" "$dwf" "$dsr" "${src_repos[@]}")
+        # Guard (Thread 2): if any signature lookup failed, baseline class evidence is
+        # incomplete. A missing run could be a non-match; fail-closed and skip DOWNGRADE.
+        [ "${cmi:-0}" -gt 0 ] || [ "${bei:-0}" -gt 0 ] && continue
+        if [ "${ce:-0}" -gt 0 ]; then crate="$(round_div $(( ${cm:-0} * 1000 )) "$ce")"; else crate=0; fi
+        if [ "${be:-0}" -gt 0 ]; then brate="$(round_div $(( ${bm:-0} * 1000 )) "$be")"; else brate=0; fi
+        knobs="$(printf '{"min_baseline_sample":%s,"margin_permille":%s}' "${dmin:-0}" "${dmargin:-0}")"
+        decision="$(decide_suspect_downgrade "$crate" "$brate" "$be" "$knobs")"
+        if [ "$decision" = "DOWNGRADE" ]; then
+          triage="PRE_EXISTING"; downgrade="DOWNGRADE"
+          dg_cand_rate="$crate"; dg_cand_sample="$ce"; dg_base_rate="$brate"; dg_base_sample="$be"
+          break
+        fi
+      done <<< "$dg_patterns"
+    fi
+  fi
+
+  echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift $downgrade $dg_cand_rate $dg_cand_sample $dg_base_rate $dg_base_sample"
 }
 
 cmd_evaluate() {
@@ -708,7 +820,7 @@ cmd_evaluate() {
     local mark="  "; [ -n "$cand" ] && [ "$c" = "$cand" ] && mark="* "
     printf '  %s%-7s -> %s\n' "$mark" "$ch" "${c:0:12}"
   done
-  read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift < <(_frontier_state "$agent")
+  read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample < <(_frontier_state "$agent")
   echo "----"
   if [ "$frontier" = "-" ]; then
     echo "frontier: none — fully rolled out (all rings on candidate)."
@@ -722,6 +834,8 @@ cmd_evaluate() {
         echo "::warning::triage=SUSPECT (decision-mix shift, #668 Layer 2) — the candidate's decision distribution moved ≥ threshold vs the prior-version baseline. HOLDS the promotion; review the decision-mix table in the blocker issue. Composition drift (e.g. a draft-PR burst) is the usual false positive → promote --override to dismiss; a genuine always/never shift → roll back."
       elif [ "$triage" = "SUSPECT" ]; then
         echo "::warning::triage=SUSPECT — failure matches a suspect class (possibly candidate-caused). BLOCKS + needs a human; see the blocker issue's discriminating question, then promote --override if unrelated or roll back if a real regression."
+      elif [ "$downgrade" = "DOWNGRADE" ]; then
+        echo "::notice::triage=PRE_EXISTING (auto-downgraded from SUSPECT, #668 increment 6) — the candidate's suspect-class failure rate (${dg_cand_rate}‰ over ${dg_cand_sample} runs) is no worse than the prior version's (${dg_base_rate}‰ over ${dg_base_sample} runs), so the timeout is environmental, not a candidate regression. Report only; the SUSPECT hold auto-cleared (no human needed). Advances with --allow-pre-existing once dwell/sample pass."
       else
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback, do NOT advance."
       fi
@@ -762,7 +876,7 @@ cmd_promote() {
       *) echo "::error::unknown promote flag: $1" >&2; return 2 ;;
     esac; shift
   done
-  read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift < <(_frontier_state "$agent")
+  read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift _dg _dgcr _dgcs _dgbr _dgbs < <(_frontier_state "$agent")
   if [ "$frontier" = "-" ]; then
     echo "nothing to promote — $agent is fully rolled out."; return 0
   fi
@@ -957,9 +1071,10 @@ _suspect_guidance() {
      | "- **\(.id):** \(.guidance)"'
 }
 
-# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>]
+# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>] [<downgrade>] [<dg_cand_rate>] [<dg_cand_sample>] [<dg_base_rate>] [<dg_base_sample>]
 _blocker_body() {
   local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" mix_shift="${9:--}" mix_table="${10:-}" note
+  local downgrade="${11:--}" dg_cand_rate="${12:-0}" dg_cand_sample="${13:-0}" dg_base_rate="${14:-0}" dg_base_sample="${15:-0}"
   # Correctness variant (#668 L2): a decision-mix SHIFT holds as SUSPECT but is NOT a reliability
   # failure — the candidate exited green yet its decision distribution moved. Distinct note + a
   # candidate-vs-baseline mix table replace the failing-runs evidence (there are none).
@@ -995,6 +1110,15 @@ EOF
 >
 > **Discriminating question:**
 $(printf '%s\n' "$guidance" | sed 's/^/> /')"
+  elif [ "$downgrade" = "DOWNGRADE" ]; then
+    note="> ℹ️ **PRE_EXISTING** — *auto-downgraded from SUSPECT (#668 increment 6).* This failure matched a suspect class that opts into data-driven auto-downgrade, and the candidate's failure rate for that class is **no worse** than the prior version's on comparable traffic — so it is environmental, not a candidate regression. The SUSPECT hold auto-cleared: report only, **no human needed**, and the frontier advances with \`--allow-pre-existing\` once dwell/sample pass. (A materially-worse or thin-baseline case would have stayed SUSPECT.)
+>
+> **Suspect-class failure rate (candidate vs prior-version baseline):**
+>
+> | version | rate (‰) | runs |
+> |---|---|---|
+> | candidate | \`$dg_cand_rate\` | $dg_cand_sample |
+> | baseline | \`$dg_base_rate\` | $dg_base_sample |"
   else
     note="> ⚠️ **PRE_EXISTING** — the failure is pre-existing/environmental (reusable byte-identical to the prior channel). Report only; the gate will not roll back or advance. Fix-forward, and the armed timer auto-promotes once clean."
   fi
@@ -1114,7 +1238,8 @@ cmd_sync_issues() {
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift host
-    read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift < <(_frontier_state "$agent")
+    local downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample
+    read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample < <(_frontier_state "$agent")
     host="$(_agent_field "$agent" host)"
     local blk="—" num_state num istate
     # Best-effort (#1081): these substitutions call gh/jq. Under `set -euo pipefail`
@@ -1127,7 +1252,7 @@ cmd_sync_issues() {
       local evidence body title mix_table=""
       evidence="$(_blocker_evidence "$agent" "$cand" || true)"
       [ "$mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$cand" || true)"
-      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table")"
+      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table" "$downgrade" "$dg_cand_rate" "$dg_cand_sample" "$dg_base_rate" "$dg_base_sample")"
       if [ "$mix_shift" = "SHIFT" ]; then
         title="Canary blocker: $agent $transition (decision-mix shift, SUSPECT)"
       else
@@ -1148,7 +1273,11 @@ cmd_sync_issues() {
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
           gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-          { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          if [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; then
+            gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+          else
+            gh issue edit "$num" --repo "$ISSUE_REPO" --remove-label needs-human >/dev/null 2>&1 || true
+          fi
           echo "  updated blocker issue #$num for $agent"; blk="#$num"
         fi
       fi
