@@ -159,27 +159,46 @@ _looks_like_oid() { [[ "$1" =~ ^[0-9a-f]{7,64}$ ]]; }
 # host, empty if none (major-scoped-channels epic #657, Phase F4). This is the "current
 # major line" a v-scoped channel tag is derived against; there is no new registry field —
 # it is derived from the release tags already present (mirrors _next_release_version).
+declare -A _AGENT_MAJOR_CACHE=()
+
 _agent_current_major() {
-  local versions highest
-  versions="$(_host_release_versions "$1")"
+  local agent="$1"
+  if [[ -v _AGENT_MAJOR_CACHE["$agent"] ]]; then
+    echo "${_AGENT_MAJOR_CACHE["$agent"]}"
+    return 0
+  fi
+  local versions highest major=""
+  versions="$(_host_release_versions "$agent")"
   # shellcheck disable=SC2086
   highest="$(max_semver $versions)"
-  [ -z "$highest" ] && return 0
-  major_component "$highest"
+  if [ -n "$highest" ]; then
+    major="$(major_component "$highest")"
+  fi
+  _AGENT_MAJOR_CACHE["$agent"]="$major"
+  echo "$major"
 }
 
 # _channel_tag_commit <agent> <suffix> — commit the tag <agent>/<suffix> resolves to
 # (empty if absent). Same host-vs-local resolution as channel_commit, generalized to an
 # arbitrary channel suffix so a v-scoped `v<M>-<tier>` can be probed (epic #657 F4).
+declare -A _CHANNEL_COMMIT_CACHE=()
+
 _channel_tag_commit() {
-  local agent="$1" suffix="$2" host
-  host="$(_agent_field "$agent" host)"
-  if [ -n "$host" ] && [ "$host" != "$THIS_REPO" ]; then
-    _gh_tag_commit "$host" "$agent/$suffix"
+  local agent="$1" suffix="$2" host key="${1}:${2}"
+  if [[ -v _CHANNEL_COMMIT_CACHE["$key"] ]]; then
+    echo "${_CHANNEL_COMMIT_CACHE["$key"]}"
     return 0
   fi
-  git rev-parse -q --verify "refs/tags/$agent/$suffix^{commit}" 2>/dev/null \
-    || git rev-parse -q --verify "$agent/$suffix^{commit}" 2>/dev/null || true
+  local commit=""
+  host="$(_agent_field "$agent" host)"
+  if [ -n "$host" ] && [ "$host" != "$THIS_REPO" ]; then
+    commit="$(_gh_tag_commit "$host" "$agent/$suffix")"
+  else
+    commit="$(git rev-parse -q --verify "refs/tags/$agent/$suffix^{commit}" 2>/dev/null \
+      || git rev-parse -q --verify "$agent/$suffix^{commit}" 2>/dev/null || true)"
+  fi
+  _CHANNEL_COMMIT_CACHE["$key"]="$commit"
+  echo "$commit"
 }
 
 # _resolved_channel <agent> <tier> — echo "<tag>\t<commit>" for the channel <agent> uses on
