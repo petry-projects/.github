@@ -42,6 +42,24 @@ setup() {
   [ "$(ring_canonical_ref dev-lead .github-private)" = "dev-lead/next" ]
 }
 
+@test "ring_canonical_ref: major-aware form yields <agent>/v<major>-<tier> (#657 F3)" {
+  # A major argument opts the ref into the major-scoped channel line; the tier
+  # is still the repo's ring tier.
+  [ "$(ring_canonical_ref agent-shield markets 2)" = "agent-shield/v2-stable" ]
+  [ "$(ring_canonical_ref agent-shield TalkTerm 2)" = "agent-shield/v2-ring1" ]
+  [ "$(ring_canonical_ref dev-lead .github-private 5)" = "dev-lead/v5-next" ]
+  # No major argument is backward-compatible: the legacy bare-tier ref.
+  [ "$(ring_canonical_ref agent-shield markets)" = "agent-shield/stable" ]
+}
+
+@test "ring_pinned_major: extracts M from v<M>-<tier>, empty for bare tier (#657 F3)" {
+  [ "$(ring_pinned_major agent-shield/v3-stable)" = "3" ]
+  [ "$(ring_pinned_major agent-shield/v12-ring1)" = "12" ]
+  # Bare-tier (legacy/unmajored) refs carry no major.
+  [ -z "$(ring_pinned_major agent-shield/stable)" ]
+  [ -z "$(ring_pinned_major agent-shield/ring0)" ]
+}
+
 @test "ring_accepted_refs: canonical first, then the ring-channel grace" {
   run ring_accepted_refs auto-rebase TalkTerm
   [ "${lines[0]}" = "auto-rebase/ring1" ]                 # canonical = tier channel
