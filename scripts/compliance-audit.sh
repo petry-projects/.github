@@ -1241,11 +1241,12 @@ check_centralized_workflow_stubs() {
   #                         model": the expected channel is the repo's RING TIER
   #                         (next/ring0/ring1/stable — see ring_tier_for_repo),
   #                         e.g. `agent-shield/ring1` on a ring1 repo. Any other
-  #                         value is a fixed pin (e.g. feature-ideation → v1).
+  #                         value would be a fixed pin (e.g. `foo → v1`); every
+  #                         reusable below is now on the ring model (#606).
   #   legacy-accepted-csv — additional refs still accepted *during* migration so
   #                         the audit neither flags nor reverts a stub mid-move.
-  #                         For RING reusables the per-repo legacy set (the
-  #                         `<name>/stable` channel + v1,v2) is computed below.
+  #                         For RING reusables the per-repo legacy set (the other
+  #                         ring channels — higher tiers) is computed below.
   # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
   # the private petry-projects/.github-private repo and is pinned to the
   # dev-lead/stable channel, validated by check_dev_lead_stub() below.
@@ -1255,8 +1256,9 @@ check_centralized_workflow_stubs() {
     "dependabot-automerge.yml:dependabot-automerge-reusable:RING"
     "dependabot-rebase.yml:dependabot-rebase-reusable:RING"
     "agent-shield.yml:agent-shield-reusable:RING"
-    "feature-ideation.yml:feature-ideation-reusable:v1:"
+    "feature-ideation.yml:feature-ideation-reusable:RING"
     "pr-review-mention.yml:pr-review-mention-reusable:RING"
+    "pr-auto-review.yml:pr-auto-review-reusable:RING"
   )
 
   # List the repo's workflow directory once instead of probing each file.
