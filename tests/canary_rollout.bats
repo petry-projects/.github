@@ -1441,7 +1441,7 @@ GITEOF
   # YAML, so the class must stay inert at differs=1 (excludes only when byte-identical).
   run jq -e '.agents["add-to-project"].gate.benign_failure_classes[]
              | select(.id=="reusable-setup-restricted-secrets")
-             | has("version_independent") | not' "$RINGS"
+             | .version_independent != true' "$RINGS"
   [ "$status" -eq 0 ]
 }
 
