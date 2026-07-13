@@ -262,6 +262,7 @@ deploy_repo() {
   local -a paths=() templates=() names=() emits=() tmpfiles=()
   local workflow template target_path raw existing_sha existing_content emit deploy_template base
   for workflow in "${WORKFLOWS[@]}"; do
+    base=""
     if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
       skip "$repo/$workflow (exempt)"
       continue

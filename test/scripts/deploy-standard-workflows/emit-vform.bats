@@ -11,7 +11,7 @@
 # major derivation) and the target repo's existing stub content.
 
 setup() {
-  TT_TMP="$(mktemp -d)"
+  TT_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   REPO_ROOT="$(cd -- "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   SCRIPT="${REPO_ROOT}/scripts/deploy-standard-workflows.sh"
 }

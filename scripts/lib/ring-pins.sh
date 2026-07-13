@@ -149,7 +149,10 @@ ring_host_current_major() {
   local host="$1" base="$2" refs
   refs="$(gh api "repos/${host}/git/matching-refs/tags/${base}/v" \
             --jq '.[]?.ref' 2>/dev/null \
-          | sed -n "s#^refs/tags/${base}/v##p")" || return 0
+          | sed -n "s#^refs/tags/${base}/v##p")" || {
+    echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
+    return 0
+  }
   # shellcheck disable=SC2086
   ring_highest_major $refs
   return 0

@@ -11,7 +11,7 @@
 # logged to GH_CALLS so a DRY_RUN can be proven side-effect-free.
 
 setup() {
-  TT_TMP="$(mktemp -d)"
+  TT_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   REPO_ROOT="$(cd -- "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   SCRIPT="${REPO_ROOT}/scripts/migrate-major-channels.sh"
   GH_CALLS="${TT_TMP}/gh-calls.log"; export GH_CALLS
@@ -62,9 +62,10 @@ case "$path" in
     exit 1 ;;                           # v-tag absent
   *git/ref/tags/foo/*)                  # bare-tier tag → resolves to a commit
     printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\tcommit\n'; exit 0 ;;
-  *contents/.github/workflows/foo.yml*) # consumer stub content (base64)
+  *contents/.github/workflows/foo.yml*) # consumer stub content as JSON
     body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${CONSUMER_REF:-foo/ring1}"
-    printf '%s' "$(printf '%s' "$body" | base64 | tr -d '\n')"
+    b64="$(printf '%s' "$body" | base64 | tr -d '\n')"
+    printf '{"content":"%s"}' "$b64"
     exit 0 ;;
   *git/refs*) exit 0 ;;                 # create/delete ref (mutating)
 esac

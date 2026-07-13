@@ -55,8 +55,14 @@ _tag_exists() {
 # _tag_commit <host> <tag> -> the commit sha the tag resolves to (first field of
 # the ref object's sha), or empty if the tag does not exist.
 _tag_commit() {
-  local out
-  out="$(gh api "repos/$1/git/ref/tags/$2" --jq '.object.sha' 2>/dev/null)" || return 0
+  local host="$1" tag="$2" out
+  out="$(gh api "repos/${host}/git/ref/tags/${tag}" --jq '.object.sha' 2>&1)" || {
+    if <<< "$out" grep -q "404"; then
+      return 0
+    fi
+    echo "Error fetching tag commit for ${host}/${tag}: ${out}" >&2
+    return 1
+  }
   printf '%s' "${out%%[[:space:]]*}"
 }
 
@@ -73,8 +79,8 @@ _delete_tag_ref() {
 
 # ── registry helpers ──────────────────────────────────────────────────────────
 
-_agent_host()  { jq -r --arg a "$1" '.agents[$a].host'            "$CANARY_RINGS"; }
-_agent_tiers() { jq -r --arg a "$1" '.agents[$a].rings[].channel' "$CANARY_RINGS"; }
+_agent_host()  { jq -r --arg a "$1" '.agents[$a]?.host?'            "$CANARY_RINGS"; }
+_agent_tiers() { jq -r --arg a "$1" '.agents[$a]?.rings[]?.channel?' "$CANARY_RINGS"; }
 _agent_names() { jq -r '.agents | keys[]'                         "$CANARY_RINGS"; }
 
 # _enrolled_consumers <agent> -> the concrete repos enrolled in <agent>'s rings,
@@ -93,16 +99,22 @@ _enrolled_consumers() {
       '$org_infra') [ "${#org_infra[@]}" -gt 0 ] && printf '%s\n' "${org_infra[@]}" ;;
       *)            printf '%s\n' "$m" ;;
     esac
-  done < <(jq -r --arg a "$agent" '.agents[$a].rings[].members[]' "$CANARY_RINGS") | sort -u
+  done < <(jq -r --arg a "$agent" '.agents[$a]?.rings[]?.members[]?' "$CANARY_RINGS") | sort -u
 }
 
 # _consumer_pinned_ref <repo> <agent> -> the channel ref the repo's
 # .github/workflows/<agent>.yml stub pins the reusable at (e.g. `agent/ring1`), or
 # empty if the stub is missing / does not pin the agent.
 _consumer_pinned_ref() {
-  local repo="$1" agent="$2" content ref
-  content="$(gh api "repos/${repo}/contents/.github/workflows/${agent}.yml" 2>/dev/null \
-             | base64 -d 2>/dev/null)" || return 0
+  local repo="$1" agent="$2" response content ref
+  response="$(gh api "repos/${repo}/contents/.github/workflows/${agent}.yml" 2>&1)" || {
+    if <<< "$response" grep -q "404"; then
+      return 0
+    fi
+    echo "Error fetching workflow for ${repo}: ${response}" >&2
+    return 1
+  }
+  content="$(jq -r '.content // empty' <<< "$response" | base64 -d 2>/dev/null)"
   ref="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | head -1)"
   printf '%s' "${ref#@}"
 }
@@ -120,6 +132,7 @@ _is_bare_tier_ref() {
 create_vtags() {
   local agent="$1" host major tier bare vtag commit
   host="$(_agent_host "$agent")"
+  [[ -z "$host" ]] && { log "skip $agent — host not found"; return 0; }
   major="$(ring_host_current_major "$host" "$agent")"
   if [ -z "$major" ]; then
     log "skip $agent — no release major (nothing to major-scope)"
@@ -208,9 +221,19 @@ main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run)     DRY_RUN=true; shift ;;
-      --agent)       agent_filter="$2"; shift 2 ;;
+      --agent)
+        if [[ $# -lt 2 ]]; then
+          err "--agent requires an argument"
+          exit 1
+        fi
+        agent_filter="$2"; shift 2 ;;
       --emit-repins) mode="emit-repins"; shift ;;
-      --retire-bare) mode="retire-bare"; retire_agent="$2"; shift 2 ;;
+      --retire-bare)
+        if [[ $# -lt 2 ]]; then
+          err "--retire-bare requires an argument"
+          exit 1
+        fi
+        mode="retire-bare"; retire_agent="$2"; shift 2 ;;
       -h|--help)     sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) err "Unknown option: $1"; exit 1 ;;
     esac
