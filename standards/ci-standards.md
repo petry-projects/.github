@@ -175,6 +175,56 @@ that reusable. The reference implementation and the full rationale live in the
 release-strategy initiative
 (`petry-projects/.github-private/docs/initiatives/agentic-release-strategy.md`).
 
+#### Caller-stub input forwarding across channel pins
+
+**Rule.** Never add or modify a `with:` forward on a channel-pinned caller stub
+to pass an input the **pinned channel does not yet declare**. GitHub validates a
+reusable's `with:` inputs against the workflow **as it exists at the pinned ref**,
+and only at **run startup** — so forwarding an input the channel has not yet
+published makes the stub fail closed with `startup_failure` the first time it is
+triggered on `main`.
+
+**Sequencing** — to add a new `workflow_call` input to a channel-pinned reusable
+and forward it from the stub, land the three steps **in this order**:
+
+1. **Land the input in the reusable** — merge the new `workflow_call` input into
+   the reusable's `main` (and cut its release tag).
+2. **Promote the pinned channel** to a commit that declares the input — move the
+   channel tag forward (`cut-release.sh --channel`, or the ring promotion) so the
+   ref the stub pins now includes the input.
+3. **Then teach the stub to forward it** — only now add the `with:` forward to the
+   caller stub.
+
+Doing these in any other order — most easily, adding the `with:` forward first —
+strands the stub on a channel that predates the input and breaks every trigger
+at startup.
+
+**Why PR CI does not catch this.** A `pull_request` run executes the
+**base-branch** stub, and the pinned channel **lags the PR**, so a stub-only
+`with:` change is exercised by **nothing** in PR CI: the base-branch stub does
+not carry the new forward, and the pinned channel it resolves does not carry the
+new input. The change is green pre-merge and only dies at `startup_failure` on
+the **first real trigger after merge to `main`** (the failure mode behind
+incident #1034: a channel-pinned pr-review caller stub was edited to forward a
+`with:` input the pinned channel did not yet declare, breaking **every** review
+with `startup_failure`).
+
+**`actionlint` does not cover this.** `actionlint` input-checks only **local
+`./` reusable refs** — it never resolves the pinned **remote** channel, so it
+cannot see that the forwarded key is undeclared there. The dedicated guards below
+are required **in addition to** `actionlint`.
+
+**Reference guards** (landed in `.github-private` via #1052, companion to this
+standard):
+
+- `scripts/validate-caller-inputs.sh` — resolves each reusable `uses: …@<ref>`
+  carrying a `with:` block **at the pinned ref** and fails on any forwarded key
+  not declared there (includes an incident-#1034 regression test).
+- `scripts/stub_freeze_drift.sh` — byte-identity freeze of the ring-0 caller
+  stubs' forwarding block.
+- `pr-review-trigger-canary.yml` — a dry-run canary that fails loud on
+  `startup_failure` before a real trigger can.
+
 ### Pure reusable workflows must be disabled
 
 **Standard.** A **pure reusable workflow** — one whose `on:` block declares
