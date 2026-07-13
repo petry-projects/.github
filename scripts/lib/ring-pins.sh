@@ -120,3 +120,62 @@ ring_legacy_csv() {
   ring_accepted_refs "$1" "$2" | tail -n +2 | paste -sd, -
   return 0
 }
+
+# ══ major-scoped channels tooling — F5 shared helpers (epic #657) ══════════════
+
+# ring_highest_major <version>... -> the MAJOR of the highest strict semver among
+# the arguments, or empty if none is a valid `[v]X.Y.Z`. Tolerates a leading `v`
+# on a token; non-semver tokens are ignored. Pure; always returns 0.
+ring_highest_major() {
+  local v major best=""
+  for v in "$@"; do
+    v="${v#v}"
+    [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || continue
+    major="${BASH_REMATCH[1]}"
+    if [ -z "$best" ] || [ "$major" -gt "$best" ]; then
+      best="$major"
+    fi
+  done
+  [ -n "$best" ] && printf '%s' "$best"
+  return 0
+}
+
+# ring_host_current_major <host-repo> <channel-base> -> the current major line for
+# an agent, derived from its release tags `<base>/vX.Y.Z` on the host repo, or
+# empty if the agent has no release (so callers fall back to the bare-tier form).
+# gh-backed: reads matching-refs for `<base>/v` and feeds the semver tokens to
+# ring_highest_major. Requires GH_TOKEN in the environment.
+ring_host_current_major() {
+  local host="$1" base="$2" refs
+  refs="$(gh api "repos/${host}/git/matching-refs/tags/${base}/v" \
+            --jq '.[]?.ref' 2>/dev/null \
+          | sed -n "s#^refs/tags/${base}/v##p")" || {
+    echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
+    return 0
+  }
+  # shellcheck disable=SC2086
+  ring_highest_major $refs
+  return 0
+}
+
+# ring_repin_uses <channel-base> <newref> -> rewrite a workflow stub read on stdin
+# so its reusable `uses:` ref (and any matching `agent_ref:`) points at <newref>.
+# Only lines referencing THIS agent's reusable are touched; the trailing comment
+# on a `uses:` line is preserved. Pure (sed only).
+ring_repin_uses() {
+  local base="$1" newref="$2"
+  sed -E \
+    -e "s#^([[:space:]]*uses:[[:space:]]*petry-projects/[^@[:space:]]*/${base}-reusable\.yml)@[^[:space:]]+#\1@${newref}#" \
+    -e "s#^([[:space:]]*agent_ref:[[:space:]]*[\"']?)${base}/[^\"'[:space:]]+#\1${newref}#"
+  return 0
+}
+
+# ring_vform_tier_aligned <pinned-ref> <channel-base> <repo> -> 0 iff <pinned-ref>
+# is a major-scoped v-form `<base>/v<M>-<tier>` whose tier matches <repo>'s ring
+# tier (any major). A bare-tier ref (no `v<M>-`) or a wrong-tier v-form is not
+# aligned. Pure.
+ring_vform_tier_aligned() {
+  local ref="$1" base="$2" repo="$3" tier
+  tier="$(ring_tier_for_repo "$repo")"
+  [[ "$ref" =~ ^${base}/v[0-9]+-${tier}$ ]]
+}
