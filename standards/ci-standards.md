@@ -33,6 +33,19 @@ file with that header, **stop and read the header first** — if the change
 isn't allowed by the contract, the right move is a PR against the central
 reusable, not a local edit.
 
+**Full-file identity (Tier 1).** A Tier-1 stub is **full-file identical across
+every adopting repo, modulo the tier channel pin** — the `uses:` ref and its
+matching `agent_ref`, pinned to the reusable's moving `stable` channel tag
+(`@<name>/stable`, or a canary-ring tag under the
+[stable channel](#reusable-workflow-versioning--the-stable-channel)).
+**Everything else is fixed: `on:`, `permissions:`, and `concurrency:` are
+_not_ repo-adjustable.** Trimming a trigger, narrowing a permission, or adding a
+`concurrency:` block when adopting the stub is drift, not a repo-specific
+liberty — the behavior lives in the reusable. To change any of it, open a PR
+against the reusable (or a standards PR that updates the template here) and let
+the channel tag promote the change centrally; never edit a caller to adjust its
+trigger, permission, or concurrency surface.
+
 ### Reusable workflow versioning — the `stable` channel
 
 **Standard.** Every reusable workflow is versioned by a **moving `stable`
@@ -1699,6 +1712,17 @@ The dev-lead agent is a reactive, write-enabled automation that keeps pull reque
 It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 
 ### Concurrency, pinning, and the permission contract
+
+The dev-lead stub is a **Tier-1 caller** ([Centralization tiers](#centralization-tiers)):
+it is **full-file identical across every adopting repo, modulo the tier channel
+pin** on its `uses:` ref and matching `agent_ref` (`@dev-lead/stable`, or a
+canary-ring tag — see
+[Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
+Its **`on:`, `permissions:`, and `concurrency:` surface is _not_
+repo-adjustable**: editing a trigger, permission scope, or concurrency block on a
+PR branch is drift, not a repo-specific liberty. Behavior changes go through the
+reusable (or a standards PR that updates the template), promoted by moving the
+channel tag centrally — never by editing this caller.
 
 Three things are deliberately **not** tuned in the caller stub — they are owned
 centrally so they cannot drift per repo:
