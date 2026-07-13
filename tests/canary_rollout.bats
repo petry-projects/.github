@@ -979,6 +979,9 @@ case "\$*" in
   *"/commits/"*) echo "$MAINSHA" ;;
   *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
   *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  # bare-tier fleet: no v-scoped channel tags exist yet (v<M>-next), so a v-channel
+  # probe resolves absent — only the vX.Y.Z RELEASE existence probe returns tag_probe_resp.
+  *"git/ref/tags/$agent/v"*"-next"*) printf '\n' ;;
   *"git/ref/tags/$agent/v"*) printf '%s\n' "$tag_probe_resp" ;;
   *"run list"*) echo "[]" ;;
   *) echo "{}" ;;
@@ -2368,4 +2371,190 @@ GHEOF
   grep -q "skip-checks-pending" "$ISSUE_LOG"
   # SUSPECT → routed to a human (needs-human) as well as the dev-lead agent.
   grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+}
+
+# ══ major-scoped channels: v<major>-<tier> resolution + promotion (epic #657, F4) ══
+# F4 makes the engine CAPABLE of operating on major-scoped `<agent>/v<M>-<tier>` channel tags
+# while remaining fall-back-safe on today's bare-tier fleet: resolution prefers the v-form when
+# that tag exists, else the legacy bare `<agent>/<tier>`. The transition-safety guard is that on
+# the bare fixture the engine is byte-identical to pre-F4 (F5, not F4, migrates the live tags).
+
+# ── pure name-builders (mirror F3 ring_canonical_ref convention) ────────────────
+@test "channel_tag: with a major builds the v-scoped form (matches ring-pins convention)" {
+  [ "$(channel_tag dev-lead next 2)" = "dev-lead/v2-next" ]
+  [ "$(channel_tag auto-rebase stable 3)" = "auto-rebase/v3-stable" ]
+}
+@test "channel_tag: without a major builds the legacy bare form" {
+  [ "$(channel_tag dev-lead next)" = "dev-lead/next" ]
+  [ "$(channel_tag dev-lead stable '')" = "dev-lead/stable" ]
+}
+@test "major_component: extracts the MAJOR of a strict semver" {
+  [ "$(major_component 2.3.1)" = "2" ]
+  [ "$(major_component 10.0.0)" = "10" ]
+}
+@test "major_component: a non-semver token yields empty (no false major)" {
+  [ -z "$(major_component 2-next)" ]
+  [ -z "$(major_component '')" ]
+  [ -z "$(major_component v2.0.0)" ]
+}
+
+# ── a fleet whose v2 major line EXISTS: v2-next=cand(cccc), v2-ring0/ring1/stable=old(bbbb) →
+#    frontier ring0, transition next->ring0. Bare tags resolve to a DIFFERENT sha (aaaa) so a test
+#    can prove the engine PREFERS the v-form. Ref mutations are logged to MOVE_LOG.
+_vline_stub() {
+  local cut_days="$1" run_days_ago="$2" conclusion="$3"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export MOVE_LOG="$STUB_BIN/move.log"
+  local cand="cccccccccccccccccccccccccccccccccccccccc"
+  local old="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  local bare="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-${cut_days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-${run_days_ago} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_days_ago}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
+  *"-X POST"*"git/refs"*)        echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
+  *"git/ref/tags/dev-lead/v2-next"*)   echo "$cand commit" ;;
+  *"git/ref/tags/dev-lead/v2-ring0"*)  echo "$old commit" ;;
+  *"git/ref/tags/dev-lead/v2-ring1"*)  echo "$old commit" ;;
+  *"git/ref/tags/dev-lead/v2-stable"*) echo "$old commit" ;;
+  *"git/ref/tags/dev-lead/next"*)   echo "$bare commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "$bare commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "$bare commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "$bare commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d}]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: resolution prefers the v2 line + evaluate reports the major line (#657 F4)" {
+  _vline_stub 3 2 success
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  # The candidate + ring listing report the major line, not the bare tier.
+  [[ "$output" == *"candidate (v2-next)"* ]]
+  [[ "$output" == *"v2-stable"* ]]
+  [[ "$output" != *"candidate (next) ="* ]]
+  # The v-form is PREFERRED: the candidate resolves to cccc (v2-next), never the bare aaaa.
+  [[ "$output" == *"cccccccccccc"* ]]
+  [[ "$output" != *"aaaaaaaaaaaa"* ]]
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"PROMOTE"* ]]
+}
+
+@test "orchestrator: promote advances WITHIN a major line — moves v2-ring0, never a v1 tag (#657 F4)" {
+  _vline_stub 3 2 success
+  local out="$BATS_TEST_TMPDIR/gh_output"; : > "$out"
+  run env CANARY_RINGS="$RINGS" GITHUB_OUTPUT="$out" bash "$ORCH" promote dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promoted dev-lead/v2-ring0"* ]]
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v2-ring0" "$MOVE_LOG"
+  # A v2 promotion NEVER touches a v1-* tag.
+  ! grep -q "v1-" "$MOVE_LOG"
+  # promoted_ring stays the logical tier (ring0), not the major-scoped tag.
+  grep -q "promoted_ring=ring0" "$out"
+}
+
+@test "orchestrator: on the bare-tier fixture the verdict is byte-identical to pre-F4 (transition-safety) (#657 F4)" {
+  # No v-tags exist (the v-form probe resolves absent) → resolution falls back to the bare tier,
+  # so the candidate + verdict are exactly what pre-F4 produced on this fixture.
+  _graduated_stub 3 2 success 0
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"candidate (next) ="* ]]
+  [[ "$output" != *"candidate (v"* ]]
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"PROMOTE"* ]]
+}
+
+# ── autocut on the major dimension: a MAJOR bump seeds a fresh v<newmajor>-next line; a minor/
+#    patch bump advances the CURRENT major's v<M>-next (falling back to bare next on today's fleet).
+#    args: agent host reusable main_blob next_blob mainsha nextsha versions bump [v2next_sha]
+_f4_autocut_stub() {
+  local agent="$1" host="$2" reusable="$3" MAIN_BLOB="$4" NEXT_BLOB="$5" MAINSHA="$6" NEXTSHA="$7" versions="$8" bump="$9" V2NEXT="${10:-}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
+  local refs="" v
+  for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
+  local v2next_resp=""
+  [ -n "$V2NEXT" ] && v2next_resp="${V2NEXT}"$'\t'"commit"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *".default_branch"*) echo "main" ;;
+  *"contents/"*"ref=$MAINSHA"*) echo "$MAIN_BLOB" ;;
+  *"contents/"*"ref=$NEXTSHA"*) echo "$NEXT_BLOB" ;;
+  *"-X POST"*"git/tags"*) echo "\$*" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$GH_LOG"; exit 0 ;;
+  *"-X POST"*"git/refs"*) echo "\$*" >> "$GH_LOG"; echo "{}" ;;
+  *"/commits/"*) echo "$MAINSHA" ;;
+  *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
+  *"git/ref/tags/$agent/v2-next"*) printf '%s\n' "$v2next_resp" ;;
+  *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) printf '\n' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<GITEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"rev-parse"*"$agent/next"*) echo "$NEXTSHA" ;;
+  *) : ;;
+esac
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  AUTOCUT_RINGS="$BATS_TEST_TMPDIR/f4-autocut-rings.json"
+  jq --arg a "$agent" --arg b "$bump" \
+    '{version, description, org_infra_repos, member_tokens, agents: {($a): (.agents[$a] + {autocut: {bump: $b}})}}' \
+    "$RINGS" > "$AUTOCUT_RINGS"
+}
+
+@test "orchestrator: autocut of a MAJOR bump seeds a fresh v<newmajor>-next line, not the old next (#657 F4)" {
+  _f4_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" major
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # major bump v2.1.0 → v3.0.0; the immutable release cut as usual, next seeded on the FRESH v3 line.
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  # The fresh major line does NOT move the old bare next (that would break the running fleet).
+  ! grep -q "git/refs/tags/dev-lead/next " "$GH_LOG"
+}
+
+@test "orchestrator: autocut of a patch bump advances the current major's v2-next when that line exists (#657 F4)" {
+  _f4_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" patch \
+    cccccccccccccccccccccccccccccccccccccccc
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # patch bump v2.1.0 → v2.1.1; the v2 line exists → next advances ON the major line, not bare next.
+  grep -q "git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v2-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  ! grep -q "git/refs/tags/dev-lead/next " "$GH_LOG"
+}
+
+@test "orchestrator: autocut of a patch bump falls back to bare next when no v-line exists yet (#657 F4)" {
+  # Today's bare fleet: no v2-next tag → resolution falls back to bare next → byte-identical move.
+  _f4_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    blobMAIN blobNEXT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" patch
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  ! grep -q "git/refs/tags/dev-lead/v2-next" "$GH_LOG"
 }

@@ -119,6 +119,22 @@ max_semver() {
   echo "$hi"
 }
 
+# major_component <version> — echo the MAJOR of a strict MAJOR.MINOR.PATCH, empty
+# otherwise. Pure. Used (major-scoped-channels epic #657, Phase F4) to derive an
+# agent's current major line from its highest vX.Y.Z release for v-form tagging.
+major_component() {
+  [[ "$1" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]] && printf '%s' "${BASH_REMATCH[1]}" || true
+}
+
+# channel_tag <agent> <tier> [major] — build a channel tag name. With a MAJOR the
+# v-scoped form `<agent>/v<major>-<tier>` (mirrors ring_canonical_ref in
+# ring-pins.sh); without it the legacy bare `<agent>/<tier>`. Pure. (Epic #657 F4.)
+channel_tag() {
+  local agent="$1" tier="$2" major="${3:-}"
+  if [ -n "$major" ]; then printf '%s/v%s-%s' "$agent" "$major" "$tier"
+  else printf '%s/%s' "$agent" "$tier"; fi
+}
+
 # dwell_met <dwell_hours> <floor_hours> — echo 1 if the candidate has dwelled at
 # least floor_hours on the source tier, else 0.
 dwell_met() {
