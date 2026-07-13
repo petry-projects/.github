@@ -15,8 +15,15 @@
 #      marker travels with this file on copy; no sonar-project.properties entry
 #      is needed. See ../ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637.
 #
-# UNLIKE claude.yml, this file has NO OIDC byte-for-byte constraint and may be
-# freely modified on PR branches to adjust triggers for repo-specific needs.
+# This stub is copied VERBATIM and is full-file identical across every adopting
+# repo, modulo the per-repo ring/channel pin on the `uses:` ref and its matching
+# `agent_ref` (below). Any other diff is drift, not a repo-specific liberty:
+# `on:`, `permissions:`, and `concurrency:` are NOT repo-adjustable — do not trim
+# a trigger, narrow a permission, or add a concurrency block on a PR branch. The
+# behavior lives in the reusable, so change it there (or via a standards PR) and
+# let the channel tag promote it centrally — never by editing this caller. See
+# ../ci-standards.md#centralization-tiers and
+# ../ci-standards.md#reusable-workflow-versioning--the-stable-channel.
 #
 # REQUIRED secrets: CLAUDE_CODE_OAUTH_TOKEN
 # OPTIONAL secrets: GH_PAT_WORKFLOWS, GOOGLE_API_KEY, GH_PAT
