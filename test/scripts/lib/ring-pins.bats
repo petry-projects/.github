@@ -23,8 +23,17 @@ setup() {
   ring_is_ring_reusable auto-rebase
   ring_is_ring_reusable pr-review-mention
   ring_is_ring_reusable dev-lead
-  ! ring_is_ring_reusable feature-ideation
+  # channel-ified in #606 (Story B of the shim-identity epic #604)
+  ring_is_ring_reusable feature-ideation
+  ring_is_ring_reusable pr-auto-review
   ! ring_is_ring_reusable add-to-project
+}
+
+@test "ring_canonical_ref: feature-ideation and pr-auto-review resolve to tier channels (#606)" {
+  [ "$(ring_canonical_ref feature-ideation markets)" = "feature-ideation/stable" ]
+  [ "$(ring_canonical_ref feature-ideation TalkTerm)" = "feature-ideation/ring1" ]
+  [ "$(ring_canonical_ref pr-auto-review markets)" = "pr-auto-review/stable" ]
+  [ "$(ring_canonical_ref pr-auto-review TalkTerm)" = "pr-auto-review/ring1" ]
 }
 
 @test "ring_canonical_ref is the repo's tier channel" {

@@ -29,6 +29,8 @@ readonly RING_REUSABLES=(
   agent-shield
   pr-review-mention
   dev-lead
+  feature-ideation
+  pr-auto-review
 )
 
 # ring_tier_for_repo <repo> -> next|ring0|ring1|stable
