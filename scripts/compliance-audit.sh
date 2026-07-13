@@ -1303,6 +1303,7 @@ check_centralized_workflow_stubs() {
     IFS=':' read -r wf reusable canonical legacy <<< "$entry"
     [ -z "$canonical" ] && { echo "::error::centralized entry '$entry' missing canonical pin — expected format 'wf:reusable:canonical:legacy-csv'" >&2; exit 1; }
     is_ring=0
+    chan=""
 
     # RING sentinel: this reusable is on the canary-ring model. The canonical
     # ref is the channel for THIS repo's ring tier (next/ring0/ring1/stable),
