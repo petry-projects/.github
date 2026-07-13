@@ -168,6 +168,41 @@ setup() {
   [ "$(classify_failure 1 unknown)" = "REGRESSION" ]
 }
 
+# ── decide_suspect_downgrade (SUSPECT→PRE_EXISTING auto-downgrade, #668 increment 6) ─
+# args: <cand_rate_permille> <base_rate_permille> <base_sample> <knobs_json>
+# Applied AFTER classify_failure returns SUSPECT (keeps the verdict core small). DOWNGRADE only
+# when the candidate is statistically no-worse than the prior version AND the baseline is not
+# too thin (tiny-n guard); otherwise HOLD (stay SUSPECT, increment 2 behaviour).
+DG_KNOBS='{"min_baseline_sample":10,"margin_permille":100}'
+
+@test "decide_suspect_downgrade: cand no worse than base+margin, sample≥min → DOWNGRADE" {
+  [ "$(decide_suspect_downgrade 100 100 10 "$DG_KNOBS")" = "DOWNGRADE" ]
+  [ "$(decide_suspect_downgrade 50 100 25 "$DG_KNOBS")" = "DOWNGRADE" ]
+}
+@test "decide_suspect_downgrade: cand materially worse than base+margin → HOLD (stay SUSPECT)" {
+  [ "$(decide_suspect_downgrade 500 100 10 "$DG_KNOBS")" = "HOLD" ]
+  [ "$(decide_suspect_downgrade 201 100 10 "$DG_KNOBS")" = "HOLD" ]
+}
+@test "decide_suspect_downgrade: thin baseline (base_sample < min) → HOLD (tiny-n guard)" {
+  # Even a candidate rate of 0 must NOT downgrade on too little baseline data.
+  [ "$(decide_suspect_downgrade 0 100 9 "$DG_KNOBS")" = "HOLD" ]
+  [ "$(decide_suspect_downgrade 100 100 5 "$DG_KNOBS")" = "HOLD" ]
+}
+@test "decide_suspect_downgrade: boundary at exactly base+margin → DOWNGRADE (inclusive)" {
+  # margin 100, base 100 → threshold 200; cand==200 downgrades, cand==201 holds.
+  [ "$(decide_suspect_downgrade 200 100 10 "$DG_KNOBS")" = "DOWNGRADE" ]
+  [ "$(decide_suspect_downgrade 201 100 10 "$DG_KNOBS")" = "HOLD" ]
+}
+@test "decide_suspect_downgrade: sample exactly at min → not thin (DOWNGRADE when no worse)" {
+  [ "$(decide_suspect_downgrade 100 100 10 "$DG_KNOBS")" = "DOWNGRADE" ]
+}
+@test "decide_suspect_downgrade: absent/empty knobs default to margin 0 + no tiny-n guard" {
+  # margin 0 → strict no-worse; min_baseline_sample 0 → any sample passes the guard.
+  [ "$(decide_suspect_downgrade 100 100 0 '{}')" = "DOWNGRADE" ]
+  [ "$(decide_suspect_downgrade 101 100 0 '{}')" = "HOLD" ]
+  [ "$(decide_suspect_downgrade 100 100 0 '')" = "DOWNGRADE" ]
+}
+
 # ── _reusable_differs: cross-repo host-aware blob compare (#613) ───────────────
 # When an agent's host != THIS_REPO (e.g. dev-lead hosted in .github-private while the
 # engine runs from .github), the reusable blob is NOT in the local checkout — the compare
@@ -1495,6 +1530,181 @@ GITEOF
 @test "canary-rings.json: suspect_failure_classes is default-absent for opted-out agents (byte-identical)" {
   run jq -e '.agents["agent-shield"].gate | has("suspect_failure_classes") | not' "$RINGS"
   [ "$status" -eq 0 ]
+}
+
+# ── SUSPECT→PRE_EXISTING auto-downgrade (#668 increment 6) ────────────────────────
+# dev-lead's workload-timeout suspect class opts into auto_downgrade: a SUSPECT whose
+# candidate suspect-class failure RATE is statistically no-worse than the prior version's
+# on the baseline window is auto-cleared to PRE_EXISTING (report-only, no needs-human). The
+# genuinely worse case and the tiny-n baseline stay SUSPECT (increment 2). Classes without
+# auto_downgrade never downgrade (increment 2 byte-identical).
+
+@test "canary-rings.json: dev-lead workload-timeout opts into auto_downgrade (#668 increment 6)" {
+  run jq -e '.agents["dev-lead"].gate.suspect_failure_classes[]
+             | select(.id=="workload-timeout") | .auto_downgrade
+             | .min_baseline_sample==10 and .margin_permille==100' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rings.json: auto_downgrade is dev-lead workload-timeout ONLY (scope guard, #668 increment 6)" {
+  # No other agent/class opts in — the increment starts with dev-lead workload-timeout only.
+  run jq -e '[.agents[].gate.suspect_failure_classes? // [] | .[] | select(.auto_downgrade != null)] | length == 1' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+# _downgrade_stub <cand_fail> <cand_total> <base_fail> <base_total> — dev-lead cross-repo,
+# reusable DIFFERS (reuseAAAA vs reuseBBBB → differs=1). Source-tier CANDIDATE runs (createdAt
+# 1d ago, ids ≥2001) and prior-version BASELINE runs (createdAt 7d ago, ids 1001+); in each
+# window the first <fail> runs are workload-timeout failures (run view → exit-124 signature)
+# and the rest are successes → controls the suspect-class failure RATE + sample per window.
+# The `run list` case honours `--created >=<since>` like the real gh, so the candidate window
+# (since cut) sees only candidate runs and the baseline window (createdAt < cut) only baseline.
+_downgrade_stub() {
+  local cand_fail="$1" cand_total="$2" base_fail="$3" base_total="$4"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" \
+      --argjson cf "$cand_fail" --argjson ct "$cand_total" --argjson bf "$base_fail" --argjson bt "$base_total" '
+      ( [range(0;\$ct)|{databaseId:(2001+.),conclusion:(if . < \$cf then "failure" else "success" end),createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(0;\$bt)|{databaseId:(1001+.),conclusion:(if . < \$bf then "failure" else "success" end),createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "orchestrator: SUSPECT + auto_downgrade + cand rate no worse than baseline → PRE_EXISTING (report-only) (#668 inc6)" {
+  # cand 1/10 = 100‰, baseline 1/10 = 100‰ (sample 10 ≥ min 10); 100 ≤ 100+100 → DOWNGRADE.
+  _downgrade_stub 1 10 1 10
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"PRE_EXISTING"* ]]
+  [[ "$output" == *"auto-downgraded"* ]]
+}
+
+@test "orchestrator: SUSPECT + auto_downgrade + cand rate materially worse → stays SUSPECT (#668 inc6)" {
+  # cand 5/10 = 500‰, baseline 1/10 = 100‰; 500 > 100+100 → HOLD → still SUSPECT + needs a human.
+  _downgrade_stub 5 10 1 10
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"auto-downgraded"* ]]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+}
+
+@test "orchestrator: SUSPECT + auto_downgrade + thin baseline → stays SUSPECT (tiny-n guard) (#668 inc6)" {
+  # baseline sample 5 < min 10 → never downgrade on thin data, even though cand==baseline rate.
+  _downgrade_stub 1 10 1 5
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"auto-downgraded"* ]]
+}
+
+@test "orchestrator: suspect class WITHOUT auto_downgrade → SUSPECT unchanged (increment 2 regression guard, #668 inc6)" {
+  # A no-worse baseline that WOULD downgrade if opted in; with auto_downgrade stripped it must
+  # stay SUSPECT — proving un-flagged classes are byte-identical to increment 2.
+  _downgrade_stub 1 10 1 10
+  local no_dg="$BATS_TEST_TMPDIR/no-downgrade-rings.json"
+  jq 'del(.agents["dev-lead"].gate.suspect_failure_classes[].auto_downgrade)' "$RINGS" > "$no_dg"
+  run env CANARY_RINGS="$no_dg" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" == *"SUSPECT"* ]]
+  [[ "$output" != *"auto-downgraded"* ]]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+}
+
+@test "orchestrator: an auto-downgraded PRE_EXISTING advances with --allow-pre-existing (#668 inc6)" {
+  # Report-only, so --allow-pre-existing (not --override) advances it, exactly like any PRE_EXISTING.
+  _downgrade_stub 1 10 1 10
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --allow-pre-existing --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRY-RUN"* ]]
+}
+
+# _downgrade_sync_stub <cand_fail> <cand_total> <base_fail> <base_total> — _downgrade_stub plus
+# issue ops and a dev-lead-only registry, to exercise the sync-issues blocker path.
+_downgrade_sync_stub() {
+  _downgrade_stub "$1" "$2" "$3" "$4"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local cut_iso cand_iso base_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cand_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  base_iso="$(date -u -d '-7 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseBBBB" ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Stage timeout (exit code 124)","conclusion":"failure"}]}]}' ;;
+  *"run list"*)
+    since=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--created" ] && since="\$a"; prev="\$a"; done
+    since="\${since#>=}"
+    jq -nc --arg s "\$since" --arg cc "$cand_iso" --arg bb "$base_iso" \
+      --argjson cf "$1" --argjson ct "$2" --argjson bf "$3" --argjson bt "$4" '
+      ( [range(0;\$ct)|{databaseId:(2001+.),conclusion:(if . < \$cf then "failure" else "success" end),createdAt:\$cc,workflowName:"Dev-Lead Agent"}]
+      + [range(0;\$bt)|{databaseId:(1001+.),conclusion:(if . < \$bf then "failure" else "success" end),createdAt:\$bb,workflowName:"Dev-Lead Agent"}] )
+      | map(select(\$s=="" or .createdAt >= \$s))' ;;
+  "issue list"*)   echo '[]' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  DG_RINGS="$BATS_TEST_TMPDIR/dg-sync-rings.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$DG_RINGS"
+}
+
+@test "orchestrator: sync-issues files a PRE_EXISTING blocker (no needs-human) for an auto-downgraded SUSPECT (#668 inc6)" {
+  _downgrade_sync_stub 1 10 1 10
+  run env CANARY_RINGS="$DG_RINGS" ISSUE_REPO="petry-projects/.github-private" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened blocker issue #777 for dev-lead"* ]]
+  # Body carries the auto-downgrade note + the candidate-vs-baseline rate comparison.
+  grep -q "auto-downgraded" "$ISSUE_LOG"
+  grep -q "PRE_EXISTING" "$ISSUE_LOG"
+  # Report-only → NOT routed to a human (that is the whole point of the downgrade).
+  ! grep -q -- "--add-label needs-human" "$ISSUE_LOG"
 }
 
 @test "_blocker_body: SUSPECT triage renders the class guidance (discriminating question)" {

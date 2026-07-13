@@ -183,6 +183,35 @@ classify_failure() {
   if [ "$suspect" = "1" ]; then echo "SUSPECT"; else echo "REGRESSION"; fi
 }
 
+# decide_suspect_downgrade <cand_rate_permille> <base_rate_permille> <base_sample> <knobs_json>
+# Pure SUSPECT→PRE_EXISTING auto-downgrade core (#668 increment 6, optional 1c). Applied by the
+# orchestrator AFTER classify_failure returns SUSPECT (so the verdict core stays small and
+# unit-testable), for a suspect class that opts into `auto_downgrade`. Rates are per-mille failure
+# rates of the SAME suspect class: the candidate's over its in-window runs vs the prior version's
+# over the trailing baseline window. Echoes exactly one of:
+#   DOWNGRADE — the baseline has enough data (base_sample >= min_baseline_sample) AND the candidate
+#               is no worse than the baseline for this class (cand_rate <= base_rate + margin_permille)
+#               → the failure is environmental, not a candidate regression; the caller re-triages it
+#               PRE_EXISTING (report-only).
+#   HOLD      — thin baseline (base_sample < min_baseline_sample: NEVER downgrade on tiny-n — the
+#               conservative default keeps the human) OR the candidate is materially worse
+#               (cand_rate > base_rate + margin_permille) → stay SUSPECT (increment 2 behaviour).
+# Knobs object {min_baseline_sample, margin_permille}; absent knobs default to 0 (margin 0 = strict
+# no-worse; min_baseline_sample 0 = no tiny-n guard, though the orchestrator always sets it).
+decide_suspect_downgrade() {
+  local cand="${1:-0}" base="${2:-0}" base_sample="${3:-0}" knobs="$4"
+  [ -z "$knobs" ] && knobs='{}'
+  local min_base margin
+  min_base="$(jq -r '.min_baseline_sample // 0' <<< "$knobs" 2>/dev/null || echo 0)"
+  margin="$(jq -r '.margin_permille // 0' <<< "$knobs" 2>/dev/null || echo 0)"
+  case "$min_base" in ''|*[!0-9]*) min_base=0 ;; esac
+  case "$margin" in ''|*[!0-9]*) margin=0 ;; esac
+  # Tiny-n guard first: too little baseline data → keep the human (conservative), regardless of rate.
+  if [ "$base_sample" -lt "$min_base" ]; then echo "HOLD"; return 0; fi
+  if [ "$cand" -le $(( base + margin )) ]; then echo "DOWNGRADE"; return 0; fi
+  echo "HOLD"
+}
+
 # benign_match <workflow_name> <failure_signature> <workflow_regex> <step_regex>
 # Decide whether ONE in-window failure matches ONE known-benign failure-class allowlist
 # entry (#1025 P2). A match requires a non-empty <step_regex> (guards against a match-all
