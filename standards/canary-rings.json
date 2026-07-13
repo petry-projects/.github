@@ -76,7 +76,11 @@
             "workflow": "Dev-Lead Agent",
             "step": "Stage timeout|exit code 124|rebase-conflict-sentinel",
             "reason": "#664/#668 \u2014 a dev-lead run can exit 124 when a stage exceeds its time budget (large workload, or a rebase-conflict sentinel that never resolves). This is *possibly* candidate-caused (a candidate that changed execution-time-sensitive code could genuinely be slower), so unlike a version_independent benign class it is NOT auto-cleared \u2014 it BLOCKS as SUSPECT and carries a discriminating question for a fast human confirm.",
-            "guidance": "Did this candidate change execution-time-sensitive code, or is it a large-workload/rebase timeout unrelated to the diff? If unrelated \u2192 `promote --override`; if the candidate got materially slower \u2192 treat as a real regression and roll back."
+            "guidance": "Did this candidate change execution-time-sensitive code, or is it a large-workload/rebase timeout unrelated to the diff? If unrelated \u2192 `promote --override`; if the candidate got materially slower \u2192 treat as a real regression and roll back.",
+            "auto_downgrade": {
+              "min_baseline_sample": 10,
+              "margin_permille": 100
+            }
           }
         ],
         "_suspect_note": "suspect_failure_classes (#668 increment 2): same shape as benign classes (`id`, `workflow` ERE, `step` ERE) plus a `guidance` discriminating question. A counted (non-benign) failure that matches a suspect class at differs=1 is triaged SUSPECT instead of REGRESSION \u2014 it still BLOCKS and still needs a human (labelled `needs-human`, NOT auto-cleared like `version_independent`), but the blocker issue renders the `guidance` so the human confirm is a 30-second check rather than a from-scratch investigation. Default-absent (this key omitted) = today's behavior, byte-identical for agents that do not opt in.",
