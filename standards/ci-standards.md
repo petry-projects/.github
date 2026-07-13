@@ -199,11 +199,12 @@ Doing these in any other order — most easily, adding the `with:` forward first
 strands the stub on a channel that predates the input and breaks every trigger
 at startup.
 
-**Why PR CI does not catch this.** A `pull_request` run executes the
-**base-branch** stub, and the pinned channel **lags the PR**, so a stub-only
-`with:` change is exercised by **nothing** in PR CI: the base-branch stub does
-not carry the new forward, and the pinned channel it resolves does not carry the
-new input. The change is green pre-merge and only dies at `startup_failure` on
+**Why PR CI does not catch this.** While a standard `pull_request` trigger
+executes the PR-branch stub, workflows triggered by comments or reviews (such as
+`pull_request_review` or `issue_comment`) always execute the **default-branch
+(base)** stub. Because the base-branch stub does not carry the new forward, and
+the pinned channel lags the PR, the new forward is exercised by **nothing** in
+PR CI. The change is green pre-merge and only dies at `startup_failure` on
 the **first real trigger after merge to `main`** (the failure mode behind
 incident #1034: a channel-pinned pr-review caller stub was edited to forward a
 `with:` input the pinned channel did not yet declare, breaking **every** review
