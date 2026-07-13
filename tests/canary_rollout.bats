@@ -1411,6 +1411,40 @@ GITEOF
   [ "$status" -eq 0 ]
 }
 
+@test "canary-rings.json: add-to-project gate carries a 'Set up job' startup benign class (#701)" {
+  # #701 fix-forward: a pre-existing/environmental 'Set up job' startup failure of the
+  # add-to-project reusable was counted in cum_fail and blocked the next->ring0 gate.
+  run jq -e '.agents["add-to-project"].gate.benign_failure_classes
+             | type == "array" and length >= 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["add-to-project"].gate.benign_failure_classes[]
+             | select(.id=="reusable-setup-restricted-secrets")
+             | has("id") and has("reason") and has("step") and has("workflow")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rings.json: add-to-project benign class matches a 'Set up job' failure of its caller workflow (#701)" {
+  # Functional: drive benign_match with the class's own workflow+step regex.
+  wf_re="$(jq -r '.agents["add-to-project"].gate.benign_failure_classes[]
+                  | select(.id=="reusable-setup-restricted-secrets") | .workflow' "$RINGS")"
+  step_re="$(jq -r '.agents["add-to-project"].gate.benign_failure_classes[]
+                    | select(.id=="reusable-setup-restricted-secrets") | .step' "$RINGS")"
+  [ "$(benign_match 'Auto-add to Initiatives project' 'Set up job' "$wf_re" "$step_re")" = "yes" ]
+  # a normal in-reusable step failure of the same workflow is NOT swept up by this class
+  [ "$(benign_match 'Auto-add to Initiatives project' 'Add issue to project' "$wf_re" "$step_re")" = "no" ]
+  # and it does not leak onto an unrelated workflow
+  [ "$(benign_match 'Dev-Lead Agent' 'Set up job' "$wf_re" "$step_re")" = "no" ]
+}
+
+@test "canary-rings.json: add-to-project 'Set up job' class is NOT version_independent (can't mask a differs=1 regression) (#701)" {
+  # A 'Set up job' signature could also arise from a candidate breaking the reusable's own
+  # YAML, so the class must stay inert at differs=1 (excludes only when byte-identical).
+  run jq -e '.agents["add-to-project"].gate.benign_failure_classes[]
+             | select(.id=="reusable-setup-restricted-secrets")
+             | .version_independent != true' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 # ── SUSPECT triage: suspect_failure_classes (#668 increment 2, #675) ─────────────
 # A *possibly-candidate-caused* failure class (dev-lead exit-124 workload timeouts) gets
 # the full REGRESSION verdict at differs=1 today, forcing ad-hoc human diagnosis each time.

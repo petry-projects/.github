@@ -838,7 +838,14 @@
         "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
         "baseline_window_days": 14,
         "baseline_spike_cap_multiple": 3,
-        "benign_failure_classes": [],
+        "benign_failure_classes": [
+          {
+            "id": "reusable-setup-restricted-secrets",
+            "workflow": "Auto-add to Initiatives project",
+            "step": "Set up job",
+            "reason": "#701/#668 \u2014 the caller (Auto-add to Initiatives project) triggers on pull_request_target/issues and passes required INITIATIVES_APP_* secrets to the called reusable; in a restricted-secret context (e.g. a Dependabot-authored event) GitHub withholds those Actions secrets, so the called workflow fails at 'Set up job' at startup, before any candidate reusable step runs. Environmental/pre-existing, not a candidate regression. NOT version_independent: a 'Set up job' signature could also arise from a candidate breaking the reusable's own YAML, so this excludes only at differs=0 (byte-identical) and can never mask a differs=1 regression."
+          }
+        ],
         "control": {
           "allow_pre_existing": false
         },
