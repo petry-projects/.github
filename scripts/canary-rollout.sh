@@ -297,9 +297,9 @@ _suspect_patterns() {
 _suspect_downgrade_patterns() {
   _jq -r --arg a "$1" \
     '.agents[$a]?.gate?.suspect_failure_classes? // []
-     | .[] | select(.auto_downgrade != null)
+     | .[] | select(.auto_downgrade? != null)
      | [(.workflow // ""), (.step // ""),
-        (.auto_downgrade.min_baseline_sample // 0), (.auto_downgrade.margin_permille // 0)]
+        (.auto_downgrade?.min_baseline_sample? // 0), (.auto_downgrade?.margin_permille? // 0)]
      | @tsv'
 }
 
@@ -312,7 +312,7 @@ _suspect_downgrade_patterns() {
 # signature cache is warm from the cumulative-health pass on the candidate window).
 _suspect_class_counts() {
   local agent="$1" since="$2" before="$3" wf_re="$4" step_re="$5"; shift 5
-  local wf repo json rid rwf sig matched=0 executed=0
+  local wf repo json rid rwf sig matched=0 executed=0 count
   wf="$(_agent_field "$agent" run_workflow)"
   local exec_filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
   local fail_filter='.[]?|select(.conclusion=="failure")'
@@ -323,8 +323,11 @@ _suspect_class_counts() {
   for repo in "$@"; do
     { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
     json="$(_run_json "$repo" "$wf" "$since")"
-    executed=$(( executed + $(jq "[${exec_filter}]|length" 2>/dev/null <<< "$json" || echo 0) ))
-    while IFS=$'\t' read -r rid rwf; do
+    count="$(jq "[${exec_filter}]|length" 2>/dev/null <<< "$json" || echo 0)"
+    executed=$(( executed + ${count:-0} ))
+    while IFS=$'\t' read -r rid rwf || [ -n "$rid" ]; do
+      rid="${rid%$'\r'}"
+      rwf="${rwf%$'\r'}"
       [ -z "$rid" ] && continue
       sig="$(_run_signature "$repo" "$rid")"
       [ -z "$sig" ] && continue
@@ -763,8 +766,8 @@ _frontier_state() {
         [ -z "$dsr" ] && continue
         read -r cm ce < <(_suspect_class_counts "$agent" "$cut_z" "-" "$dwf" "$dsr" "${src_repos[@]}")
         read -r bm be < <(_suspect_class_counts "$agent" "$dg_base_since" "$cut_z" "$dwf" "$dsr" "${src_repos[@]}")
-        if [ "$ce" -gt 0 ]; then crate="$(round_div $(( cm * 1000 )) "$ce")"; else crate=0; fi
-        if [ "$be" -gt 0 ]; then brate="$(round_div $(( bm * 1000 )) "$be")"; else brate=0; fi
+        if [ "${ce:-0}" -gt 0 ]; then crate="$(round_div $(( ${cm:-0} * 1000 )) "$ce")"; else crate=0; fi
+        if [ "${be:-0}" -gt 0 ]; then brate="$(round_div $(( ${bm:-0} * 1000 )) "$be")"; else brate=0; fi
         knobs="$(printf '{"min_baseline_sample":%s,"margin_permille":%s}' "${dmin:-0}" "${dmargin:-0}")"
         decision="$(decide_suspect_downgrade "$crate" "$brate" "$be" "$knobs")"
         if [ "$decision" = "DOWNGRADE" ]; then
