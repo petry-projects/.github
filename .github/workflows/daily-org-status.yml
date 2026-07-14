@@ -1,4 +1,5 @@
 name: Daily Org Status
+# readme-report: Daily "Org Status" digest posted as an issue for maintainers.
 
 on:
   schedule:
