@@ -15,9 +15,10 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 # Emit the non-comment `run:` command lines of every workflow file. A line is
 # treated as a comment when its first non-whitespace character is '#'.
 workflow_command_lines() {
-  local f trimmed
+  local f trimmed line
   for f in "$REPO_ROOT"/.github/workflows/*.yml; do
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
       trimmed="${line#"${line%%[![:space:]]*}"}"
       [ "${trimmed:0:1}" = "#" ] && continue
       printf '%s\t%s\n' "$f" "$line"
@@ -27,7 +28,7 @@ workflow_command_lines() {
 
 @test "every 'pip install' in a workflow is hash- and binary-locked" {
   local fail=0 file cmd
-  while IFS=$'\t' read -r file cmd; do
+  while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
     case "$cmd" in
       *"pip install"*)
         case "$cmd" in *"--require-hashes"*) : ;; *)
@@ -44,7 +45,7 @@ workflow_command_lines() {
 
 @test "every 'npx' in a workflow refuses lifecycle scripts (--ignore-scripts)" {
   local fail=0 file cmd
-  while IFS=$'\t' read -r file cmd; do
+  while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
     case "$cmd" in
       *"npx "*)
         case "$cmd" in *"--ignore-scripts"*) : ;; *)
@@ -58,17 +59,21 @@ workflow_command_lines() {
 
 @test "each hash-locked requirements file referenced by a workflow exists" {
   local fail=0 file cmd path
-  while IFS=$'\t' read -r file cmd; do
+  while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
     case "$cmd" in
       *"--require-hashes"*"-r "*)
         path="${cmd##*-r }"
         path="${path%% *}"
+        path="${path#\'}"
+        path="${path#\"}"
         path="${path%\'}"
         path="${path%\"}"
         # Reusable workflows check the tooling out under .feature-ideation-tooling/;
         # map that runtime prefix back to the repo root for the existence check.
         path="${path#.feature-ideation-tooling/}"
-        if [ ! -f "$REPO_ROOT/$path" ]; then
+        if [ -z "$path" ]; then
+          echo "EMPTY path extracted from: ${file##*/}: $cmd"; fail=1
+        elif [ ! -f "$REPO_ROOT/$path" ]; then
           echo "MISSING requirements file: ${file##*/} references $path"; fail=1
         fi
         ;;
