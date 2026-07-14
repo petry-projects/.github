@@ -45,7 +45,7 @@ permissions: {}
 jobs:
   initiative-planner:
     # Self-host: petry-projects/.github HOSTS the reusable, so this in-repo copy
-    # uses a LOCAL ref (always current) — not the `@initiative-planner/stable`
+    # uses a LOCAL ref (always current) — not the `@initiative-planner/v1-stable`
     # remote channel that CONSUMER repos pin (see standards/workflows/initiative-planner.yml).
     # Mirrors add-to-project.yml / pr-review-mention.yml; local refs also avoid the
     # SHA-pin security finding a remote tag ref raises on the hosting repo.
