@@ -53,6 +53,8 @@ on:
         description: "GitHub App private key"
         required: true
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   update-and-merge:
     runs-on: ubuntu-latest
