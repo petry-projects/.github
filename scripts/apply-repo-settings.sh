@@ -280,6 +280,17 @@ apply_check_suite_prefs() {
        --input - <<< "$payload" 2>&1 >/dev/null); then
     ok "  auto-trigger disabled for app_ids: ${CHECK_SUITE_APP_IDS[*]}"
   else
+    # The check-suites/preferences endpoint is legacy: it only accepts a CLASSIC
+    # PAT (or GitHub App) with repo-admin. Fine-grained PATs and GITHUB_TOKEN get
+    # a 403 here. When the configured token lacks that capability we cannot apply
+    # this preference — skip it (loudly) rather than failing the whole settings
+    # run, which was reporting apply-repo-settings as 100%-failed fleet-wide while
+    # every other setting applied fine. The token-config fix is tracked in
+    # petry-projects/.github-private#1209; until then this preference is not applied.
+    if grep -qiE '"status": *"403"|HTTP 403|authenticate with a personal access token' <<< "$api_err"; then
+      warn "  Skipping check-suite prefs for $repo — token lacks repo-admin for the check-suites API (403). Tracking: petry-projects/.github-private#1209"
+      return 0
+    fi
     err "  PATCH failed for $repo. API response: $api_err"
     return 1
   fi
