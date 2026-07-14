@@ -30,6 +30,16 @@ The `standards/` directory contains the authoritative policy documents for this 
 | [`push-protection`](standards/push-protection.md) | Secret push protection configuration | Layer 1 — GitHub Push Protection, Layer 2 — local pre-commit prevention, Layer 3 — CI secret scanning, incident response, compliance audit checks |
 | [`ruleset-remediation-runbook`](standards/ruleset-remediation-runbook.md) | Runbook for resolving ruleset violations | Snapshot (rollback insurance), bypass actors, legacy ruleset migration, verify, 2026-06-10 fleet remediation |
 
+## Reporting & Dashboards
+
+Scheduled workflows in this repo post audit reports and status digests as issues or run summaries for maintainers.
+
+| Workflow | Purpose |
+|----------|---------|
+| [`compliance-audit-and-improvement.yml`](workflows/compliance-audit-and-improvement.yml) | Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues |
+| [`daily-org-status.yml`](workflows/daily-org-status.yml) | Daily "Org Status" digest posted as an issue for maintainers |
+| [`org-scorecard.yml`](workflows/org-scorecard.yml) | Weekly OpenSSF Scorecard security-posture review across public repos; findings tracked as issues |
+
 ## Related
 
 The companion repository [`petry-projects/.github-private`](https://github.com/petry-projects/.github-private) holds private automation:

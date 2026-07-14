@@ -15,9 +15,9 @@ beekeeping tech, and agent orchestration.
 | [broodminder-export](https://github.com/petry-projects/broodminder-export) | Extract all of your data from the BroodMinder API into portable files — resumable, rate-limit-aware. | Python |
 | [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered Social Media Agent for small organizations — enterprise-quality social presence at non-profit pricing | Shell |
 | [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMad Operations Suite — SRE and DevOps agents and workflows for the BMad Method ecosystem | Shell |
-| [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A collection of Google Apps Scripts for personal productivity automation | JavaScript |
+| [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A place to share Google AppScripts for personal productivity | JavaScript |
 | [incubator](https://github.com/petry-projects/incubator) | Product incubator: pre-product idea Discussions, decision briefs/PRD-lite, and disposable POCs. Ideas graduate to their own product repo once a POC proves out. | Shell |
-| [repo-template](https://github.com/petry-projects/repo-template) | Org template repository: one-click scaffold for new petry-projects repos. Files via 'Use this template'; non-file standards via bootstrap. | Shell |
+| [repo-template](https://github.com/petry-projects/repo-template) | Org template repository: one-click scaffold for new petry-projects repos. Files via 'Use this template'; non-file standards via bootstrap. See epic petry-projects/.github-private#964. | Shell |
 | [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, Claude Code skills, and agentic workflow infrastructure | Shell |
 | [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
 
@@ -52,10 +52,30 @@ All repositories in this org follow shared engineering standards defined in
 - **Copilot Instructions Standard** — Canonical instruction files (source of truth in `.github`);
   adding a new language; content quality rules.
 
+- **Feature Ideation Sources** — AI/ML vendor & lab primary sources; research & trends; developer
+  tooling and platform changelogs; security & compliance feeds; newsletters, podcasts, and conferences.
+
+- **Initiatives Project** — What belongs on the board; fields; theme → initiative mapping; views;
+  how the auto-add works.
+
 - **Persona Standards** — Trigger matrix (the onboarding checklist); canary onboarding (the last
   step); trust, permissions, and safety.
 
 - **PR Limits** — Exempt actors; operator runbook; reconciliation with the Dependabot cap.
+
+- **Ruleset Remediation Runbook** — Snapshot every ruleset for rollback insurance; bypass actor
+  management; legacy ruleset migration; verify and rollback procedures.
+
+---
+
+## Reporting & Dashboards
+
+Scheduled reports and dashboards post as issues or run summaries for org maintainers:
+
+- **Compliance audit & improvement** — Weekly org standards compliance audit + runtime health survey,
+  with per-finding remediation issues.
+- **Daily org status** — Daily "Org Status" digest posted as an issue for maintainers.
+- **OpenSSF Scorecard** — Weekly security-posture review across public repos; findings tracked as issues.
 
 ---
 
