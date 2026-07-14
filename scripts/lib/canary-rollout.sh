@@ -123,7 +123,7 @@ decide_bump() {
 # of scope for #712, so they never drive the verdict. Pure: a deterministic awk transform over
 # the text (no gh/git/network I/O), tolerant of comments and standard 2-space GitHub indent.
 workflow_call_iface() {
-  awk '
+  tr -d '\r' <<< "$1" | awk '
     function ind(s){ match(s, /^ */); return RLENGTH }
     { raw = $0 }
     raw ~ /^[[:space:]]*($|#)/ { next }                                   # blank / comment
@@ -151,7 +151,7 @@ workflow_call_iface() {
       for (n in inp)     print "input "  n " " (req[n] ? 1 : 0)
       for (n in seclist) print "secret " n
     }
-  ' <<< "$1" | sort
+  ' | sort
 }
 
 # interface_break <old_desc> <new_desc> — echo 1 if the change from <old_desc> to <new_desc>
@@ -163,13 +163,15 @@ workflow_call_iface() {
 interface_break() {
   local old="$1" new="$2" kind name req key
   local -A new_has=() old_has=() new_input_req=() old_input_req=()
-  while read -r kind name req; do
+  while read -r kind name req || [ -n "$kind" ]; do
     [ -z "$kind" ] && continue
+    kind="${kind%$'\r'}"; name="${name%$'\r'}"; req="${req%$'\r'}"
     new_has["$kind/$name"]=1
     [ "$kind" = input ] && new_input_req["$name"]="${req:-0}"
   done <<< "$new"
-  while read -r kind name req; do
+  while read -r kind name req || [ -n "$kind" ]; do
     [ -z "$kind" ] && continue
+    kind="${kind%$'\r'}"; name="${name%$'\r'}"; req="${req%$'\r'}"
     old_has["$kind/$name"]=1
     [ "$kind" = input ] && old_input_req["$name"]="${req:-0}"
   done <<< "$old"

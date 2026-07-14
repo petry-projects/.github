@@ -80,7 +80,7 @@ setup() {
 # ── decide_bump: signal-based classification, knob as override (#712, epic #1083) ─
 # decide_bump <breaking 0|1> <feat 0|1> <override> → major|minor|patch.
 # An explicit override (patch|minor|major) always wins; else breaking→major, feat→minor,
-# else patch. All 8 signal combinations plus override precedence are exercised.
+# else patch. All 4 signal combinations plus override precedence are exercised.
 @test "decide_bump: breaking beats feat → major (both signals set)" {
   [ "$(decide_bump 1 1 '')" = "major" ]
 }

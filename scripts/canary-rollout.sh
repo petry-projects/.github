@@ -1482,7 +1482,7 @@ _autocut_commit_signals() {
     if type != "array" then error("not an array") else . end
     | (map(.sha)) as $shas
     | ([ range(0; length) | select($shas[.] == $stop) ] | first) as $idx
-    | (if $idx == null then . else .[0:$idx] end)
+    | if $idx == null then error("boundary sha not found in page") else .[0:$idx] end
     | map(.commit.message // "")
     | {
         b: any(.[]; test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
@@ -1498,7 +1498,7 @@ _autocut_commit_signals() {
 # contents API (base64 → text). Non-zero on any fetch/decode error.
 _gh_file_content() {
   local raw
-  raw="$(gh api "repos/$1/contents/$2?ref=$3" --jq '.content' 2>/dev/null)" || return 1
+  raw="$(gh api "repos/$1/contents/$2?ref=$3" --jq '.content // empty' 2>/dev/null)" || return 1
   [ -z "$raw" ] && return 1
   printf '%s' "$raw" | tr -d '\n' | base64 -d 2>/dev/null || return 1
 }
