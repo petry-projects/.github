@@ -164,7 +164,7 @@ jobs:
               if [[ "$MERGE_STATE" == "dirty" ]]; then
                 STUCK_SENTINEL="<!-- auto-rebase-stuck -->"
                 STUCK_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$STUCK_SENTINEL\"))] | length")
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$STUCK_SENTINEL\"))] | length" 2>/dev/null || echo "-1")
                 if [[ "$STUCK_POSTED" -eq 0 ]]; then
                   echo "  Conflicting + not review-ready — posting one-time manual-attention notice"
                   STUCK_BODY="$STUCK_SENTINEL"
