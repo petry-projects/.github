@@ -37,10 +37,10 @@ load_host_tags() {
   [ -n "${HOST_LOADED[$host]:-}" ] && return 0
   HOST_LOADED[$host]=1
   local name sha
-  while IFS=$'\t' read -r name sha; do
+  while IFS=$'\t' read -r name sha || [ -n "$name" ]; do
     [ -n "$name" ] && TAG_SHA["$host"$'\t'"$name"]="$sha"
   done < <(gh api --paginate "repos/$ORG/$host/tags" \
-             --jq '.[] | [.name, .commit.sha] | @tsv' 2>/dev/null || true)
+             --jq '.[] | [.name, .commit.sha] | @tsv' 2>/dev/null | tr -d '\r' || true)
 }
 
 # resolve_version <host> <agent> <channel-ref> -> "vX.Y.Z" | "?" (unresolved)
@@ -49,7 +49,8 @@ resolve_version() {
   load_host_tags "$host"
   local chan_sha="${TAG_SHA["$host"$'\t'"$ref"]:-}"
   # If the pin is already an immutable vX.Y.Z, report it as-is.
-  if [[ "$ref" =~ ^"$agent"/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  ref_regex="^${agent}/v[0-9]+\.[0-9]+\.[0-9]+$"
+  if [[ "$ref" =~ $ref_regex ]]; then
     printf '%s' "${ref#"$agent"/}"; return 0
   fi
   [ -z "$chan_sha" ] && { printf '?'; return 0; }
@@ -74,13 +75,17 @@ for repo in "${REPOS[@]}"; do
   for agent in "${REUSABLES[@]}"; do
     # Caller stubs are conventionally named after the reusable (minus -reusable).
     stub=".github/workflows/${agent}.yml"
-    content="$(gh api "repos/$ORG/$repo/contents/$stub" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+    content="$(gh api "repos/$ORG/$repo/contents/$stub" --jq '.content // empty' 2>/dev/null | base64 -d 2>/dev/null || true)"
     [ -n "$content" ] || continue
     # Extract the reusable uses: line -> host + @ref.
     uses_line="$(grep -oE "uses:[[:space:]]*$ORG/(\.github|\.github-private)/\.github/workflows/${agent}-reusable\.yml@[^[:space:]#]+" <<< "$content" | head -1 || true)"
     [ -n "$uses_line" ] || continue
-    host="$(sed -E "s#.*$ORG/(\.github(-private)?)/.*#\1#" <<< "$uses_line")"
-    ref="$(sed -E 's#.*@##' <<< "$uses_line")"          # e.g. dev-lead/v1-ring1
+    ref="${uses_line##*@}"          # e.g. dev-lead/v1-ring1
+    host=""
+    host_regex="$ORG/(\.github(-private)?)/"
+    if [[ "$uses_line" =~ $host_regex ]]; then
+      host="${BASH_REMATCH[1]}"
+    fi
     channel="${ref#"$agent"/}"                            # e.g. v1-ring1
     version="$(resolve_version "$host" "$agent" "$ref")"
     SEEN_VERSION["$agent"$'\t'"$version"]=1
