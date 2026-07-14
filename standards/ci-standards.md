@@ -1645,7 +1645,7 @@ org-level workflows that run across all repositories:
 - **Behavior:** Creates/updates GitHub Issues with findings, auto-closes resolved findings
 - **Skip list:** CII-Best-Practices, Contributors, Fuzzing, Maintained, Packaging, Signed-Releases
 - **Pinned-Dependencies — first-party exemption:** Our first-party reusable refs
-  deliberately use mutable channel tags (see [Action Pinning Policy](#action-pinning-policy)),
+  deliberately use moving channel tags (see [Action Pinning Policy](#action-pinning-policy)),
   so Scorecard permanently docks `Pinned-Dependencies` and that finding can never
   reach 10/10. Third-party **action** pinning is already enforced by
   `check_action_pinning` in `scripts/compliance-audit.sh` (which exempts first-party),
