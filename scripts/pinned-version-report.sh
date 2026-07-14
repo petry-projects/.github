@@ -24,7 +24,7 @@ source "$SCRIPT_DIR/lib/ring-pins.sh"
 REUSABLES=("${RING_REUSABLES[@]}")
 
 # Fleet repos to scan (non-archived). Enumerated live so new repos are covered.
-mapfile -t REPOS < <(gh repo list "$ORG" --no-archived --limit 100 --json name --jq '.[].name' | sort)
+mapfile -t REPOS < <(gh repo list "$ORG" --no-archived --limit 500 --json name --jq '.[].name' | sort)
 
 # --- channel -> version resolution -----------------------------------------
 # Cache each host repo's tags (name -> commit sha) once; resolve a channel tag to
@@ -119,10 +119,13 @@ done
   echo "|----------|-----------------------|"
   # Group SEEN_VERSION by agent.
   for agent in "${REUSABLES[@]}"; do
-    vers=""
+    vers_arr=()
     for k in "${!SEEN_VERSION[@]}"; do
-      [[ "$k" == "$agent"$'\t'* ]] && vers+="${k#*$'\t'} "
+      [[ "$k" == "$agent"$'\t'* ]] && vers_arr+=("${k#*$'\t'}")
     done
-    [ -n "$vers" ] && echo "| \`$agent\` | $(echo "$vers" | tr ' ' '\n' | sort -u | tr '\n' ' ') |"
+    if [ "${#vers_arr[@]}" -gt 0 ]; then
+      vers="$(printf '%s\n' "${vers_arr[@]}" | sort -u | tr '\n' ' ')"
+      echo "| \`$agent\` | ${vers% } |"
+    fi
   done
 } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"

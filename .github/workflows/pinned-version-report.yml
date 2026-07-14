@@ -19,10 +19,17 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Guard — PAT present
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::GH_PAT_WORKFLOWS is required — cross-repo reads need the org PAT, not github.token."
+            exit 1
+          fi
       - name: Generate pinned-version report
         env:
-          # Needs cross-repo read on consumers + tag read on the host repos; the
-          # default token only sees this repo, so use the org PAT.
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
+          # Needs cross-repo read on consumers + tag read on the host repos.
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
           ORG: petry-projects
         run: bash scripts/pinned-version-report.sh
