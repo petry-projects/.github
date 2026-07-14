@@ -54,6 +54,24 @@ stub_pinning() {  # <ref> → base64 of a minimal auto-rebase stub pinning the r
   base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
 }
 
+devlead_stub_pinning() {  # <ref> → base64 of a .github dev-lead CONSUMER stub pinned at <ref>
+  local body="jobs:
+  dev-lead:
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@$1
+    with:
+      agent_ref: $1
+    secrets: inherit"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
+selfhost_stub() {  # <base> → base64 of a meta-repo SELF-HOST stub using a local ./ ref
+  local body="jobs:
+  $1:
+    uses: ./.github/workflows/$1-reusable.yml  # local ref — always current
+    secrets: inherit"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
 @test "emits @<agent>/v<M>-<tier> when the reusable has a release" {
   export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.3.1
 refs/tags/auto-rebase/v1.0.0"
@@ -92,4 +110,37 @@ refs/tags/auto-rebase/v1.0.0"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
+}
+
+# ── meta-repo consumer stubs (#704) ────────────────────────────────────────────
+# The meta-repos (.github / .github-private) are exempt from blanket stub
+# deployment because they self-host most reusables via local `./` refs. But they
+# ARE channel consumers of the reusables they do NOT host — e.g. .github (ring0)
+# consumes dev-lead from .github-private — and those consumer stubs must be
+# re-pinned by the F5 sweep like any other consumer, or the major-scope migration
+# skips them and --retire-bare stays blocked.
+
+@test "re-pins a meta-repo's channel-pinned CONSUMER stub to the tier v<M>-form" {
+  export GH_RELEASE_REFS="refs/tags/dev-lead/v3.2.0"
+  # .github's dev-lead stub is a consumer still on the bare tier channel.
+  GH_CONTENT_B64="$(devlead_stub_pinning dev-lead/ring0)"; export GH_CONTENT_B64
+  install_gh_stub
+  # --force so the bare-tier migration grace does not mark it already-compliant.
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo .github --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  # .github is a ring0 repo → v3 major line → @dev-lead/v3-ring0
+  echo "$output" | grep -qF '@dev-lead/v3-ring0'
+  echo "$output" | grep -qE 'Would open PR for \.github .* dev-lead.yml'
+}
+
+@test "leaves a meta-repo's local ./ SELF-HOST stub exempt (never re-pins it)" {
+  export GH_RELEASE_REFS="refs/tags/agent-shield/v2.0.0"
+  # .github HOSTS agent-shield's reusable — its stub uses a local ./ ref.
+  GH_CONTENT_B64="$(selfhost_stub agent-shield)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo .github --workflow agent-shield.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '.github/agent-shield.yml (exempt)'
+  ! echo "$output" | grep -qi 'Would open PR'
+  ! echo "$output" | grep -qF '@agent-shield/v'
 }

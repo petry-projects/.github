@@ -246,27 +246,19 @@ batch_pr_body() {
 deploy_repo() {
   local repo="$1"
 
-  # Fully-exempt repos (no per-workflow opt-in) skip with a single log line.
-  if is_skipped_repo "$repo"; then
-    local opts_in_any=false w
-    for w in "${WORKFLOWS[@]}"; do
-      if repo_opts_into "$repo" "$w"; then opts_in_any=true; break; fi
-    done
-    if [[ "$opts_in_any" == "false" ]]; then skip "$repo (exempt)"; return; fi
-  fi
+  # NOTE: a skipped meta-repo (.github / .github-private) is NOT short-circuited
+  # here — the per-workflow loop below fetches each stub to tell a self-host `./`
+  # ref (stays exempt) from a channel-pinned consumer ref (re-pinned by the F5
+  # sweep, #704). Each exempt workflow still logs its own `(exempt)` line.
 
   # Collect the drifted stubs for this repo (path/template pairs + names). For
   # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
   local -a paths=() templates=() names=() emits=() tmpfiles=()
-  local workflow template target_path raw existing_sha existing_content emit deploy_template base
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source
   for workflow in "${WORKFLOWS[@]}"; do
     base=""
-    if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
-      skip "$repo/$workflow (exempt)"
-      continue
-    fi
     template="$STANDARDS_DIR/$workflow"
     target_path=".github/workflows/$workflow"
     if [[ ! -f "$template" ]]; then
@@ -276,16 +268,41 @@ deploy_repo() {
     raw=$(fetch_existing "$repo" "$target_path")
     existing_sha="${raw%%$'\t'*}"
     existing_content="${raw#*$'\t'}"
+
+    # Meta-repo handling (#704). A skipped repo is exempt from blanket stub
+    # deployment because it self-hosts most reusables via local `./` refs — a
+    # channel-pinned template must never overwrite those. But a meta-repo also
+    # CONSUMES the reusables it does not host (e.g. .github consumes dev-lead from
+    # .github-private), and those channel-pinned consumer stubs must be re-pinned
+    # by the F5 sweep or the major-scope migration skips them (freezing the inner
+    # canary rings) and --retire-bare stays blocked. So process a skipped repo's
+    # workflow only when its existing stub is a ring-managed channel CONSUMER; a
+    # missing stub, a non-ring reusable, or a local `./` self-host ref stays exempt
+    # (opt-ins via SKIP_OVERRIDES keep their verbatim-template path unchanged).
+    repin_source="$template"
+    if is_skipped_repo "$repo" && ! repo_opts_into "$repo" "$workflow"; then
+      base="$(reusable_base_of "$template")"
+      if [[ -z "$existing_sha" ]] || [[ -z "$base" ]] || ! ring_is_ring_reusable "$base" \
+         || ring_stub_selfhosts "$base" <<< "$existing_content"; then
+        skip "$repo/$workflow (exempt)"
+        continue
+      fi
+      # A channel consumer stub: re-pin the meta-repo's OWN stub body in place —
+      # never overwrite its bespoke content with the generic template.
+      repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+      printf '%s' "$existing_content" > "$repin_source"
+    fi
+
     if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template" "$repo"; then
       skip "$repo/$target_path already compliant"
       continue
     fi
     emit="$(emit_ref_for "$template" "$repo")"
-    deploy_template="$template"
+    deploy_template="$repin_source"
     if [[ -n "$emit" ]] && [[ "$DRY_RUN" != "true" ]]; then
       base="$(reusable_base_of "$template")"
       deploy_template="$(mktemp)"
-      ring_repin_uses "$base" "$emit" < "$template" > "$deploy_template"
+      ring_repin_uses "$base" "$emit" < "$repin_source" > "$deploy_template"
       tmpfiles+=("$deploy_template")
     fi
     paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit")

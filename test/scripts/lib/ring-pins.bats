@@ -123,3 +123,35 @@ setup() {
   # bare tier (no v<M>-) → not a v-form
   ! ring_vform_tier_aligned auto-rebase/ring1 auto-rebase TalkTerm
 }
+
+# ── meta-repo self-host vs channel-consumer discrimination (#704) ──────────────
+
+@test "ring_stub_selfhosts: true for a local ./ self-host ref" {
+  # .github hosts agent-shield's reusable itself, so its own stub uses a local ref.
+  local stub="jobs:
+  agent-shield:
+    uses: ./.github/workflows/agent-shield-reusable.yml  # local ref — always current
+    secrets: inherit"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts agent-shield <<<"$1"' _ "$stub"
+  [ "$status" -eq 0 ]
+}
+
+@test "ring_stub_selfhosts: false for a channel-pinned consumer ref" {
+  # .github does NOT host dev-lead (it lives in .github-private) — its stub is a
+  # channel consumer, so it must be re-pinned, not treated as self-host.
+  local stub="jobs:
+  dev-lead:
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0
+    with:
+      agent_ref: dev-lead/ring0"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts dev-lead <<<"$1"' _ "$stub"
+  [ "$status" -ne 0 ]
+}
+
+@test "ring_stub_selfhosts: false when the stub does not reference the reusable at all" {
+  local stub="jobs:
+  something-else:
+    uses: ./.github/workflows/other-reusable.yml"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts dev-lead <<<"$1"' _ "$stub"
+  [ "$status" -ne 0 ]
+}

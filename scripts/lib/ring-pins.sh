@@ -179,3 +179,17 @@ ring_vform_tier_aligned() {
   tier="$(ring_tier_for_repo "$repo")"
   [[ "$ref" =~ ^${base}/v[0-9]+-${tier}$ ]]
 }
+
+# ring_stub_selfhosts <channel-base> -> 0 iff the workflow stub read on stdin
+# references THIS agent's reusable via a LOCAL `./` self-host ref (e.g.
+# `uses: ./.github/workflows/<base>-reusable.yml`) rather than a channel-pinned
+# consumer ref (`uses: <org>/<repo>/.../<base>-reusable.yml@<base>/<tier>`).
+#
+# The meta-repos (.github / .github-private) HOST some reusables locally — their
+# own stubs pin those via `./`, which the F5 re-pin sweep must never touch — while
+# CONSUMING others by channel (e.g. .github consumes dev-lead from .github-private),
+# which the sweep must re-pin like any other consumer (#704). Pure (grep only).
+ring_stub_selfhosts() {
+  local base="$1"
+  grep -qE "^[[:space:]]*uses:[[:space:]]*\./[^@[:space:]]*/${base}-reusable\.yml([[:space:]]|\$)"
+}
