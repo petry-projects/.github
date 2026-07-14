@@ -41,7 +41,18 @@ teardown() { rm -rf "$TT_TMP"; }
 # Fake gh. Env knobs:
 #   FOO_MAJOR_REFS  matching-refs output for foo's release tags (empty → no major)
 #   VTAG_EXISTS     if "true", every foo/v<M>-<tier> lookup reports the tag exists
-#   CONSUMER_REF    the ref the consumerX stub pins (e.g. foo/ring1 or foo/v2-ring1)
+#   CONSUMER_REF    the ref a single foo.yml stub pins (e.g. foo/ring1 or foo/v2-ring1)
+#   STUB_SPEC       space-separated "<file>:<uses-ref>[:<agent_ref>]" tokens describing
+#                   EVERY stub a consumer ships under .github/workflows/ (default: a lone
+#                   "foo.yml:${CONSUMER_REF:-foo/ring1}"). The directory listing is
+#                   derived from these files; each file's body pins foo's reusable at its
+#                   <uses-ref> and threads <agent_ref> (default: the uses-ref) as the
+#                   agent_ref input — so a stub can be v-form on uses: yet bare on
+#                   agent_ref (#715). A <uses-ref> of literal "other" makes the file call
+#                   an unrelated reusable (so the agent scan must ignore it).
+#   AGENT_REF       overrides the agent_ref for the default single foo.yml stub (used
+#                   with CONSUMER_REF to model a v-form uses: pin + bare agent_ref).
+#   NO_AGENT_REF    if "true", stubs carry a uses: pin but NO agent_ref input.
 install_gh_stub() {
   local bin="${TT_TMP}/bin"; mkdir -p "$bin"
   cat > "$bin/gh" <<'STUB'
@@ -51,6 +62,7 @@ install_gh_stub() {
 # find the path arg (first non-flag after 'api')
 path=""
 for a in "$@"; do case "$a" in -*|api) ;; *) path="$a"; break ;; esac; done
+spec="${STUB_SPEC:-foo.yml:${CONSUMER_REF:-foo/ring1}}"
 case "$path" in
   *matching-refs/tags/foo/v*)
     [ -n "${FOO_MAJOR_REFS:-}" ] && printf '%s\n' "${FOO_MAJOR_REFS}"
@@ -62,14 +74,33 @@ case "$path" in
     exit 1 ;;                           # v-tag absent
   *git/ref/tags/foo/*)                  # bare-tier tag → resolves to a commit
     printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\tcommit\n'; exit 0 ;;
-  *contents/.github/workflows/foo.yml*) # consumer stub content as JSON
-    body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${CONSUMER_REF:-foo/ring1}"
-    # Only emit an agent_ref: line when the test asks for one (NO_AGENT_REF omits it —
-    # the common case: a stub with a uses: pin but no agent_ref input).
-    if [ "${NO_AGENT_REF:-false}" != "true" ]; then
-      body="${body}
+  */contents/.github/workflows)         # directory listing (post --jq '.[].name')
+    for tok in $spec; do printf '%s\n' "${tok%%:*}"; done
+    exit 0 ;;
+  */contents/.github/workflows/*)       # a single consumer stub, content as JSON
+    wf="${path##*/}"; found=""; uref=""; aref=""
+    for tok in $spec; do
+      [ "${tok%%:*}" = "$wf" ] || continue
+      found=1; rest="${tok#*:}"          # <uses-ref>[:<agent_ref>]
+      uref="${rest%%:*}"
+      [ "$rest" != "$uref" ] && aref="${rest#*:}"
+      break
+    done
+    [ -z "$found" ] && exit 1           # unknown file → 404
+    if [ "$uref" = "emptycontent" ]; then # contents-API >1MB case: content:"" (undecodable)
+      printf '{"content":"","encoding":"none"}'; exit 0
+    fi
+    if [ "$uref" = "other" ]; then       # calls an unrelated reusable — the scan must skip it
+      body="    uses: petry-projects/.github/.github/workflows/bar-reusable.yml@bar/stable"
+    else
+      body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${uref}"
+      # agent_ref: line — explicit per-file <agent_ref>, else the AGENT_REF knob, else the
+      # uses-ref. NO_AGENT_REF omits it (a stub with a uses: pin but no agent_ref input).
+      if [ "${NO_AGENT_REF:-false}" != "true" ]; then
+        body="${body}
     with:
-      agent_ref: ${AGENT_REF:-${CONSUMER_REF:-foo/ring1}}"
+      agent_ref: ${aref:-${AGENT_REF:-$uref}}"
+      fi
     fi
     b64="$(printf '%s' "$body" | base64 | tr -d '\n')"
     printf '{"content":"%s"}' "$b64"
@@ -161,4 +192,79 @@ STUB
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF 'consumerX'
   echo "$output" | grep -qF 'foo/v2-ring1'
+}
+
+# ── multi-stub coverage (F5 long-tail, #707) ──────────────────────────────────
+# A consumer may ship more than one stub calling the same reusable — e.g.
+# .github-private's dev-lead.yml PLUS dev-lead-retry.yml / dev-lead-health.yml.
+# The guard/emitter must scan EVERY such stub, not just <agent>.yml, or a bare
+# secondary stub is silently missed (retirement wrongly proceeds; re-pin never
+# listed). ring1 is consumerX's tier, so its bare pins map to foo/v2-ring1.
+
+@test "--retire-bare refuses when a secondary stub is bare even though <agent>.yml is migrated" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  # foo.yml already on the v-form, but the retry stub is still bare.
+  export STUB_SPEC="foo.yml:foo/v2-ring1 foo-retry.yml:foo/ring1"
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'refuse'
+  echo "$output" | grep -qF 'foo-retry.yml'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
+}
+
+@test "--emit-repins lists each bare secondary stub by filename, not just <agent>.yml" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export STUB_SPEC="foo.yml:foo/v2-ring1 foo-retry.yml:foo/ring1 foo-health.yml:foo/ring1"
+  install_gh_stub
+  run env GH_TOKEN=x CANARY_RINGS="$RINGS" bash "$SCRIPT" --emit-repins --agent foo
+  [ "$status" -eq 0 ]
+  # Both bare secondary stubs are named and targeted at the v-form; the already
+  # migrated foo.yml is NOT emitted as a re-pin.
+  echo "$output" | grep -qF 'foo-retry.yml'
+  echo "$output" | grep -qF 'foo-health.yml'
+  echo "$output" | grep -qF 'foo/v2-ring1'
+  ! grep -qE 'repin[^\n]*/foo\.yml:' <<< "$output"
+}
+
+@test "--retire-bare proceeds (dry-run) when main + retry + health stubs are all migrated" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export STUB_SPEC="foo.yml:foo/v2-ring1 foo-retry.yml:foo/v2-ring1 foo-health.yml:foo/v2-ring1"
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
+}
+
+@test "an unrelated workflow stub in the consumer is ignored by the scan" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  # ci.yml calls a DIFFERENT reusable; only foo-retry.yml is a bare foo stub.
+  export STUB_SPEC="foo.yml:foo/v2-ring1 ci.yml:other foo-retry.yml:foo/ring1"
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF 'foo-retry.yml'
+  # the unrelated ci.yml must never be named as an offender
+  ! echo "$output" | grep -qF 'ci.yml'
+}
+
+# ── fail-closed on undecodable content (#708 review finding, blocking) ─────────
+# The contents API returns content:"" (encoding:none) for files >1MB, and a
+# malformed payload fails base64 decode. Either must ABORT the scan — NOT cache an
+# empty file and silently skip the stub, or --retire-bare could delete bare tags
+# for a consumer whose stubs were never actually read (the #657 breakage class).
+
+@test "--retire-bare aborts (fail-closed) when a stub's content can't be decoded" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  # foo.yml is clean v-form, but foo-retry.yml comes back as the >1MB empty-content case.
+  export STUB_SPEC="foo.yml:foo/v2-ring1 foo-retry.yml:emptycontent"
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'fail-closed'
+  echo "$output" | grep -qF 'foo-retry.yml'
+  # must NOT have proceeded to plan any deletion
+  ! echo "$output" | grep -qi 'would delete'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
 }
