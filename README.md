@@ -14,21 +14,21 @@ Organization-wide GitHub configuration and workflows for the `petry-projects` or
 
 The `standards/` directory contains the authoritative policy documents for this org.
 
-| Standard | Topic |
-|----------|-------|
-| [`advanced-security`](standards/advanced-security.md) | GitHub Advanced Security configuration |
-| [`agent-standards`](standards/agent-standards.md) | Copilot and agentic workflow standards |
-| [`ci-standards`](standards/ci-standards.md) | CI pipeline conventions and enforcement |
-| [`codeowners-standard`](standards/codeowners-standard.md) | CODEOWNERS file policy |
-| [`copilot-instructions-standard`](standards/copilot-instructions-standard.md) | Copilot instructions file conventions |
-| [`dependabot-policy`](standards/dependabot-policy.md) | Dependabot configuration and auto-merge rules |
-| [`feature-ideation-sources`](standards/feature-ideation-sources.md) | Sources and process for feature ideation |
-| [`github-settings`](standards/github-settings.md) | Repository settings policy |
-| [`initiatives-project`](standards/initiatives-project.md) | GitHub Projects board conventions |
-| [`persona-standards`](standards/persona-standards.md) | Agent and persona definition standards |
-| [`pr-limits`](standards/pr-limits.md) | Pull request size and scope limits |
-| [`push-protection`](standards/push-protection.md) | Secret push protection configuration |
-| [`ruleset-remediation-runbook`](standards/ruleset-remediation-runbook.md) | Runbook for resolving ruleset violations |
+| Standard | Topic | Key topics |
+|----------|-------|------------|
+| [`advanced-security`](standards/advanced-security.md) | GitHub Advanced Security configuration | Code Security Configurations, push-protection live-fire test (canary), licensing & billing, verification, compliance audit checks |
+| [`agent-standards`](standards/agent-standards.md) | Copilot and agentic workflow standards | Required files, agent configuration security, AgentShield CI workflow, Decision-Making Reusables, BMAD Method Workflows |
+| [`ci-standards`](standards/ci-standards.md) | CI pipeline conventions and enforcement | Staged promotion through concentric rings, reusable workflow versioning (`stable` channel), action pinning policy, permissions policy, required workflows |
+| [`codeowners-standard`](standards/codeowners-standard.md) | CODEOWNERS file policy | Rule, team composition, required setup for new bots, branch protection |
+| [`copilot-instructions-standard`](standards/copilot-instructions-standard.md) | Copilot instructions file conventions | Canonical instruction files, adding a new language, content quality rules, compliance |
+| [`dependabot-policy`](standards/dependabot-policy.md) | Dependabot configuration and auto-merge rules | Policy, configuration files, auto-merge workflow, CODEOWNERS approval timing, vulnerability audit CI check |
+| [`feature-ideation-sources`](standards/feature-ideation-sources.md) | Sources and process for feature ideation | AI/ML vendor & lab sources, developer tooling changelogs, security & compliance, newsletters, podcasts |
+| [`github-settings`](standards/github-settings.md) | Repository settings policy | Repository rulesets, organization-level secrets, GitHub Apps & integrations, labels — standard set, compliance audit process |
+| [`initiatives-project`](standards/initiatives-project.md) | GitHub Projects board conventions | What belongs on the board, fields, Theme → Initiative, how the auto-add works, views |
+| [`persona-standards`](standards/persona-standards.md) | Agent and persona definition standards | The trigger matrix, canary onboarding, trust & permissions, definition layers, Definition of Done |
+| [`pr-limits`](standards/pr-limits.md) | Pull request size and scope limits | What is limited, exempt actors, reconciliation with Dependabot cap, operator runbook |
+| [`push-protection`](standards/push-protection.md) | Secret push protection configuration | Layer 1 — GitHub Push Protection, Layer 2 — local pre-commit prevention, Layer 3 — CI secret scanning, incident response, compliance audit checks |
+| [`ruleset-remediation-runbook`](standards/ruleset-remediation-runbook.md) | Runbook for resolving ruleset violations | Snapshot (rollback insurance), bypass actors, legacy ruleset migration, verify, 2026-06-10 fleet remediation |
 
 ## Related
 
