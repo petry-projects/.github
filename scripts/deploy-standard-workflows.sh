@@ -258,7 +258,7 @@ deploy_repo() {
   local -a paths=() templates=() names=() emits=() tmpfiles=()
   local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source
   for workflow in "${WORKFLOWS[@]}"; do
-    base=""
+    base=""; repin_source=""; emit=""; deploy_template=""
     template="$STANDARDS_DIR/$workflow"
     target_path=".github/workflows/$workflow"
     if [[ ! -f "$template" ]]; then
@@ -289,8 +289,10 @@ deploy_repo() {
       fi
       # A channel consumer stub: re-pin the meta-repo's OWN stub body in place —
       # never overwrite its bespoke content with the generic template.
-      repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
-      printf '%s' "$existing_content" > "$repin_source"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+        printf '%s\n' "$existing_content" > "$repin_source"
+      fi
     fi
 
     if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template" "$repo"; then
@@ -308,7 +310,9 @@ deploy_repo() {
     paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit")
   done
 
-  [[ "${#names[@]}" -eq 0 ]] && return  # nothing drifted for this repo
+  if [[ "${#names[@]}" -eq 0 ]]; then
+    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return  # nothing drifted for this repo
+  fi
 
   local n="${#names[@]}" list branch
   list=$(IFS=', '; echo "${names[*]}")
@@ -321,7 +325,7 @@ deploy_repo() {
       [[ -n "${emits[i]}" ]] && dry "$repo/${names[i]} would pin @${emits[i]}"
     done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
-    return
+    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return
   fi
 
   # Interleave (path, template) into the variadic file-pair args.

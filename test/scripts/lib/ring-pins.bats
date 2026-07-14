@@ -132,7 +132,7 @@ setup() {
   agent-shield:
     uses: ./.github/workflows/agent-shield-reusable.yml  # local ref — always current
     secrets: inherit"
-  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts agent-shield <<<"$1"' _ "$stub"
+  run ring_stub_selfhosts agent-shield <<< "$stub"
   [ "$status" -eq 0 ]
 }
 
@@ -144,7 +144,7 @@ setup() {
     uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0
     with:
       agent_ref: dev-lead/ring0"
-  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts dev-lead <<<"$1"' _ "$stub"
+  run ring_stub_selfhosts dev-lead <<< "$stub"
   [ "$status" -ne 0 ]
 }
 
@@ -152,6 +152,6 @@ setup() {
   local stub="jobs:
   something-else:
     uses: ./.github/workflows/other-reusable.yml"
-  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_stub_selfhosts dev-lead <<<"$1"' _ "$stub"
+  run ring_stub_selfhosts dev-lead <<< "$stub"
   [ "$status" -ne 0 ]
 }
