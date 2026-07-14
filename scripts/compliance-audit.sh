@@ -751,17 +751,33 @@ check_codeowners() {
   # CODEOWNERS can be in root, .github/, or docs/
   local found=false
   local codeowners_content=""
+  # #437: distinguish a genuinely-absent file (a deterministic HTTP 404 on every
+  # candidate path) from a transient/auth read error (non-404), so a blip never
+  # becomes a false `missing-codeowners` finding that spends a whole dev-lead run
+  # confirming a file that was there all along. Mirrors check_check_suite_prefs
+  # (#487): capture the raw response + status that gh_api's `--jq` masks, retry
+  # non-deterministic failures, and treat any non-404 failure as inconclusive.
+  local any_unreadable=false
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
-    # Use || echo "" so a 404 is non-fatal under set -euo pipefail
+    local raw="" rc=1 i
+    for i in 1 2 3; do
+      raw=$(gh api "repos/$ORG/$repo/contents/$path" 2>&1) && rc=0 || rc=$?
+      [ "$rc" -eq 0 ] && break
+      # 404 is deterministic — the file is not at this path; stop retrying it.
+      # Matches both gh's stderr "(HTTP 404)" and the API's JSON {"status":"404"}.
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] && break
+      [ "$i" -lt 3 ] && sleep $((i * 2))
+    done
+    if [ "$rc" -ne 0 ]; then
+      # Non-404 failure (auth/scope/network/5xx/rate-limit) → inconclusive path.
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] || any_unreadable=true
+      continue
+    fi
     local content decoded
-    content=$(gh_api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null || echo "")
+    content=$(printf '%s' "$raw" | jq -r '.content? // empty' 2>/dev/null || echo "")
     [ -n "$content" ] || continue
-    # The contents API always returns the file body as base64. On a 404,
-    # `gh api` prints the error body (e.g. `{"message":"Not Found",...}`) to
-    # stdout, which is NOT base64 — so if decoding fails, skip this path
-    # rather than treating the error JSON as owner lines. The old
-    # `base64 -d || echo "$content"` fallback leaked that error body in as a
-    # fake owner line, producing bogus codeowners-org-leads-not-first findings.
+    # The contents API returns the body as base64. Reject anything that does not
+    # cleanly decode so an error body can never leak in as owner lines (#370).
     decoded=$(printf '%s' "$content" | base64 -d 2>/dev/null) || continue
     [ -n "$decoded" ] || continue
     found=true
@@ -770,6 +786,13 @@ check_codeowners() {
   done
 
   if [ "$found" = false ]; then
+    if [ "$any_unreadable" = true ]; then
+      # Could not determine presence — do NOT file a `missing` finding (#437).
+      add_finding "$repo" "settings" "codeowners-unreadable" "warning" \
+        "Could not read CODEOWNERS (transient/auth error, not a 404) — verify GH_TOKEN scope and repo access. CODEOWNERS presence was not evaluated this run; NOT filed as missing to avoid a false finding." \
+        "standards/codeowners-standard.md"
+      return 0
+    fi
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
       "standards/codeowners-standard.md"
