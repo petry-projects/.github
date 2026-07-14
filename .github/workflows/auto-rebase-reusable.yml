@@ -150,6 +150,33 @@ jobs:
             fi
             if [[ "$ELIG" -ne 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) not eligible under '$ELIGIBILITY' (draft=$IS_DRAFT approved=$IS_APPROVED label=$HAS_LABEL) — skipping"
+
+              # Escalate silently-rotting PRs (issue #711): a skipped PR that is
+              # already CONFLICTING will never be updated by auto-rebase and cannot
+              # be approved while red (pr-review skips red PRs) — a deadlock that
+              # rots the PR for weeks with no signal. Surface it exactly once so a
+              # human can act. mergeable_state comes free from PR_JSON (no extra
+              # API call); it may be "unknown" until GitHub computes it, in which
+              # case a later run catches it. Idempotent via the stuck sentinel.
+              MERGE_STATE=$(jq -r '.mergeable_state // "unknown"' <<< "$PR_JSON")
+              if [[ "$MERGE_STATE" == "dirty" ]]; then
+                STUCK_SENTINEL="<!-- auto-rebase-stuck -->"
+                STUCK_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+                  --json comments --jq "[.comments[] | select(.body | contains(\"$STUCK_SENTINEL\"))] | length")
+                if [[ "$STUCK_POSTED" -eq 0 ]]; then
+                  echo "  Conflicting + not review-ready — posting one-time manual-attention notice"
+                  STUCK_BODY="$STUCK_SENTINEL"
+                  STUCK_BODY+=$'\n'"**Auto-rebase is skipping this PR.** It has merge conflicts with \`$BASE_BRANCH\` but is not review-ready (draft=$IS_DRAFT, approved=$IS_APPROVED, \`$READY_LABEL\`=$HAS_LABEL), so auto-rebase will not update it — and it cannot be approved while red. Left alone it will not progress."
+                  STUCK_BODY+=$'\n\n'"To unblock, do one of:"
+                  STUCK_BODY+=$'\n'"- add the \`$READY_LABEL\` label (opts it into auto-rebase without an approval), or"
+                  STUCK_BODY+=$'\n'"- get it approved, or"
+                  STUCK_BODY+=$'\n'"- resolve manually:"
+                  STUCK_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"$'\n'"git merge origin/$BASE_BRANCH"$'\n'"# resolve conflicts, then:"$'\n'"git add . && git commit && git push"$'\n'"\`\`\`"
+                  # Best-effort: a comment-side failure (e.g. the 2500-comment cap)
+                  # must not abort the step or starve other PRs — logged and swallowed.
+                  auto_rebase_post_comment_best_effort "$PR_NUMBER" "$REPO" "$STUCK_BODY"
+                fi
+              fi
               continue
             fi
 
