@@ -106,7 +106,7 @@ _enrolled_consumers() {
 # .github/workflows/<agent>.yml stub pins the reusable at (e.g. `agent/ring1`), or
 # empty if the stub is missing / does not pin the agent.
 _consumer_pinned_ref() {
-  local repo="$1" agent="$2" response content ref
+  local repo="$1" agent="$2" response content
   response="$(gh api "repos/${repo}/contents/.github/workflows/${agent}.yml" 2>&1)" || {
     if <<< "$response" grep -q "404"; then
       return 0
@@ -115,8 +115,16 @@ _consumer_pinned_ref() {
     return 1
   }
   content="$(jq -r '.content // empty' <<< "$response" | base64 -d 2>/dev/null)"
-  ref="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | head -1)"
-  printf '%s' "${ref#@}"
+  # Emit EVERY channel ref the stub carries for this agent, one per line, @-stripped:
+  # both the `uses:` pin (`@<agent>/<tier>`) AND the `agent_ref:` input
+  # (`<agent>/<tier>`, no `@`) — the reusable checks out its tooling at agent_ref, so a
+  # bare agent_ref keeps the bare tag load-bearing (retiring it broke dev-lead, #657).
+  # `|| true` on each grep: a stub with a `uses:` pin but no `agent_ref:` (the common
+  # case) must NOT fail-close under `set -o pipefail` on the empty match.
+  local uses_refs agentref_refs
+  uses_refs="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | sed 's/^@//' || true)"
+  agentref_refs="$(grep -oE "agent_ref: *${agent}/[^[:space:]\"']+" <<< "$content" | sed -E 's/^agent_ref: *//' || true)"
+  printf '%s\n%s\n' "$uses_refs" "$agentref_refs" | grep -v '^[[:space:]]*$' | sort -u || true
 }
 
 # _is_bare_tier_ref <agent> <ref> -> 0 if <ref> is a bare `<agent>/<tier>` pin
@@ -177,15 +185,18 @@ emit_repins() {
   fi
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+    local refs
+    if ! refs="$(_consumer_pinned_ref "$c" "$agent")"; then
       err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
       return 1
     fi
-    [ -z "$ref" ] && continue
-    if _is_bare_tier_ref "$agent" "$ref"; then
-      tier="${ref##*/}"
-      log "repin ${c}: @${ref} -> @${agent}/v${major}-${tier}"
-    fi
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      if _is_bare_tier_ref "$agent" "$ref"; then
+        tier="${ref##*/}"
+        log "repin ${c}: ${ref} -> ${agent}/v${major}-${tier}"
+      fi
+    done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
 }
 
@@ -198,14 +209,17 @@ retire_bare() {
   local -a offenders=()
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+    local refs
+    if ! refs="$(_consumer_pinned_ref "$c" "$agent")"; then
       err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
       return 1
     fi
-    [ -z "$ref" ] && continue
-    if _is_bare_tier_ref "$agent" "$ref"; then
-      offenders+=("${c} (@${ref})")
-    fi
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      if _is_bare_tier_ref "$agent" "$ref"; then
+        offenders+=("${c} (${ref})")
+      fi
+    done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
 
   if [ "${#offenders[@]}" -gt 0 ]; then

@@ -64,6 +64,13 @@ case "$path" in
     printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\tcommit\n'; exit 0 ;;
   *contents/.github/workflows/foo.yml*) # consumer stub content as JSON
     body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${CONSUMER_REF:-foo/ring1}"
+    # Only emit an agent_ref: line when the test asks for one (NO_AGENT_REF omits it —
+    # the common case: a stub with a uses: pin but no agent_ref input).
+    if [ "${NO_AGENT_REF:-false}" != "true" ]; then
+      body="${body}
+    with:
+      agent_ref: ${AGENT_REF:-${CONSUMER_REF:-foo/ring1}}"
+    fi
     b64="$(printf '%s' "$body" | base64 | tr -d '\n')"
     printf '{"content":"%s"}' "$b64"
     exit 0 ;;
@@ -115,11 +122,34 @@ STUB
 
 @test "--retire-bare proceeds (dry-run) when no enrolled consumer pins bare" {
   export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
-  export CONSUMER_REF="foo/v2-ring1"   # consumerX already migrated to the v-form
+  export CONSUMER_REF="foo/v2-ring1"   # consumerX already migrated to the v-form (uses: AND agent_ref)
   install_gh_stub
   run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
   [ "$status" -eq 0 ]
   echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
+}
+
+@test "--retire-bare proceeds when the stub has a v-form uses: pin and NO agent_ref (must not fail-close on the empty grep)" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export CONSUMER_REF="foo/v2-ring1"   # uses: v-form
+  export NO_AGENT_REF="true"            # stub carries no agent_ref: line (the common case)
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
+  ! echo "$output" | grep -qi 'could not read'   # must NOT fail-close
+}
+
+@test "--retire-bare refuses when uses: is v-form but agent_ref: is still bare (regression: broke dev-lead)" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export CONSUMER_REF="foo/v2-ring1"   # uses: pin already migrated…
+  export AGENT_REF="foo/ring1"          # …but agent_ref: still bare (the load-bearing checkout ref)
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'refuse'
+  echo "$output" | grep -qF 'consumerX'
   ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
 }
 
