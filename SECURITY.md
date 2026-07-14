@@ -15,10 +15,10 @@ with the details and "SECURITY" in the subject.
 
 Please include, where possible:
 
-- the affected repository and version / commit,
-- a description of the issue and its impact,
-- steps to reproduce or a proof of concept,
-- any suggested remediation.
+- The affected repository and version / commit.
+- A description of the issue and its impact.
+- Steps to reproduce or a proof of concept.
+- Any suggested remediation.
 
 ## What to expect
 
