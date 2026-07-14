@@ -1,6 +1,7 @@
 # Petry Projects
 
-A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling, beekeeping tech, and agent orchestration.
+A collection of open-source tools and experiments spanning terminal UX, market data, AI content tooling,
+beekeeping tech, and agent orchestration.
 
 ---
 
@@ -10,7 +11,7 @@ A collection of open-source tools and experiments spanning terminal UX, market d
 | --- | --- | --- |
 | [TalkTerm](https://github.com/petry-projects/TalkTerm) | Terminal-based communication tool | HTML |
 | [markets](https://github.com/petry-projects/markets) | Market data and analysis tooling (dual-licensed AGPL / Commercial) | HTML |
-| [broodly](https://github.com/petry-projects/broodly) | Field-first beekeeping decision-support app — mobile-first (iOS, Android, web) via Expo + React Native with a Go GraphQL API on GCP | HTML |
+| [broodly](https://github.com/petry-projects/broodly) | A test implementation of the BMAD method | HTML |
 | [broodminder-export](https://github.com/petry-projects/broodminder-export) | Extract all of your data from the BroodMinder API into portable files — resumable, rate-limit-aware. | Python |
 | [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered Social Media Agent for small organizations — enterprise-quality social presence at non-profit pricing | Shell |
 | [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMad Operations Suite — SRE and DevOps agents and workflows for the BMad Method ecosystem | Shell |
@@ -24,20 +25,45 @@ A collection of open-source tools and experiments spanning terminal UX, market d
 
 ## Standards & Practices
 
-All repositories in this org follow shared engineering standards defined in [`.github`](https://github.com/petry-projects/.github):
+All repositories in this org follow shared engineering standards defined in
+[`.github`](https://github.com/petry-projects/.github):
 
-- **TDD** — tests are written before implementation; coverage gates enforced in CI
-- **CodeQL** — static analysis on every PR
-- **SonarCloud** — code quality and security scanning
-- **Dependabot** — automated dependency updates with automerge for patch-level changes
-- **Claude Code** — AI-assisted development via [agent standards](https://github.com/petry-projects/.github/blob/main/AGENTS.md)
+- **CI Standards** — Reusable workflow versioning via the `stable` channel; staged promotion through
+  concentric rings; action pinning policy; permissions policy; workflow patterns by tech stack
+  (Node.js, Go, Python, Electron).
+
+- **Advanced Security** — Code Security Configurations for the org fleet; push-protection live-fire
+  canary test; custom secret scanning patterns; compliance audit checks.
+
+- **Push Protection** — GitHub push protection (primary enforcement); local pre-commit prevention;
+  CI secret scanning (secondary defense); incident response runbook.
+
+- **Agent Standards** — AgentShield deep security scan; required agent files and compliance
+  exemptions; BMAD Method workflows; decision-making reusables.
+
+- **Dependabot Policy** — Stack-specific templates (npm, Go, Rust, Python, Terraform, Actions);
+  auto-merge workflow; vulnerability audit CI check; CODEOWNERS approval timing.
+
+- **GitHub Settings** — Repository rulesets (`pr-quality`, `code-quality`); auto-merge
+  configuration; bypass actors; labels — standard set; org-level secrets.
+
+- **CODEOWNERS Standard** — Branch protection; team composition; required setup for new bots.
+
+- **Copilot Instructions Standard** — Canonical instruction files (source of truth in `.github`);
+  adding a new language; content quality rules.
+
+- **Persona Standards** — Trigger matrix (the onboarding checklist); canary onboarding (the last
+  step); trust, permissions, and safety.
+
+- **PR Limits** — Exempt actors; operator runbook; reconciliation with the Dependabot cap.
 
 ---
 
 ## Contributing
 
 1. Fork the relevant repository and create a branch off `main`.
-2. Follow the [AGENTS.md](https://github.com/petry-projects/.github/blob/main/AGENTS.md) guidelines for commit style, TDD, and CI requirements.
+2. Follow the [AGENTS.md](https://github.com/petry-projects/.github/blob/main/AGENTS.md) guidelines
+   for commit style, TDD, and CI requirements.
 3. Open a pull request — CI must pass before review.
 
 Questions or feedback? Open an issue in the relevant repo.
