@@ -8,6 +8,7 @@
 #   Phase 6: Summary report.
 # Standard: https://github.com/${{ github.repository_owner }}/.github/tree/main/standards
 name: Org Standards Compliance Audit
+# readme-report: Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues.
 
 on:
   schedule:
