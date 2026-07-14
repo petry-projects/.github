@@ -80,6 +80,8 @@ on:
         description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   auto-rebase:
     runs-on: ubuntu-latest
