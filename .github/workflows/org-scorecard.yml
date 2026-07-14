@@ -136,15 +136,20 @@ jobs:
               # enforced by compliance-audit.sh check_action_pinning (which exempts
               # first-party) — so an Actions-only Pinned-Dependencies finding is
               # fully covered elsewhere and is pure noise. Scorecard's detail lines
-              # name the dependency type, so suppress the issue only when EVERY
-              # "not pinned" detail is a GitHubAction; keep it whenever there is a
-              # non-Actions gap (containerImage / pip / npm / go) that nothing else
-              # tracks. Errs toward keeping the issue if the wording is unexpected.
+              # name the dependency type, so suppress the issue only when ALL of
+              # these hold: (1) at least one "not pinned" detail exists, confirming
+              # the expected detail format is present, and (2) every such detail is a
+              # GitHubAction. Keep it whenever there is a non-Actions gap
+              # (containerImage / pip / npm / go) or when no recognisable detail
+              # lines are found (format changed — errs toward keeping the issue).
               if [ "$CHECK_NAME" = "Pinned-Dependencies" ] && [ "$SCORE" != "10" ]; then
+                TOTAL_WARN=$(echo "$ROW" | jq -r \
+                  '[.details[]? | select(test("not pinned by hash"; "i"))] | length' \
+                  2>/dev/null || echo "0")
                 NON_ACTION_WARN=$(echo "$ROW" | jq -r \
                   '[.details[]? | select(test("not pinned by hash"; "i")) | select(test("GitHubAction"; "i") | not)] | length' \
                   2>/dev/null || echo "1")
-                if [ "${NON_ACTION_WARN:-1}" -eq 0 ]; then
+                if [ "${TOTAL_WARN:-0}" -gt 0 ] && [ "${NON_ACTION_WARN:-1}" -eq 0 ]; then
                   echo "Pinned-Dependencies for $REPO is Actions-only — covered by compliance-audit + deliberate first-party channel tags; suppressing issue (#709)"
                   if [ -n "$EXISTING_ISSUE" ]; then
                     EXEMPT_MSG="Auto-closing (accepted exception, #709): this Pinned-Dependencies finding is limited to GitHub Actions refs."
