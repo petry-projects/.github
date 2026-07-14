@@ -28,6 +28,8 @@ on:
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   check-and-dispatch:
     runs-on: ubuntu-latest
