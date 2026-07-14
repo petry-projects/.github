@@ -101,7 +101,7 @@ jobs:
 
       - name: Run AgentShield
         run: |
-          npx --ignore-scripts ecc-agentshield scan --path . --format json --min-severity high
+          npx --ignore-scripts ecc-agentshield@1.4.0 scan --path . --format json --min-severity high
 
   secret-scan:
     name: Secret scan (gitleaks)
