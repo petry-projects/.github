@@ -287,7 +287,8 @@ apply_check_suite_prefs() {
     # run, which was reporting apply-repo-settings as 100%-failed fleet-wide while
     # every other setting applied fine. The token-config fix is tracked in
     # petry-projects/.github-private#1209; until then this preference is not applied.
-    if grep -qiE '"status": *"403"|HTTP 403|authenticate with a personal access token' <<< "$api_err"; then
+    local re_403='"status":[[:space:]]*"?403'
+    if [[ "${api_err,,}" =~ $re_403 || "${api_err,,}" =~ "http 403" || "${api_err,,}" =~ "authenticate with a personal access token" ]]; then
       warn "  Skipping check-suite prefs for $repo — token lacks repo-admin for the check-suites API (403). Tracking: petry-projects/.github-private#1209"
       return 0
     fi
