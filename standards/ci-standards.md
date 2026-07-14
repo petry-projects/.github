@@ -1644,6 +1644,15 @@ org-level workflows that run across all repositories:
   to list repositories in the organization.
 - **Behavior:** Creates/updates GitHub Issues with findings, auto-closes resolved findings
 - **Skip list:** CII-Best-Practices, Contributors, Fuzzing, Maintained, Packaging, Signed-Releases
+- **Pinned-Dependencies — first-party exemption:** Our first-party reusable refs
+  deliberately use mutable channel tags (see [Action Pinning Policy](#action-pinning-policy)),
+  so Scorecard permanently docks `Pinned-Dependencies` and that finding can never
+  reach 10/10. Third-party **action** pinning is already enforced by
+  `check_action_pinning` in `scripts/compliance-audit.sh` (which exempts first-party),
+  so an Actions-only Pinned-Dependencies finding is fully covered elsewhere and is
+  suppressed (no issue) rather than looping forever. A finding is **still raised**
+  when it includes a non-Actions gap (container image / pip / npm / go) that nothing
+  else tracks — the suppression keys off Scorecard's per-detail dependency type.
 
 ---
 
