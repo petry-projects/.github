@@ -115,6 +115,8 @@ on:
         description: 'Claude Code OAuth token (org-level secret)'
         required: true
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: Gather signals — issues, discussions, releases, community feedback
