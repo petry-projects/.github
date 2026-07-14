@@ -92,7 +92,7 @@ _agent_names() { jq -r '.agents | keys[]'                         "$CANARY_RINGS
 # reusable. Falls back to `<agent>-reusable.yml` if the registry omits `reusable`.
 _agent_reusable_file() {
   local agent="$1" path
-  path="$(jq -r --arg a "$agent" '.agents[$a]?.reusable? // empty' "$CANARY_RINGS")"
+  path="$(jq -r --arg a "$agent" '.agents?[$a]?.reusable? // empty' "$CANARY_RINGS")"
   [ -z "$path" ] && path="${agent}-reusable.yml"
   printf '%s' "${path##*/}"
 }
@@ -128,29 +128,50 @@ _enrolled_consumers() {
 _consumer_agent_stubs() {
   local repo="$1" agent="$2" reusable listing wf response content ref
   reusable="$(_agent_reusable_file "$agent")"
-  listing="$(gh api "repos/${repo}/contents/.github/workflows" --jq '.[].name' 2>&1)" || {
-    if <<< "$listing" grep -q "404"; then
-      return 0
-    fi
-    echo "Error listing workflows for ${repo}: ${listing}" >&2
-    return 1
-  }
-  while IFS= read -r wf; do
-    [ -z "$wf" ] && continue
-    case "$wf" in *.yml | *.yaml) ;; *) continue ;; esac
-    response="$(gh api "repos/${repo}/contents/.github/workflows/${wf}" 2>&1)" || {
-      if <<< "$response" grep -q "404"; then
-        continue
+  local cache_dir="/tmp/migrate-wf-cache-$$/${repo}"
+  local listing_file="${cache_dir}/.listing"
+
+  if [ ! -d "$cache_dir" ]; then
+    mkdir -p "$cache_dir"
+    listing="$(gh api "repos/${repo}/contents/.github/workflows" --jq '.[].name' 2>&1)" || {
+      if [[ "$listing" == *404* ]]; then
+        touch "$listing_file"
+        return 0
       fi
-      echo "Error fetching ${repo}/.github/workflows/${wf}: ${response}" >&2
+      echo "Error listing workflows for ${repo}: ${listing}" >&2
+      rm -rf "$cache_dir"
       return 1
     }
-    content="$(jq -r '.content // empty' <<< "$response" | base64 -d 2>/dev/null)"
-    grep -qF "${reusable}@" <<< "$content" || continue
-    ref="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | head -1)"
+    listing="${listing//$'\r'/}"
+    printf '%s\n' "$listing" > "$listing_file"
+
+    while IFS= read -r wf || [ -n "$wf" ]; do
+      [ -z "$wf" ] && continue
+      case "$wf" in *.yml | *.yaml) ;; *) continue ;; esac
+      response="$(gh api "repos/${repo}/contents/.github/workflows/${wf}" 2>&1)" || {
+        if [[ "$response" == *404* ]]; then
+          continue
+        fi
+        echo "Error fetching ${repo}/.github/workflows/${wf}: ${response}" >&2
+        rm -rf "$cache_dir"
+        return 1
+      }
+      jq -r '.content // empty' <<< "$response" | base64 -d > "${cache_dir}/${wf}" 2>/dev/null || true
+    done < "$listing_file"
+  fi
+
+  [ -f "$listing_file" ] || return 0
+  while IFS= read -r wf || [ -n "$wf" ]; do
+    [ -z "$wf" ] && continue
+    case "$wf" in *.yml | *.yaml) ;; *) continue ;; esac
+    local cached_file="${cache_dir}/${wf}"
+    [ -f "$cached_file" ] || continue
+    content="$(cat "$cached_file")"
+    [[ "$content" == *"${reusable}@"* ]] || continue
+    ref="$(grep -oE "@${agent}/[^[:space:]\"']+" "$cached_file" | head -1)"
     [ -z "$ref" ] && continue
     printf '%s\t%s\n' "$wf" "${ref#@}"
-  done <<< "$listing"
+  done < "$listing_file"
 }
 
 # _is_bare_tier_ref <agent> <ref> -> 0 if <ref> is a bare `<agent>/<tier>` pin
@@ -203,6 +224,7 @@ create_vtags() {
 # the v-form it should move to, naming the specific workflow file. Read only.
 emit_repins() {
   local agent="$1" host major c stubs wf ref tier
+  trap 'rm -rf "/tmp/migrate-wf-cache-$$"' EXIT
   host="$(_agent_host "$agent")"
   major="$(ring_host_current_major "$host" "$agent")"
   if [ -z "$major" ]; then
@@ -215,7 +237,10 @@ emit_repins() {
       err "could not read ${c} workflow stubs — aborting (fail-closed)"
       return 1
     fi
-    while IFS=$'\t' read -r wf ref; do
+    [ -z "$stubs" ] && continue
+    stubs="${stubs//$'\r'/}"
+    while IFS=$'\t' read -r wf ref || [ -n "$wf" ]; do
+      tier=""
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
         tier="${ref##*/}"
@@ -229,6 +254,7 @@ emit_repins() {
 # consumer still pins a bare tier. Refuses (non-zero) otherwise.
 retire_bare() {
   local agent="$1" host c stubs wf ref tier
+  trap 'rm -rf "/tmp/migrate-wf-cache-$$"' EXIT
   host="$(_agent_host "$agent")"
   [[ -z "$host" ]] && { err "unknown agent: $agent"; return 1; }
   local -a offenders=()
@@ -238,7 +264,9 @@ retire_bare() {
       err "could not read ${c} workflow stubs — aborting (fail-closed)"
       return 1
     fi
-    while IFS=$'\t' read -r wf ref; do
+    [ -z "$stubs" ] && continue
+    stubs="${stubs//$'\r'/}"
+    while IFS=$'\t' read -r wf ref || [ -n "$wf" ]; do
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
         offenders+=("${c}/${wf} (@${ref})")
