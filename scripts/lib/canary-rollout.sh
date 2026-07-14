@@ -97,6 +97,93 @@ bump_version() {
   esac
 }
 
+# ── breaking-change classification (autocut major-awareness, #712, epic #1083) ──
+# The autocut front end decides the release bump from SIGNALS (a breaking change → major,
+# a non-breaking feat → minor, else patch), with the manual `.agents[a].autocut.bump` knob
+# kept as an explicit override. These pure cores make that decision unit-testable; the
+# orchestrator gathers the raw signals (commit messages, workflow_call interface) and feeds
+# them in.
+
+# decide_bump <breaking:0|1> <feat:0|1> <override> — echo the semver bump level. An explicit
+# <override> in {major,minor,patch} ALWAYS wins (back-compat / manual force); otherwise a
+# breaking signal → major, a feat signal → minor, and neither → patch.
+decide_bump() {
+  local breaking="${1:-0}" feat="${2:-0}" override="${3:-}"
+  case "$override" in major|minor|patch) echo "$override"; return 0 ;; esac
+  if [ "$breaking" = 1 ]; then echo major; return 0; fi
+  if [ "$feat" = 1 ]; then echo minor; return 0; fi
+  echo patch
+}
+
+# workflow_call_iface <yaml_text> — parse a reusable workflow's `on.workflow_call` block into
+# a normalized, sorted interface descriptor (one item per line), for a set-comparison diff:
+#   input <name> <required 0|1>
+#   secret <name>
+# Outputs are intentionally omitted: a new output is not breaking and a removed output is out
+# of scope for #712, so they never drive the verdict. Pure: a deterministic awk transform over
+# the text (no gh/git/network I/O), tolerant of comments and standard 2-space GitHub indent.
+workflow_call_iface() {
+  awk '
+    function ind(s){ match(s, /^ */); return RLENGTH }
+    { raw = $0 }
+    raw ~ /^[[:space:]]*($|#)/ { next }                                   # blank / comment
+    { i = ind(raw) }
+    raw ~ /^[[:space:]]*workflow_call:[[:space:]]*(#.*)?$/ { inwc=1; wci=i; sec=""; seci=-1; keyi=-1; next }
+    (inwc && i <= wci) { inwc=0 }                                         # left workflow_call block
+    !inwc { next }
+    raw ~ /^[[:space:]]*inputs:[[:space:]]*(#.*)?$/  { sec="input";  seci=i; keyi=-1; next }
+    raw ~ /^[[:space:]]*secrets:[[:space:]]*(#.*)?$/ { sec="secret"; seci=i; keyi=-1; next }
+    raw ~ /^[[:space:]]*outputs:[[:space:]]*(#.*)?$/ { sec="output"; seci=i; keyi=-1; next }
+    (sec != "" && i <= seci) { sec="" }                                  # left the section
+    sec == "" { next }
+    {
+      if (keyi == -1) keyi = i
+      if (i == keyi) {
+        name = raw; sub(/^[[:space:]]*/, "", name); sub(/:.*/, "", name)
+        cur = name
+        if (sec == "input")  { inp[cur]=1; if (!(cur in req)) req[cur]=0 }
+        else if (sec == "secret") { seclist[cur]=1 }
+      } else if (i > keyi && sec == "input") {
+        if (raw ~ /^[[:space:]]*required:[[:space:]]*true[[:space:]]*(#.*)?$/) req[cur]=1
+      }
+    }
+    END {
+      for (n in inp)     print "input "  n " " (req[n] ? 1 : 0)
+      for (n in seclist) print "secret " n
+    }
+  ' <<< "$1" | sort
+}
+
+# interface_break <old_desc> <new_desc> — echo 1 if the change from <old_desc> to <new_desc>
+# (both workflow_call_iface descriptors) is a BREAKING interface change, else 0. Breaking iff:
+#   - an input or secret present in OLD is absent in NEW (removed or renamed), OR
+#   - an input is required:true in NEW but was not required:true in OLD (newly-added-required
+#     or optional→required flip).
+# Added-optional inputs and relaxing required→optional are NOT breaking. Pure: bash only.
+interface_break() {
+  local old="$1" new="$2" kind name req key
+  local -A new_has=() old_has=() new_input_req=() old_input_req=()
+  while read -r kind name req; do
+    [ -z "$kind" ] && continue
+    new_has["$kind/$name"]=1
+    [ "$kind" = input ] && new_input_req["$name"]="${req:-0}"
+  done <<< "$new"
+  while read -r kind name req; do
+    [ -z "$kind" ] && continue
+    old_has["$kind/$name"]=1
+    [ "$kind" = input ] && old_input_req["$name"]="${req:-0}"
+  done <<< "$old"
+  for key in "${!old_has[@]}"; do
+    if [ -z "${new_has[$key]:-}" ]; then echo 1; return 0; fi   # removed / renamed
+  done
+  for name in "${!new_input_req[@]}"; do
+    if [ "${new_input_req[$name]}" = 1 ] && [ "${old_input_req[$name]:-x}" != 1 ]; then
+      echo 1; return 0                                          # newly-required input
+    fi
+  done
+  echo 0
+}
+
 # _semver_gt <a> <b> — return 0 iff semver a is strictly greater than b (compared
 # by major, then minor, then patch). Equal is NOT greater.
 _semver_gt() {

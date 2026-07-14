@@ -77,6 +77,122 @@ setup() {
   [ "$(bump_version 2.1.0 bogus)" = "2.1.1" ]
 }
 
+# ── decide_bump: signal-based classification, knob as override (#712, epic #1083) ─
+# decide_bump <breaking 0|1> <feat 0|1> <override> → major|minor|patch.
+# An explicit override (patch|minor|major) always wins; else breaking→major, feat→minor,
+# else patch. All 8 signal combinations plus override precedence are exercised.
+@test "decide_bump: breaking beats feat → major (both signals set)" {
+  [ "$(decide_bump 1 1 '')" = "major" ]
+}
+@test "decide_bump: breaking only → major" {
+  [ "$(decide_bump 1 0 '')" = "major" ]
+}
+@test "decide_bump: feat only → minor" {
+  [ "$(decide_bump 0 1 '')" = "minor" ]
+}
+@test "decide_bump: neither signal → patch" {
+  [ "$(decide_bump 0 0 '')" = "patch" ]
+}
+@test "decide_bump: override wins over every signal combination" {
+  # override major
+  [ "$(decide_bump 0 0 major)" = "major" ]
+  [ "$(decide_bump 1 1 major)" = "major" ]
+  # override minor (even when breaking would say major)
+  [ "$(decide_bump 1 0 minor)" = "minor" ]
+  [ "$(decide_bump 0 0 minor)" = "minor" ]
+  # override patch (even when breaking/feat would escalate)
+  [ "$(decide_bump 1 1 patch)" = "patch" ]
+  [ "$(decide_bump 0 1 patch)" = "patch" ]
+}
+@test "decide_bump: an invalid override is ignored (falls back to signals)" {
+  [ "$(decide_bump 1 0 bogus)" = "major" ]
+  [ "$(decide_bump 0 1 '')"   = "minor" ]
+}
+
+# ── workflow_call_iface: parse an on.workflow_call interface into a descriptor ────
+# Pure YAML→descriptor transform: emits `input <name> <req 0|1>` and `secret <name>`
+# (sorted). Outputs are intentionally not emitted (they never drive a breaking verdict).
+@test "workflow_call_iface: extracts inputs (with required flags) and secrets" {
+  yaml="$(cat <<'YML'
+name: demo-reusable
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      dry_run:
+        required: false
+        type: boolean
+      note:
+        type: string
+    secrets:
+      APP_TOKEN:
+        required: true
+    outputs:
+      result:
+        value: ${{ jobs.x.outputs.r }}
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps: []
+YML
+)"
+  run workflow_call_iface "$yaml"
+  [ "$status" -eq 0 ]
+  # required input → req 1; optional / unspecified → req 0
+  [[ "$output" == *"input target 1"* ]]
+  [[ "$output" == *"input dry_run 0"* ]]
+  [[ "$output" == *"input note 0"* ]]
+  [[ "$output" == *"secret APP_TOKEN"* ]]
+  # outputs are not part of the interface descriptor
+  [[ "$output" != *"result"* ]]
+}
+
+# ── interface_break: decide a breaking workflow_call interface change ─────────────
+# interface_break <old_desc> <new_desc> → 1 if an input/secret was removed or renamed,
+# or an input became (or was newly added as) required:true; else 0. Added-optional
+# inputs and new outputs are NOT breaking.
+@test "interface_break: removed input → breaking" {
+  old="$(printf 'input a 0\ninput b 0\n')"
+  new="$(printf 'input a 0\n')"
+  [ "$(interface_break "$old" "$new")" = "1" ]
+}
+@test "interface_break: renamed input (drop old name, add new) → breaking" {
+  old="$(printf 'input a 0\n')"
+  new="$(printf 'input renamed 0\n')"
+  [ "$(interface_break "$old" "$new")" = "1" ]
+}
+@test "interface_break: removed secret → breaking" {
+  old="$(printf 'secret TOKEN\n')"
+  new="$(printf '')"
+  [ "$(interface_break "$old" "$new")" = "1" ]
+}
+@test "interface_break: newly-added required input → breaking" {
+  old="$(printf 'input a 0\n')"
+  new="$(printf 'input a 0\ninput b 1\n')"
+  [ "$(interface_break "$old" "$new")" = "1" ]
+}
+@test "interface_break: optional input flipped to required → breaking" {
+  old="$(printf 'input a 0\n')"
+  new="$(printf 'input a 1\n')"
+  [ "$(interface_break "$old" "$new")" = "1" ]
+}
+@test "interface_break: added OPTIONAL input → NOT breaking" {
+  old="$(printf 'input a 0\n')"
+  new="$(printf 'input a 0\ninput b 0\n')"
+  [ "$(interface_break "$old" "$new")" = "0" ]
+}
+@test "interface_break: identical interface → NOT breaking" {
+  desc="$(printf 'input a 1\nsecret TOKEN\n')"
+  [ "$(interface_break "$desc" "$desc")" = "0" ]
+}
+@test "interface_break: required input relaxed to optional → NOT breaking" {
+  old="$(printf 'input a 1\n')"
+  new="$(printf 'input a 0\n')"
+  [ "$(interface_break "$old" "$new")" = "0" ]
+}
+
 @test "_semver_gt: compares by major, then minor, then patch" {
   run _semver_gt 2.1.1 2.1.0; [ "$status" -eq 0 ]
   run _semver_gt 2.2.0 2.1.9; [ "$status" -eq 0 ]
@@ -2606,4 +2722,242 @@ GITEOF
   grep -q "git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
   grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
   ! grep -q "git/refs/tags/dev-lead/v2-next" "$GH_LOG"
+}
+
+# ── autocut breaking-change detection (#712, epic #1083 pillar 2) ──────────────
+# When autocut cuts a candidate it now CLASSIFIES the change: a conventional-commit
+# `!`/`BREAKING CHANGE` on a commit touching the reusable, or a workflow_call interface
+# break (removed/renamed/newly-required input, removed secret) auto-produces a MAJOR
+# (seeding a fresh v<newmajor>-next per F4); a non-breaking `feat` → minor, `fix` → patch;
+# any signal-fetch error fails safe to patch. The `.agents[a].autocut.bump` knob overrides.
+#
+# The stub feeds, in addition to the plumbing the other autocut stubs mock: the commit list
+# for `commits?path=<reusable>&sha=<mainsha>` (a JSON array, newest-first, terminated by a
+# boundary commit with sha=<nextsha> that must be EXCLUDED) and the reusable's file CONTENT
+# (base64, keyed by ref) so the interface diff can parse on.workflow_call at both refs.
+#   args: agent host reusable mainsha nextsha versions commits_json old_yaml new_yaml [bump]
+_detect_autocut_stub() {
+  local agent="$1" host="$2" reusable="$3" MAINSHA="$4" NEXTSHA="$5" versions="$6"
+  local commits_json="$7" old_yaml="$8" new_yaml="$9" bump="${10:-}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
+  local refs="" v
+  for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
+  printf '%s' "$commits_json" > "$STUB_BIN/commits.json"
+  local NEW_B64 OLD_B64
+  NEW_B64="$(printf '%s' "$new_yaml" | base64 | tr -d '\n')"
+  OLD_B64="$(printf '%s' "$old_yaml" | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *".default_branch"*) echo "main" ;;
+  *"commits?path="*) cat "$STUB_BIN/commits.json" ;;
+  *"/commits/"*) echo "$MAINSHA" ;;
+  *"contents/"*"ref=$MAINSHA"*".content"*) echo "$NEW_B64" ;;
+  *"contents/"*"ref=$NEXTSHA"*".content"*) echo "$OLD_B64" ;;
+  *"contents/"*"ref=$MAINSHA"*) echo "blobNEW" ;;
+  *"contents/"*"ref=$NEXTSHA"*) echo "blobOLD" ;;
+  *"-X POST"*"git/tags"*) echo "\$*" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$GH_LOG"; exit 0 ;;
+  *"-X POST"*"git/refs"*) echo "\$*" >> "$GH_LOG"; echo "{}" ;;
+  *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
+  *"git/ref/tags/$agent/v"*"-next"*) printf '\n' ;;
+  *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) printf '\n' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<GITEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"rev-parse"*"$agent/next"*) echo "$NEXTSHA" ;;
+  *) : ;;
+esac
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  AUTOCUT_RINGS="$BATS_TEST_TMPDIR/detect-autocut-rings.json"
+  if [ -n "$bump" ]; then
+    jq --arg a "$agent" --arg b "$bump" \
+      '{version, description, org_infra_repos, member_tokens, agents: {($a): (.agents[$a] + {autocut: {bump: $b}})}}' \
+      "$RINGS" > "$AUTOCUT_RINGS"
+  else
+    jq --arg a "$agent" \
+      '{version, description, org_infra_repos, member_tokens, agents: {($a): .agents[$a]}}' \
+      "$RINGS" > "$AUTOCUT_RINGS"
+  fi
+}
+
+# A workflow_call interface with one required + one optional input and a secret.
+_iface_yaml() {
+  cat <<'YML'
+name: dev-lead-reusable
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      dry_run:
+        required: false
+        type: boolean
+    secrets:
+      APP_TOKEN:
+        required: true
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps: []
+YML
+}
+
+@test "orchestrator: autocut detects a feat! commit → MAJOR + seeds a fresh v<newmajor>-next (#712)" {
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"feat!: drop the legacy dry_run input\n\nRemoves a caller-facing knob."}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  # interface unchanged (same yaml both refs) — the major comes purely from the commit signal.
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$(_iface_yaml)"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # major bump v2.1.0 → v3.0.0; next seeded on the FRESH v3 line, old bare next untouched.
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  ! grep -q "git/refs/tags/dev-lead/next " "$GH_LOG"
+}
+
+@test "orchestrator: autocut detects a removed workflow_call input → MAJOR (interface break) (#712)" {
+  # Commits are non-breaking (fix) — the major comes from the interface diff: new yaml drops 'dry_run'.
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: internal cleanup"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  local new_yaml
+  new_yaml="$(cat <<'YML'
+name: dev-lead-reusable
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+    secrets:
+      APP_TOKEN:
+        required: true
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps: []
+YML
+)"
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$new_yaml"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+}
+
+@test "orchestrator: autocut detects a newly-required workflow_call input → MAJOR (interface break) (#712)" {
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: tidy"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  # new yaml adds a brand-new REQUIRED input 'workspace' — callers not passing it break.
+  local new_yaml
+  new_yaml="$(cat <<'YML'
+name: dev-lead-reusable
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      dry_run:
+        required: false
+        type: boolean
+      workspace:
+        required: true
+        type: string
+    secrets:
+      APP_TOKEN:
+        required: true
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps: []
+YML
+)"
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$new_yaml"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+}
+
+@test "orchestrator: autocut detects a non-breaking feat commit → MINOR (#712)" {
+  # feat adds an OPTIONAL input — non-breaking → minor.
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"feat: add an optional verbose input"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  local new_yaml
+  new_yaml="$(cat <<'YML'
+name: dev-lead-reusable
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      dry_run:
+        required: false
+        type: boolean
+      verbose:
+        required: false
+        type: boolean
+    secrets:
+      APP_TOKEN:
+        required: true
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps: []
+YML
+)"
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$new_yaml"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # minor bump v2.1.0 → v2.2.0
+  grep -q "git/tags .*tag=dev-lead/v2.2.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  ! grep -q "tag=dev-lead/v3" "$GH_LOG"
+}
+
+@test "orchestrator: autocut detects a fix-only change → PATCH (#712)" {
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: correct a log message"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$(_iface_yaml)"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+}
+
+@test "orchestrator: autocut fails SAFE to PATCH when the commit-signal fetch errors (#712)" {
+  # commits?path returns a non-array error payload → signal fetch fails → never auto-major.
+  local commits='{"message":"Not Found","status":"404"}'
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$(_iface_yaml)"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v2.1.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  ! grep -q "tag=dev-lead/v3" "$GH_LOG"
+}
+
+@test "orchestrator: autocut knob override forces MAJOR over a patch-only diff (#712)" {
+  # Signals say patch (fix commit, no interface change) but the registry knob forces major.
+  local commits='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: small tweak"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  _detect_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "$commits" "$(_iface_yaml)" "$(_iface_yaml)" major
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
 }

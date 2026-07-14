@@ -1458,12 +1458,98 @@ _host_release_versions() {
     | sed -n "s#^refs/tags/${agent}/v##p" || true
 }
 
-# _autocut_bump <agent> — the configured bump level for the agent (registry knob
-# .agents[a].autocut.bump), defaulting to patch. Anything but minor/major → patch.
-_autocut_bump() {
+# _autocut_bump_override <agent> — the EXPLICIT bump override for the agent (registry knob
+# .agents[a].autocut.bump), or empty when unset/invalid. Since #712 the knob is an OVERRIDE
+# over signal-based detection (not the sole source), so an absent/invalid knob yields empty
+# (→ detection decides) rather than defaulting to patch.
+_autocut_bump_override() {
   local b
-  b="$(_jq -r --arg a "$1" '.agents[$a]?.autocut?.bump // "patch"')"
-  case "$b" in major|minor|patch) echo "$b" ;; *) echo "patch" ;; esac
+  b="$(_jq -r --arg a "$1" '.agents[$a]?.autocut?.bump // ""')"
+  case "$b" in major|minor|patch) echo "$b" ;; *) echo "" ;; esac
+}
+
+# _autocut_commit_signals <host> <reusable> <next_commit> <mainsha> — scan the commits that
+# TOUCH the reusable between the current `next` candidate (exclusive) and main HEAD, echoing
+# "<breaking 0|1> <feat 0|1>". breaking=1 iff any such commit is a conventional-commit `!`
+# (`type(scope)!:`) or carries a `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer; feat=1 iff any
+# such commit subject is `feat:`/`feat(scope):` (non-breaking). Returns non-zero on any
+# fetch/parse error so the caller can fail safe to patch (never auto-major on missing data).
+_autocut_commit_signals() {
+  local host="$1" reusable="$2" next_commit="$3" mainsha="$4" json out
+  json="$(gh api "repos/$host/commits?path=$reusable&sha=$mainsha&per_page=100" 2>/dev/null)" || return 1
+  [ -z "$json" ] && return 1
+  out="$(jq -r --arg stop "$next_commit" '
+    if type != "array" then error("not an array") else . end
+    | (map(.sha)) as $shas
+    | ([ range(0; length) | select($shas[.] == $stop) ] | first) as $idx
+    | (if $idx == null then . else .[0:$idx] end)
+    | map(.commit.message // "")
+    | {
+        b: any(.[]; test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
+        f: any(.[]; test("^feat(\\([^)]*\\))?:"))
+      }
+    | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
+  ' <<< "$json" 2>/dev/null)" || return 1
+  [ -z "$out" ] && return 1
+  printf '%s\n' "$out"
+}
+
+# _gh_file_content <repo> <path> <ref> — the decoded text of <path> at <ref> on <repo> via the
+# contents API (base64 → text). Non-zero on any fetch/decode error.
+_gh_file_content() {
+  local raw
+  raw="$(gh api "repos/$1/contents/$2?ref=$3" --jq '.content' 2>/dev/null)" || return 1
+  [ -z "$raw" ] && return 1
+  printf '%s' "$raw" | tr -d '\n' | base64 -d 2>/dev/null || return 1
+}
+
+# _autocut_iface_break <host> <reusable> <next_commit> <mainsha> — echo 1 if the reusable's
+# `on.workflow_call` interface has a BREAKING change (removed/renamed input|secret, or a
+# newly-required input) between the `next` candidate and main HEAD, else 0. Non-zero return on
+# any fetch error so the caller does not escalate to major on missing interface data.
+_autocut_iface_break() {
+  local host="$1" reusable="$2" old_ref="$3" new_ref="$4" old_c new_c
+  old_c="$(_gh_file_content "$host" "$reusable" "$old_ref")" || return 1
+  new_c="$(_gh_file_content "$host" "$reusable" "$new_ref")" || return 1
+  interface_break "$(workflow_call_iface "$old_c")" "$(workflow_call_iface "$new_c")"
+}
+
+# _autocut_detect_bump <agent> <host> <reusable> <next_commit> <mainsha> — the release bump for
+# an autocut, echoed on stdout (a `::notice::` recording the level + driving signal goes to
+# stderr so it does not pollute the captured value). The `.agents[a].autocut.bump` knob wins as
+# an explicit override (even over a failed signal fetch); otherwise the level is DETECTED from
+# the commit signals and the workflow_call interface diff via decide_bump, failing safe to
+# patch on any signal-fetch error (never auto-major on missing data — a real breaking change
+# can still be forced with the knob).
+_autocut_detect_bump() {
+  local agent="$1" host="$2" reusable="$3" next_commit="$4" mainsha="$5"
+  local override; override="$(_autocut_bump_override "$agent")"
+  if [ -n "$override" ]; then
+    echo "::notice::autocut $agent: bump=$override (registry override .agents[$agent].autocut.bump)" >&2
+    echo "$override"; return 0
+  fi
+  local breaking=0 feat=0 driver="" sigs iface
+  if sigs="$(_autocut_commit_signals "$host" "$reusable" "$next_commit" "$mainsha")"; then
+    read -r breaking feat <<< "$sigs"
+  else
+    echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
+    echo "patch"; return 0
+  fi
+  [ "$breaking" = 1 ] && driver="conventional-commit breaking change"
+  # An interface break escalates to major; a fetch error here is non-fatal (keep commit signals)
+  # and never invents a major from missing data.
+  if iface="$(_autocut_iface_break "$host" "$reusable" "$next_commit" "$mainsha")"; then
+    if [ "$iface" = 1 ]; then breaking=1; driver="workflow_call interface break"; fi
+  fi
+  local bump; bump="$(decide_bump "$breaking" "$feat" "")"
+  if [ -z "$driver" ]; then
+    case "$bump" in
+      minor) driver="feat commit" ;;
+      *)     driver="no breaking/feat signal" ;;
+    esac
+  fi
+  echo "::notice::autocut $agent: detected bump=$bump ($driver)" >&2
+  echo "$bump"
 }
 
 # _next_release_version <agent> <bump> — compute the next release version: bump the highest
@@ -1508,7 +1594,7 @@ _autocut_agent() {
     echo "autocut $agent: reusable unchanged on $host (next candidate up to date) — no cut."
     return 0
   fi
-  bump="$(_autocut_bump "$agent")"
+  bump="$(_autocut_detect_bump "$agent" "$host" "$reusable" "$next_commit" "$mainsha")"
   newver="$(_next_release_version "$agent" "$bump")"
   # Seed/advance the correct `next` line on the major dimension (major-scoped-channels epic
   # #657, F4): a MAJOR bump opens a FRESH `<agent>/v<newmajor>-next` line (a brand-new major
