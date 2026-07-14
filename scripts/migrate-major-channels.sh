@@ -106,7 +106,7 @@ _enrolled_consumers() {
 # .github/workflows/<agent>.yml stub pins the reusable at (e.g. `agent/ring1`), or
 # empty if the stub is missing / does not pin the agent.
 _consumer_pinned_ref() {
-  local repo="$1" agent="$2" response content ref
+  local repo="$1" agent="$2" response content
   response="$(gh api "repos/${repo}/contents/.github/workflows/${agent}.yml" 2>&1)" || {
     if <<< "$response" grep -q "404"; then
       return 0
@@ -194,7 +194,7 @@ emit_repins() {
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
         tier="${ref##*/}"
-        log "repin ${c}: @${ref} -> @${agent}/v${major}-${tier}"
+        log "repin ${c}: ${ref} -> ${agent}/v${major}-${tier}"
       fi
     done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
@@ -217,7 +217,7 @@ retire_bare() {
     while IFS= read -r ref; do
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
-        offenders+=("${c} (@${ref})")
+        offenders+=("${c} (${ref})")
       fi
     done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
