@@ -23,6 +23,8 @@ on:
         description: "Classic PAT owned by donpetry-bot, used to post acknowledgement comments as the bot"
         required: true
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   handle-mention:
     runs-on: ubuntu-latest
