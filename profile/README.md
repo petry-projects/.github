@@ -11,10 +11,13 @@ A collection of open-source tools and experiments spanning terminal UX, market d
 | [TalkTerm](https://github.com/petry-projects/TalkTerm) | Terminal-based communication tool | HTML |
 | [markets](https://github.com/petry-projects/markets) | Market data and analysis tooling (dual-licensed AGPL / Commercial) | HTML |
 | [broodly](https://github.com/petry-projects/broodly) | Field-first beekeeping decision-support app — mobile-first (iOS, Android, web) via Expo + React Native with a Go GraphQL API on GCP | HTML |
+| [broodminder-export](https://github.com/petry-projects/broodminder-export) | Extract all of your data from the BroodMinder API into portable files — resumable, rate-limit-aware. | Python |
 | [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered Social Media Agent for small organizations — enterprise-quality social presence at non-profit pricing | Shell |
 | [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMad Operations Suite — SRE and DevOps agents and workflows for the BMad Method ecosystem | Shell |
 | [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A collection of Google Apps Scripts for personal productivity automation | JavaScript |
-| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, Claude Code skills, and agentic workflow infrastructure | JavaScript |
+| [incubator](https://github.com/petry-projects/incubator) | Product incubator: pre-product idea Discussions, decision briefs/PRD-lite, and disposable POCs. Ideas graduate to their own product repo once a POC proves out. | Shell |
+| [repo-template](https://github.com/petry-projects/repo-template) | Org template repository: one-click scaffold for new petry-projects repos. Files via 'Use this template'; non-file standards via bootstrap. | Shell |
+| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, Claude Code skills, and agentic workflow infrastructure | Shell |
 | [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
 
 ---
