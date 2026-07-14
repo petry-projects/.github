@@ -10,7 +10,7 @@ This policy applies to all repositories in the **petry-projects** organization
 Report privately via **GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)**:
 open the affected repository → **Security** tab → **Report a vulnerability**.
 
-If private reporting is unavailable on a given repo, email **donpetry@gmail.com**
+If private reporting is unavailable on a given repo, email **<donpetry@gmail.com>**
 with the details and "SECURITY" in the subject.
 
 Please include, where possible:
