@@ -166,7 +166,10 @@ jobs:
                 if [[ "$STUCK_POSTED" -eq 0 ]]; then
                   echo "  Conflicting + not review-ready — posting one-time manual-attention notice"
                   STUCK_BODY="$STUCK_SENTINEL"
-                  STUCK_BODY+=$'\n'"**Auto-rebase is skipping this PR.** It has merge conflicts with \`$BASE_BRANCH\` but is not review-ready (draft=$IS_DRAFT, approved=$IS_APPROVED, \`$READY_LABEL\`=$HAS_LABEL), so auto-rebase will not update it — and it cannot be approved while red. Left alone it will not progress."
+                  STUCK_BODY+=$'\n'"**Auto-rebase is skipping this PR.** It has merge conflicts with \`$BASE_BRANCH\`"
+                  STUCK_BODY+=" but is not review-ready (draft=$IS_DRAFT, approved=$IS_APPROVED,"
+                  STUCK_BODY+=" \`$READY_LABEL\`=$HAS_LABEL), so auto-rebase will not update it — and it cannot be"
+                  STUCK_BODY+=" approved while red. Left alone it will not progress."
                   STUCK_BODY+=$'\n\n'"To unblock, do one of:"
                   STUCK_BODY+=$'\n'"- add the \`$READY_LABEL\` label (opts it into auto-rebase without an approval), or"
                   STUCK_BODY+=$'\n'"- get it approved, or"
