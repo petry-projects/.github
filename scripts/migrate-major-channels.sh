@@ -115,8 +115,14 @@ _consumer_pinned_ref() {
     return 1
   }
   content="$(jq -r '.content // empty' <<< "$response" | base64 -d 2>/dev/null)"
-  ref="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | head -1)"
-  printf '%s' "${ref#@}"
+  # Emit EVERY channel ref the stub carries for this agent, one per line, @-stripped:
+  # both the `uses:` pin (`@<agent>/<tier>`) AND the `agent_ref:` input
+  # (`<agent>/<tier>`, no `@`) — the reusable checks out its tooling at agent_ref, so a
+  # bare agent_ref keeps the bare tag load-bearing (retiring it broke dev-lead, #657).
+  {
+    grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | sed 's/^@//'
+    grep -oE "agent_ref: *${agent}/[^[:space:]\"']+" <<< "$content" | sed -E 's/^agent_ref: *//'
+  } | sort -u
 }
 
 # _is_bare_tier_ref <agent> <ref> -> 0 if <ref> is a bare `<agent>/<tier>` pin
@@ -177,15 +183,18 @@ emit_repins() {
   fi
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+    local refs
+    if ! refs="$(_consumer_pinned_ref "$c" "$agent")"; then
       err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
       return 1
     fi
-    [ -z "$ref" ] && continue
-    if _is_bare_tier_ref "$agent" "$ref"; then
-      tier="${ref##*/}"
-      log "repin ${c}: @${ref} -> @${agent}/v${major}-${tier}"
-    fi
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      if _is_bare_tier_ref "$agent" "$ref"; then
+        tier="${ref##*/}"
+        log "repin ${c}: @${ref} -> @${agent}/v${major}-${tier}"
+      fi
+    done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
 }
 
@@ -198,14 +207,17 @@ retire_bare() {
   local -a offenders=()
   while IFS= read -r c; do
     [ -z "$c" ] && continue
-    if ! ref="$(_consumer_pinned_ref "$c" "$agent")"; then
+    local refs
+    if ! refs="$(_consumer_pinned_ref "$c" "$agent")"; then
       err "could not read ${c}/.github/workflows/${agent}.yml — aborting (fail-closed)"
       return 1
     fi
-    [ -z "$ref" ] && continue
-    if _is_bare_tier_ref "$agent" "$ref"; then
-      offenders+=("${c} (@${ref})")
-    fi
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      if _is_bare_tier_ref "$agent" "$ref"; then
+        offenders+=("${c} (@${ref})")
+      fi
+    done <<< "$refs"
   done < <(_enrolled_consumers "$agent")
 
   if [ "${#offenders[@]}" -gt 0 ]; then
