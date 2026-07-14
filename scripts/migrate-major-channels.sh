@@ -119,10 +119,12 @@ _consumer_pinned_ref() {
   # both the `uses:` pin (`@<agent>/<tier>`) AND the `agent_ref:` input
   # (`<agent>/<tier>`, no `@`) — the reusable checks out its tooling at agent_ref, so a
   # bare agent_ref keeps the bare tag load-bearing (retiring it broke dev-lead, #657).
-  {
-    grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | sed 's/^@//'
-    grep -oE "agent_ref: *${agent}/[^[:space:]\"']+" <<< "$content" | sed -E 's/^agent_ref: *//'
-  } | sort -u
+  # `|| true` on each grep: a stub with a `uses:` pin but no `agent_ref:` (the common
+  # case) must NOT fail-close under `set -o pipefail` on the empty match.
+  local uses_refs agentref_refs
+  uses_refs="$(grep -oE "@${agent}/[^[:space:]\"']+" <<< "$content" | sed 's/^@//' || true)"
+  agentref_refs="$(grep -oE "agent_ref: *${agent}/[^[:space:]\"']+" <<< "$content" | sed -E 's/^agent_ref: *//' || true)"
+  printf '%s\n%s\n' "$uses_refs" "$agentref_refs" | grep -v '^[[:space:]]*$' | sort -u || true
 }
 
 # _is_bare_tier_ref <agent> <ref> -> 0 if <ref> is a bare `<agent>/<tier>` pin
