@@ -132,7 +132,7 @@ _enrolled_consumers() {
 # and keeps only files that pin THIS agent's reusable. Fail-closed: a read error that is
 # NOT a 404 returns non-zero so callers abort rather than under-report.
 _consumer_agent_stubs() {
-  local repo="$1" agent="$2" reusable listing wf response content uses_refs agentref_refs r
+  local repo="$1" agent="$2" reusable listing wf response content uses_refs agentref_refs r b64 decoded
   reusable="$(_agent_reusable_file "$agent")"
   local cache_dir="/tmp/migrate-wf-cache-$$/${repo}"
   local listing_file="${cache_dir}/.listing"
@@ -162,7 +162,22 @@ _consumer_agent_stubs() {
         rm -rf "$cache_dir"
         return 1
       }
-      jq -r '.content // empty' <<< "$response" | base64 -d > "${cache_dir}/${wf}" 2>/dev/null || true
+      # Decode the stub content — FAIL-CLOSED. A workflow stub always carries content,
+      # so empty `.content` (the contents-API >1MB case returns content:"", encoding:none)
+      # or a base64 failure means we did NOT actually read the stub. Abort rather than
+      # cache an empty file and silently skip it — otherwise --retire-bare could delete
+      # bare tags for a consumer whose stubs were never verified (the #657 breakage class
+      # this guard exists to prevent). Mirrors the non-404 error handling above.
+      b64="$(jq -r '.content // empty' <<< "$response")"
+      if [ -z "$b64" ]; then
+        echo "Error: empty/oversized content for ${repo}/.github/workflows/${wf} (contents API >1MB?) — aborting (fail-closed)" >&2
+        rm -rf "$cache_dir"; return 1
+      fi
+      if ! decoded="$(base64 -d <<< "$b64" 2>/dev/null)"; then
+        echo "Error: base64 decode failed for ${repo}/.github/workflows/${wf} — aborting (fail-closed)" >&2
+        rm -rf "$cache_dir"; return 1
+      fi
+      printf '%s' "$decoded" > "${cache_dir}/${wf}"
     done < "$listing_file"
   fi
 

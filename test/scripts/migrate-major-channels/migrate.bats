@@ -87,6 +87,9 @@ case "$path" in
       break
     done
     [ -z "$found" ] && exit 1           # unknown file → 404
+    if [ "$uref" = "emptycontent" ]; then # contents-API >1MB case: content:"" (undecodable)
+      printf '{"content":"","encoding":"none"}'; exit 0
+    fi
     if [ "$uref" = "other" ]; then       # calls an unrelated reusable — the scan must skip it
       body="    uses: petry-projects/.github/.github/workflows/bar-reusable.yml@bar/stable"
     else
@@ -244,4 +247,24 @@ STUB
   echo "$output" | grep -qF 'foo-retry.yml'
   # the unrelated ci.yml must never be named as an offender
   ! echo "$output" | grep -qF 'ci.yml'
+}
+
+# ── fail-closed on undecodable content (#708 review finding, blocking) ─────────
+# The contents API returns content:"" (encoding:none) for files >1MB, and a
+# malformed payload fails base64 decode. Either must ABORT the scan — NOT cache an
+# empty file and silently skip the stub, or --retire-bare could delete bare tags
+# for a consumer whose stubs were never actually read (the #657 breakage class).
+
+@test "--retire-bare aborts (fail-closed) when a stub's content can't be decoded" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  # foo.yml is clean v-form, but foo-retry.yml comes back as the >1MB empty-content case.
+  export STUB_SPEC="foo.yml:foo/v2-ring1 foo-retry.yml:emptycontent"
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'fail-closed'
+  echo "$output" | grep -qF 'foo-retry.yml'
+  # must NOT have proceeded to plan any deletion
+  ! echo "$output" | grep -qi 'would delete'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
 }
