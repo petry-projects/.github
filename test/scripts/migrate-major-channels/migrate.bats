@@ -42,12 +42,17 @@ teardown() { rm -rf "$TT_TMP"; }
 #   FOO_MAJOR_REFS  matching-refs output for foo's release tags (empty → no major)
 #   VTAG_EXISTS     if "true", every foo/v<M>-<tier> lookup reports the tag exists
 #   CONSUMER_REF    the ref a single foo.yml stub pins (e.g. foo/ring1 or foo/v2-ring1)
-#   STUB_SPEC       space-separated "<file>:<ref>" tokens describing EVERY stub a
-#                   consumer ships under .github/workflows/ (default: a lone
+#   STUB_SPEC       space-separated "<file>:<uses-ref>[:<agent_ref>]" tokens describing
+#                   EVERY stub a consumer ships under .github/workflows/ (default: a lone
 #                   "foo.yml:${CONSUMER_REF:-foo/ring1}"). The directory listing is
-#                   derived from these files; each file's body pins foo's reusable at
-#                   its <ref>. A <ref> of literal "other" makes the file call an
-#                   unrelated reusable (so the agent scan must ignore it).
+#                   derived from these files; each file's body pins foo's reusable at its
+#                   <uses-ref> and threads <agent_ref> (default: the uses-ref) as the
+#                   agent_ref input — so a stub can be v-form on uses: yet bare on
+#                   agent_ref (#715). A <uses-ref> of literal "other" makes the file call
+#                   an unrelated reusable (so the agent scan must ignore it).
+#   AGENT_REF       overrides the agent_ref for the default single foo.yml stub (used
+#                   with CONSUMER_REF to model a v-form uses: pin + bare agent_ref).
+#   NO_AGENT_REF    if "true", stubs carry a uses: pin but NO agent_ref input.
 install_gh_stub() {
   local bin="${TT_TMP}/bin"; mkdir -p "$bin"
   cat > "$bin/gh" <<'STUB'
@@ -73,13 +78,26 @@ case "$path" in
     for tok in $spec; do printf '%s\n' "${tok%%:*}"; done
     exit 0 ;;
   */contents/.github/workflows/*)       # a single consumer stub, content as JSON
-    wf="${path##*/}"; ref=""
-    for tok in $spec; do [ "${tok%%:*}" = "$wf" ] && { ref="${tok#*:}"; break; }; done
-    [ -z "$ref" ] && exit 1             # unknown file → 404
-    if [ "$ref" = "other" ]; then
+    wf="${path##*/}"; found=""; uref=""; aref=""
+    for tok in $spec; do
+      [ "${tok%%:*}" = "$wf" ] || continue
+      found=1; rest="${tok#*:}"          # <uses-ref>[:<agent_ref>]
+      uref="${rest%%:*}"
+      [ "$rest" != "$uref" ] && aref="${rest#*:}"
+      break
+    done
+    [ -z "$found" ] && exit 1           # unknown file → 404
+    if [ "$uref" = "other" ]; then       # calls an unrelated reusable — the scan must skip it
       body="    uses: petry-projects/.github/.github/workflows/bar-reusable.yml@bar/stable"
     else
-      body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${ref}"
+      body="    uses: petry-projects/.github/.github/workflows/foo-reusable.yml@${uref}"
+      # agent_ref: line — explicit per-file <agent_ref>, else the AGENT_REF knob, else the
+      # uses-ref. NO_AGENT_REF omits it (a stub with a uses: pin but no agent_ref input).
+      if [ "${NO_AGENT_REF:-false}" != "true" ]; then
+        body="${body}
+    with:
+      agent_ref: ${aref:-${AGENT_REF:-$uref}}"
+      fi
     fi
     b64="$(printf '%s' "$body" | base64 | tr -d '\n')"
     printf '{"content":"%s"}' "$b64"
@@ -132,11 +150,34 @@ STUB
 
 @test "--retire-bare proceeds (dry-run) when no enrolled consumer pins bare" {
   export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
-  export CONSUMER_REF="foo/v2-ring1"   # consumerX already migrated to the v-form
+  export CONSUMER_REF="foo/v2-ring1"   # consumerX already migrated to the v-form (uses: AND agent_ref)
   install_gh_stub
   run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
   [ "$status" -eq 0 ]
   echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
+  ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
+}
+
+@test "--retire-bare proceeds when the stub has a v-form uses: pin and NO agent_ref (must not fail-close on the empty grep)" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export CONSUMER_REF="foo/v2-ring1"   # uses: v-form
+  export NO_AGENT_REF="true"            # stub carries no agent_ref: line (the common case)
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qiE 'would delete .*foo/(stable|ring1)'
+  ! echo "$output" | grep -qi 'could not read'   # must NOT fail-close
+}
+
+@test "--retire-bare refuses when uses: is v-form but agent_ref: is still bare (regression: broke dev-lead)" {
+  export FOO_MAJOR_REFS="refs/tags/foo/v2.1.0"
+  export CONSUMER_REF="foo/v2-ring1"   # uses: pin already migrated…
+  export AGENT_REF="foo/ring1"          # …but agent_ref: still bare (the load-bearing checkout ref)
+  install_gh_stub
+  run env GH_TOKEN=x DRY_RUN=true CANARY_RINGS="$RINGS" bash "$SCRIPT" --retire-bare foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'refuse'
+  echo "$output" | grep -qF 'consumerX'
   ! grep -qE 'DELETE .*git/refs' "$GH_CALLS"
 }
 

@@ -116,17 +116,23 @@ _enrolled_consumers() {
   done < <(jq -r --arg a "$agent" '.agents[$a]?.rings[]?.members[]?' "$CANARY_RINGS") | sort -u
 }
 
-# _consumer_agent_stubs <repo> <agent> -> every workflow stub in <repo> that calls
-# <agent>'s reusable, emitted one per line as `<workflow-file><TAB><pinned-ref>`
-# (e.g. `dev-lead-retry.yml\tdev-lead/next`). A consumer may ship more than one
-# stub for the same reusable — the canonical `<agent>.yml` PLUS companions like
-# `<agent>-retry.yml` / `<agent>-health.yml` — and the bare-tier guard/emitter
-# must see them ALL, or a bare companion is silently missed (#707). Reads the
-# consumer's `.github/workflows/` listing, then each candidate file's content, and
-# keeps only files that pin THIS agent's reusable. Fail-closed: a read error that
-# is NOT a 404 returns non-zero so callers abort rather than under-report.
+# _consumer_agent_stubs <repo> <agent> -> every channel ref pinned by every workflow
+# stub in <repo> that calls <agent>'s reusable, emitted one per line as
+# `<workflow-file><TAB><pinned-ref>` (e.g. `dev-lead-retry.yml\tdev-lead/next`). Two
+# dimensions of coverage, both load-bearing for the retire guard:
+#   • MULTI-STUB (#707): a consumer may ship more than one stub for the same reusable
+#     — the canonical `<agent>.yml` PLUS companions like `<agent>-retry.yml` /
+#     `<agent>-health.yml` — and the guard/emitter must see them ALL, or a bare
+#     companion is silently missed.
+#   • MULTI-REF PER STUB (#715): each stub carries BOTH a `uses:` pin (`@<agent>/<tier>`)
+#     AND an `agent_ref:` input (`<agent>/<tier>`, no `@`). The reusable checks out its
+#     tooling at agent_ref, so a bare agent_ref keeps the bare tag load-bearing (retiring
+#     it while agent_ref was bare broke dev-lead, #657). Emit a line for EACH.
+# Reads the consumer's `.github/workflows/` listing, then each candidate file's content,
+# and keeps only files that pin THIS agent's reusable. Fail-closed: a read error that is
+# NOT a 404 returns non-zero so callers abort rather than under-report.
 _consumer_agent_stubs() {
-  local repo="$1" agent="$2" reusable listing wf response content ref
+  local repo="$1" agent="$2" reusable listing wf response content uses_refs agentref_refs r
   reusable="$(_agent_reusable_file "$agent")"
   local cache_dir="/tmp/migrate-wf-cache-$$/${repo}"
   local listing_file="${cache_dir}/.listing"
@@ -168,9 +174,15 @@ _consumer_agent_stubs() {
     [ -f "$cached_file" ] || continue
     content="$(cat "$cached_file")"
     [[ "$content" == *"${reusable}@"* ]] || continue
-    ref="$(grep -oE "@${agent}/[^[:space:]\"']+" "$cached_file" | head -1)"
-    [ -z "$ref" ] && continue
-    printf '%s\t%s\n' "$wf" "${ref#@}"
+    # Both refs the stub carries, @-stripped: the `uses:` pin AND the `agent_ref:` input
+    # (see #715 note above). `|| true` on each grep so a stub with a `uses:` pin but no
+    # `agent_ref:` (the common case) does NOT fail-close under `set -o pipefail`.
+    uses_refs="$(grep -oE "@${agent}/[^[:space:]\"']+" "$cached_file" | sed 's/^@//' || true)"
+    agentref_refs="$(grep -oE "agent_ref: *${agent}/[^[:space:]\"']+" "$cached_file" | sed -E 's/^agent_ref: *//' || true)"
+    while IFS= read -r r; do
+      [ -z "$r" ] && continue
+      printf '%s\t%s\n' "$wf" "$r"
+    done < <(printf '%s\n%s\n' "$uses_refs" "$agentref_refs" | grep -v '^[[:space:]]*$' | sort -u)
   done < "$listing_file"
 }
 
@@ -244,7 +256,7 @@ emit_repins() {
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
         tier="${ref##*/}"
-        log "repin ${c}/${wf}: @${ref} -> @${agent}/v${major}-${tier}"
+        log "repin ${c}/${wf}: ${ref} -> ${agent}/v${major}-${tier}"
       fi
     done <<< "$stubs"
   done < <(_enrolled_consumers "$agent")
@@ -269,7 +281,7 @@ retire_bare() {
     while IFS=$'\t' read -r wf ref || [ -n "$wf" ]; do
       [ -z "$ref" ] && continue
       if _is_bare_tier_ref "$agent" "$ref"; then
-        offenders+=("${c}/${wf} (@${ref})")
+        offenders+=("${c}/${wf} (${ref})")
       fi
     done <<< "$stubs"
   done < <(_enrolled_consumers "$agent")
