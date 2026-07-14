@@ -764,16 +764,17 @@ check_codeowners() {
       raw=$(gh api "repos/$ORG/$repo/contents/$path" 2>&1) && rc=0 || rc=$?
       [ "$rc" -eq 0 ] && break
       # 404 is deterministic — the file is not at this path; stop retrying it.
-      grep -q 'HTTP 404' <<< "$raw" && break
+      # Matches both gh's stderr "(HTTP 404)" and the API's JSON {"status":"404"}.
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] && break
       [ "$i" -lt 3 ] && sleep $((i * 2))
     done
     if [ "$rc" -ne 0 ]; then
       # Non-404 failure (auth/scope/network/5xx/rate-limit) → inconclusive path.
-      grep -q 'HTTP 404' <<< "$raw" || any_unreadable=true
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] || any_unreadable=true
       continue
     fi
     local content decoded
-    content=$(printf '%s' "$raw" | jq -r '.content // ""' 2>/dev/null || echo "")
+    content=$(printf '%s' "$raw" | jq -r '.content? // empty' 2>/dev/null || echo "")
     [ -n "$content" ] || continue
     # The contents API returns the body as base64. Reject anything that does not
     # cleanly decode so an error body can never leak in as owner lines (#370).

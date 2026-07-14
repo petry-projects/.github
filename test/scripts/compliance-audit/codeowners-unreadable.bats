@@ -12,7 +12,7 @@ bats_require_minimum_version 1.5.0
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 
 setup() {
-  TEST_TMP="$(mktemp -d)"
+  TEST_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   MOCK_BIN="$TEST_TMP/bin"
   mkdir -p "$MOCK_BIN"
   # No-op sleep so the retry path runs instantly.
@@ -39,6 +39,13 @@ _run_check() {
 
 @test "all paths 404 (genuinely absent) → missing-codeowners error" {
   run _run_check 'echo "gh: Not Found (HTTP 404)" >&2; exit 1'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"missing-codeowners"* ]]
+  [[ "$output" != *"codeowners-unreadable"* ]]
+}
+
+@test "JSON status:404 body (no HTTP 404 header) → missing-codeowners error" {
+  run _run_check 'printf '"'"'{"message":"Not Found","status":"404"}'"'"'\n; exit 1'
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing-codeowners"* ]]
   [[ "$output" != *"codeowners-unreadable"* ]]
