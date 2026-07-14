@@ -49,8 +49,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
         run: |
           DATE=$(date -u +%Y-%m-%d)
+          # This digest embeds the date in its title, so a fresh issue is created
+          # every day — 32 had accumulated open. Close prior open Org Status
+          # digests before opening today's so only the current snapshot stays open.
+          gh issue list --repo "$GITHUB_REPOSITORY" --label daily-report --state open \
+            --search "Org Status — in:title" --limit 200 \
+            --json number,title \
+            -q '.[] | select(.title | startswith("Org Status — ")) | .number' \
+          | while read -r prev; do
+              [ -n "$prev" ] || continue
+              gh issue close "$prev" --repo "$GITHUB_REPOSITORY" \
+                --comment "Superseded by the newer daily Org Status snapshot." \
+                || echo "::warning::Failed to close issue #$prev — it may remain open until the next daily run."
+            done
           gh issue create \
-            --repo petry-projects/.github \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Org Status — $DATE" \
             --body-file /tmp/report.md \
             --label daily-report
