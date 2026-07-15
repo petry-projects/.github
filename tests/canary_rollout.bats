@@ -1136,6 +1136,54 @@ GHEOF
   [[ "$output" == *"Validation Failed"* ]]
 }
 
+# ── #745: protected channel-tag WRITES go through a repo-scoped write token ──────
+# The owner-wide App token is refused a release-channel-tags ruleset bypass on a PATCH
+# of a protected channel tag (403 "Resource not accessible by integration") — GitHub
+# evaluates an App's bypass/effective-perms differently for an owner-level token than a
+# repo-scoped installation token. The fix mints a SECOND, repo-scoped token
+# (Contents:write on the tag hosts) and routes ONLY the tag writes through it via
+# CANARY_WRITE_TOKEN — the read-only fleet gate keeps the owner-wide GH_TOKEN so the
+# '*' stable-tier enumeration is not regressed. Each stub line records which token was
+# in effect (the GH_TOKEN visible to the `gh` child) for the mutation.
+_token_capture_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export TOKEN_LOG="$STUB_BIN/tokens.log"; : > "$TOKEN_LOG"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+printf '%s\t%s\n' "$*" "${GH_TOKEN:-<unset>}" >> "$TOKEN_LOG"
+echo "1111111111111111111111111111111111111111"
+exit 0
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "_gh_move_tag: routes the PATCH through CANARY_WRITE_TOKEN when set (#745)" {
+  _token_capture_stub
+  run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -eq 0 ]
+  grep -q 'PATCH.*repo-scoped' "$TOKEN_LOG"
+  ! grep -q 'PATCH.*owner-wide' "$TOKEN_LOG"
+}
+
+@test "_gh_move_tag: falls back to the ambient GH_TOKEN when CANARY_WRITE_TOKEN is unset (#745)" {
+  _token_capture_stub
+  run env -u CANARY_WRITE_TOKEN GH_TOKEN=owner-wide bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -eq 0 ]
+  grep -q 'PATCH.*owner-wide' "$TOKEN_LOG"
+}
+
+@test "_gh_create_annotated_tag: routes the object create + ref publish through CANARY_WRITE_TOKEN when set (#745)" {
+  _token_capture_stub
+  run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
+    "source '$ORCH' && _gh_create_annotated_tag petry-projects/.github agent-shield/v2.0.0 12b0075a9c48000000000000000000000000000 'agent-shield release v2.0.0'"
+  [ "$status" -eq 0 ]
+  # both the git/tags object create and the git/refs publish must carry the write token
+  [ "$(grep -c 'repo-scoped' "$TOKEN_LOG")" -ge 2 ]
+  ! grep -q 'owner-wide' "$TOKEN_LOG"
+}
+
 # ── orchestrator: sync-issues — auto-triage held promotions into tracked issues ──
 # A held (BLOCKED) promotion files/updates ONE idempotent issue per agent with the failing-run
 # evidence; a cleared agent's issue auto-closes; the fleet-status table is rendered to the job
