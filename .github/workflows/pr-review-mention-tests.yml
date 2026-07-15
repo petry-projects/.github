@@ -44,14 +44,23 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
+          persist-credentials: false
 
-      - name: Install bats, shellcheck, and jq
-        # yq (mikefarah) is preinstalled on the ubuntu-latest runner image and is
-        # what helpers/setup.bash uses to read the workflow under test.
+      - name: Install bats, shellcheck, jq, and yq
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends bats shellcheck jq
+          # Install a pinned mikefarah/yq so the suite is reproducible and not
+          # dependent on whatever version ships in the runner image.
+          YQ_VERSION="v4.44.3"
+          curl -sSfL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
+            -o /tmp/yq_linux_amd64
+          curl -sSfL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums" \
+            -o /tmp/yq_checksums
+          EXPECTED_SHA="$(grep ' yq_linux_amd64$' /tmp/yq_checksums | awk '{print $1}')"
+          echo "${EXPECTED_SHA}  /tmp/yq_linux_amd64" | sha256sum -c -
+          sudo install -m 755 /tmp/yq_linux_amd64 /usr/local/bin/yq
 
       - name: shellcheck
         run: |

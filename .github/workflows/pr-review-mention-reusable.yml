@@ -40,9 +40,11 @@ jobs:
     # For comment events we also gate at the job level on author_association so
     # that the job (and its secrets) never start for external/untrusted actors.
     #
-    # Recursion guard (#538): the ack comment this job posts contains
-    # '@donpetry-bot' and is posted via a PAT (so it DOES re-trigger workflows,
-    # unlike GITHUB_TOKEN), which without this guard self-loops until GitHub's
+    # Recursion guard (#538): when triggered by a human the ack comment
+    # addresses them as '@<actor>' — but ack comments posted by the bot itself
+    # use a plain login (no leading '@'), so they carry no mention webhook. The
+    # comment is also posted via a PAT (so it DOES re-trigger workflows, unlike
+    # GITHUB_TOKEN), which without this guard self-loops until GitHub's
     # 2500-comment cap (.github-private#860: 1,481 identical acks over ~4.5h).
     # A comment the agent posts about its own work must never re-trigger the
     # agent, so we exclude on TWO independent axes, belt-and-suspenders:
