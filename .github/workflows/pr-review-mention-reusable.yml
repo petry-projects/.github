@@ -40,12 +40,22 @@ jobs:
     # For comment events we also gate at the job level on author_association so
     # that the job (and its secrets) never start for external/untrusted actors.
     #
-    # Recursion guard: the ack comment this job posts itself contains
-    # '@donpetry-bot' and is posted via a PAT (so it DOES re-trigger workflows,
-    # unlike GITHUB_TOKEN), which without this guard self-loops until GitHub's
-    # 2500-comment cap. Skip any comment carrying our own ack marker. We match on
-    # the marker (not the bot actor) because donpetry-bot is also a human account
-    # whose own @-mention review requests must still fire.
+    # Recursion guard (#538): when triggered by a human the ack comment
+    # addresses them as '@<actor>' — but ack comments posted by the bot itself
+    # use a plain login (no leading '@'), so they carry no mention webhook. The
+    # comment is also posted via a PAT (so it DOES re-trigger workflows, unlike
+    # GITHUB_TOKEN), which without this guard self-loops until GitHub's
+    # 2500-comment cap (.github-private#860: 1,481 identical acks over ~4.5h).
+    # A comment the agent posts about its own work must never re-trigger the
+    # agent, so we exclude on TWO independent axes, belt-and-suspenders:
+    #   1. the bot actor — any comment authored by donpetry-bot is skipped, and
+    #   2. the marker — any comment carrying an '<!-- pr-review-agent' marker is
+    #      skipped (broadened from the old 'pr-review-agent mention-ack' string
+    #      so EVERY agent-posted comment, not just the ack, is caught).
+    # The earlier design matched the marker alone to keep donpetry-bot's own
+    # @-mention review requests working, but #860 showed the self-trigger risk
+    # outweighs that convenience; the bot can still request a review via the
+    # review_requested (assign-reviewer) path above.
     if: |
       (github.event_name == 'pull_request' &&
        github.event.requested_reviewer != null &&
@@ -53,7 +63,8 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' &&
        contains(github.event.comment.body, '@donpetry-bot') &&
-       !contains(github.event.comment.body, 'pr-review-agent mention-ack') &&
+       github.event.comment.user.login != 'donpetry-bot' &&
+       !contains(github.event.comment.body, '<!-- pr-review-agent') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
        (github.event_name == 'pull_request_review_comment' ||
         github.event.issue.pull_request != null))
@@ -143,14 +154,32 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
+          # Pass event fields via env, never interpolated inline into the shell
+          # body — a login is attacker-controlled and inline `${{ }}` in a run:
+          # block is a script-injection vector.
+          EVENT_NAME: ${{ github.event_name }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          BOT_LOGIN: donpetry-bot
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            ACTOR="${{ github.event.sender.login }}"
-            MSG="@${ACTOR} assigned me as reviewer — starting a fresh review now. Results will appear in a few minutes."
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            ACTOR="$SENDER_LOGIN"
+            ACTION="assigned me as reviewer — starting a fresh review now. Results will appear in a few minutes."
           else
-            ACTOR="${{ github.event.comment.user.login }}"
-            MSG="@${ACTOR} I'm on it — starting a fresh review now. Results will appear in a few minutes."
+            ACTOR="$COMMENT_USER"
+            ACTION="I'm on it — starting a fresh review now. Results will appear in a few minutes."
           fi
+          # Never emit a literal '@donpetry-bot' (#538): an @-mention of the bot
+          # is itself an issue_comment the mention listener reads as a review
+          # request, self-looping the cascade. When the actor IS the bot, address
+          # it by plain login (no leading '@' → fires no mention webhook); a human
+          # requester still gets a real @-mention ping.
+          if [ "$ACTOR" = "$BOT_LOGIN" ]; then
+            ADDRESSEE="$ACTOR"
+          else
+            ADDRESSEE="@${ACTOR}"
+          fi
+          MSG="${ADDRESSEE} ${ACTION}"
           # Best-effort (issue #594): the ack comment ran unguarded under `bash -e`,
           # so a single PR at GitHub's 2500-comment cap ("Commenting is disabled on
           # issues with more than 2500 comments"), a secondary rate limit, or a
