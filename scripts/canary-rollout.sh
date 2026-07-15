@@ -293,16 +293,29 @@ candidate_cut_date() {
 _run_json() {
   local repo="$1" wf="$2" since="$3" out
   [ -z "$repo" ] || [ "$repo" = '*' ] && { echo '[]'; return 0; }
-  # Fail CLOSED on a genuine gh failure (network / rate-limit / expired creds): returning
-  # an empty [] would read as "zero failures" and could green-light a bad promotion. A
-  # non-zero return halts the run under `set -e` instead. An empty-but-successful result
-  # (no runs) is still a valid [].
-  if ! out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
-      -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
-    echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf)" >&2
-    return 1
-  fi
-  echo "${out:-[]}"
+  # The 4h scheduled tick fans this out across every agent × tier repo, so a single
+  # transient blip (network / secondary rate-limit / brief 5xx) among dozens of reads
+  # used to fail the whole fleet sweep (#738). Retry a non-zero `gh` a bounded number of
+  # times with backoff to ride out a momentary hiccup. A SUSTAINED failure still exhausts
+  # the retries and returns non-zero: fail CLOSED on a genuine outage (returning an empty
+  # [] would read as "zero failures" and could green-light a bad promotion — a non-zero
+  # return halts the run under `set -e` instead). An empty-but-successful result (no runs)
+  # is still a valid []. Tunable via CANARY_GH_RETRIES / CANARY_GH_RETRY_SLEEP (tests set 0).
+  local attempts="${CANARY_GH_RETRIES:-3}" delay="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
+  while :; do
+    if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
+        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
+      echo "${out:-[]}"; return 0
+    fi
+    if [ "$attempt" -ge "$attempts" ]; then
+      echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s)" >&2
+      return 1
+    fi
+    echo "::warning::_run_json: transient failure fetching run list for $repo (workflow=$wf), attempt $attempt/$attempts — retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
 }
 
 # _tier_sample <agent> <since_z> <repo...> — EXECUTED runs (success+failure) on the
