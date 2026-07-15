@@ -54,11 +54,21 @@ jobs:
           # Install a pinned mikefarah/yq so the suite is reproducible and not
           # dependent on whatever version ships in the runner image.
           YQ_VERSION="v4.44.3"
-          curl -sSfL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
+          # --proto-redir '=https' enforces HTTPS on redirects (GitHub releases
+          # redirect to objects.githubusercontent.com).
+          curl -sSfL --proto-redir '=https' \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
             -o /tmp/yq_linux_amd64
-          curl -sSfL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums" \
+          curl -sSfL --proto-redir '=https' \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums" \
             -o /tmp/yq_checksums
-          EXPECTED_SHA="$(grep ' yq_linux_amd64$' /tmp/yq_checksums | awk '{print $1}')"
+          curl -sSfL --proto-redir '=https' \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums_hashes_order" \
+            -o /tmp/yq_checksums_order
+          # The checksums file puts filename first; use checksums_hashes_order to
+          # find the SHA-256 column position dynamically.
+          SHA256_COL=$(( $(grep -n "^SHA-256$" /tmp/yq_checksums_order | cut -d: -f1) + 1 ))
+          EXPECTED_SHA="$(grep "^yq_linux_amd64 " /tmp/yq_checksums | awk -v col="${SHA256_COL}" '{print $col}')"
           echo "${EXPECTED_SHA}  /tmp/yq_linux_amd64" | sha256sum -c -
           sudo install -m 755 /tmp/yq_linux_amd64 /usr/local/bin/yq
 
