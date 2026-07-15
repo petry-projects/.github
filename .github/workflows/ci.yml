@@ -36,7 +36,7 @@ jobs:
       - name: Lint YAML
         if: always()
         run: |
-          pip install --quiet yamllint
+          pip install --quiet --require-hashes --only-binary :all: -r scripts/ci-yamllint-requirements.txt
           yamllint -c <(cat <<'YAMLLINTRC'
           extends: default
           rules:
@@ -101,7 +101,7 @@ jobs:
 
       - name: Run AgentShield
         run: |
-          npx ecc-agentshield scan --path . --format json --min-severity high
+          npx --ignore-scripts ecc-agentshield@1.4.0 scan --path . --format json --min-severity high
 
   secret-scan:
     name: Secret scan (gitleaks)

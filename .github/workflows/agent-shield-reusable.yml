@@ -57,7 +57,7 @@ jobs:
           AS_VERSION: ${{ inputs.agentshield-version }}
           AS_SEVERITY: ${{ inputs.min-severity }}
         run: |
-          npx "ecc-agentshield@${AS_VERSION}" scan \
+          npx --ignore-scripts "ecc-agentshield@${AS_VERSION}" scan \
             --path . \
             --min-severity "${AS_SEVERITY}" \
             --format terminal

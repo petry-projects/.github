@@ -148,7 +148,7 @@ jobs:
           fetch-depth: 1
 
       - name: Install Python jsonschema
-        run: pip install --quiet 'jsonschema>=4'
+        run: 'pip install --quiet --require-hashes --only-binary :all: -r .feature-ideation-tooling/scripts/feature-ideation-requirements.txt'
 
       - name: Collect project signals
         env:

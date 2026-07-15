@@ -229,7 +229,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install pip-audit
-        run: pip install pip-audit==2.9.0
+        run: 'pip install --require-hashes --only-binary :all: -r scripts/pip-audit-requirements.txt'
 
       - name: Audit Python dependencies
         run: |
