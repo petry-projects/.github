@@ -114,13 +114,30 @@ _gh_tag_commit() {
 # `git push --force` is not (013 on protected channel tags) and also fails with
 # "nonexistent object" for a cross-repo host commit absent from this checkout (#1054).
 # Tries PATCH (existing ref) then falls back to POST (create the ref).
+# The operative PATCH must NOT swallow stderr (#743): a promotion-due run was failing with
+# only the generic caller-side "failed to move" because both calls discarded the API error,
+# hiding the real GitHub rejection (ruleset/bypass/permission). Capture the response and
+# surface it as a single-line ::error::. The POST create-ref fallback is taken ONLY when the
+# PATCH is a genuine 404/"not found" (the ref does not yet exist) — for any OTHER failure a
+# POST would 422 "Reference already exists" and MASK the real rejection, so we stop and report.
 _gh_move_tag() {
   [ $# -lt 3 ] && return 1
-  local repo="$1" tag="$2" sha="$3"
-  gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
-      -f sha="$sha" -F force=true >/dev/null 2>&1 && return 0
-  gh api -X POST "repos/$repo/git/refs" \
-      -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null 2>&1
+  local repo="$1" tag="$2" sha="$3" out rc
+  out="$(gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
+      -f sha="$sha" -F force=true 2>&1)" && return 0
+  rc=$?
+  # Only a genuinely-absent ref (404) warrants creating it; every other PATCH failure is a
+  # real rejection to surface, not to paper over with a create.
+  local low="${out,,}"
+  if [[ "$low" != *"not found"* && "$low" != *"http 404"* ]]; then
+    echo "::error::_gh_move_tag: could not move refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
+    return "$rc"
+  fi
+  out="$(gh api -X POST "repos/$repo/git/refs" \
+      -f ref="refs/tags/$tag" -f sha="$sha" 2>&1)" && return 0
+  rc=$?
+  echo "::error::_gh_move_tag: could not create refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
+  return "$rc"
 }
 
 # _gh_create_annotated_tag <repo> <tag> <sha> <message> — create the immutable annotated

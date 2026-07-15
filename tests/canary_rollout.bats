@@ -1051,6 +1051,75 @@ GITEOF
   [ ! -f "$MOVE_LOG" ]
 }
 
+# ── _gh_move_tag: surface the underlying API error, don't swallow it (#743) ─────
+# A promotion-due run was failing with only a generic caller-side "failed to move" because
+# BOTH gh api calls discarded stderr (`>/dev/null 2>&1`). The mover must now echo the real
+# API rejection (::error::) on failure, and only fall back to the POST create-ref path for a
+# GENUINE 404/"not found" — a non-404 rejection must not be masked by the POST then 422-ing
+# "Reference already exists".
+_move_tag_stub() {
+  # $1 = PATCH behavior: ok | reject (non-404 422) | absent (404 not found)
+  # $2 = POST  behavior: ok | reject   (only reached on the 404 fallback path)
+  local patch="$1" post="${2:-ok}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALL_LOG="$STUB_BIN/calls.log"; : > "$CALL_LOG"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"-X PATCH"*"git/refs/tags/"*)
+    echo "PATCH" >> "$CALL_LOG"
+    case "$patch" in
+      ok)     echo '{"ref":"refs/tags/x"}'; exit 0 ;;
+      reject) echo "gh: Tag agent-shield/v2-ring0 update was blocked by ruleset release-channel-tags (HTTP 422)" >&2; exit 1 ;;
+      absent) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    esac ;;
+  *"-X POST"*"git/refs"*)
+    echo "POST" >> "$CALL_LOG"
+    case "$post" in
+      ok)     echo '{"ref":"refs/tags/x"}'; exit 0 ;;
+      reject) echo "gh: Validation Failed: sha is not a valid commit (HTTP 422)" >&2; exit 1 ;;
+    esac ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "_gh_move_tag: surfaces the API rejection and does NOT fall back to POST on a non-404 PATCH failure (#743)" {
+  _move_tag_stub reject
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::"* ]]
+  [[ "$output" == *"blocked by ruleset release-channel-tags"* ]]
+  grep -q '^PATCH$' "$CALL_LOG"
+  ! grep -q '^POST$' "$CALL_LOG"
+}
+
+@test "_gh_move_tag: a successful PATCH moves the tag and never falls back to POST (#743)" {
+  _move_tag_stub ok
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -eq 0 ]
+  grep -q '^PATCH$' "$CALL_LOG"
+  ! grep -q '^POST$' "$CALL_LOG"
+  [[ "$output" != *"::error::"* ]]
+}
+
+@test "_gh_move_tag: falls back to POST (create) when the ref is genuinely absent (404) (#743)" {
+  _move_tag_stub absent ok
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -eq 0 ]
+  grep -q '^PATCH$' "$CALL_LOG"
+  grep -q '^POST$' "$CALL_LOG"
+}
+
+@test "_gh_move_tag: surfaces the create error when the 404 POST fallback also fails (#743)" {
+  _move_tag_stub absent reject
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::"* ]]
+  [[ "$output" == *"Validation Failed"* ]]
+}
+
 # ── orchestrator: sync-issues — auto-triage held promotions into tracked issues ──
 # A held (BLOCKED) promotion files/updates ONE idempotent issue per agent with the failing-run
 # evidence; a cleared agent's issue auto-closes; the fleet-status table is rendered to the job
