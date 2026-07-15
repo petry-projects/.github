@@ -897,8 +897,10 @@ cmd_evaluate() {
         echo "::warning::triage=SUSPECT — failure matches a suspect class (possibly candidate-caused). BLOCKS + needs a human; see the blocker issue's discriminating question, then promote --override if unrelated or roll back if a real regression."
       elif [ "$downgrade" = "DOWNGRADE" ]; then
         echo "::notice::triage=PRE_EXISTING (auto-downgraded from SUSPECT, #668 increment 6) — the candidate's suspect-class failure rate (${dg_cand_rate}‰ over ${dg_cand_sample} runs) is no worse than the prior version's (${dg_base_rate}‰ over ${dg_base_sample} runs), so the timeout is environmental, not a candidate regression. Report only; the SUSPECT hold auto-cleared (no human needed). Advances with --allow-pre-existing once dwell/sample pass."
+      elif [ "$triage" = "PRE_EXISTING" ]; then
+        echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback. Advances with --allow-pre-existing (or control.allow_pre_existing in the registry) once dwell/sample pass."
       else
-        echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback, do NOT advance."
+        echo "::warning::state=BLOCKED (indeterminate) — could not resolve the candidate's cut date, so the gate fails closed and holds (not a detected failure; cum_fail=$cum_fail). Clears once the candidate's cut date/tag is resolvable."
       fi
     elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
       echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
@@ -1185,8 +1187,14 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
 > |---|---|---|
 > | candidate | \`$dg_cand_rate\` | $dg_cand_sample |
 > | baseline | \`$dg_base_rate\` | $dg_base_sample |"
-  else
+  elif [ "$triage" = "PRE_EXISTING" ]; then
     note="> ⚠️ **PRE_EXISTING** — the failure is pre-existing/environmental (reusable byte-identical to the prior channel). Report only; the gate will not roll back or advance. Fix-forward, and the armed timer auto-promotes once clean."
+  else
+    # Fail-closed hold (_frontier_state: cut_z empty) — state=BLOCKED but triage="-" and cum_fail=0.
+    # There is no detected failure; the gate could not resolve the candidate's cut date, so it
+    # holds rather than evaluate an unbounded window. Do NOT claim PRE_EXISTING here (there is
+    # nothing environmental to report) — say what actually happened.
+    note="> ℹ️ **INDETERMINATE (gate held — candidate cut date unresolved)** — the gate could not resolve this candidate's cut date, so it fails closed and holds the promotion instead of evaluating an unbounded run history. This is **not** a detected run failure (cumulative failures: $cum_fail). It usually clears on its own once the candidate's release tag/cut date becomes resolvable; if it persists, verify that candidate \`${cand:0:12}\` is a tagged, resolvable commit on \`$host\`."
   fi
   cat <<EOF
 <!-- canary-blocker:$agent -->
