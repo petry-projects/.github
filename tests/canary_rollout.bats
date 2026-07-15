@@ -460,6 +460,22 @@ SEOF
   done < "$SLEEP_LOG"
 }
 
+@test "_run_json: empty repo returns [] without calling gh" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "gh should not be called" >&2\nexit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _run_json '' some-wf '2026-01-01T00:00:00Z'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "_run_json: wildcard repo returns [] without calling gh" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "gh should not be called" >&2\nexit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _run_json '*' some-wf '2026-01-01T00:00:00Z'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]

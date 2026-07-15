@@ -309,7 +309,7 @@ candidate_cut_date() {
 # repo since the given Zulu timestamp. Empty repo/wildcard → []. Never fails the caller.
 _run_json() {
   local repo="$1" wf="$2" since="$3" out
-  [ -z "$repo" ] || [ "$repo" = '*' ] && { echo '[]'; return 0; }
+  if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
   # The 4h scheduled tick fans this out across every agent × tier repo, so a single
   # transient blip (network / secondary rate-limit / brief 5xx) among dozens of reads
   # used to fail the whole fleet sweep (#738). Retry a non-zero `gh` a bounded number of
