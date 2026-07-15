@@ -384,6 +384,82 @@ GHEOF
   [[ "$output" == *"failed to fetch run list"* ]]
 }
 
+@test "_run_json: empty CANARY_GH_RETRIES falls back to safe default (3)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails2"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: error" >&2; exit 1; fi
+echo '[{"conclusion":"success","createdAt":"2026-01-01T00:00:00Z","databaseId":1,"workflowName":"X"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES="" \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"conclusion":"success"'* ]]
+}
+
+@test "_run_json: non-integer CANARY_GH_RETRIES falls back to safe default (3)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails3"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: error" >&2; exit 1; fi
+echo '[{"conclusion":"success","createdAt":"2026-01-01T00:00:00Z","databaseId":1,"workflowName":"X"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES="not-a-number" \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"conclusion":"success"'* ]]
+}
+
+@test "_run_json: empty CANARY_GH_RETRY_SLEEP falls back to safe default (2)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "[{\"conclusion\":\"success\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"databaseId\":1,\"workflowName\":\"X\"}]"\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/sleep" <<'SEOF'
+#!/usr/bin/env bash
+case "$1" in ''|*[!0-9]*) echo "bad sleep arg: $1" >&2; exit 1 ;; esac
+exit 0
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  run env CANARY_GH_RETRY_SLEEP="" CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+}
+
+@test "_run_json: non-integer CANARY_GH_RETRY_SLEEP falls back to safe default (2)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "[{\"conclusion\":\"success\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"databaseId\":1,\"workflowName\":\"X\"}]"\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/sleep" <<'SEOF'
+#!/usr/bin/env bash
+case "$1" in ''|*[!0-9]*) echo "bad sleep arg: $1" >&2; exit 1 ;; esac
+exit 0
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  run env CANARY_GH_RETRY_SLEEP="not-a-number" CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+}
+
+@test "_run_json: exponential backoff delay is capped at 30 seconds" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  printf '#!/usr/bin/env bash\necho "gh: down" >&2\nexit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=16 CANARY_GH_RETRIES=5 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''" || true
+  while IFS= read -r val; do
+    [ "$val" -le 30 ] || { echo "sleep called with $val > 30"; false; }
+  done < "$SLEEP_LOG"
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]

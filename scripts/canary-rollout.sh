@@ -302,6 +302,8 @@ _run_json() {
   # return halts the run under `set -e` instead). An empty-but-successful result (no runs)
   # is still a valid []. Tunable via CANARY_GH_RETRIES / CANARY_GH_RETRY_SLEEP (tests set 0).
   local attempts="${CANARY_GH_RETRIES:-3}" delay="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
+  case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
+  case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
         -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
@@ -315,6 +317,7 @@ _run_json() {
     sleep "$delay"
     attempt=$((attempt + 1))
     delay=$((delay * 2))
+    [ "$delay" -gt 30 ] && delay=30
   done
 }
 
