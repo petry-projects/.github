@@ -2041,6 +2041,41 @@ GHEOF
   [[ "$output" == *"override"* ]]   # the guidance names the fast path when unrelated
 }
 
+@test "_blocker_body: PRE_EXISTING triage still renders the genuine pre-existing banner" {
+  # Regression guard: a real PRE_EXISTING triage must keep its banner + fix-forward note.
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _blocker_body dev-lead 'next->ring0' cccccccccccc 1 0 PRE_EXISTING petry-projects/.github-private '_(evidence)_'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PRE_EXISTING"* ]]
+  [[ "$output" == *"byte-identical"* ]]
+}
+
+@test "_blocker_body: indeterminate triage (cut date unresolved) does NOT claim PRE_EXISTING" {
+  # Fail-closed path (_frontier_state, cut_z empty): state=BLOCKED, triage="-", cum_fail=0.
+  # The body must not falsely assert an environmental/byte-identical failure — there is none.
+  run env CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _blocker_body ci-failure-analyst 'next->ring0' df3b7d462460 0 0 - petry-projects/.github-private '_(no candidate cut date resolved — cannot list failing runs)_'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+  [[ "$output" != *"byte-identical"* ]]
+  # It must instead surface the honest reason: an unresolved cut date holding the gate.
+  [[ "$output" == *"cut date"* ]]
+  [[ "$output" == *"INDETERMINATE"* ]]
+}
+
+@test "orchestrator: evaluate warning for a fail-closed frontier does NOT claim PRE_EXISTING" {
+  # cmd_evaluate's BLOCKED branch must distinguish triage="-" (cut date unresolved) from a real
+  # PRE_EXISTING failure, so the job-log warning is not misleading.
+  run env CANARY_RINGS="$RINGS" bash -c '
+    source "'"$ORCH"'"
+    _frontier_state() { echo "df3b7d462460 ring0 next->ring0 BLOCKED 0 4 0 3 0 0 0 - - - 0 0 0 0"; }
+    cmd_evaluate ci-failure-analyst'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"PRE_EXISTING"* ]]
+  [[ "$output" == *"cut date"* ]]
+}
+
 # ── sync-issues needs-human label routing for SUSPECT triage ─────────────────────────
 # The create path applies needs-human for both REGRESSION and SUSPECT (fixed in 4cd379b).
 # The update path must match: when an existing open blocker is refreshed with SUSPECT
