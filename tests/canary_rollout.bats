@@ -384,6 +384,43 @@ GHEOF
   [[ "$output" == *"failed to fetch run list"* ]]
 }
 
+# A tier repo that has NEVER run a given agent's workflow is not a fetch failure:
+# `gh run list --workflow <name>` exits non-zero with "could not find any workflows
+# named <name>". That repo legitimately has zero runs of this workflow, so _run_json
+# must return [] immediately — NOT retry and fail CLOSED. Before #747 this indistinct
+# non-zero exit exhausted the retries and failed the whole scheduled fleet sweep.
+@test "_run_json: workflow-not-present in a tier repo returns [] (no fail-closed) (#747)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "could not find any workflows named Some Workflow" >&2
+exit 1
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo 'Some Workflow' ''"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "_run_json: workflow-not-present returns immediately without retrying (#747)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  CALL_LOG="$BATS_TEST_TMPDIR/gh-calls"; export CALL_LOG
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo x >> "$CALL_LOG"
+echo "could not find any workflows named Some Workflow" >&2
+exit 1
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo 'Some Workflow' ''"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$CALL_LOG")" -eq 1 ]
+  [[ "$output" != *"retrying"* ]]
+  [[ "$output" != *"failed to fetch run list"* ]]
+}
+
 @test "_run_json: empty CANARY_GH_RETRIES falls back to safe default (3)" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails2"; echo 1 > "$RJ_FAILS_LEFT"
