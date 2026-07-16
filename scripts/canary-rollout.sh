@@ -322,6 +322,7 @@ _run_json() {
   case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
   case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
   local errf; errf="$(mktemp "${TMPDIR:-/tmp}/canary-rollout.XXXXXX")"
+  # shellcheck disable=SC2064  # intentional: $errf is local, must expand now (at trap-set time)
   trap "rm -f \"$errf\"" EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
