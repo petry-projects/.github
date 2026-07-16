@@ -321,12 +321,23 @@ _run_json() {
   local attempts="${CANARY_GH_RETRIES:-3}" delay="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
   case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
+  local errf; errf="$(mktemp)"
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
-        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
-      echo "${out:-[]}"; return 0
+        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errf")"; then
+      rm -f "$errf"; echo "${out:-[]}"; return 0
+    fi
+    # A tier repo that has NEVER run this agent's workflow is not a fetch failure: gh exits
+    # non-zero with "could not find any workflows named <wf>". That repo legitimately has
+    # zero runs of this workflow, so return [] — NOT a fail-closed error. Otherwise the
+    # scheduled fleet sweep dies whenever one tier repo has never run one agent's workflow
+    # (#747). This is a TRUE empty (the repo has no such runs), not an outage masking real
+    # failures, so it cannot green-light a bad promotion.
+    if grep -qi 'could not find any workflows named' "$errf"; then
+      rm -f "$errf"; echo '[]'; return 0
     fi
     if [ "$attempt" -ge "$attempts" ]; then
+      rm -f "$errf"
       echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s)" >&2
       return 1
     fi
