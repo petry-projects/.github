@@ -321,7 +321,8 @@ _run_json() {
   local attempts="${CANARY_GH_RETRIES:-3}" delay="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
   case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
-  local errf; errf="$(mktemp)"
+  local errf; errf="$(mktemp "${TMPDIR:-/tmp}/canary-rollout.XXXXXX")"
+  trap "rm -f \"$errf\"" EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
         -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errf")"; then
