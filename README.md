@@ -36,9 +36,9 @@ Scheduled workflows in this repo post audit reports and status digests as issues
 
 | Workflow | Purpose |
 |----------|---------|
-| [`compliance-audit-and-improvement.yml`](.github/workflows/compliance-audit-and-improvement.yml) | Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues |
-| [`daily-org-status.yml`](.github/workflows/daily-org-status.yml) | Daily "Org Status" digest posted as an issue for maintainers |
-| [`org-scorecard.yml`](.github/workflows/org-scorecard.yml) | Weekly OpenSSF Scorecard security-posture review across public repos; findings tracked as issues |
+| [`compliance-audit-and-improvement.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/compliance-audit-and-improvement.yml) | Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues |
+| [`daily-org-status.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/daily-org-status.yml) | Daily "Org Status" digest posted as an issue for maintainers |
+| [`org-scorecard.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml) | Weekly OpenSSF Scorecard security-posture review across public repos; findings tracked as issues |
 
 ## Related
 
