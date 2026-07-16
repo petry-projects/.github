@@ -1194,7 +1194,9 @@ GHEOF
 # code bug). The diagnostic must run ONLY on a 403 (not on the #743 non-404 422 rejection),
 # must still surface the ::error:: + return non-zero, and must not fall back to POST.
 _diag_403_stub() {
-  local scope="${1:-selected}"   # selected (repo-scoped) | all (owner-wide)
+  local scope="${1:-selected}"   # selected (repo-scoped, low count) | all (owner-wide, high count)
+  local install_count
+  if [ "$scope" = all ]; then install_count=50; else install_count=2; fi
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export CALL_LOG="$STUB_BIN/calls.log"; : > "$CALL_LOG"
   export TOKEN_LOG="$STUB_BIN/tokens.log"; : > "$TOKEN_LOG"
@@ -1217,7 +1219,7 @@ case "\$*" in
     exit 0 ;;
   *"installation/repositories"*)
     echo "DIAG_INSTALL" >> "$CALL_LOG"
-    echo '{"repository_selection":"$scope","total_count":2}'
+    echo '{"total_count":$install_count}'
     exit 0 ;;
   *) echo "{}" ;;
 esac
@@ -1232,7 +1234,7 @@ GHEOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"effective-permission diagnostic"* ]]
   [[ "$output" == *"X-Accepted-GitHub-Permissions: contents=write"* ]]
-  [[ "$output" == *"REPO-SCOPED"* ]]
+  [[ "$output" == *"total_count=2"* ]]
   [[ "$output" == *"::error::"* ]]
   grep -q '^PATCH$' "$CALL_LOG"
   grep -q '^DIAG_HEADERS$' "$CALL_LOG"
@@ -1248,12 +1250,12 @@ GHEOF
   ! grep -q 'installation/repositories.*owner-wide' "$TOKEN_LOG"
 }
 
-@test "_gh_move_tag: the 403 diagnostic reports OWNER-WIDE when repository_selection is all (#749)" {
+@test "_gh_move_tag: the 403 diagnostic reports the higher total_count for an owner-wide installation token (#749)" {
   _diag_403_stub all
   run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
     "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
-  [[ "$output" == *"OWNER-WIDE"* ]]
-  [[ "$output" != *"REPO-SCOPED"* ]]
+  [[ "$output" == *"total_count=50"* ]]
+  [[ "$output" != *"total_count=2"* ]]
 }
 
 @test "_gh_move_tag: a non-403 (422 ruleset) failure does NOT trigger the 403 diagnostic (#749)" {
@@ -1286,7 +1288,7 @@ GHEOF
   [[ "$output" == *"effective-permission diagnostic"* ]]
   # Must not print a jq error about parse failure
   [[ "$output" != *"parse error"* ]]
-  [[ "$output" == *"token scope UNKNOWN"* ]]
+  [[ "$output" == *"total_count=<unreadable>"* ]]
 }
 
 @test "_gh_403_diag: installation/repositories response missing keys does not error (#749)" {
@@ -1300,7 +1302,7 @@ case "$*" in
   *"-i "*"repos/"*)
     printf 'HTTP/2.0 403 Forbidden\r\nX-Accepted-GitHub-Permissions: contents=write\r\n\r\n{}'
     exit 0 ;;
-  *"installation/repositories"*) echo '{}' ;;   # valid JSON but no repository_selection or total_count
+  *"installation/repositories"*) echo '{}' ;;   # valid JSON but no total_count
   *) echo "{}" ;;
 esac
 GHEOF
@@ -1310,7 +1312,7 @@ GHEOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"effective-permission diagnostic"* ]]
   [[ "$output" != *"parse error"* ]]
-  [[ "$output" == *"token scope UNKNOWN"* ]]
+  [[ "$output" == *"total_count=<unreadable>"* ]]
 }
 
 # ── orchestrator: sync-issues — auto-triage held promotions into tracked issues ──
