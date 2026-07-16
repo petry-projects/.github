@@ -87,8 +87,9 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
 - **[OpenSSF Scorecard](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml)**
   — Weekly security-posture review across public repos; findings tracked as issues.
 
-- **Ruleset Remediation Runbook** — Snapshot every ruleset for rollback insurance; bypass actor
-  management; legacy ruleset migration; verify and rollback procedures.
+- **[Ruleset Remediation Runbook](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md)** — Snapshot every ruleset
+  for rollback insurance; bypass actor management; legacy ruleset migration; verify and rollback
+  procedures.
 
 ---
 
@@ -96,10 +97,12 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
 
 Scheduled reports and dashboards post as issues or run summaries for org maintainers:
 
-- **Compliance audit & improvement** — Weekly org standards compliance audit + runtime health survey,
-  with per-finding remediation issues.
-- **Daily org status** — Daily "Org Status" digest posted as an issue for maintainers.
-- **OpenSSF Scorecard** — Weekly security-posture review across public repos; findings tracked as issues.
+- **[Compliance audit & improvement](https://github.com/petry-projects/.github/blob/main/.github/workflows/compliance-audit-and-improvement.yml)**
+  — Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues.
+- **[Daily org status](https://github.com/petry-projects/.github/blob/main/.github/workflows/daily-org-status.yml)**
+  — Daily "Org Status" digest posted as an issue for maintainers.
+- **[OpenSSF Scorecard](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml)**
+  — Weekly security-posture review across public repos; findings tracked as issues.
 
 ---
 
