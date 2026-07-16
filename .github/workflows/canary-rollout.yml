@@ -122,6 +122,35 @@ jobs:
             exit 1
           fi
 
+      # Mint a SECOND, repo-scoped installation token for the tag WRITES only (#745). The
+      # owner-wide token above is refused the release-channel-tags ruleset bypass on a
+      # protected channel-tag PATCH — 403 "Resource not accessible by integration": GitHub
+      # evaluates an App's bypass/effective-permissions differently for an owner-level token
+      # than for a repo-scoped installation token. This token is scoped to just the two
+      # tag-host repos (every agent's registry host is .github or .github-private) with an
+      # explicit Contents:write, and is passed to the engine as CANARY_WRITE_TOKEN so ONLY
+      # _gh_move_tag / _gh_create_annotated_tag use it — the fleet gate's cross-repo
+      # run-history reads keep the owner-wide token (don't regress the '*' stable-tier
+      # enumeration). Not a hard requirement to verify separately: if the write token is
+      # empty the engine falls back to the owner-wide token and the move re-fails loudly.
+      # Confirmed by #744's un-suppressed error (run 29435711407): the owner-wide-token
+      # PATCH .../git/refs/tags/<channel-tag> returned 403 "Resource not accessible by
+      # integration" while an admin-token PATCH of the same ref succeeded.
+      - name: Mint repo-scoped write token (tag moves)
+        id: write-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_MANAGER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_MANAGER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          # Scope to exactly the tag-host repos (NOT owner-wide) and request Contents:write
+          # explicitly — this is the combination that carries the ruleset bypass for a
+          # protected channel-tag UPDATE.
+          repositories: |
+            .github
+            .github-private
+          permission-contents: write
+
       - name: Checkout (with tags)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -142,6 +171,9 @@ jobs:
         if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Repo-scoped write token for the inline cut's tag writes (_gh_create_annotated_tag
+          # + _gh_move_tag). The owner-wide GH_TOKEN above stays the credential for reads (#745).
+          CANARY_WRITE_TOKEN: ${{ steps.write-token.outputs.token }}
           CANARY_AUTO_CUT: ${{ vars.CANARY_AUTO_CUT }}
         run: |
           set -uo pipefail
@@ -171,6 +203,9 @@ jobs:
           # The inline autocut cut (create+move tags on each agent's host) and the gate's
           # cross-repo run-history reads both authenticate with the App token.
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Repo-scoped write token used ONLY for the channel-tag PATCH/POST in _gh_move_tag /
+          # _gh_create_annotated_tag (promote-all's real moves). Reads/gate keep GH_TOKEN (#745).
+          CANARY_WRITE_TOKEN: ${{ steps.write-token.outputs.token }}
           # One TSV line per real promotion (agent, ring, sha, owning-repo) so the deployment
           # step records a deployment for EVERY move in a promote-all run, on the right host.
           CANARY_PROMOTIONS_LOG: ${{ runner.temp }}/promotions.tsv

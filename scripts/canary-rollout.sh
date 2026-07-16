@@ -107,6 +107,24 @@ _gh_tag_commit() {
   fi
 }
 
+# _gh_write <gh-args…> — run a `gh` mutation with the repo-scoped WRITE token when one is
+# provided (CANARY_WRITE_TOKEN), else the ambient GH_TOKEN. The owner-wide token the workflow
+# mints for the fleet gate's cross-repo run-history reads is refused a release-channel-tags
+# ruleset bypass on a protected channel-tag PATCH — 403 "Resource not accessible by
+# integration" (#745): GitHub evaluates an App's bypass/effective-permissions differently for
+# an owner-level token than for a repo-scoped installation token. So tag writes are routed
+# through a SECOND token minted repo-scoped (repositories: .github + .github-private) with an
+# explicit Contents:write, while reads keep the owner-wide token (don't regress the '*'
+# stable-tier enumeration). Absent CANARY_WRITE_TOKEN (e.g. unit tests / local runs) it is a
+# transparent pass-through, so every existing GH_TOKEN-only path is unchanged.
+_gh_write() {
+  if [ -n "${CANARY_WRITE_TOKEN:-}" ]; then
+    GH_TOKEN="$CANARY_WRITE_TOKEN" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 # _gh_move_tag <repo> <tag> <sha> — force-move (or create) the lightweight ref
 # refs/tags/<tag> on <repo> to <sha> via the GitHub API. THE channel-tag mover for every
 # agent (promote + rollback), this-repo and cross-repo alike (#1076): the API path is
@@ -123,7 +141,7 @@ _gh_tag_commit() {
 _gh_move_tag() {
   [ $# -lt 3 ] && return 1
   local repo="$1" tag="$2" sha="$3" out rc
-  out="$(gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
+  out="$(_gh_write api -X PATCH "repos/$repo/git/refs/tags/$tag" \
       -f sha="$sha" -F force=true 2>&1)" && return 0
   rc=$?
   # Only a genuinely-absent ref (404) warrants creating it; every other PATCH failure is a
@@ -133,7 +151,7 @@ _gh_move_tag() {
     echo "::error::_gh_move_tag: could not move refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
     return "$rc"
   fi
-  out="$(gh api -X POST "repos/$repo/git/refs" \
+  out="$(_gh_write api -X POST "repos/$repo/git/refs" \
       -f ref="refs/tags/$tag" -f sha="$sha" 2>&1)" && return 0
   rc=$?
   echo "::error::_gh_move_tag: could not create refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
@@ -152,14 +170,14 @@ _gh_move_tag() {
 _gh_create_annotated_tag() {
   [ $# -lt 4 ] && return 1
   local repo="$1" tag="$2" sha="$3" message="$4" obj
-  obj="$(gh api -X POST "repos/$repo/git/tags" \
+  obj="$(_gh_write api -X POST "repos/$repo/git/tags" \
       -f tag="$tag" -f message="$message" -f object="$sha" -f type=commit \
       --jq '.sha // empty')"
   if [ $? -ne 0 ] || [ -z "$obj" ]; then
       echo "::error::_gh_create_annotated_tag: could not create the annotated release tag on $repo or read back its object SHA" >&2
       return 1
   fi
-  gh api -X POST "repos/$repo/git/refs" \
+  _gh_write api -X POST "repos/$repo/git/refs" \
       -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null 2>&1 || {
       echo "::error::_gh_create_annotated_tag: created tag object $obj on $repo but could not publish ref refs/tags/$tag" >&2
       return 1
