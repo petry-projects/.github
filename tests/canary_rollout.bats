@@ -1264,6 +1264,55 @@ GHEOF
   [[ "$output" == *"::error::"* ]]
 }
 
+@test "_gh_403_diag: empty installation/repositories response does not cause a jq parse error (#749)" {
+  # Stub: PATCH → 403; installation/repositories → empty (API failure)
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"-X PATCH"*"git/refs/tags/"*)
+    echo '{"message":"Resource not accessible by integration","status":"403"}' >&2; exit 1 ;;
+  *"-i "*"repos/"*)
+    printf 'HTTP/2.0 403 Forbidden\r\nX-Accepted-GitHub-Permissions: contents=write\r\n\r\n{}'
+    exit 0 ;;
+  *"installation/repositories"*) exit 1 ;;   # API failure → empty $inst
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GH_TOKEN=tok bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"effective-permission diagnostic"* ]]
+  # Must not print a jq error about parse failure
+  [[ "$output" != *"parse error"* ]]
+  [[ "$output" == *"token scope UNKNOWN"* ]]
+}
+
+@test "_gh_403_diag: installation/repositories response missing keys does not error (#749)" {
+  # Stub: installation/repositories returns valid JSON but without the expected keys
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"-X PATCH"*"git/refs/tags/"*)
+    echo '{"message":"Resource not accessible by integration","status":"403"}' >&2; exit 1 ;;
+  *"-i "*"repos/"*)
+    printf 'HTTP/2.0 403 Forbidden\r\nX-Accepted-GitHub-Permissions: contents=write\r\n\r\n{}'
+    exit 0 ;;
+  *"installation/repositories"*) echo '{}' ;;   # valid JSON but no repository_selection or total_count
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GH_TOKEN=tok bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"effective-permission diagnostic"* ]]
+  [[ "$output" != *"parse error"* ]]
+  [[ "$output" == *"token scope UNKNOWN"* ]]
+}
+
 # ── orchestrator: sync-issues — auto-triage held promotions into tracked issues ──
 # A held (BLOCKED) promotion files/updates ONE idempotent issue per agent with the failing-run
 # evidence; a cleared agent's issue auto-closes; the fleet-status table is rendered to the job
