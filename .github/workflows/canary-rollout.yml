@@ -133,6 +133,9 @@ jobs:
       # run-history reads keep the owner-wide token (don't regress the '*' stable-tier
       # enumeration). Not a hard requirement to verify separately: if the write token is
       # empty the engine falls back to the owner-wide token and the move re-fails loudly.
+      # Confirmed by #744's un-suppressed error (run 29435711407): the owner-wide-token
+      # PATCH .../git/refs/tags/<channel-tag> returned 403 "Resource not accessible by
+      # integration" while an admin-token PATCH of the same ref succeeded.
       - name: Mint repo-scoped write token (tag moves)
         id: write-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
