@@ -18,7 +18,7 @@ beekeeping tech, and agent orchestration.
 | [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A place to share Google AppScripts for personal productivity | JavaScript |
 | [incubator](https://github.com/petry-projects/incubator) | Product incubator: pre-product idea Discussions, decision briefs/PRD-lite, and disposable POCs. Ideas graduate to their own product repo once a POC proves out. | Shell |
 | [repo-template](https://github.com/petry-projects/repo-template) | Org template repository: one-click scaffold for new petry-projects repos. Files via 'Use this template'; non-file standards via bootstrap. | Shell |
-| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents and agentic workflow infrastructure | Shell |
+| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, skills, and agentic workflow infrastructure | Shell |
 | [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
 
 ---
@@ -28,46 +28,46 @@ beekeeping tech, and agent orchestration.
 All repositories in this org follow shared engineering standards defined in
 [`.github`](https://github.com/petry-projects/.github):
 
-- **[CI Standards](../standards/ci-standards.md)** — Reusable workflow versioning via the `stable` channel;
+- **[CI Standards](https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md)** — Reusable workflow versioning via the `stable` channel;
   staged promotion through concentric rings; action pinning policy; permissions policy; workflow patterns
   by tech stack (Node.js, Go, Python, Electron).
 
-- **[Advanced Security](../standards/advanced-security.md)** — Code Security Configurations for the org
+- **[Advanced Security](https://github.com/petry-projects/.github/blob/main/standards/advanced-security.md)** — Code Security Configurations for the org
   fleet; push-protection live-fire canary test; custom secret scanning patterns; compliance audit checks.
 
-- **[Push Protection](../standards/push-protection.md)** — GitHub push protection (primary enforcement);
+- **[Push Protection](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md)** — GitHub push protection (primary enforcement);
   local pre-commit prevention; CI secret scanning (secondary defense); incident response runbook.
 
-- **[Agent Standards](../standards/agent-standards.md)** — AgentShield deep security scan; required agent
+- **[Agent Standards](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md)** — AgentShield deep security scan; required agent
   files and compliance exemptions; BMAD Method workflows; decision-making reusables.
 
-- **[Dependabot Policy](../standards/dependabot-policy.md)** — Stack-specific templates (npm, Go, Rust,
+- **[Dependabot Policy](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md)** — Stack-specific templates (npm, Go, Rust,
   Python, Terraform, Actions); auto-merge workflow; vulnerability audit CI check; CODEOWNERS approval
   timing.
 
-- **[GitHub Settings](../standards/github-settings.md)** — Repository rulesets (`pr-quality`,
+- **[GitHub Settings](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md)** — Repository rulesets (`pr-quality`,
   `code-quality`); auto-merge configuration; bypass actors; labels — standard set; org-level secrets.
 
-- **[CODEOWNERS Standard](../standards/codeowners-standard.md)** — Branch protection; team composition;
+- **[CODEOWNERS Standard](https://github.com/petry-projects/.github/blob/main/standards/codeowners-standard.md)** — Branch protection; team composition;
   required setup for new bots.
 
-- **[Copilot Instructions Standard](../standards/copilot-instructions-standard.md)** — Canonical
+- **[Copilot Instructions Standard](https://github.com/petry-projects/.github/blob/main/standards/copilot-instructions-standard.md)** — Canonical
   instruction files (source of truth in `.github`); adding a new language; content quality rules.
 
-- **[Feature Ideation Sources](../standards/feature-ideation-sources.md)** — AI/ML vendor & lab primary
+- **[Feature Ideation Sources](https://github.com/petry-projects/.github/blob/main/standards/feature-ideation-sources.md)** — AI/ML vendor & lab primary
   sources; research & trends; developer tooling and platform changelogs; security & compliance feeds;
   newsletters, podcasts, and conferences.
 
-- **[Initiatives Project](../standards/initiatives-project.md)** — What belongs on the board; fields;
+- **[Initiatives Project](https://github.com/petry-projects/.github/blob/main/standards/initiatives-project.md)** — What belongs on the board; fields;
   theme → initiative mapping; views; how the auto-add works.
 
-- **[Persona Standards](../standards/persona-standards.md)** — Trigger matrix (the onboarding checklist);
+- **[Persona Standards](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md)** — Trigger matrix (the onboarding checklist);
   canary onboarding (the last step); trust, permissions, and safety.
 
-- **[PR Limits](../standards/pr-limits.md)** — Exempt actors; operator runbook; reconciliation with the
+- **[PR Limits](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md)** — Exempt actors; operator runbook; reconciliation with the
   Dependabot cap.
 
-- **[Ruleset Remediation Runbook](../standards/ruleset-remediation-runbook.md)** — Snapshot every ruleset
+- **[Ruleset Remediation Runbook](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md)** — Snapshot every ruleset
   for rollback insurance; bypass actor management; legacy ruleset migration; verify and rollback
   procedures.
 
