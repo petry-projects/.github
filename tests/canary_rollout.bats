@@ -1184,6 +1184,86 @@ GHEOF
   ! grep -q 'owner-wide' "$TOKEN_LOG"
 }
 
+# ── #749: one-shot effective-permission diagnostic on a 403 tag-move ────────────
+# #745/#746 (repo-scoped write token) did NOT resolve the 403 "Resource not accessible by
+# integration" on a protected channel-tag PATCH. To decide the next step from DATA rather than
+# guessing again, the _gh_move_tag 403 failure path (behind #744's un-suppressed error) dumps
+# the write token's EFFECTIVE permissions + scope — using the SAME write token the PATCH used —
+# so we can tell (a) a token that LACKS effective contents:write (a minting bug, code-fixable)
+# from (b) a token that HAS it but is still blocked because the ruleset bypass lapsed (NOT a
+# code bug). The diagnostic must run ONLY on a 403 (not on the #743 non-404 422 rejection),
+# must still surface the ::error:: + return non-zero, and must not fall back to POST.
+_diag_403_stub() {
+  local scope="${1:-selected}"   # selected (repo-scoped) | all (owner-wide)
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALL_LOG="$STUB_BIN/calls.log"; : > "$CALL_LOG"
+  export TOKEN_LOG="$STUB_BIN/tokens.log"; : > "$TOKEN_LOG"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+printf '%s\t%s\n' "\$*" "\${GH_TOKEN:-<unset>}" >> "$TOKEN_LOG"
+case "\$*" in
+  *"-X PATCH"*"git/refs/tags/"*)
+    echo "PATCH" >> "$CALL_LOG"
+    echo '{"message":"Resource not accessible by integration","status":"403"}' >&2
+    exit 1 ;;
+  *"-X POST"*"git/refs"*)
+    echo "POST" >> "$CALL_LOG"; echo '{"ref":"refs/tags/x"}'; exit 0 ;;
+  *"-i "*"repos/"*)
+    echo "DIAG_HEADERS" >> "$CALL_LOG"
+    printf 'HTTP/2.0 403 Forbidden\r\n'
+    printf 'X-Accepted-GitHub-Permissions: contents=write; contents=read\r\n'
+    printf '\r\n'
+    echo '{"full_name":"petry-projects/.github"}'
+    exit 0 ;;
+  *"installation/repositories"*)
+    echo "DIAG_INSTALL" >> "$CALL_LOG"
+    echo '{"repository_selection":"$scope","total_count":2}'
+    exit 0 ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "_gh_move_tag: on a 403 dumps the effective-permission diagnostic then surfaces the error (#749)" {
+  _diag_403_stub selected
+  run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"effective-permission diagnostic"* ]]
+  [[ "$output" == *"X-Accepted-GitHub-Permissions: contents=write"* ]]
+  [[ "$output" == *"REPO-SCOPED"* ]]
+  [[ "$output" == *"::error::"* ]]
+  grep -q '^PATCH$' "$CALL_LOG"
+  grep -q '^DIAG_HEADERS$' "$CALL_LOG"
+  grep -q '^DIAG_INSTALL$' "$CALL_LOG"
+  ! grep -q '^POST$' "$CALL_LOG"
+}
+
+@test "_gh_move_tag: the 403 diagnostic introspects through CANARY_WRITE_TOKEN (#749)" {
+  _diag_403_stub selected
+  run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  grep -q 'installation/repositories.*repo-scoped' "$TOKEN_LOG"
+  ! grep -q 'installation/repositories.*owner-wide' "$TOKEN_LOG"
+}
+
+@test "_gh_move_tag: the 403 diagnostic reports OWNER-WIDE when repository_selection is all (#749)" {
+  _diag_403_stub all
+  run env GH_TOKEN=owner-wide CANARY_WRITE_TOKEN=repo-scoped bash -c \
+    "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [[ "$output" == *"OWNER-WIDE"* ]]
+  [[ "$output" != *"REPO-SCOPED"* ]]
+}
+
+@test "_gh_move_tag: a non-403 (422 ruleset) failure does NOT trigger the 403 diagnostic (#749)" {
+  _move_tag_stub reject
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github agent-shield/v2-ring0 12b0075a9c48000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"effective-permission diagnostic"* ]]
+  [[ "$output" == *"::error::"* ]]
+}
+
 # ── orchestrator: sync-issues — auto-triage held promotions into tracked issues ──
 # A held (BLOCKED) promotion files/updates ONE idempotent issue per agent with the failing-run
 # evidence; a cleared agent's issue auto-closes; the fleet-status table is rendered to the job

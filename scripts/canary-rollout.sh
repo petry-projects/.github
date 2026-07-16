@@ -148,6 +148,14 @@ _gh_move_tag() {
   # real rejection to surface, not to paper over with a create.
   local low="${out,,}"
   if [[ "$low" != *"not found"* && "$low" != *"http 404"* ]]; then
+    # #749: on a 403 "Resource not accessible by integration" — the failure #745/#746 did NOT
+    # fix — dump the write token's EFFECTIVE permissions + scope so the next step is decided
+    # from data, not another guess. Only runs on the 403 branch (a non-404 that is also a
+    # permission 403), before the ::error:: so the diagnostic and the surfaced rejection are
+    # co-located in the run log. Best-effort: never alters rc.
+    if [[ "$low" == *"403"* || "$low" == *"not accessible by integration"* ]]; then
+      _gh_403_diag "$repo" >&2 || true
+    fi
     echo "::error::_gh_move_tag: could not move refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
     return "$rc"
   fi
@@ -156,6 +164,48 @@ _gh_move_tag() {
   rc=$?
   echo "::error::_gh_move_tag: could not create refs/tags/$tag -> ${sha:0:12} on $repo (HTTP): ${out//$'\n'/ }" >&2
   return "$rc"
+}
+
+# _gh_403_diag <repo> — one-shot effective-permission diagnostic (#749), called only from the
+# _gh_move_tag 403 failure path. #745/#746 (repo-scoped write token) did NOT resolve the 403
+# "Resource not accessible by integration" on a protected channel-tag PATCH, so before guessing
+# again we DUMP DATA, using the SAME token the PATCH used (_gh_write → CANARY_WRITE_TOKEN when
+# set). This distinguishes the two possible root causes:
+#   (a) the token LACKS effective contents:write → a minting bug (code-fixable), or
+#   (b) the token HAS contents:write but the release-channel-tags ruleset bypass lapsed → NOT a
+#       code bug (a maintainer must re-save bypass_actors / open GitHub support).
+# Emits, to stderr, inside a foldable ::group:::
+#   - X-Accepted-GitHub-Permissions from `gh api -i repos/<repo>` (the perms the API advertises),
+#   - the installation's repository_selection ("all" = OWNER-WIDE, "selected" = REPO-SCOPED) and
+#     repo count, i.e. whether the token is owner- or repo-scoped.
+# Best-effort: every probe is guarded, and the function always returns 0 — a diagnostic must
+# never mask the 403 or change the mover's exit status.
+_gh_403_diag() {
+  local repo="$1" hdr inst sel count
+  echo "::group::_gh_move_tag 403 effective-permission diagnostic (#749)"
+  if [ -n "${CANARY_WRITE_TOKEN:-}" ]; then
+    echo "diag: introspecting with CANARY_WRITE_TOKEN (repo-scoped write token)"
+  else
+    echo "diag: introspecting with ambient GH_TOKEN (no CANARY_WRITE_TOKEN set)"
+  fi
+  # (1) What permission does the API advertise for this repo endpoint?
+  hdr="$(_gh_write api -i "repos/$repo" 2>/dev/null | grep -i '^x-accepted-github-permissions:' || true)"
+  if [ -n "$hdr" ]; then
+    printf 'diag: %s\n' "${hdr%$'\r'}"
+  else
+    echo "diag: X-Accepted-GitHub-Permissions header not present on repos/$repo response"
+  fi
+  # (2) Is the token owner-wide or repo-scoped, and over how many repos?
+  inst="$(_gh_write api /installation/repositories 2>/dev/null || true)"
+  sel="$(jq -r '.repository_selection // empty' <<<"$inst" 2>/dev/null || true)"
+  count="$(jq -r '.total_count // empty' <<<"$inst" 2>/dev/null || true)"
+  case "$sel" in
+    all)      echo "diag: token scope = OWNER-WIDE (repository_selection=all, repos=${count:-?})" ;;
+    selected) echo "diag: token scope = REPO-SCOPED (repository_selection=selected, repos=${count:-?})" ;;
+    *)        echo "diag: token scope UNKNOWN (repository_selection='${sel:-<unreadable>}')" ;;
+  esac
+  echo "::endgroup::"
+  return 0
 }
 
 # _gh_create_annotated_tag <repo> <tag> <sha> <message> — create the immutable annotated
