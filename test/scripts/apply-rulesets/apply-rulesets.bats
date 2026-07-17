@@ -54,7 +54,7 @@ EOF
   # Widening this to include merge/rebase is exactly the drift the compliance audit's
   # check_ruleset_contents() flags. Lock the codified source of truth so it can never
   # silently regress to [merge, rebase, squash].
-  run jq -c '.rules[] | select(.type=="pull_request") | .parameters.allowed_merge_methods' "$RULESETS_DIR/pr-quality.json"
+  run jq -c '.rules[]? | select(.type=="pull_request") | .parameters.allowed_merge_methods' "$RULESETS_DIR/pr-quality.json"
   [ "$status" -eq 0 ]
   [ "$output" = '["squash"]' ]
 }
