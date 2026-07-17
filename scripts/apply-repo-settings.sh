@@ -31,6 +31,19 @@ fi
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 
+# Source of the persona manifests that the <id>:hands-off opt-out label family is
+# derived from. `.github-private` is PUBLIC (private:false, verified) despite its
+# name, so these reads work over the token already required by this script and need
+# no extra auth. See standards/persona-standards.md §1.1 (the manifest is the
+# index-of-record) and §4 rule 4 (every persona defines an opt_out_label).
+PERSONA_MANIFEST_REPO="${PERSONA_MANIFEST_REPO:-petry-projects/.github-private}"
+PERSONA_MANIFEST_REF="${PERSONA_MANIFEST_REF:-main}"
+
+# One consistent color for the entire opt-out family — neutral grey, deliberately
+# distinct from the functional labels (security/bug red, dependency/docs blue,
+# in-progress yellow). Documented in standards/github-settings.md#labels--standard-set.
+PERSONA_OPT_OUT_COLOR="ededed"
+
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
 warn()  { echo "[WARN]  $*" >&2; }
@@ -60,6 +73,35 @@ usage() {
   exit 1
 }
 
+# persona_opt_out_label_configs — emit one "name|color|description" line per persona,
+# deriving the <id>:hands-off opt-out label from the persona manifests rather than a
+# hand-maintained list. Adding a persona therefore needs NO edit here: the family
+# follows from personas/<id>/persona.yml, the index-of-record (persona-standards.md
+# §1.1). Draft personas are included — being able to say "hands-off" is exactly what
+# a draft needs. If the manifest listing cannot be read (e.g. transient API error) we
+# warn and emit nothing, so a network hiccup never blocks the static label set.
+persona_opt_out_label_configs() {
+  local ids id opt_out
+  ids=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas?ref=$PERSONA_MANIFEST_REF" 2>/dev/null \
+        | jq -r '.[] | select(.type == "dir") | .name' 2>/dev/null) || {
+    warn "  Could not list persona manifests from $PERSONA_MANIFEST_REPO — skipping opt-out labels"
+    return 0
+  }
+
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    # Prefer the manifest's declared opt_out_label; fall back to the <id>:hands-off
+    # convention (persona-standards.md §4 rule 4) when the field cannot be read.
+    opt_out=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas/$id/persona.yml?ref=$PERSONA_MANIFEST_REF" \
+                -H "Accept: application/vnd.github.raw" 2>/dev/null \
+              | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
+              | tr -d "\"'" | awk '{print $1}')
+    [ -z "$opt_out" ] && opt_out="$id:hands-off"
+    printf '%s|%s|Opt an item out of the %s persona automation entirely\n' \
+      "$opt_out" "$PERSONA_OPT_OUT_COLOR" "$id"
+  done <<< "$ids"
+}
+
 apply_labels() {
   local repo="$1"
   info "Applying standard labels to $ORG/$repo ..."
@@ -74,6 +116,13 @@ apply_labels() {
     "documentation|0075ca|Documentation changes"
     "in-progress|fbca04|An agent is actively working this issue"
   )
+
+  # Append the derived persona opt-out family (<id>:hands-off, one per persona).
+  local persona_configs=()
+  mapfile -t persona_configs < <(persona_opt_out_label_configs)
+  if [ "${#persona_configs[@]}" -gt 0 ]; then
+    label_configs+=("${persona_configs[@]}")
+  fi
 
   for config in "${label_configs[@]}"; do
     IFS='|' read -r name color description <<< "$config"
@@ -300,6 +349,7 @@ apply_check_suite_prefs() {
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+main() {
 if [ $# -eq 0 ]; then
   usage
 fi
@@ -355,4 +405,10 @@ else
   pp_apply_security_and_analysis "$1"
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
+fi
+}
+
+# Run main only when executed directly, not when sourced (e.g. by the bats suite).
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
 fi

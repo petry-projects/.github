@@ -1,0 +1,46 @@
+# Tests for the standard repo-settings applier (scripts/apply-repo-settings.sh).
+# Gates: shellcheck (applier) + bats (the persona <id>:hands-off opt-out family,
+# derived from the persona manifests — petry-projects/.github#756).
+name: Apply Repo Settings Tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/apply-repo-settings.sh'
+      - 'test/scripts/apply-repo-settings/**'
+      - '.github/workflows/apply-repo-settings-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply-repo-settings.sh'
+      - 'test/scripts/apply-repo-settings/**'
+      - '.github/workflows/apply-repo-settings-tests.yml'
+
+permissions: {}
+
+concurrency:
+  group: apply-repo-settings-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install bats, shellcheck, jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats shellcheck jq
+
+      - name: shellcheck
+        run: shellcheck --severity=warning -x scripts/apply-repo-settings.sh
+
+      - name: bats
+        run: bats --print-output-on-failure test/scripts/apply-repo-settings/
