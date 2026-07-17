@@ -116,8 +116,19 @@ persona_opt_out_label_configs() {
     # convention (persona-standards.md §4 rule 4) when the field cannot be read.
     if opt_out_raw=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas/$id/persona.yml?ref=$PERSONA_MANIFEST_REF" \
                        -H "Accept: application/vnd.github.raw" 2>/dev/null); then
-      opt_out=$(echo "$opt_out_raw" | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
-                | tr -d '\r' | tr -d "\"'" | awk '{print $1}')
+      # `opt_out_label` is a free-form string in the schema, and GitHub label names
+      # may contain spaces — so this must NOT truncate at the first word (an
+      # `awk '{print $1}'` here would provision "needs" for a label named
+      # "needs human review", leaving the real opt-out absent and the hatch broken).
+      # Take the whole scalar, then strip: trailing YAML comment (which requires
+      # leading whitespace), trailing space, and surrounding quotes.
+      opt_out=$(printf '%s' "$opt_out_raw" \
+                | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
+                | tr -d '\r' \
+                | sed -e 's/[[:space:]]\{1,\}#.*$//' \
+                      -e 's/[[:space:]]*$//' \
+                      -e 's/^"\(.*\)"$/\1/' \
+                      -e "s/^'\(.*\)'$/\1/")
     else
       # The convention fallback below is a GUESS. §4 rule 4 makes <id>:hands-off
       # only a convention — the schema lets a persona declare any opt_out_label —
@@ -159,7 +170,15 @@ apply_labels() {
   # fail-open survived review. $( ) is also a subshell, but its status propagates.
   if [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" != true ]; then
     local persona_out=""
-    if ! persona_out=$(persona_opt_out_label_configs); then
+    if persona_out=$(persona_opt_out_label_configs); then
+      # Cache only a GOOD derivation. Caching a failure would mean a transient
+      # error on the first repo of an --all sweep denies opt-out labels to every
+      # LATER repo too, even once the API recovers — turning one blip into a
+      # fleet-wide gap. Retrying costs a few API calls on the failure path only.
+      _PERSONA_OPT_OUT_CONFIGS_CACHED=true
+    else
+      # Sticky by design: the repo we just processed went without its opt-out
+      # labels, so the RUN did not do what it claims even if later repos recover.
       _PERSONA_OPT_OUT_SYNC_FAILED=true
     fi
     _PERSONA_OPT_OUT_CONFIGS_CACHE=()
@@ -168,7 +187,6 @@ apply_labels() {
     if [ -n "$persona_out" ]; then
       mapfile -t _PERSONA_OPT_OUT_CONFIGS_CACHE <<< "$persona_out"
     fi
-    _PERSONA_OPT_OUT_CONFIGS_CACHED=true
   fi
   if [ "${#_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}" -gt 0 ]; then
     label_configs+=("${_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}")

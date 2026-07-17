@@ -166,22 +166,70 @@ _run_fn() { run "$@"; }
   ! grep -q 'hands-off' "$CALLS"
 }
 
+# _apply_labels <repo> — run apply_labels in THIS shell and record its status in
+# $APPLY_RC. Must NOT echo the status: $( ) is a subshell, and the whole point is
+# to observe the flag mutations apply_labels makes in the CURRENT shell.
+# `|| true` would mask an unexpected non-zero and let a flag assertion pass on a
+# broken function, so the status is captured explicitly with errexit off.
+_apply_labels() {
+  set +e; apply_labels "$1" >/dev/null 2>&1; APPLY_RC=$?; set -e
+}
+
 @test "apply_labels records the failure so the run cannot claim success" {
   # The honesty half: the static labels landed, but _PERSONA_OPT_OUT_SYNC_FAILED is
   # set, and main() turns that into a non-zero exit.
   export PERSONA_DIRS_JSON='not-json'
-  _run_fn apply_labels acme
-  [ "$status" -eq 0 ]
-  # _run_fn runs in a subshell, so re-derive in THIS shell to observe the flag.
   _PERSONA_OPT_OUT_CONFIGS_CACHED=false
   _PERSONA_OPT_OUT_SYNC_FAILED=false
-  apply_labels acme >/dev/null 2>&1 || true
+  _apply_labels acme
+  [ "$APPLY_RC" -eq 0 ]
   [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]
 }
 
 @test "a healthy derivation leaves the failure flag unset" {
   _PERSONA_OPT_OUT_CONFIGS_CACHED=false
   _PERSONA_OPT_OUT_SYNC_FAILED=false
-  apply_labels acme >/dev/null 2>&1 || true
+  _apply_labels acme
+  [ "$APPLY_RC" -eq 0 ]
   [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = false ]
+}
+
+@test "a failed derivation is NOT cached — later repos retry and recover" {
+  # --all sweeps share the cache. Caching a failure would let one transient blip on
+  # the first repo deny opt-out labels to every later repo even after the API
+  # recovers, turning a hiccup into a fleet-wide gap.
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _PERSONA_OPT_OUT_SYNC_FAILED=false
+  export PERSONA_DIRS_JSON='not-json'          # repo 1: derivation fails
+  _apply_labels repo-one
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" = false ]   # must NOT have cached the failure
+  export PERSONA_DIRS_JSON='[{"type":"dir","name":"qa-lead"}]'  # repo 2: API recovers
+  _apply_labels repo-two
+  [ "$APPLY_RC" -eq 0 ]
+  grep -q 'qa-lead:hands-off' "$CALLS"           # repo 2 DID get the label
+  [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]     # but the run still cannot claim success
+}
+
+@test "a successful derivation IS cached — no refetch per repo" {
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _apply_labels repo-one
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" = true ]
+}
+
+@test "an opt_out_label containing spaces is not truncated at the first word" {
+  # opt_out_label is free-form in the schema and GitHub labels may contain spaces.
+  # Truncating would provision "needs" and leave the real hatch absent.
+  printf 'triggers:\n  opt_out_label: "needs human review"\n' > "$MANIFEST_DIR/qa-lead.yml"
+  _run_fn persona_opt_out_label_configs
+  [ "$status" -eq 0 ]
+  [[ "$output" == "needs human review|"* ]]
+}
+
+@test "a trailing YAML comment is stripped from opt_out_label" {
+  printf 'triggers:\n  opt_out_label: qa-lead:hands-off  # the escape hatch\n' > "$MANIFEST_DIR/qa-lead.yml"
+  _run_fn persona_opt_out_label_configs
+  [ "$status" -eq 0 ]
+  [[ "$output" == "qa-lead:hands-off|"* ]]
 }
