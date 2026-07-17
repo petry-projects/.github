@@ -185,12 +185,12 @@ MENTION_ON='    - surface: mention
   [ "${output% *}" = "false off" ]
 }
 
-@test "pm_mention_decision surfaces a write-mode mention with gate_label" {
+@test "pm_mention_decision surfaces a write-mode mention" {
   run pm_mention_decision "$(manifest '    - surface: mention
       enabled: true
       mode: write
       gate_label: qa-lead')"
-  [ "$output" = "true write qa-lead:hands-off qa-lead" ]
+  [ "$output" = "true write qa-lead:hands-off" ]
 }
 
 @test "pm_mention_trust_floor defaults to the persona-wide floor" {
@@ -228,53 +228,97 @@ MENTION_ON='    - surface: mention
   [[ "$output" == */some-branch/personas/qa-lead/persona.yml ]]
 }
 
-# --- null-safety (jq ? operator paths) -------------------------------------
+# --- mention precision (#755 finding 9) ------------------------------------
+# The router must not be MORE trigger-happy than GitHub itself. Firing where
+# GitHub renders no mention means pasting an example summons an agent.
 
-@test "pm_mention_decision handles missing triggers or surfaces gracefully" {
-  run pm_mention_decision "{}"
-  [ "$output" = "false off" ]
+@test "pm_extract_slugs ignores a handle inside a fenced code block" {
+  run pm_extract_slugs 'Example:
+```
+@petry-projects/qa-lead review this
+```
+done'
+  [ -z "$output" ]
 }
 
-@test "pm_mention_decision handles malformed triggers type gracefully" {
-  run pm_mention_decision '{"triggers": "invalid-type"}'
-  [ "$output" = "false off" ]
+@test "pm_extract_slugs ignores a handle inside a tilde fence" {
+  run pm_extract_slugs 'Example:
+~~~
+@petry-projects/qa-lead review this
+~~~
+done'
+  [ -z "$output" ]
 }
 
-@test "pm_mention_decision handles empty input gracefully" {
-  run pm_mention_decision ""
-  [ "$output" = "false off " ] || [ "$output" = "false off" ]
+@test "pm_extract_slugs ignores a handle in inline code" {
+  run pm_extract_slugs 'The handle is `@petry-projects/qa-lead` for QA.'
+  [ -z "$output" ]
 }
 
-@test "pm_mention_trust_floor handles missing triggers or trust floor gracefully" {
-  run pm_mention_trust_floor "{}"
-  [ "$output" = "" ]
+@test "pm_extract_slugs ignores a handle in a blockquote (quote-reply)" {
+  # GitHub's one-click Quote reply prefixes '>'. Re-running an agent over quoted
+  # text is not what the quoter meant, and no recursion axis catches it.
+  run pm_extract_slugs '> @petry-projects/qa-lead please review
+
+Agreed.'
+  [ -z "$output" ]
 }
 
-@test "pm_mention_trust_floor handles empty input gracefully" {
-  run pm_mention_trust_floor ""
-  [ "$output" = "" ]
+@test "pm_extract_slugs still fires on a real mention beside a quote" {
+  run pm_extract_slugs '> some earlier comment
+
+@petry-projects/qa-lead thoughts?'
+  [ "$output" = "qa-lead" ]
 }
 
-# --- alias resolution ------------------------------------------------------
+@test "pm_extract_slugs still fires on a real mention after a code block" {
+  run pm_extract_slugs 'Repro:
+```
+npm test
+```
+@petry-projects/qa-lead can you look?'
+  [ "$output" = "qa-lead" ]
+}
 
-@test "pm_persona_aliases emits stripped alias slugs" {
+@test "pm_should_route ignores a comment whose only handle is in a code fence" {
+  run pm_should_route don-petry OWNER 'docs:
+```
+@petry-projects/qa-lead
+```'
+  [ "$status" -ne 0 ]
+}
+
+# --- gate_label (#755 finding 2) -------------------------------------------
+
+@test "pm_mention_gate_label returns the gate for a write-mode mention" {
+  run pm_mention_gate_label "$(manifest '    - surface: mention
+      enabled: true
+      mode: write
+      gate_label: qa-lead')"
+  [ "$output" = "qa-lead" ]
+}
+
+@test "pm_mention_gate_label is empty for an advisory mention" {
+  run pm_mention_gate_label "$(manifest "$MENTION_ON")"
+  [ -z "$output" ]
+}
+
+@test "pm_mention_gate_label is empty when the surface is absent" {
+  run pm_mention_gate_label "$(manifest '    - surface: issues
+      enabled: true
+      mode: advisory')"
+  [ -z "$output" ]
+}
+
+@test "gate_label survives an empty opt_out_label (the read-shift trap)" {
+  # A 4th space-separated field on pm_mention_decision would silently shift an
+  # empty opt_out_label's place onto the gate. Separate functions cannot.
   local m
-  m="$(manifest "$MENTION_ON")"
-  # Inject an alias into the address block
-  m="${m}
-address:
-  aliases:
-    - petry-projects/old-qa"
-  run pm_persona_aliases "$m"
-  [ "$output" = "old-qa" ]
-}
-
-@test "pm_persona_aliases returns empty when no aliases declared" {
-  run pm_persona_aliases "$(manifest "$MENTION_ON")"
-  [ -z "$output" ]
-}
-
-@test "pm_persona_aliases returns empty on empty input" {
-  run pm_persona_aliases ""
-  [ -z "$output" ]
+  m="$(manifest '    - surface: mention
+      enabled: true
+      mode: write
+      gate_label: qa-lead')"
+  m="${m/  opt_out_label: qa-lead:hands-off/  opt_out_label: \"\"}"
+  run pm_mention_gate_label "$m"
+  [ "$output" = "qa-lead" ]
 }

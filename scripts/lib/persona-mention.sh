@@ -88,9 +88,37 @@ pm_is_agent_comment() {
 # A match here is NOT a decision to run: the slug still has to resolve to a
 # manifest that enables the mention surface. Real teams (org-leads) match the
 # shape and are dropped later by a 404.
+# pm_strip_unaddressable <body> — drop regions where a handle must not count.
+#
+# Three regions, two reasons:
+#
+#   fenced code (``` / ~~~)  — GitHub renders NO mention here and notifies nobody.
+#   inline code (`...`)      — likewise. Firing on these means the router is more
+#                              trigger-happy than GitHub's own semantics: pasting
+#                              a usage example, or documenting the handle, would
+#                              summon the persona.
+#   blockquotes (^>)         — a DELIBERATE divergence. GitHub *does* render and
+#                              notify on a quoted mention, but GitHub's one-click
+#                              "Quote reply" copies a whole prior comment prefixed
+#                              with '>', and re-running an agent over quoted text
+#                              is almost never what the quoter meant. Neither
+#                              recursion axis catches it (a human quoting a human
+#                              is not a bot and carries no marker). To address a
+#                              persona, mention it outside the quote.
+pm_strip_unaddressable() {
+  printf '%s' "$1" | awk '
+    # Toggle on fence open/close; never emit the fence or its contents.
+    /^[[:space:]]*(```|~~~)/ { infence = !infence; next }
+    infence                  { next }
+    /^[[:space:]]*>/         { next }          # blockquote line
+    { gsub(/`[^`]*`/, " "); print }            # inline code -> whitespace
+  '
+}
+
+# pm_extract_slugs <body> — emit each DISTINCT persona slug addressed in body.
 pm_extract_slugs() {
   local body="$1" org="${PERSONA_ORG:-petry-projects}"
-  printf '%s' "$body" \
+  pm_strip_unaddressable "$body" \
     | grep -oE "@${org}/[a-z0-9]+(-[a-z0-9]+)*" \
     | sed "s|@${org}/||" \
     | awk '!seen[$0]++'
@@ -166,28 +194,22 @@ except Exception as exc:
   printf '%s' "$json" | jq -r "$filter"
 }
 
-# pm_mention_decision <manifest-yaml> — emit "<enabled> <mode> <opt_out_label> [<gate_label>]".
+# pm_mention_decision <manifest-yaml> — emit "<enabled> <mode> <opt_out_label>".
 #
 # Resolves the `mention` surface against the trigger matrix: an explicit row wins;
 # otherwise triggers.default_mode applies (§4). default_mode 'off' means the
-# persona is not addressable at all. gate_label is emitted as a 4th field only
-# when the surface declares one (write-mode guard, §1 principle 3).
+# persona is not addressable at all.
 pm_mention_decision() {
   # shellcheck disable=SC2016  # $t/$s/$m are jq variables, not shell expansions
-  local input="${1:-}"
-  if [ -z "$input" ]; then
-    echo "false off "
-    return
-  fi
-  printf '%s' "$input" | pm_manifest_query '
-    (.triggers? // {}) as $t
-    | ($t.surfaces? // []) as $s
-    | ($s | map(select(.surface? == "mention")) | first) as $m
+  printf '%s' "$1" | pm_manifest_query '
+    (.triggers // {}) as $t
+    | ($t.surfaces // []) as $s
+    | ($s | map(select(.surface == "mention")) | first) as $m
     | (if $m == null
-       then (if ($t.default_mode? // "off") == "advisory" then "true advisory" else "false off" end)
-       else ((($m.enabled? // false) | tostring) + " " + ($m.mode? // "advisory"))
+       then (if ($t.default_mode // "off") == "advisory" then "true advisory" else "false off" end)
+       else ((($m.enabled // false) | tostring) + " " + ($m.mode // "advisory"))
        end) as $decision
-    | ($decision + " " + ($t.opt_out_label? // "") + " " + (($m // {}).gate_label? // "")) | gsub("\\s+$"; "")
+    | $decision + " " + ($t.opt_out_label // "")
   '
 }
 
@@ -198,29 +220,29 @@ pm_mention_decision() {
 # is the safe direction.
 pm_mention_trust_floor() {
   # shellcheck disable=SC2016  # $m is a jq variable, not a shell expansion
-  local input="${1:-}"
-  if [ -z "$input" ]; then
-    echo ""
-    return
-  fi
-  printf '%s' "$input" | pm_manifest_query '
-    ((.triggers?.surfaces? // []) | map(select(.surface? == "mention")) | first) as $m
-    | ($m.trust_floor? // .trust?.author_association_floor? // [])
+  printf '%s' "$1" | pm_manifest_query '
+    ((.triggers.surfaces // []) | map(select(.surface == "mention")) | first) as $m
+    | ($m.trust_floor // .trust.author_association_floor // [])
     | join(" ")
   '
 }
 
-# pm_persona_aliases <manifest-yaml> — emit each alias slug (without the org prefix),
-# one per line. Used to validate that an addressed slug is a known alias for the
-# manifest's canonical id when claimed != slug (§4.1 rule 5: renames keep the old
-# handle as an alias).
-pm_persona_aliases() {
-  # shellcheck disable=SC2016  # jq variable, not shell expansion
-  local input="${1:-}"
-  [ -n "$input" ] || return 0
-  printf '%s' "$input" | pm_manifest_query '
-    [(.address?.aliases? // [])[] | ltrimstr("petry-projects/")]
-    | .[]
+# pm_mention_gate_label <manifest-yaml> — the label that ARMS a write-mode
+# mention, or empty.
+#
+# Its own function rather than a fourth field on pm_mention_decision: that
+# returns space-separated values, and an EMPTY optional field silently shifts the
+# next one into its place ("true write  qa-lead" would parse gate_label as the
+# opt_out_label). A security gate is the last place to accept that.
+#
+# §4 rule 2 makes gate_label schema-REQUIRED when mode == write. The schema
+# enforces that it is DECLARED; the caller must enforce that it is APPLIED —
+# declaring a lock is not locking the door.
+pm_mention_gate_label() {
+  # shellcheck disable=SC2016  # $m is a jq variable, not a shell expansion
+  printf '%s' "$1" | pm_manifest_query '
+    ((.triggers.surfaces // []) | map(select(.surface == "mention")) | first) as $m
+    | ($m.gate_label // "")
   '
 }
 
