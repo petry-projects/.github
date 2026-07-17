@@ -81,6 +81,29 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# ── repo self-host guard: dependency-audit.yml publishes the codified context ─
+# code-quality.json requires `dependency-audit / Detect ecosystems` (asserted
+# above). GitHub composes that context as `<caller-job-id> / <reusable-job
+# displayName>`, so this repo's OWN dependency-audit.yml must be the thin caller
+# stub (job id `dependency-audit` → dependency-audit-reusable.yml, whose detect
+# job is displayName "Detect ecosystems"), matching agent-shield.yml's self-host
+# pattern. The pre-centralization inline workflow ran a top-level `detect` job
+# directly, publishing the bare `Detect ecosystems` context and drifting the
+# live ruleset off the codified name (#772).
+DEP_AUDIT_WF="$SCRIPT_DIR/.github/workflows/dependency-audit.yml"
+
+@test "dependency-audit.yml: is a caller stub with job 'dependency-audit' using the reusable" {
+  run grep -Eq '^  dependency-audit:[[:space:]]*$' "$DEP_AUDIT_WF"
+  [ "$status" -eq 0 ]
+  run grep -Eq '^[[:space:]]*uses:[[:space:]]*.*dependency-audit-reusable\.yml' "$DEP_AUDIT_WF"
+  [ "$status" -eq 0 ]
+}
+
+@test "dependency-audit.yml: carries no inline 'detect' job (would publish bare 'Detect ecosystems')" {
+  run grep -Eq '^  detect:[[:space:]]*$' "$DEP_AUDIT_WF"
+  [ "$status" -ne 0 ]
+}
+
 # ── apply behavior: create / update / dry-run ─────────────────────────────────
 @test "apply --repo: creates rulesets when absent (POST per file)" {
   _stub_gh
