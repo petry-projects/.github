@@ -158,6 +158,26 @@ legacy ruleset and reports the exact migration delta (checks to move into
 for the repo-boundary rule, codified in #576). Run `apply-rulesets.sh` to converge each
 repo's live ruleset to the desired state documented here.
 
+**Compliance check — contents, not just presence (#766).** The weekly audit does
+not merely verify that a ruleset with the right *name* exists.
+`check_ruleset_contents()` in [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)
+compares each live `pr-quality` / `code-quality` ruleset against its codified
+source in [`standards/rulesets/`](rulesets/) and raises a finding **per drifted
+parameter** — naming the parameter, the expected value, and the actual value.
+It covers `required_approving_review_count`, `require_code_owner_review`,
+`required_review_thread_resolution`, `dismiss_stale_reviews_on_push`,
+`require_last_push_approval`, `allowed_merge_methods`, and (for `code-quality`)
+`required_status_checks`. Only codified parameters are compared, so API-only
+fields never produce noise. `required_status_checks` uses **subset** semantics —
+every codified context must be present, but repo-specific *additional* checks are
+allowed (see [`code-quality`](#code-quality--required-checks-ruleset-all-repositories)
+below); a *missing* codified context is drift. The check **fails closed**: a
+ruleset that cannot be fetched or parsed is a finding, never a silent pass. This
+means flipping `required_review_thread_resolution` to `false`, lowering the
+review count, dropping `require_code_owner_review`, or widening
+`allowed_merge_methods` is now caught — previously the audit passed as long as a
+ruleset by that name existed.
+
 > **Remediating ruleset findings is a manual, admin-token procedure** —
 > `compliance-remediate.sh` skips the `rulesets` category. Follow the
 > [Ruleset Remediation Runbook](ruleset-remediation-runbook.md) (snapshot →
