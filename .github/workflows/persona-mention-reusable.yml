@@ -1,0 +1,196 @@
+# Reusable Persona Mention Router.
+# SOURCE OF TRUTH: petry-projects/.github/.github/workflows/persona-mention-reusable.yml
+# Standard: https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md (§4.1)
+#
+# Routes `@petry-projects/<role>` mentions to the addressed persona. ONE router
+# for every persona — personas do NOT each ship a mention workflow (§4.1); that
+# per-agent drift is exactly what the manifest exists to prevent.
+#
+# How a mention resolves, and why there is no index:
+#   `validate-personas.py` enforces address.handle's slug == id == the persona's
+#   directory name, so '@petry-projects/qa-lead' resolves to
+#   personas/qa-lead/persona.yml in .github-private by convention. The manifest
+#   IS the index-of-record (§1.1). A 404 means "not a persona" — which is also
+#   how a real, non-persona team like @petry-projects/org-leads falls through
+#   harmlessly.
+#
+# The manifest, not this file, decides:
+#   whether the mention surface is enabled, in what mode, behind which trust
+#   floor, and under which opt-out label. This router restates none of it.
+#
+# Requires:
+#   GH_PAT_WORKFLOWS — org secret, classic PAT (repo scope) for API calls and dispatch
+name: Persona Mention Router (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      tooling_ref:
+        description: |
+          Ref of petry-projects/.github to source scripts/lib/persona-mention.sh
+          from. Leave empty (the default) to source it from THIS reusable's own
+          commit (`github.job_workflow_sha`), which guarantees the routing logic
+          always matches the version of this workflow the caller pinned, with no
+          skew (the #465/#528 lesson: a fixed `v1` default predates the library
+          and fails every run with "No such file or directory"). Override only to
+          test a branch end-to-end.
+        required: false
+        default: ''
+        type: string
+      persona_ref:
+        description: |
+          Ref of petry-projects/.github-private to read persona manifests at.
+          Defaults to main — a persona's live contract is what is merged, not
+          what a branch proposes. Override only for end-to-end testing.
+        required: false
+        default: 'main'
+        type: string
+    secrets:
+      GH_PAT_WORKFLOWS:
+        description: 'Classic PAT with repo scope, used for API calls and dispatching the persona'
+        required: true
+
+permissions: {}  # no default permissions; each job grants only what it needs
+
+concurrency:
+  # Serialise per comment, not per thread: two different personas addressed in
+  # one comment are dispatched by a single run, and cancelling an in-flight route
+  # would silently drop a mention.
+  group: persona-mention-${{ github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read          # read the item's labels for the opt-out check
+      pull-requests: read
+    # The CHEAP pre-filter, mirrored from pm_should_route (tests/persona_mention.bats).
+    # It runs BEFORE the job starts, so secrets are never exposed to a run that a
+    # bot, a marked comment, or an untrusted actor triggered.
+    #
+    # Two independent recursion axes, per §4.1 and the #860 postmortem (1,481
+    # acks in 4.5h). Comments posted via a PAT re-trigger workflows, unlike
+    # GITHUB_TOKEN, and with N mutually addressable personas the cycles are
+    # combinatorial, not self-loops:
+    #   1. bot actor — a comment authored by an agent identity never routes
+    #   2. marker    — a comment carrying '<!-- persona:' never routes
+    # Either alone closes the common loop; both together also close the case of
+    # an agent posting under a human's PAT.
+    #
+    # The trust check here is the conservative §4 default. A persona may TIGHTEN
+    # it in its own manifest (enforced below), never loosen it — so this gate is
+    # always at least as strict as the union of what the personas allow.
+    if: |
+      contains(github.event.comment.body, '@petry-projects/') &&
+      github.event.comment.user.login != 'donpetry-bot' &&
+      github.event.comment.user.login != 'github-actions[bot]' &&
+      !contains(github.event.comment.body, '<!-- persona:') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+
+    steps:
+      - name: Checkout persona-mention tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: petry-projects/.github
+          # Source the library from this reusable's own commit so the routing
+          # logic always matches the pinned workflow version (#465/#528).
+          ref: ${{ inputs.tooling_ref || github.job_workflow_sha }}
+          path: .persona-tooling
+          fetch-depth: 1
+
+      - name: Route the mention
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          PERSONA_REF: ${{ inputs.persona_ref }}
+          # Every event field arrives via env, never interpolated inline into the
+          # run: body. A comment body and a login are attacker-controlled, and an
+          # inline `${{ }}` in a run: block is a script-injection vector.
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_ASSOC: ${{ github.event.comment.author_association }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          EVENT_NAME: ${{ github.event_name }}
+          ITEM_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/persona-mention.sh
+          source .persona-tooling/scripts/lib/persona-mention.sh
+
+          if ! pm_should_route "$COMMENT_USER" "$COMMENT_ASSOC" "$COMMENT_BODY"; then
+            echo "Not routable (bot actor, agent marker, trust floor, or no handle) — nothing to do."
+            exit 0
+          fi
+
+          # Labels for the opt-out check. Discussions have no labels API surface
+          # here, so an empty set is correct rather than fatal.
+          LABELS=""
+          if [ "$EVENT_NAME" != "discussion_comment" ] && [ -n "${ITEM_NUMBER:-}" ]; then
+            LABELS="$(gh api "/repos/${SOURCE_REPO}/issues/${ITEM_NUMBER}/labels" --jq '.[].name' 2>/dev/null || echo "")"
+          fi
+
+          dispatched=0
+          while IFS= read -r slug; do
+            [ -n "$slug" ] || continue
+            echo "::group::@petry-projects/${slug}"
+
+            url="$(pm_manifest_url "$slug")"
+            if ! manifest="$(curl -fsSL --max-time 20 "$url" 2>/dev/null)"; then
+              echo "No manifest at ${url} — not a persona (a real team, or a typo). Skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            # The slug we routed on must equal the id the manifest claims. These
+            # cannot diverge while validate-personas.py holds, so a mismatch means
+            # the invariant broke — refuse rather than guess which one is right.
+            claimed="$(pm_persona_id "$manifest")"
+            if [ "$claimed" != "$slug" ]; then
+              echo "::warning::manifest at ${url} claims id '${claimed}' but was addressed as '${slug}' — refusing to route"
+              echo "::endgroup::"
+              continue
+            fi
+
+            read -r enabled mode opt_out <<<"$(pm_mention_decision "$manifest")"
+            if [ "$enabled" != "true" ]; then
+              echo "Persona '${slug}' does not enable the mention surface (mode=${mode}). Skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF "$opt_out"; then
+              echo "Item carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            # The persona's own floor, which may TIGHTEN the job-level default.
+            # An undeclared floor yields an empty set and pm_trust_ok denies —
+            # a persona that forgot to declare trust must not be more permissive
+            # than one that did.
+            floor="$(pm_mention_trust_floor "$manifest")"
+            # shellcheck disable=SC2086  # word-splitting is the point: floor is a set
+            if ! pm_trust_ok "$COMMENT_ASSOC" $floor; then
+              echo "@${COMMENT_USER} (${COMMENT_ASSOC}) is below persona '${slug}' floor [${floor}]. Skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            echo "Routing to '${slug}' (mode=${mode})."
+            gh api \
+              --method POST \
+              --header "Accept: application/vnd.github+json" \
+              /repos/petry-projects/.github-private/dispatches \
+              --field event_type=persona-mention \
+              --field "client_payload[persona]=$slug" \
+              --field "client_payload[mode]=$mode" \
+              --field "client_payload[source_repo]=$SOURCE_REPO" \
+              --field "client_payload[item_number]=${ITEM_NUMBER:-}" \
+              --field "client_payload[comment_url]=$COMMENT_URL" \
+              --field "client_payload[requested_by]=$COMMENT_USER"
+            dispatched=$((dispatched + 1))
+            echo "::endgroup::"
+          done < <(pm_extract_slugs "$COMMENT_BODY")
+
+          echo "Dispatched ${dispatched} persona(s)."
