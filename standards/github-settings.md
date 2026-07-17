@@ -447,7 +447,11 @@ Repos may require repo-specific secrets beyond this standard set.
 
 ## Labels — Standard Set
 
-All repositories MUST have these labels configured:
+All repositories MUST have these labels configured. They fall into two groups: a
+**fixed set** enumerated below, and a **derived family** (the persona opt-out labels)
+computed from the persona manifests rather than hand-listed.
+
+### Fixed set
 
 | Label | Color | Purpose |
 |-------|-------|---------|
@@ -458,6 +462,37 @@ All repositories MUST have these labels configured:
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
+
+### Derived family — persona opt-out labels (`<id>:hands-off`)
+
+| Label | Color | Purpose |
+|-------|-------|---------|
+| `<id>:hands-off` (one per persona) | `#ededed` (grey) | Opt an item out of the `<id>` persona's automation entirely (per [persona-standards.md §4 rule 4](persona-standards.md)) |
+
+This family is **derived, not enumerated.** [`scripts/apply-repo-settings.sh`](../scripts/apply-repo-settings.sh)
+(`apply_labels()` → `persona_opt_out_label_configs()`) lists the persona directories
+under `personas/<id>/` in [`petry-projects/.github-private`](https://github.com/petry-projects/.github-private)
+and provisions each persona's `opt_out_label` (read from its `persona.yml`, defaulting
+to the `<id>:hands-off` convention). The persona manifest is the index-of-record
+([persona-standards.md §1.1](persona-standards.md)), so **onboarding a new persona
+provisions its opt-out label automatically — no edit to the label list is required.**
+Draft (`status: draft`) personas are included: being able to say "hands-off" is exactly
+what a not-yet-stable persona needs.
+
+> **`.github-private` is PUBLIC** (`private: false`, verified) despite its name, so the
+> applier reads the manifests over the token it already uses for the rest of the run;
+> no extra cross-repo auth is required.
+
+All labels in this family share the single grey color `#ededed`, chosen to sit apart
+from the functional labels above (which use red/blue/teal/yellow to signal category).
+
+> **`dev-lead:hands-off` reconciliation.** `dev-lead:hands-off` already exists in
+> repos but predates this mechanism — it was created ad hoc and appeared in neither
+> the script nor this table (drift). It is now a member of this derived family: once
+> the `dev-lead` persona is represented by a `personas/dev-lead/persona.yml` manifest,
+> the applier provisions `dev-lead:hands-off` from that manifest like any other
+> persona. The applier only creates/updates labels (never deletes), so the existing
+> `dev-lead:hands-off` label is retained in the meantime.
 
 ---
 
