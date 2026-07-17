@@ -130,6 +130,12 @@ gh_api() {
 # and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
 # add_finding() are defined, since the lib's check functions call them.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Directory holding the codified ruleset source of truth
+# (pr-quality.json / code-quality.json). check_ruleset_contents diffs each live
+# ruleset against these files. Overridable for tests.
+RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
+
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
@@ -531,6 +537,162 @@ check_rulesets() {
 
   check_ruleset_bypass_actors "$repo" "$default_branch" "$rulesets_json"
   check_legacy_rulesets "$repo" "$default_branch" "$rulesets_json"
+  check_ruleset_contents "$repo" "$default_branch" "$rulesets_json"
+}
+
+# ---------------------------------------------------------------------------
+# Check: Ruleset CONTENTS match the codified source of truth
+# ---------------------------------------------------------------------------
+# check_rulesets above only verifies a ruleset EXISTS BY NAME. That is the whole
+# of the pre-#766 check: a repo could flip `required_review_thread_resolution`
+# to false, drop `require_code_owner_review`, lower the approving-review count,
+# or widen `allowed_merge_methods`, and compliance still passed because a
+# ruleset named `pr-quality` still existed. The codified standard and live
+# reality could diverge arbitrarily and silently (issue #766).
+#
+# This check compares each live ruleset against its codified source in
+# standards/rulesets/*.json and raises a finding per drifted PARAMETER, naming
+# the parameter, the expected value, and the actual value.
+#
+# Design constraints (issue #766):
+#   - The codified JSON is the source of truth (#575/#580). Intent is NEVER
+#     inferred from the live ruleset — that is the detection-based builder
+#     apply-rulesets.sh retired for diverging from the standard.
+#   - Normalisation: only the parameters WE CODIFY are compared. The API returns
+#     fields the codified JSON does not carry (id, source, source_type,
+#     _links, required_reviewers, dismissal_restriction, actor ids) and in a
+#     different key order; iterating only codified keys and comparing values (not
+#     serialised blobs) ignores that noise so a clean fleet stays clean.
+#   - required_status_checks uses SUBSET semantics: the codified contexts are the
+#     unconditional fleet-wide minimum (github-settings.md#code-quality); a repo
+#     may ADD repo-specific checks (build-and-test, Go, coverage, …) — those are
+#     not drift. A MISSING codified context IS drift. Every other parameter
+#     (pull_request scalars + allowed_merge_methods) is matched exactly, with
+#     arrays compared order-insensitively.
+#   - Fail closed: if a ruleset cannot be fetched or parsed, or the codified
+#     source is missing, that is a finding — never a silent pass. An error must
+#     never read as "no drift" (the systemic bug in #755).
+#
+# Missing-by-name is already reported by check_rulesets (missing-pr-quality /
+# missing-code-quality); this check stays silent in that case to avoid double
+# reporting, and instead audits the contents of the rulesets that DO exist.
+
+# Codified ruleset name → the rule `type` whose parameters we audit.
+RULESET_CONTENT_SPECS=(
+  "pr-quality:pull_request:standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
+  "code-quality:required_status_checks:standards/github-settings.md#code-quality--required-checks-ruleset-all-repositories"
+)
+
+# jq program: given codified params ($exp) and live params ($act), emit one
+# TSV line (param<TAB>expected<TAB>actual) per drifted codified parameter.
+#   - required_status_checks: subset check on the set of `.context` values;
+#     drift only when a codified context is absent from the live set. `actual`
+#     is rendered as the missing contexts so the finding is directly actionable.
+#   - all other params: exact compare (arrays sorted so order never matters).
+RULESET_DRIFT_JQ='
+  def ctxset($v): (($v // []) | map(.context) | unique);
+  ($act // {}) as $a
+  | $exp | to_entries[]
+  | .key as $k
+  | .value as $ev
+  | ($a[$k]) as $av
+  | if $k == "required_status_checks" then
+      (ctxset($ev)) as $e
+      | (ctxset($av)) as $c
+      | ($e - $c) as $missing
+      | select(($missing | length) > 0)
+      | [ $k, ($e | join(", ")), ("missing: " + ($missing | join(", "))) ]
+    else
+      (if ($ev | type) == "array" then ($ev | sort) else $ev end) as $e
+      | (if ($av | type) == "array" then ($av | sort) else $av end) as $c
+      | select($e != $c)
+      | [ $k,
+          ($e | if type == "array" then join(", ") else tostring end),
+          ($c | if type == "array" then join(", ") else tostring end) ]
+    end
+  | @tsv
+'
+
+check_ruleset_contents() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local spec name rtype std_ref
+  for spec in "${RULESET_CONTENT_SPECS[@]}"; do
+    IFS=':' read -r name rtype std_ref <<< "$spec"
+    _ruleset_contents_one "$repo" "$rulesets_json" "$name" "$rtype" "$std_ref"
+  done
+}
+
+# _ruleset_contents_one <repo> <rulesets_json> <name> <rule_type> <std_ref>
+# Audit one named ruleset's codified parameters against its live counterpart.
+_ruleset_contents_one() {
+  local repo="$1" rulesets_json="$2" name="$3" rtype="$4" std_ref="$5"
+
+  # --- Codified source of truth (fail closed if missing/unparseable) --------
+  local codified_file="$RULESETS_SRC_DIR/$name.json"
+  if [ ! -f "$codified_file" ]; then
+    add_finding "$repo" "rulesets" "ruleset-contents-source-missing-$name" "error" \
+      "Cannot audit \`$name\` ruleset contents: codified source of truth \`standards/rulesets/$name.json\` was not found. Treating as a finding rather than a pass (fail closed) — an audit that cannot read the standard must never read as \"no drift\"." \
+      "$std_ref"
+    return 0
+  fi
+  local exp_params
+  exp_params=$(jq -c --arg t "$rtype" '[.rules[]? | select(.type==$t) | .parameters][0] // empty' "$codified_file" 2>/dev/null || echo "")
+  if [ -z "$exp_params" ]; then
+    add_finding "$repo" "rulesets" "ruleset-contents-source-invalid-$name" "error" \
+      "Cannot audit \`$name\` ruleset contents: codified source \`standards/rulesets/$name.json\` has no \`$rtype\` rule parameters to compare against (unparseable or malformed). Fail closed." \
+      "$std_ref"
+    return 0
+  fi
+
+  # --- Resolve the live ruleset id by name ----------------------------------
+  # Absence-by-name is already reported by check_rulesets; stay silent here.
+  local rs_id
+  rs_id=$(echo "$rulesets_json" | jq -r --arg n "$name" 'map(select(.name==$n)) | .[0].id // empty' 2>/dev/null || echo "")
+  [ -z "$rs_id" ] && return 0
+
+  # --- Fetch the full live ruleset (fail closed on error/invalid JSON) ------
+  local rs
+  rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+  if [ -z "$rs" ] || ! echo "$rs" | jq empty >/dev/null 2>&1; then
+    add_finding "$repo" "rulesets" "ruleset-contents-unfetchable-$name" "error" \
+      "Could not fetch or parse the \`$name\` ruleset (id $rs_id) to audit its contents against \`standards/rulesets/$name.json\`. Treating as drift, not a pass (fail closed): an error must never be conflated with \"no drift\"." \
+      "$std_ref"
+    return 0
+  fi
+
+  # A ruleset that exists but has lost the codified rule type entirely is drift.
+  local has_rule
+  has_rule=$(echo "$rs" | jq --arg t "$rtype" 'any(.rules[]?; .type==$t)' 2>/dev/null || echo "false")
+  if [ "$has_rule" != "true" ]; then
+    add_finding "$repo" "rulesets" "ruleset-drift-$name-missing-rule" "error" \
+      "Ruleset \`$name\` exists but no longer carries a \`$rtype\` rule, so every codified parameter is unenforced. The codified standard (\`standards/rulesets/$name.json\`) requires it; run \`scripts/apply-rulesets.sh --repo $ORG/$repo\` to converge." \
+      "$std_ref"
+    return 0
+  fi
+
+  local act_params
+  act_params=$(echo "$rs" | jq -c --arg t "$rtype" '[.rules[]? | select(.type==$t) | .parameters][0] // {}' 2>/dev/null || echo "")
+  [ -z "$act_params" ] && act_params="{}"
+
+  # --- Diff codified vs live and emit one finding per drifted parameter ------
+  local drift
+  if ! drift=$(jq -rn --argjson exp "$exp_params" --argjson act "$act_params" "$RULESET_DRIFT_JQ" 2>/dev/null); then
+    add_finding "$repo" "rulesets" "ruleset-contents-uncomparable-$name" "error" \
+      "Could not compare the \`$name\` ruleset (id $rs_id) against \`standards/rulesets/$name.json\` (parameter comparison failed). Fail closed." \
+      "$std_ref"
+    return 0
+  fi
+
+  local param expected actual slug
+  while IFS=$'\t' read -r param expected actual; do
+    [ -z "$param" ] && continue
+    slug=$(printf '%s' "$param" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="param"
+    add_finding "$repo" "rulesets" "ruleset-drift-$name-$slug" "error" \
+      "Ruleset \`$name\` parameter \`$param\` has drifted from the codified standard: expected \`$expected\`, actual \`$actual\`. The codified JSON (\`standards/rulesets/$name.json\`) is the source of truth (#575/#580); run \`scripts/apply-rulesets.sh --repo $ORG/$repo\` to converge." \
+      "$std_ref"
+  done <<< "$drift"
 }
 
 # ---------------------------------------------------------------------------
