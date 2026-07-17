@@ -270,6 +270,21 @@ persona's own trigger matrix, applies the trust floor and `opt_out_label`, and
 dispatches. Personas do **not** each ship a mention workflow — that is the
 per-agent drift the manifest exists to prevent.
 
+The router is
+[`persona-mention-reusable.yml`](../.github/workflows/persona-mention-reusable.yml),
+its decision core is
+[`scripts/lib/persona-mention.sh`](../scripts/lib/persona-mention.sh) (pure and
+network-free, so `tests/persona_mention.bats` pins the guards without API
+access), and repos adopt it by copying the one stub
+[`standards/workflows/persona-mention.yml`](workflows/persona-mention.yml).
+
+**There is no persona index, by design.** Because `address.handle`'s slug MUST
+equal `id` (rule 1) and `id` MUST equal the persona's directory name, a handle
+resolves to `personas/<slug>/persona.yml` by convention — the manifest is the
+index-of-record (§1.1), so nothing derives, caches, or duplicates it. A 404 is a
+meaningful answer: "not a persona". That is also how a real, non-persona team
+(`@petry-projects/org-leads`) falls through harmlessly rather than erroring.
+
 > **Recursion is the hazard here.** Agent comments posted via a PAT re-trigger
 > workflows (unlike `GITHUB_TOKEN`), and `.github-private#860` burned 1,481
 > identical acks in 4.5 hours from a *single* self-loop. With N mutually
