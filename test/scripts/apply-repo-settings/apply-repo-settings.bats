@@ -43,8 +43,10 @@ args="\$*"
 case "\$args" in
   *"contents/personas/"*"persona.yml"*)
     id=\$(printf '%s' "\$args" | sed -n 's#.*contents/personas/\([^/?]*\)/persona.yml.*#\1#p')
-    [ -f "$MANIFEST_DIR/\$id.yml" ] && cat "$MANIFEST_DIR/\$id.yml"
-    exit 0 ;;
+    # A real `gh api` on an unreachable/absent manifest exits NON-zero (404).
+    # The stub must too, or the fetch-failure path is untestable.
+    if [ -f "$MANIFEST_DIR/\$id.yml" ]; then cat "$MANIFEST_DIR/\$id.yml"; exit 0; fi
+    exit 1 ;;
   *"contents/personas"*)
     printf '%s' "\${PERSONA_DIRS_JSON:-[]}"; exit 0 ;;
   *"label create"*)
@@ -106,14 +108,28 @@ _run_fn() { run "$@"; }
   [[ "$output" == *"business-analyst:hands-off|"* ]]
 }
 
-# ── graceful degradation ──────────────────────────────────────────────────────
-@test "unavailable manifest listing degrades to no opt-out labels (returns 0)" {
+# ── failure is reported, not swallowed (#755) ─────────────────────────────────
+# The static label set still lands on a hiccup — that resilience is deliberate —
+# but the run must NEVER report success while the mandated <id>:hands-off escape
+# hatch is absent. "Applied ✅" with no opt-out label is worse than a red run:
+# nobody learns until they tell a persona to back off and it ignores them.
+@test "unavailable manifest listing returns NON-ZERO (does not fail open)" {
   export PERSONA_DIRS_JSON='not-json'  # jq parse failure on the listing
   _run_fn persona_opt_out_label_configs
-  [ "$status" -eq 0 ]
-  # No label emitted to stdout; only a WARN (which run merges from stderr) is present.
+  [ "$status" -ne 0 ]
+  # Still emits no label to stdout; only a WARN (which run merges from stderr).
   [[ "$output" != *":hands-off"* ]]
   [[ "$output" != *"|ededed|"* ]]
+}
+
+@test "an unreadable manifest returns NON-ZERO even though it guesses the label" {
+  # <id>:hands-off is only a CONVENTION (§4 rule 4); the schema lets a persona
+  # declare any opt_out_label. If the manifest cannot be read we may create a label
+  # nobody uses while the real one stays absent — so emit the guess, but say so.
+  rm -f "$MANIFEST_DIR/qa-lead.yml"
+  _run_fn persona_opt_out_label_configs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"qa-lead:hands-off"* ]]   # the best guess is still emitted
 }
 
 # ── integration with apply_labels ─────────────────────────────────────────────
@@ -141,10 +157,79 @@ _run_fn() { run "$@"; }
   [ ! -f "$CALLS" ]
 }
 
-@test "apply_labels still succeeds when persona derivation is unavailable" {
+@test "apply_labels still applies the static 7 when persona derivation is unavailable" {
+  # The resilience half: a persona hiccup must not block unrelated label work.
   export PERSONA_DIRS_JSON='not-json'
   _run_fn apply_labels acme
   [ "$status" -eq 0 ]
   [ "$(grep -c 'label create' "$CALLS")" -eq 7 ]
   ! grep -q 'hands-off' "$CALLS"
+}
+
+# _apply_labels <repo> — run apply_labels in THIS shell and record its status in
+# $APPLY_RC. Must NOT echo the status: $( ) is a subshell, and the whole point is
+# to observe the flag mutations apply_labels makes in the CURRENT shell.
+# `|| true` would mask an unexpected non-zero and let a flag assertion pass on a
+# broken function, so the status is captured explicitly with errexit off.
+_apply_labels() {
+  set +e; apply_labels "$1" >/dev/null 2>&1; APPLY_RC=$?; set -e
+}
+
+@test "apply_labels records the failure so the run cannot claim success" {
+  # The honesty half: the static labels landed, but _PERSONA_OPT_OUT_SYNC_FAILED is
+  # set, and main() turns that into a non-zero exit.
+  export PERSONA_DIRS_JSON='not-json'
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _PERSONA_OPT_OUT_SYNC_FAILED=false
+  _apply_labels acme
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]
+}
+
+@test "a healthy derivation leaves the failure flag unset" {
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _PERSONA_OPT_OUT_SYNC_FAILED=false
+  _apply_labels acme
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = false ]
+}
+
+@test "a failed derivation is NOT cached — later repos retry and recover" {
+  # --all sweeps share the cache. Caching a failure would let one transient blip on
+  # the first repo deny opt-out labels to every later repo even after the API
+  # recovers, turning a hiccup into a fleet-wide gap.
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _PERSONA_OPT_OUT_SYNC_FAILED=false
+  export PERSONA_DIRS_JSON='not-json'          # repo 1: derivation fails
+  _apply_labels repo-one
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" = false ]   # must NOT have cached the failure
+  export PERSONA_DIRS_JSON='[{"type":"dir","name":"qa-lead"}]'  # repo 2: API recovers
+  _apply_labels repo-two
+  [ "$APPLY_RC" -eq 0 ]
+  grep -q 'qa-lead:hands-off' "$CALLS"           # repo 2 DID get the label
+  [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]     # but the run still cannot claim success
+}
+
+@test "a successful derivation IS cached — no refetch per repo" {
+  _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+  _apply_labels repo-one
+  [ "$APPLY_RC" -eq 0 ]
+  [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" = true ]
+}
+
+@test "an opt_out_label containing spaces is not truncated at the first word" {
+  # opt_out_label is free-form in the schema and GitHub labels may contain spaces.
+  # Truncating would provision "needs" and leave the real hatch absent.
+  printf 'triggers:\n  opt_out_label: "needs human review"\n' > "$MANIFEST_DIR/qa-lead.yml"
+  _run_fn persona_opt_out_label_configs
+  [ "$status" -eq 0 ]
+  [[ "$output" == "needs human review|"* ]]
+}
+
+@test "a trailing YAML comment is stripped from opt_out_label" {
+  printf 'triggers:\n  opt_out_label: qa-lead:hands-off  # the escape hatch\n' > "$MANIFEST_DIR/qa-lead.yml"
+  _run_fn persona_opt_out_label_configs
+  [ "$status" -eq 0 ]
+  [[ "$output" == "qa-lead:hands-off|"* ]]
 }
