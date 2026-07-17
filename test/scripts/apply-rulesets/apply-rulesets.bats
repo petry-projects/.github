@@ -49,6 +49,16 @@ EOF
   done
 }
 
+@test "pr-quality.json: allows squash merges only (allowed_merge_methods == [squash])" {
+  # Anti-divergence guard (#771): the pr-quality ruleset enforces squash-only merges.
+  # Widening this to include merge/rebase is exactly the drift the compliance audit's
+  # check_ruleset_contents() flags. Lock the codified source of truth so it can never
+  # silently regress to [merge, rebase, squash].
+  run jq -c '.rules[] | select(.type=="pull_request") | .parameters.allowed_merge_methods' "$RULESETS_DIR/pr-quality.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["squash"]' ]
+}
+
 @test "pr-quality.json: omits 'automatic_copilot_code_review_enabled' (Free-plan API rejects it)" {
   # GitHub's rulesets API 422s ("Unexpected parameter") on this pull_request
   # parameter for Free-plan orgs, which blocks apply-rulesets from creating or
