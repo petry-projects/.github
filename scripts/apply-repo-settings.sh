@@ -598,6 +598,14 @@ if [ "$1" = "--all" ]; then
     exit 1
   fi
 
+  # The persona opt-out family is the escape hatch §4 rule 4 mandates. If it could
+  # not be derived faithfully, the static labels still landed — but this run did
+  # NOT do what it claims, and saying so is the whole point (#755).
+  if [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]; then
+    err "persona opt-out labels could not be derived faithfully — static labels applied, but the <id>:hands-off family is incomplete or guessed"
+    exit 1
+  fi
+
   ok "All repos processed successfully"
 else
   repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
