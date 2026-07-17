@@ -195,7 +195,6 @@ A persona that enables the `mention` surface MUST declare an `address` block
 ```yaml
 address:
   handle: petry-projects/qa-lead   # an org TEAM — mentioned as @petry-projects/qa-lead
-  aliases: []                      # additional handles that route here (renames)
 ```
 
 **The handle MUST be an org team, never a user account.** This is not a style
@@ -226,10 +225,39 @@ two things a bare convention cannot:
 3. **The team MUST set `notification_setting: notifications_disabled`.** The
    handle exists to route a webhook, not to page humans. Membership should be
    empty or bot-only.
-4. **Handles and aliases MUST be unique across all personas.** Cross-file, so
-   JSON Schema cannot see it — enforced by `validate-personas.py`.
-5. **A rename keeps the old handle as an `alias`.** Roles outlive their spelling;
-   in-flight threads must not break.
+4. **Handles are unique across all personas — by construction, not by check.**
+   The org is pinned by the pattern, the slug equals `id`, `id` equals the
+   persona's directory name, and directory names are unique. Two personas
+   therefore *cannot* claim the same handle, so there is deliberately no
+   cross-file uniqueness check: it could never fire.
+
+### 4.1.1 Renames — and why there is no `aliases`
+
+An earlier draft of this standard let a persona declare `address.aliases[]` so a
+**renamed** role kept routing (`qa-lead` listing `petry-projects/murat`). That
+field is gone. Two reasons, one structural and one measured:
+
+- **Index-free routing could never have honoured it.** The router resolves
+  `@petry-projects/murat` to `personas/murat/persona.yml` — a 404 after the
+  rename. The alias is declared *inside the renamed persona's own manifest*,
+  which the router never opens, because it does not know to look there.
+- **There is nothing live left to route.** GitHub stops rendering a renamed
+  team's old handle as a mention at all — it becomes plain text. Measured:
+
+  ```text
+  before rename:  <a class="team-mention" …>@petry-projects/probe</a>
+  after rename:   <p>@petry-projects/probe please review</p>
+  ```
+
+  So the old handle is not a silently-broken mention that looks live — the
+  reader sees grey text and knows instantly it did not resolve. The fix is
+  obvious and local: mention the new handle.
+
+**To rename a role:** rename the persona directory, `id`, `name`, `canary.agent`,
+`opt_out_label`, `evals.path`, and the org team (its slug must keep matching
+`id`). In-flight mentions of the old handle stop resolving, visibly — which is
+the correct signal, not a regression. See
+[`.github#755`](https://github.com/petry-projects/.github/issues/755) finding 1.
 
 The **live** properties (rules 2 and 3 — does the team exist, is it closed, are
 notifications off?) need the network, and `validate-personas.py` is hermetic
