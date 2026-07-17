@@ -445,7 +445,7 @@
     "address": {
       "type": "object",
       "additionalProperties": false,
-      "description": "How humans @-mention this persona. Uses a GitHub team handle (never a user account) so mentions route to exactly one owner. Optional \u2014 omit for personas not yet wired for @-mentions. The team slug MUST equal the persona id (enforced by validate-personas.py).",
+      "description": "How humans @-mention this persona. Uses a GitHub team handle (never a user account) so mentions route to exactly one owner. Optional \u2014 omit for personas not yet wired for @-mentions. The team slug MUST equal the persona id (enforced by the persona validator in CI).",
       "required": [
         "handle"
       ],
@@ -457,6 +457,7 @@
         },
         "aliases": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
