@@ -73,6 +73,12 @@ usage() {
   exit 1
 }
 
+# Populated on the first apply_labels() call; reused for every subsequent repo in
+# --all mode. persona_opt_out_label_configs runs in a process-substitution subshell
+# so the cache must live at the apply_labels level, not inside the function.
+_PERSONA_OPT_OUT_CONFIGS_CACHE=()
+_PERSONA_OPT_OUT_CONFIGS_CACHED=false
+
 # persona_opt_out_label_configs — emit one "name|color|description" line per persona,
 # deriving the <id>:hands-off opt-out label from the persona manifests rather than a
 # hand-maintained list. Adding a persona therefore needs NO edit here: the family
@@ -81,9 +87,9 @@ usage() {
 # a draft needs. If the manifest listing cannot be read (e.g. transient API error) we
 # warn and emit nothing, so a network hiccup never blocks the static label set.
 persona_opt_out_label_configs() {
-  local ids id opt_out
+  local ids id opt_out opt_out_raw
   ids=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas?ref=$PERSONA_MANIFEST_REF" 2>/dev/null \
-        | jq -r '.[] | select(.type == "dir") | .name' 2>/dev/null) || {
+        | jq -r '.[]? | select(.type == "dir") | .name' 2>/dev/null) || {
     warn "  Could not list persona manifests from $PERSONA_MANIFEST_REPO — skipping opt-out labels"
     return 0
   }
@@ -92,10 +98,14 @@ persona_opt_out_label_configs() {
     [ -z "$id" ] && continue
     # Prefer the manifest's declared opt_out_label; fall back to the <id>:hands-off
     # convention (persona-standards.md §4 rule 4) when the field cannot be read.
-    opt_out=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas/$id/persona.yml?ref=$PERSONA_MANIFEST_REF" \
-                -H "Accept: application/vnd.github.raw" 2>/dev/null \
-              | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
-              | tr -d "\"'" | awk '{print $1}')
+    if opt_out_raw=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas/$id/persona.yml?ref=$PERSONA_MANIFEST_REF" \
+                       -H "Accept: application/vnd.github.raw" 2>/dev/null); then
+      opt_out=$(echo "$opt_out_raw" | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
+                | tr -d '\r' | tr -d "\"'" | awk '{print $1}')
+    else
+      echo "Warning: Failed to fetch persona.yml for $id" >&2
+      opt_out=""
+    fi
     [ -z "$opt_out" ] && opt_out="$id:hands-off"
     printf '%s|%s|Opt an item out of the %s persona automation entirely\n' \
       "$opt_out" "$PERSONA_OPT_OUT_COLOR" "$id"
@@ -118,10 +128,13 @@ apply_labels() {
   )
 
   # Append the derived persona opt-out family (<id>:hands-off, one per persona).
-  local persona_configs=()
-  mapfile -t persona_configs < <(persona_opt_out_label_configs)
-  if [ "${#persona_configs[@]}" -gt 0 ]; then
-    label_configs+=("${persona_configs[@]}")
+  # Cache on first call so --all mode doesn't re-fetch all manifests per repo.
+  if [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" != true ]; then
+    mapfile -t _PERSONA_OPT_OUT_CONFIGS_CACHE < <(persona_opt_out_label_configs)
+    _PERSONA_OPT_OUT_CONFIGS_CACHED=true
+  fi
+  if [ "${#_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}" -gt 0 ]; then
+    label_configs+=("${_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}")
   fi
 
   for config in "${label_configs[@]}"; do

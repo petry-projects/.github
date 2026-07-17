@@ -12,9 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../.." && pwd)"
 APPLY="$SCRIPT_DIR/scripts/apply-repo-settings.sh"
 
 setup() {
-  STUB_BIN="$(mktemp -d)"; export PATH="$STUB_BIN:$PATH"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   CALLS="$STUB_BIN/calls.log"; export CALLS
-  MANIFEST_DIR="$(mktemp -d)"; export MANIFEST_DIR
+  MANIFEST_DIR="$(mktemp -d "$BATS_TEST_TMPDIR/manifest.XXXXXX")"; export MANIFEST_DIR
   export GH_TOKEN=stub-token
   # Default fixture: one persona (qa-lead) whose manifest declares the conventional
   # <id>:hands-off label. The listing also carries a non-dir entry that MUST be
@@ -22,6 +22,7 @@ setup() {
   export PERSONA_DIRS_JSON='[{"type":"dir","name":"qa-lead"},{"type":"file","name":"validate-personas.py"}]'
   printf 'triggers:\n  opt_out_label: qa-lead:hands-off\n' > "$MANIFEST_DIR/qa-lead.yml"
   _stub_gh
+  source "$APPLY"
 }
 
 teardown() {
@@ -54,9 +55,8 @@ EOF
   chmod +x "$STUB_BIN/gh"
 }
 
-# Source the applier and evaluate an expression against its functions. Sourcing must
-# NOT run main() (guarded by BASH_SOURCE) or these helpers are untestable in isolation.
-_run_fn() { run bash -c "source '$APPLY'; $*"; }
+# Call functions loaded into BATS via setup()'s source "$APPLY".
+_run_fn() { run "$@"; }
 
 # ── derivation ────────────────────────────────────────────────────────────────
 @test "derives <id>:hands-off from a persona manifest, with the family color" {
