@@ -177,7 +177,7 @@ jobs:
             # fleet-wide with no error anywhere — indistinguishable from nobody
             # being addressed. Separate them on the status code.
             body_file="$(mktemp)"
-            http="$(curl -sSL --max-time 20 -o "$body_file" -w '%{http_code}' "$url" || echo 000)"
+            http="$(curl -sSL --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -o "$body_file" -w '%{http_code}' "$url" || echo 000)"
             case "$http" in
               200)
                 manifest="$(cat "$body_file")"
