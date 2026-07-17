@@ -105,8 +105,16 @@ jobs:
         # pm_manifest_query parses the manifest with python3 + yaml. PyYAML is NOT
         # documented as preinstalled on the runner images, and this reusable runs
         # on the CALLER's runner, so we cannot assume the caller installed it.
-        # Cheap no-op when present.
-        run: python3 -c 'import yaml' 2>/dev/null || pip install --quiet --disable-pip-version-check pyyaml
+        # Cheap no-op when already present.
+        #
+        # Hash- and binary-locked per the dependency-hardening gate
+        # (tests/dependency_hardening.bats). A bare `pip install pyyaml` is an
+        # unpinned, unverified supply-chain install running on every repo in the
+        # fleet — the gate caught exactly that here, and it was right to.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || \
+            pip install --quiet --require-hashes --only-binary :all: \
+              -r .persona-tooling/scripts/persona-mention-requirements.txt
 
       - name: Route the mention
         env:
