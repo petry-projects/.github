@@ -74,24 +74,40 @@ usage() {
 }
 
 # Populated on the first apply_labels() call; reused for every subsequent repo in
-# --all mode. persona_opt_out_label_configs runs in a process-substitution subshell
-# so the cache must live at the apply_labels level, not inside the function.
+# --all mode. persona_opt_out_label_configs runs in a subshell so the cache must
+# live at the apply_labels level, not inside the function.
 _PERSONA_OPT_OUT_CONFIGS_CACHE=()
 _PERSONA_OPT_OUT_CONFIGS_CACHED=false
+
+# Set when the persona opt-out family could not be derived faithfully — either the
+# manifest listing failed, or a manifest could not be read and its label had to be
+# guessed from the convention. The run then MUST NOT report success.
+#
+# Why this exists (petry-projects/.github#755): the opt-out family is the escape
+# hatch §4 rule 4 mandates. Printing "All repos processed successfully" while it is
+# silently absent means nobody learns until someone tells a persona to leave an
+# issue alone and it ignores them. Reading an error as a negative answer is the
+# systemic bug this framework already had four instances of; this is not the fifth.
+_PERSONA_OPT_OUT_SYNC_FAILED=false
 
 # persona_opt_out_label_configs — emit one "name|color|description" line per persona,
 # deriving the <id>:hands-off opt-out label from the persona manifests rather than a
 # hand-maintained list. Adding a persona therefore needs NO edit here: the family
 # follows from personas/<id>/persona.yml, the index-of-record (persona-standards.md
 # §1.1). Draft personas are included — being able to say "hands-off" is exactly what
-# a draft needs. If the manifest listing cannot be read (e.g. transient API error) we
-# warn and emit nothing, so a network hiccup never blocks the static label set.
+# a draft needs.
+#
+# Returns non-zero if the family could not be derived faithfully. It still emits
+# whatever it resolved (so a hiccup never blocks the STATIC label set — that
+# resilience is deliberate), but the caller records the failure and the run exits
+# non-zero rather than claiming success. Emitting nothing and returning 0 would
+# make "labels applied ✅" indistinguishable from "the opt-out hatch is missing".
 persona_opt_out_label_configs() {
-  local ids id opt_out opt_out_raw
+  local ids id opt_out opt_out_raw rc=0
   ids=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas?ref=$PERSONA_MANIFEST_REF" 2>/dev/null \
         | jq -r '.[]? | select(.type == "dir") | .name' 2>/dev/null) || {
-    warn "  Could not list persona manifests from $PERSONA_MANIFEST_REPO — skipping opt-out labels"
-    return 0
+    warn "  Could not list persona manifests from $PERSONA_MANIFEST_REPO — opt-out labels NOT applied"
+    return 1
   }
 
   while IFS= read -r id; do
@@ -103,13 +119,20 @@ persona_opt_out_label_configs() {
       opt_out=$(echo "$opt_out_raw" | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
                 | tr -d '\r' | tr -d "\"'" | awk '{print $1}')
     else
-      echo "Warning: Failed to fetch persona.yml for $id" >&2
+      # The convention fallback below is a GUESS. §4 rule 4 makes <id>:hands-off
+      # only a convention — the schema lets a persona declare any opt_out_label —
+      # so if the manifest is unreadable we may create a label nobody uses while
+      # the real one stays absent, leaving opt-out silently broken. Emit it (it is
+      # the best guess) but do not call the run a success.
+      warn "  Could not read personas/$id/persona.yml — guessing '$id:hands-off' from the convention"
       opt_out=""
+      rc=1
     fi
     [ -z "$opt_out" ] && opt_out="$id:hands-off"
     printf '%s|%s|Opt an item out of the %s persona automation entirely\n' \
       "$opt_out" "$PERSONA_OPT_OUT_COLOR" "$id"
   done <<< "$ids"
+  return "$rc"
 }
 
 apply_labels() {
@@ -129,8 +152,22 @@ apply_labels() {
 
   # Append the derived persona opt-out family (<id>:hands-off, one per persona).
   # Cache on first call so --all mode doesn't re-fetch all manifests per repo.
+  #
+  # Captured with $( ) rather than `mapfile < <(...)`: process substitution runs
+  # the function in a subshell whose EXIT CODE is unreachable (mapfile reports its
+  # own status), so a failure there could never be seen — which is exactly how the
+  # fail-open survived review. $( ) is also a subshell, but its status propagates.
   if [ "$_PERSONA_OPT_OUT_CONFIGS_CACHED" != true ]; then
-    mapfile -t _PERSONA_OPT_OUT_CONFIGS_CACHE < <(persona_opt_out_label_configs)
+    local persona_out=""
+    if ! persona_out=$(persona_opt_out_label_configs); then
+      _PERSONA_OPT_OUT_SYNC_FAILED=true
+    fi
+    _PERSONA_OPT_OUT_CONFIGS_CACHE=()
+    # Guard the empty case: `mapfile <<< ""` yields one empty element, which would
+    # become a bogus "||" label config.
+    if [ -n "$persona_out" ]; then
+      mapfile -t _PERSONA_OPT_OUT_CONFIGS_CACHE <<< "$persona_out"
+    fi
     _PERSONA_OPT_OUT_CONFIGS_CACHED=true
   fi
   if [ "${#_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}" -gt 0 ]; then
@@ -405,6 +442,14 @@ if [ "$1" = "--all" ]; then
     exit 1
   fi
 
+  # The persona opt-out family is the escape hatch §4 rule 4 mandates. If it could
+  # not be derived faithfully, the static labels still landed — but this run did
+  # NOT do what it claims, and saying so is the whole point (#755).
+  if [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]; then
+    err "persona opt-out labels could not be derived faithfully — static labels applied, but the <id>:hands-off family is incomplete or guessed"
+    exit 1
+  fi
+
   ok "All repos processed successfully"
 else
   repo_json=$(gh api "repos/$ORG/$1" 2>/dev/null || echo "{}")
@@ -418,6 +463,13 @@ else
   pp_apply_security_and_analysis "$1"
   apply_codeql_default_setup "$1"
   apply_check_suite_prefs "$1"
+
+  # Same guard as --all: a single-repo run must not exit 0 while the mandated
+  # opt-out hatch is missing from that repo.
+  if [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]; then
+    err "persona opt-out labels could not be derived faithfully — static labels applied, but the <id>:hands-off family is incomplete or guessed"
+    exit 1
+  fi
 fi
 }
 
