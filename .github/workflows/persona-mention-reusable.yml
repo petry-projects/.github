@@ -63,6 +63,7 @@ jobs:
   route:
     runs-on: ubuntu-latest
     permissions:
+      contents: read         # actions/checkout of petry-projects/.github tooling
       issues: read          # read the item's labels for the opt-out check
       pull-requests: read
     # The CHEAP pre-filter, mirrored from pm_should_route (tests/persona_mention.bats).
@@ -81,12 +82,23 @@ jobs:
     # The trust check here is the conservative §4 default. A persona may TIGHTEN
     # it in its own manifest (enforced below), never loosen it — so this gate is
     # always at least as strict as the union of what the personas allow.
+    #
+    # review_requested events (§4 "mention" surface, "Reviewer-assignment counts
+    # here too") are also admitted: only org members with write+ access can assign
+    # team reviewers, so the recursion guards do not apply.
     if: |
-      contains(github.event.comment.body, '@petry-projects/') &&
-      github.event.comment.user.login != 'donpetry-bot' &&
-      github.event.comment.user.login != 'github-actions[bot]' &&
-      !contains(github.event.comment.body, '<!-- persona:') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      (
+        contains(github.event.comment.body, '@petry-projects/') &&
+        github.event.comment.user.login != 'donpetry-bot' &&
+        github.event.comment.user.login != 'github-actions[bot]' &&
+        !contains(github.event.comment.body, '<!-- persona:') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'review_requested' &&
+        github.event.requested_team.slug != ''
+      )
 
     steps:
       - name: Checkout persona-mention tooling
@@ -98,6 +110,7 @@ jobs:
           ref: ${{ inputs.tooling_ref || github.job_workflow_sha }}
           path: .persona-tooling
           fetch-depth: 1
+          persist-credentials: false  # no git operations after checkout; leave no token in config
 
       - name: Route the mention
         env:
@@ -113,21 +126,41 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ITEM_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
           SOURCE_REPO: ${{ github.repository }}
+          # review_requested fields (empty for comment events)
+          REQUESTED_TEAM_SLUG: ${{ github.event.requested_team.slug }}
+          REQUESTER_LOGIN: ${{ github.event.sender.login }}
+          PR_HTML_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/persona-mention.sh
           source .persona-tooling/scripts/lib/persona-mention.sh
 
-          if ! pm_should_route "$COMMENT_USER" "$COMMENT_ASSOC" "$COMMENT_BODY"; then
-            echo "Not routable (bot actor, agent marker, trust floor, or no handle) — nothing to do."
-            exit 0
+          # Normalize the two routing paths: comment @-mention vs reviewer assignment.
+          # reviewer assignment (§4 "mention" surface): the team slug is direct —
+          # no body to parse, no recursion guards needed (assigning a reviewer requires
+          # write+ access), trust floor still enforced per-persona below.
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "${REQUESTED_TEAM_SLUG:-}" ]; then
+            DISPATCH_SLUGS="$REQUESTED_TEAM_SLUG"
+            COMMENT_USER="${REQUESTER_LOGIN:-}"
+            COMMENT_URL="${PR_HTML_URL:-}"
+            # Use COLLABORATOR as a synthetic floor-check association; assigning a team
+            # reviewer requires at least write access, which maps to COLLABORATOR.
+            COMMENT_ASSOC="COLLABORATOR"
+          else
+            if ! pm_should_route "$COMMENT_USER" "$COMMENT_ASSOC" "$COMMENT_BODY"; then
+              echo "Not routable (bot actor, agent marker, trust floor, or no handle) — nothing to do."
+              exit 0
+            fi
+            DISPATCH_SLUGS="$(pm_extract_slugs "$COMMENT_BODY")"
           fi
 
           # Labels for the opt-out check. Discussions have no labels API surface
-          # here, so an empty set is correct rather than fatal.
+          # here, so an empty set is correct rather than fatal. For issues and PRs,
+          # a label-fetch failure means we cannot verify opt-out — refuse rather than
+          # route through a potentially opted-out item (fail closed).
           LABELS=""
           if [ "$EVENT_NAME" != "discussion_comment" ] && [ -n "${ITEM_NUMBER:-}" ]; then
-            LABELS="$(gh api "/repos/${SOURCE_REPO}/issues/${ITEM_NUMBER}/labels" --jq '.[].name' 2>/dev/null || echo "")"
+            LABELS="$(gh api "/repos/${SOURCE_REPO}/issues/${ITEM_NUMBER}/labels" --jq '.[].name')"
           fi
 
           dispatched=0
@@ -136,23 +169,28 @@ jobs:
             echo "::group::@petry-projects/${slug}"
 
             url="$(pm_manifest_url "$slug")"
-            if ! manifest="$(curl -fsSL --max-time 20 "$url" 2>/dev/null)"; then
+            if ! manifest="$(curl -fsSL --max-time 20 -H "Authorization: token ${GH_TOKEN}" "$url" 2>/dev/null)"; then
               echo "No manifest at ${url} — not a persona (a real team, or a typo). Skipping."
               echo "::endgroup::"
               continue
             fi
 
-            # The slug we routed on must equal the id the manifest claims. These
-            # cannot diverge while validate-personas.py holds, so a mismatch means
-            # the invariant broke — refuse rather than guess which one is right.
+            # The slug we routed on must equal the id the manifest claims. If not,
+            # check whether the slug is a declared alias (§4.1 rule 5: renames keep
+            # the old handle as an alias so in-flight threads do not break).
             claimed="$(pm_persona_id "$manifest")"
             if [ "$claimed" != "$slug" ]; then
-              echo "::warning::manifest at ${url} claims id '${claimed}' but was addressed as '${slug}' — refusing to route"
-              echo "::endgroup::"
-              continue
+              if pm_persona_aliases "$manifest" | grep -qxF "$slug"; then
+                echo "Alias '${slug}' resolved to canonical persona '${claimed}'."
+                slug="$claimed"
+              else
+                echo "::warning::manifest at ${url} claims id '${claimed}' but was addressed as '${slug}' (not in aliases) — refusing to route"
+                echo "::endgroup::"
+                continue
+              fi
             fi
 
-            read -r enabled mode opt_out <<<"$(pm_mention_decision "$manifest")"
+            read -r enabled mode opt_out gate_label <<<"$(pm_mention_decision "$manifest")"
             if [ "$enabled" != "true" ]; then
               echo "Persona '${slug}' does not enable the mention surface (mode=${mode}). Skipping."
               echo "::endgroup::"
@@ -161,6 +199,14 @@ jobs:
 
             if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF "$opt_out"; then
               echo "Item carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            # write-mode gate: the persona must declare a gate_label and the item must
+            # carry it before write mode is armed (§1 principle 3, §4 rule 2).
+            if [ "$mode" = "write" ] && [ -n "${gate_label:-}" ] && ! printf '%s\n' "$LABELS" | grep -qxF "$gate_label"; then
+              echo "Item does not carry gate label '${gate_label}' — write mode not armed for '${slug}'. Skipping."
               echo "::endgroup::"
               continue
             fi
@@ -191,6 +237,6 @@ jobs:
               --field "client_payload[requested_by]=$COMMENT_USER"
             dispatched=$((dispatched + 1))
             echo "::endgroup::"
-          done < <(pm_extract_slugs "$COMMENT_BODY")
+          done <<< "$DISPATCH_SLUGS"
 
           echo "Dispatched ${dispatched} persona(s)."

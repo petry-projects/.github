@@ -46,6 +46,11 @@ on:
   # repository_dispatch, which is exactly the bridge the manifest declares.
   discussion_comment:
     types: [created]
+  # Reviewer assignment counts as a mention (§4 "mention" surface). When a
+  # persona team is added as a reviewer, the router dispatches it exactly as
+  # if the team had been @-mentioned in a comment.
+  pull_request:
+    types: [review_requested]
 
 permissions: {}
 

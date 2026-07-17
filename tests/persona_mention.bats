@@ -185,12 +185,12 @@ MENTION_ON='    - surface: mention
   [ "${output% *}" = "false off" ]
 }
 
-@test "pm_mention_decision surfaces a write-mode mention" {
+@test "pm_mention_decision surfaces a write-mode mention with gate_label" {
   run pm_mention_decision "$(manifest '    - surface: mention
       enabled: true
       mode: write
       gate_label: qa-lead')"
-  [ "$output" = "true write qa-lead:hands-off" ]
+  [ "$output" = "true write qa-lead:hands-off qa-lead" ]
 }
 
 @test "pm_mention_trust_floor defaults to the persona-wide floor" {
@@ -226,4 +226,55 @@ MENTION_ON='    - surface: mention
 @test "pm_manifest_url honours PERSONA_REF for testing against a branch" {
   PERSONA_REF=some-branch run pm_manifest_url qa-lead
   [[ "$output" == */some-branch/personas/qa-lead/persona.yml ]]
+}
+
+# --- null-safety (jq ? operator paths) -------------------------------------
+
+@test "pm_mention_decision handles missing triggers or surfaces gracefully" {
+  run pm_mention_decision "{}"
+  [ "$output" = "false off" ]
+}
+
+@test "pm_mention_decision handles malformed triggers type gracefully" {
+  run pm_mention_decision '{"triggers": "invalid-type"}'
+  [ "$output" = "false off" ]
+}
+
+@test "pm_mention_decision handles empty input gracefully" {
+  run pm_mention_decision ""
+  [ "$output" = "false off " ] || [ "$output" = "false off" ]
+}
+
+@test "pm_mention_trust_floor handles missing triggers or trust floor gracefully" {
+  run pm_mention_trust_floor "{}"
+  [ "$output" = "" ]
+}
+
+@test "pm_mention_trust_floor handles empty input gracefully" {
+  run pm_mention_trust_floor ""
+  [ "$output" = "" ]
+}
+
+# --- alias resolution ------------------------------------------------------
+
+@test "pm_persona_aliases emits stripped alias slugs" {
+  local m
+  m="$(manifest "$MENTION_ON")"
+  # Inject an alias into the address block
+  m="${m}
+address:
+  aliases:
+    - petry-projects/old-qa"
+  run pm_persona_aliases "$m"
+  [ "$output" = "old-qa" ]
+}
+
+@test "pm_persona_aliases returns empty when no aliases declared" {
+  run pm_persona_aliases "$(manifest "$MENTION_ON")"
+  [ -z "$output" ]
+}
+
+@test "pm_persona_aliases returns empty on empty input" {
+  run pm_persona_aliases ""
+  [ -z "$output" ]
 }

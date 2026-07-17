@@ -166,22 +166,28 @@ except Exception as exc:
   printf '%s' "$json" | jq -r "$filter"
 }
 
-# pm_mention_decision <manifest-yaml> — emit "<enabled> <mode> <opt_out_label>".
+# pm_mention_decision <manifest-yaml> — emit "<enabled> <mode> <opt_out_label> [<gate_label>]".
 #
 # Resolves the `mention` surface against the trigger matrix: an explicit row wins;
 # otherwise triggers.default_mode applies (§4). default_mode 'off' means the
-# persona is not addressable at all.
+# persona is not addressable at all. gate_label is emitted as a 4th field only
+# when the surface declares one (write-mode guard, §1 principle 3).
 pm_mention_decision() {
   # shellcheck disable=SC2016  # $t/$s/$m are jq variables, not shell expansions
-  printf '%s' "$1" | pm_manifest_query '
-    (.triggers // {}) as $t
-    | ($t.surfaces // []) as $s
-    | ($s | map(select(.surface == "mention")) | first) as $m
+  local input="${1:-}"
+  if [ -z "$input" ]; then
+    echo "false off "
+    return
+  fi
+  printf '%s' "$input" | pm_manifest_query '
+    (.triggers? // {}) as $t
+    | ($t.surfaces? // []) as $s
+    | ($s | map(select(.surface? == "mention")) | first) as $m
     | (if $m == null
-       then (if ($t.default_mode // "off") == "advisory" then "true advisory" else "false off" end)
-       else ((($m.enabled // false) | tostring) + " " + ($m.mode // "advisory"))
+       then (if ($t.default_mode? // "off") == "advisory" then "true advisory" else "false off" end)
+       else ((($m.enabled? // false) | tostring) + " " + ($m.mode? // "advisory"))
        end) as $decision
-    | $decision + " " + ($t.opt_out_label // "")
+    | ($decision + " " + ($t.opt_out_label? // "") + " " + (($m // {}).gate_label? // "")) | gsub("\\s+$"; "")
   '
 }
 
@@ -192,10 +198,29 @@ pm_mention_decision() {
 # is the safe direction.
 pm_mention_trust_floor() {
   # shellcheck disable=SC2016  # $m is a jq variable, not a shell expansion
-  printf '%s' "$1" | pm_manifest_query '
-    ((.triggers.surfaces // []) | map(select(.surface == "mention")) | first) as $m
-    | ($m.trust_floor // .trust.author_association_floor // [])
+  local input="${1:-}"
+  if [ -z "$input" ]; then
+    echo ""
+    return
+  fi
+  printf '%s' "$input" | pm_manifest_query '
+    ((.triggers?.surfaces? // []) | map(select(.surface? == "mention")) | first) as $m
+    | ($m.trust_floor? // .trust?.author_association_floor? // [])
     | join(" ")
+  '
+}
+
+# pm_persona_aliases <manifest-yaml> — emit each alias slug (without the org prefix),
+# one per line. Used to validate that an addressed slug is a known alias for the
+# manifest's canonical id when claimed != slug (§4.1 rule 5: renames keep the old
+# handle as an alias).
+pm_persona_aliases() {
+  # shellcheck disable=SC2016  # jq variable, not shell expansion
+  local input="${1:-}"
+  [ -n "$input" ] || return 0
+  printf '%s' "$input" | pm_manifest_query '
+    [(.address?.aliases? // [])[] | ltrimstr("petry-projects/")]
+    | .[]
   '
 }
 
