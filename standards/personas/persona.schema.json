@@ -133,14 +133,14 @@
       "properties": {
         "handle": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]+/[a-z0-9]+(-[a-z0-9]+)*$",
+          "pattern": "^petry-projects/[a-z0-9]+(-[a-z0-9]+)*$",
           "description": "The addressing handle in 'org/team-slug' form, mentioned as '@org/team-slug'. MUST be an org TEAM, never a user account: GitHub's user namespace is global and first-come, so a bare '@qa-lead' resolves to an unrelated real account and notifies a stranger on every mention (verified: qa-lead, dev-lead, scrum-master are all live accounts). An org team slug cannot collide. The slug MUST equal `id`, so routing is a prefix-strip. Team must be privacy 'closed' (secret teams are unmentionable) with notification_setting 'notifications_disabled'; those are live properties CI verifies, not shape this schema can check."
         },
         "aliases": {
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.-]+/[a-z0-9]+(-[a-z0-9]+)*$"
+            "pattern": "^petry-projects/[a-z0-9]+(-[a-z0-9]+)*$"
           },
           "description": "Additional handles that route here — the migration path when a role is renamed. Same org/team-slug rules as `handle`. Every alias must be unique across ALL personas' handles and aliases (cross-file, enforced by validate-personas.py)."
         }

@@ -231,7 +231,7 @@ two things a bare convention cannot:
 5. **A rename keeps the old handle as an `alias`.** Roles outlive their spelling;
    in-flight threads must not break.
 
-The **live** properties (rule 2 and 3 — does the team exist, is it closed, are
+The **live** properties (rules 2 and 3 — does the team exist, is it closed, are
 notifications off?) need the network, and `validate-personas.py` is hermetic
 with a hermetic test suite. They are verified by a separate CI step and are a
 line in the §7 Definition of Done — deliberately **not** in the validator, whose
