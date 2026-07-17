@@ -46,11 +46,11 @@ on:
   # repository_dispatch, which is exactly the bridge the manifest declares.
   discussion_comment:
     types: [created]
-  # Reviewer assignment counts as a mention (§4 "mention" surface). When a
-  # persona team is added as a reviewer, the router dispatches it exactly as
-  # if the team had been @-mentioned in a comment.
-  pull_request:
-    types: [review_requested]
+  # NOTE: reviewer assignment (pull_request/review_requested) is NOT subscribed
+  # here yet, even though §4 says "Reviewer-assignment counts here too". The
+  # router has no path for it, and a trigger that fires into a router which
+  # ignores it is a dead trigger that only burns runs. Tracked as finding 10 in
+  # petry-projects/.github#755; the trigger lands with the routing, not before.
 
 permissions: {}
 
