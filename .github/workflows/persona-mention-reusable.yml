@@ -170,6 +170,21 @@ jobs:
             echo "::group::@petry-projects/${slug}"
 
             url="$(pm_manifest_url "$slug")"
+            # Fetched UNAUTHENTICATED, on purpose. petry-projects/.github-private is
+            # PUBLIC despite its name (private: false), so no token is needed — and
+            # adding one is actively harmful. Measured against this very URL:
+            #
+            #   unauthenticated -> 200      valid token   -> 200
+            #   expired token   -> 404      empty token   -> 404
+            #
+            # raw.githubusercontent answers a bad or MISSING token with 404, not 401.
+            # With an Authorization header, the moment GH_PAT_WORKFLOWS expires — or a
+            # repo adopts the stub before the secret exists, or a fork PR runs without
+            # secrets — every persona would 404 and be silently skipped as "not a
+            # persona". Unauthenticated cannot fail that way for a public repo, so the
+            # header only ADDS a silent-death path. (CodeRabbit asked for auth on the
+            # premise that the repo is private; it is not.)
+            #
             # A 404 is a real ANSWER ("not a persona" — a plain team like
             # @petry-projects/org-leads, or a typo). Anything else is a FAILURE to
             # get an answer. `curl -f` collapses both into exit 22, which would
@@ -177,7 +192,8 @@ jobs:
             # fleet-wide with no error anywhere — indistinguishable from nobody
             # being addressed. Separate them on the status code.
             body_file="$(mktemp)"
-            http="$(curl -sSL --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -o "$body_file" -w '%{http_code}' "$url" || echo 000)"
+            # NO Authorization header, deliberately — see the note above the case.
+            http="$(curl -sSL --max-time 20 -o "$body_file" -w '%{http_code}' "$url" || echo 000)"
             case "$http" in
               200)
                 manifest="$(cat "$body_file")"
