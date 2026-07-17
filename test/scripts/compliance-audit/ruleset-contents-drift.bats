@@ -28,7 +28,7 @@ CQ_PARAMS="$(jq -c '[.rules[]|select(.type=="required_status_checks")|.parameter
   "$REPO_ROOT/standards/rulesets/code-quality.json")"
 
 setup() {
-  TEST_TMP="$(mktemp -d)"
+  TEST_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/compliance-audit.XXXXXX")"
   MOCK_BIN="$TEST_TMP/bin"
   mkdir -p "$MOCK_BIN"
   # No-op sleep so gh_api's retry backoff runs instantly.

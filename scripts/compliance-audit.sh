@@ -590,7 +590,7 @@ RULESET_CONTENT_SPECS=(
 #     is rendered as the missing contexts so the finding is directly actionable.
 #   - all other params: exact compare (arrays sorted so order never matters).
 RULESET_DRIFT_JQ='
-  def ctxset($v): (($v // []) | map(.context) | unique);
+  def ctxset($v): (if ($v | type) == "array" then [ $v[]? | .context? ] | unique else [] end);
   ($act // {}) as $a
   | $exp | to_entries[]
   | .key as $k
@@ -607,8 +607,8 @@ RULESET_DRIFT_JQ='
       | (if ($av | type) == "array" then ($av | sort) else $av end) as $c
       | select($e != $c)
       | [ $k,
-          ($e | if type == "array" then join(", ") else tostring end),
-          ($c | if type == "array" then join(", ") else tostring end) ]
+          ($e | if type == "array" then map(tostring) | join(", ") else tostring end),
+          ($c | if type == "array" then map(tostring) | join(", ") else tostring end) ]
     end
   | @tsv
 '
@@ -648,7 +648,7 @@ _ruleset_contents_one() {
   # --- Resolve the live ruleset id by name ----------------------------------
   # Absence-by-name is already reported by check_rulesets; stay silent here.
   local rs_id
-  rs_id=$(echo "$rulesets_json" | jq -r --arg n "$name" 'map(select(.name==$n)) | .[0].id // empty' 2>/dev/null || echo "")
+  rs_id=$(echo "$rulesets_json" | jq -r --arg n "$name" '.[]? | select(.name==$n) | .id' 2>/dev/null || echo "")
   [ -z "$rs_id" ] && return 0
 
   # --- Fetch the full live ruleset (fail closed on error/invalid JSON) ------
@@ -685,9 +685,9 @@ _ruleset_contents_one() {
   fi
 
   local param expected actual slug
-  while IFS=$'\t' read -r param expected actual; do
+  while IFS=$'\t' read -r param expected actual || [ -n "$param" ]; do
     [ -z "$param" ] && continue
-    slug=$(printf '%s' "$param" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    slug=$(printf '%s' "$param" | tr '[:upper:]' '[:lower:]' | tr ' /' '--' | tr -cd 'a-z0-9_-')
     [ -z "$slug" ] && slug="param"
     add_finding "$repo" "rulesets" "ruleset-drift-$name-$slug" "error" \
       "Ruleset \`$name\` parameter \`$param\` has drifted from the codified standard: expected \`$expected\`, actual \`$actual\`. The codified JSON (\`standards/rulesets/$name.json\`) is the source of truth (#575/#580); run \`scripts/apply-rulesets.sh --repo $ORG/$repo\` to converge." \
