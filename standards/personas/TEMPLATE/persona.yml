@@ -81,7 +81,6 @@ definition:
 # live properties — the schema cannot.
 address:
   handle: petry-projects/change-me   # slug MUST equal `id` above
-  aliases: []                        # old handles kept routing after a rename
 
 # --- Capabilities the persona can invoke (advisory index) -----------------
 skills: []
