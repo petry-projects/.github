@@ -85,7 +85,7 @@ MOCK
     # shellcheck disable=SC1090
     source "'"$REPO_ROOT"'/scripts/compliance-audit.sh"
     rulesets_json='"'"'[{"id":101,"name":"pr-quality"},{"id":102,"name":"code-quality"}]'"'"'
-    check_ruleset_contents "demo-repo" "main" "$rulesets_json"
+    check_ruleset_contents "demo-repo" "$rulesets_json"
     cat "$REPORT_DIR/findings.json"
   '
 }

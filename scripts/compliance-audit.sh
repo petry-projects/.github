@@ -537,7 +537,7 @@ check_rulesets() {
 
   check_ruleset_bypass_actors "$repo" "$default_branch" "$rulesets_json"
   check_legacy_rulesets "$repo" "$default_branch" "$rulesets_json"
-  check_ruleset_contents "$repo" "$default_branch" "$rulesets_json"
+  check_ruleset_contents "$repo" "$rulesets_json"
 }
 
 # ---------------------------------------------------------------------------
@@ -614,7 +614,7 @@ RULESET_DRIFT_JQ='
 '
 
 check_ruleset_contents() {
-  local repo="$1" default_branch="$2" rulesets_json="$3"
+  local repo="$1" rulesets_json="$2"
 
   local spec name rtype std_ref
   for spec in "${RULESET_CONTENT_SPECS[@]}"; do
