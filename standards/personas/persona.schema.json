@@ -128,7 +128,7 @@
     "address": {
       "type": "object",
       "additionalProperties": false,
-      "description": "How a human addresses this persona from a comment (`@<handle>`). REQUIRED when the 'mention' surface is enabled. See persona-standards.md §4.1. There is deliberately NO `aliases` field — see §4.1 'Renames'.",
+      "description": "How a human addresses this persona from a comment (`@<handle>`). REQUIRED when the 'mention' surface is enabled. See persona-standards.md §4.1. There is deliberately NO `aliases` field — see §4.1.1 'Renames'.",
       "required": ["handle"],
       "properties": {
         "handle": {

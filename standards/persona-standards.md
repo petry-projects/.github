@@ -231,7 +231,7 @@ two things a bare convention cannot:
    therefore *cannot* claim the same handle, so there is deliberately no
    cross-file uniqueness check: it could never fire.
 
-### Renames — and why there is no `aliases`
+### 4.1.1 Renames — and why there is no `aliases`
 
 An earlier draft of this standard let a persona declare `address.aliases[]` so a
 **renamed** role kept routing (`qa-lead` listing `petry-projects/murat`). That
