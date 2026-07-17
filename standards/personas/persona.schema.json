@@ -10,6 +10,25 @@
     {
       "if": {"properties": {"status": {"const": "stable"}}, "required": ["status"]},
       "then": {"required": ["evals"], "description": "A persona at status 'stable' MUST carry an evals block (the held-out gate). See persona-standards.md §1."}
+    },
+    {
+      "if": {
+        "required": ["triggers"],
+        "properties": {
+          "triggers": {
+            "required": ["surfaces"],
+            "properties": {
+              "surfaces": {
+                "contains": {
+                  "required": ["surface", "enabled"],
+                  "properties": {"surface": {"const": "mention"}, "enabled": {"const": true}}
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {"required": ["address"], "description": "A persona that enables the 'mention' surface MUST declare how it is addressed. See persona-standards.md §4.1."}
     }
   ],
   "properties": {
@@ -21,12 +40,12 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
-      "description": "Stable kebab-case identifier. MUST equal the persona directory name AND the channel-tag agent name used in canary-rings.json (e.g. 'murat', 'dev-lead')."
+      "description": "Stable kebab-case identifier. MUST be a ROLE, never a person name — 'qa-lead', not 'murat' (persona-standards.md §1.6). MUST equal the persona directory name, the addressing team slug in `address.handle`, AND the channel-tag agent name used in canary-rings.json (e.g. 'qa-lead', 'dev-lead')."
     },
     "name": {
       "type": "string",
       "minLength": 1,
-      "description": "Human display name (e.g. 'Murat'). For framework-backed personas this MUST match the locked framework identity."
+      "description": "Human display name for the ROLE (e.g. 'QA Lead', 'Dev Lead'). MUST NOT be a person name, even when this persona wraps an upstream framework agent that has one. Upstream agents are referenced ONLY by their technical skill id (definition.layers[].framework.skill, e.g. 'bmad-tea'); their persona names are upstream's business and are not mirrored here. See persona-standards.md §1.6."
     },
     "title": {
       "type": "string",
@@ -81,7 +100,7 @@
                   "name": {"type": "string", "description": "Framework directory under frameworks/ (e.g. 'bmad-test-architecture')."},
                   "upstream_repo": {"type": "string", "description": "Upstream source repo (e.g. 'bmad-code-org/bmad-method-test-architecture-enterprise')."},
                   "vendor_pin": {"type": "string", "description": "Vendored version/tag, MUST match the framework's VENDOR.md (e.g. 'v1.19.0')."},
-                  "skill": {"type": "string", "description": "The framework skill/agent id backing this persona (e.g. 'bmad-tea')."}
+                  "skill": {"type": "string", "description": "The framework skill/agent id backing this persona (e.g. 'bmad-tea'). This is the ONLY handle we keep on an upstream agent: a technical id, never the persona name upstream may give it. If you need to know what upstream calls it, read upstream."}
                 }
               },
               "local_overrides": {
@@ -103,6 +122,27 @@
               }
             ]
           }
+        }
+      }
+    },
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How a human addresses this persona from a comment (`@<handle>`). REQUIRED when the 'mention' surface is enabled. See persona-standards.md §4.1.",
+      "required": ["handle"],
+      "properties": {
+        "handle": {
+          "type": "string",
+          "pattern": "^petry-projects/[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "The addressing handle in 'org/team-slug' form, mentioned as '@org/team-slug'. MUST be an org TEAM, never a user account: GitHub's user namespace is global and first-come, so a bare '@qa-lead' resolves to an unrelated real account and notifies a stranger on every mention (verified: qa-lead, dev-lead, scrum-master are all live accounts). An org team slug cannot collide. The slug MUST equal `id`, so routing is a prefix-strip. Team must be privacy 'closed' (secret teams are unmentionable) with notification_setting 'notifications_disabled'; those are live properties CI verifies, not shape this schema can check."
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^petry-projects/[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "description": "Additional handles that route here — the migration path when a role is renamed. Same org/team-slug rules as `handle`. Every alias must be unique across ALL personas' handles and aliases (cross-file, enforced by validate-personas.py)."
         }
       }
     },

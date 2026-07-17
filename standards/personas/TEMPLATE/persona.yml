@@ -12,11 +12,16 @@
 schema_version: 1
 
 # Stable kebab-case id. MUST equal this directory's name AND the agents.<key>
-# in canary-rings.json AND the channel-tag agent name.
+# in canary-rings.json AND the channel-tag agent name AND the team slug in
+# address.handle below.
 # (lowercase kebab-case — the schema enforces ^[a-z0-9]+(-[a-z0-9]+)*$)
+#
+# MUST be a ROLE, never a person name (§1.6): 'qa-lead', not 'murat'. If this
+# persona wraps an upstream framework agent that has a person-name, that name
+# stays upstream — reference it only via framework.skill below.
 id: change-me
 
-name: CHANGE-ME              # display name, e.g. "Murat"
+name: CHANGE-ME              # role display name, e.g. "QA Lead" — NOT a person
 title: CHANGE-ME             # role title, e.g. "Master Test Architect & Quality Advisor"
 summary: >-
   One sentence: what this persona is for and where it helps
@@ -60,6 +65,24 @@ definition:
     # - kind: gh-aw
     #   path: .github/workflows/CHANGE-ME.md
 
+# --- How humans address this persona from a comment (§4.1) ----------------
+# REQUIRED if the 'mention' surface below is enabled (schema-enforced).
+#
+# MUST be an org TEAM handle, never a user account. GitHub's user namespace is
+# global and first-come: '@qa-lead', '@dev-lead' and '@scrum-master' are all
+# real accounts owned by strangers. Keying a workflow on a bare '@<role>' fires
+# correctly, looks healthy, and notifies an unrelated person on every mention.
+# An org team slug cannot collide — and it autocompletes when you type
+# '@petry-projects/' in any comment box.
+#
+# The team slug MUST equal `id`. Create the team as privacy: closed (secret
+# teams cannot be mentioned) with notification_setting: notifications_disabled
+# (the handle routes a webhook; it should not page humans). CI verifies those
+# live properties — the schema cannot.
+address:
+  handle: petry-projects/change-me   # slug MUST equal `id` above
+  aliases: []                        # old handles kept routing after a rename
+
 # --- Capabilities the persona can invoke (advisory index) -----------------
 skills: []
 # To add skills, replace the empty array above with a block sequence:
@@ -92,7 +115,7 @@ triggers:
       events: [created]
       enabled: true
       mode: advisory
-      notes: "e.g. @<bot> weigh in"
+      notes: "e.g. @petry-projects/<id> weigh in — requires the address block above"
 
     # discussion surfaces cannot run the agent inline — declare the bridge:
     # - surface: discussion

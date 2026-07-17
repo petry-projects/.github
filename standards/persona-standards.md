@@ -3,9 +3,10 @@
 Standard for defining, onboarding, and rolling out a new **agentic persona**
 across the `petry-projects` fleet.
 
-A persona is a named agent role — Dev-Lead, PR-Reviewer, Bob (Scrum Master),
-Mary (Analyst), Murat (Test Architect) — that helps the org **design, build,
-test, deliver, and operate** its projects. This standard turns the pattern that
+A persona is an agent **role** — Dev Lead, PR Review, Scrum Master, Business
+Analyst, QA Lead — that helps the org **design, build, test, deliver, and
+operate** its projects. Roles, never person-names: see principle 6. This
+standard turns the pattern that
 is already implicit across those personas into an explicit, repeatable
 **Persona Definition of Done**: a manifest, a trigger checklist, a file layout,
 an eval gate, and a canary onboarding step.
@@ -51,6 +52,28 @@ an eval gate, and a canary onboarding step.
 5. **No persona reaches `stable` without an eval gate.** The held-out eval
    discipline in `.github-private` `evals/` (dev/holdout split, `holdout-guard.yml`)
    is a promotion gate, not a nicety.
+
+6. **A persona is a role, not a person.** `id` and `name` name the **role** —
+   `qa-lead` / "QA Lead", never `murat` / "Murat". This is the naming half of
+   principle 2: an upstream framework may give its agent a person-name, and that
+   is upstream's business. We reference upstream agents **only** by their
+   technical skill id (`definition.layers[].framework.skill`, e.g. `bmad-tea`);
+   we never mirror the person-name into our namespace. The reasons are practical,
+   not stylistic:
+
+   - **A role is legible.** `@petry-projects/qa-lead` tells a reader in a PR
+     comment who is being addressed and why. `@petry-projects/murat` requires
+     knowing the BMAD cast list.
+   - **A role is stable.** Swapping the framework agent behind a persona, or
+     replacing it with a first-party layer, must not change how it is addressed.
+     Binding our identity to upstream's cast means their rename is our
+     fleet-wide migration.
+   - **A role is one namespace.** `dev-lead` and `pr-review` were already
+     role-named; only the framework-backed personas drifted. One rule, no
+     exceptions.
+
+   Roles come from the org's own vocabulary: `dev-lead`, `qa-lead`,
+   `scrum-master`, `business-analyst`, `product-manager`, `pr-review`.
 
 ---
 
@@ -141,7 +164,7 @@ on**. Fill one row per surface; anything unlisted falls back to `default_mode`.
 | `discussion` | `created`, `labeled`, `commented` | Cannot run the agent inline — **must** bridge via `repository_dispatch`/`workflow_dispatch` (see `ci-standards.md`, issue #571) |
 | `check_run` | `completed` | CI-failure follow-up |
 | `schedule` | cron | Proactive / sweep work |
-| `mention` | `@<bot>` in a comment | Reviewer-assignment counts here too |
+| `mention` | `@<handle>` in a comment | How a human addresses the persona directly — see §4.1. Reviewer-assignment counts here too |
 
 **Rules:**
 
@@ -163,6 +186,69 @@ on**. Fill one row per surface; anything unlisted falls back to `default_mode`.
 Label gates and trust checks are defined operationally in `ci-standards.md`
 (§ agent-trigger labels) and must reuse the existing labels rather than mint
 near-duplicates.
+
+### 4.1 Addressing — `@`-mentioning a persona
+
+A persona that enables the `mention` surface MUST declare an `address` block
+(schema-enforced). It is addressed by its **role**, per principle 6:
+
+```yaml
+address:
+  handle: petry-projects/qa-lead   # an org TEAM — mentioned as @petry-projects/qa-lead
+  aliases: []                      # additional handles that route here (renames)
+```
+
+**The handle MUST be an org team, never a user account.** This is not a style
+preference — it is the whole reason the block exists:
+
+> GitHub's user namespace is **global and first-come**. `@qa-lead`, `@dev-lead`,
+> `@scrum-master`, `@business-analyst` and `@murat` are **all real, live GitHub
+> accounts today** — none of them ours. A workflow keying on
+> `contains(body, '@qa-lead')` would fire correctly and look perfectly healthy
+> while every mention publicly tagged a stranger and sent them a notification,
+> from a fleet of bots, across public repos. The failure is silent on our side
+> and only visible on theirs.
+
+An org team slug lives in the org's namespace and cannot collide. It also buys
+two things a bare convention cannot:
+
+- **Autocomplete** — typing `@petry-projects/` in any GitHub comment box lists
+  every persona. The addressing scheme *is* the discovery mechanism.
+- **A real link** — the mention renders as a resolvable team, not grey text.
+
+**Rules:**
+
+1. **`handle` is `org/team-slug`, and the slug MUST equal `id`.** Routing is
+   then a prefix-strip, and "register once" holds: the role name is written in
+   exactly one place.
+2. **The team MUST be `privacy: closed`.** Secret teams cannot be mentioned at
+   all; closed teams are mentionable by org members.
+3. **The team MUST set `notification_setting: notifications_disabled`.** The
+   handle exists to route a webhook, not to page humans. Membership should be
+   empty or bot-only.
+4. **Handles and aliases MUST be unique across all personas.** Cross-file, so
+   JSON Schema cannot see it — enforced by `validate-personas.py`.
+5. **A rename keeps the old handle as an `alias`.** Roles outlive their spelling;
+   in-flight threads must not break.
+
+The **live** properties (rules 2 and 3 — does the team exist, is it closed, are
+notifications off?) need the network, and `validate-personas.py` is hermetic
+with a hermetic test suite. They are verified by a separate CI step and are a
+line in the §7 Definition of Done — deliberately **not** in the validator, whose
+hermeticity is worth more than the check.
+
+Mention handling is centralised: one router resolves the handle, consults that
+persona's own trigger matrix, applies the trust floor and `opt_out_label`, and
+dispatches. Personas do **not** each ship a mention workflow — that is the
+per-agent drift the manifest exists to prevent.
+
+> **Recursion is the hazard here.** Agent comments posted via a PAT re-trigger
+> workflows (unlike `GITHUB_TOKEN`), and `.github-private#860` burned 1,481
+> identical acks in 4.5 hours from a *single* self-loop. With N mutually
+> addressable personas the cycles are combinatorial, not self-loops: `qa-lead`
+> answering a thread that mentions `dev-lead` is enough. Every router MUST
+> exclude on two independent axes — the **bot actor** and an
+> **agent-comment marker** — as `pr-review-mention.yml` already does.
 
 ---
 
@@ -227,9 +313,15 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] `definition.layers[]` names every implementing layer; framework layers pin
       a `vendor_pin` matching the framework's `VENDOR.md`, and any local override
       sets `upstream_candidate` truthfully.
+- [ ] `id` and `name` are the **role**, not a person (§1.6); upstream agents are
+      referenced only by `framework.skill`.
 - [ ] `triggers` fills one row per surface the persona acts on; `default_mode`
       is `advisory`/`off`; every `write` surface has a `gate_label`; an
       `opt_out_label` is defined.
+- [ ] If the `mention` surface is enabled: `address.handle` is an **org team**
+      whose slug equals `id`; the team exists, is `privacy: closed`, and sets
+      `notification_setting: notifications_disabled`; the handle and every alias
+      are unique fleet-wide (§4.1).
 - [ ] `trust.author_association_floor` is set; write surfaces gate on it.
 - [ ] If it ships a reusable: caller stub grants a **superset** of
       `runtime.permissions`, carries the `SOURCE OF TRUTH` header, and pins a
@@ -242,8 +334,8 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] The persona has soaked through `next → ring0 → ring1` before `stable`.
 
 Copy [`standards/personas/TEMPLATE/`](personas/TEMPLATE/) to start; the worked
-example is **Murat** (`personas/murat/` in `.github-private`), which wraps the
-vendored `bmad-test-architecture` Test Architect.
+example is **QA Lead** (`personas/qa-lead/` in `.github-private`), which wraps
+the vendored `bmad-test-architecture` agent (`framework.skill: bmad-tea`).
 
 ---
 

@@ -34,6 +34,8 @@ inside `personas/<id>/`.
 ## Onboarding order
 
 1. **Copy & rename.** `cp standards/personas/TEMPLATE/persona.yml .github-private/personas/<id>/persona.yml` (and add a short `README.md`).
+   Pick `<id>` as a **role** — `qa-lead`, not a person name, even if the agent
+   you are wrapping has one upstream ([§1.6](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md)).
 2. **Pick your definition layer(s)** in `persona.yml` `definition.layers[]`, each
    `path` pointing at its canonical home above. Prefer wrapping a vendored
    framework agent where a good upstream exists (pin `vendor_pin` to its
@@ -45,21 +47,31 @@ inside `personas/<id>/`.
    Every `write` surface needs a `gate_label`. Define an `opt_out_label`.
 4. **Set the trust floor** (`[OWNER, MEMBER, COLLABORATOR]` unless you have a
    reason to differ).
-5. **Add evals.** Copy the `evals/` starter into `.github-private` `evals/<id>/`:
+5. **If the `mention` surface is enabled, fill `address`** and create the org
+   team `petry-projects/<id>` — `privacy: closed`,
+   `notification_setting: notifications_disabled`, membership empty or bot-only.
+   The handle **must** be a team; a bare `@<role>` is a real stranger's account
+   ([§4.1](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md)).
+6. **Add evals.** Copy the `evals/` starter into `.github-private` `evals/<id>/`:
    ≥ `min_cases` held-out cases under `evals/<id>/holdout/` and proposer-visible
    cases under `evals/<id>/dev/`. See `.github-private` `evals/README.md`.
-6. **Register the canary entry** — one `agents.<id>` block in
+7. **Register the canary entry** — one `agents.<id>` block in
    `standards/canary-rings.json` (the *only* place rings are written). Point
    `persona.yml` `canary.agent` at it.
-7. **Validate & scan.** Manifest validates against the schema; AgentShield passes;
+8. **Validate & scan.** Manifest validates against the schema; AgentShield passes;
    no immutable file touched.
-8. **Roll out** `next → ring0 → ring1 → stable`, eval gate green before `stable`.
+9. **Roll out** `next → ring0 → ring1 → stable`, eval gate green before `stable`.
 
 The full gate is the **Definition of Done** checklist in
 [`persona-standards.md` §7](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md).
 
 ## Worked example
 
-**Murat** (`.github-private/personas/murat/`) wraps the vendored
-`bmad-test-architecture` Test Architect — the reference for the
-*wrap-a-vendored-agent*, advisory-everywhere path.
+**QA Lead** (`.github-private/personas/qa-lead/`) wraps the vendored
+`bmad-test-architecture` agent (`framework.skill: bmad-tea`) — the reference for
+the *wrap-a-vendored-agent*, advisory-everywhere path.
+
+Note the naming: the persona is `qa-lead`, the **role**, even though the
+upstream framework gives that agent a person-name. Roles are legible in a PR
+comment, survive swapping the agent underneath, and keep one namespace across
+the fleet. See [§1.6](https://github.com/petry-projects/.github/blob/main/standards/persona-standards.md).
