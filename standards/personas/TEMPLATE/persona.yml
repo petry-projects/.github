@@ -145,6 +145,9 @@ trust:
 #   caller_stub: .github/workflows/CHANGE-ME.yml
 #   run_workflow: CHANGE-ME                 # MUST match canary-rings.json run_workflow
 #   permissions: [contents:read, pull-requests:write]   # caller stub grants a superset
+#   identity:                               # the account this persona ACTS AS (§5.1)
+#     account: CHANGE-ME                    # GitHub login (user/machine user), NOT the address team
+#     credential: GH_PAT_CHANGE_ME          # Actions secret with that account's PAT (GH_PAT_<ACCOUNT>[_<QUALIFIER>])
 
 # --- Held-out eval gate ----------------------------------------------------
 evals:

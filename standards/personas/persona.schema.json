@@ -35,7 +35,7 @@
     "schema_version": {
       "type": "integer",
       "const": 1,
-      "description": "Manifest schema version. Bump only when the schema shape changes."
+      "description": "Manifest schema version. Bump only when the schema shape changes in a backwards-incompatible way; additive optional fields stay at v1."
     },
     "id": {
       "type": "string",
@@ -235,6 +235,7 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["identity"],
       "description": "How the persona is wired into CI. Optional for advisory-only personas that run entirely inside an existing workflow.",
       "properties": {
         "host": {"type": "string", "description": "Repo that owns the reusable (matches canary-rings.json host)."},
@@ -245,6 +246,25 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "The full permission set the reusable requests. The caller stub MUST grant a superset of this or the fleet gets startup_failure."
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The GitHub account this persona ACTS AS at runtime — the login it commits/pushes/reviews/comments as, and the Actions secret holding that account's PAT. This is deliberately distinct from `address.handle` (the org TEAM humans @-mention): the handle routes a mention, the identity authenticates the work. Making it declarative here is what stops two personas from silently sharing one machine user via a single `vars.BOT_USER` variable (the dev-lead→donpetry-bot regression). The runtime resolves `BOT_USER` from `identity.account`; CI asserts the workflow's credential reference matches `identity.credential`. The companion validator (`validate-personas.py`) further enforces that `credential` follows the `GH_PAT_<ACCOUNT>[_<QUALIFIER>]` naming convention (where `<ACCOUNT>` is the login upper-snake-cased), while accepting grandfathered account-named secrets such as `DON_PETRY_BOT_GH_PAT`.",
+          "required": ["account", "credential"],
+          "properties": {
+            "account": {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^[A-Za-z0-9](-?[A-Za-z0-9]){0,38}$",
+              "description": "GitHub login this persona acts as (commits/pushes/reviews/comments). A user or machine-user account, NOT a team. e.g. 'don-petry' (dev-lead) or 'donpetry-bot' (pr-review)."
+            },
+            "credential": {
+              "type": "string",
+              "pattern": "^(?!GITHUB_)[A-Z][A-Z0-9_]*$",
+              "description": "Name of the GitHub Actions secret holding `account`'s PAT. Convention: GH_PAT_<ACCOUNT>[_<QUALIFIER>] with <ACCOUNT> the login upper-snake-cased (e.g. GH_PAT_DON_PETRY). Pre-existing account-named secrets (e.g. DON_PETRY_BOT_GH_PAT) are grandfathered. Must not start with `GITHUB_` (GitHub blocks creation of secrets with that prefix)."
+            }
+          }
         }
       }
     },
