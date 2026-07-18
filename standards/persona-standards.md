@@ -402,10 +402,11 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] If it ships a reusable: caller stub grants a **superset** of
       `runtime.permissions`, carries the `SOURCE OF TRUTH` header, and pins a
       channel tag.
-- [ ] `runtime.identity` declares the `account` the persona acts as and the
-      `credential` secret holding its PAT; the credential follows
-      `GH_PAT_<ACCOUNT>[_<QUALIFIER>]` (or is a grandfathered account-named
-      secret), and the runtime workflow resolves `BOT_USER` from it (§5.1).
+- [ ] If it ships a reusable: `runtime.identity` declares the `account` the
+      persona acts as and the `credential` secret holding its PAT; the credential
+      follows `GH_PAT_<ACCOUNT>[_<QUALIFIER>]` (or is a grandfathered
+      account-named secret), and the runtime workflow resolves `BOT_USER` from
+      the account (§5.1).
 - [ ] AgentShield passes on all layers; no immutable file is touched.
 - [ ] `evals/<id>/` holds `dev/` + `holdout/` splits with ≥ `evals.min_cases`
       held-out cases; `validate-cases.py` passes and the eval gate is green.
