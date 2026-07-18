@@ -251,17 +251,28 @@
     "evals": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The held-out eval gate. A persona MUST NOT reach the 'stable' ring without a passing eval set. See evals/README.md (dev/holdout split, holdout-guard.yml).",
-      "required": ["required_before", "path", "min_cases"],
+      "description": "The held-out eval gate. A persona MUST NOT reach 'stable' (or its declared required_before ring) without an eval set carrying at least min_cases held-out cases — validate-personas.py enforces the count once status reaches required_before. See evals/README.md (dev/holdout split, holdout-guard.yml). Declare EITHER `path` (one eval set) OR `paths` (several, for a persona that wraps multiple skills — e.g. pr-review's deep-review + triage sets); exactly one of the two.",
+      "required": ["required_before", "min_cases"],
+      "oneOf": [
+        {"required": ["path"]},
+        {"required": ["paths"]}
+      ],
       "properties": {
         "required_before": {
           "type": "string",
           "enum": ["ring0", "ring1", "stable"],
-          "description": "The ring by which the eval set must exist and pass. Recommended: 'stable' at minimum."
+          "description": "The ring by which the eval set(s) must exist and pass. Recommended: 'stable' at minimum."
         },
-        "path": {"type": "string", "description": "Repo-relative path to the persona's eval set (holds dev/ and holdout/ splits). Canonically 'evals/<id>/' so it inherits validate-cases.py and holdout-guard.yml."},
+        "path": {"type": "string", "description": "Single eval set — repo-relative path holding dev/ and holdout/ splits. Canonically 'evals/<id>/' so it inherits validate-cases.py + holdout-guard.yml. Use this OR `paths`, not both."},
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string"},
+          "description": "Several eval sets, one per skill the persona wraps (e.g. ['evals/deep-review/', 'evals/triage/']). Each holds dev/ + holdout/ splits and must independently clear min_cases. Use this OR `path`, not both. The manifest points at the skill-keyed sets that already exist; it does not fork them."
+        },
         "judge": {"type": "string", "description": "Path to the judge rubric (e.g. 'evals/judge.md')."},
-        "min_cases": {"type": "integer", "minimum": 1, "description": "Minimum held-out cases required before promotion to required_before."}
+        "min_cases": {"type": "integer", "minimum": 1, "description": "Minimum held-out cases required in EACH eval set before promotion to required_before. Enforced by validate-personas.py."}
       }
     },
     "canary": {
