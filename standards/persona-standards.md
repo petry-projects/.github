@@ -310,6 +310,39 @@ meaningful answer: "not a persona". That is also how a real, non-persona team
 - **AgentShield** — every definition layer is subject to the AgentShield scan;
   a persona that fails the scan cannot be onboarded.
 
+### 5.1 Runtime identity — the account a persona acts as
+
+A persona's **identity** is the GitHub account it authenticates as at runtime —
+the login it commits, pushes, reviews, or comments as, plus the Actions secret
+holding that account's PAT. Declare it in `runtime.identity`:
+
+```yaml
+runtime:
+  identity:
+    account: don-petry        # the login this persona ACTS AS
+    credential: GH_PAT_DON_PETRY   # the Actions secret holding its PAT
+```
+
+**Identity is not the address handle.** `address.handle` (§4.1) is the org *team*
+a human `@`-mentions to *route* work; `runtime.identity.account` is the *account*
+that *does* the work. They are orthogonal: a persona addressed as
+`@petry-projects/dev-lead` may act as `don-petry`.
+
+**Why it is declarative and per-persona.** Before this field, every write persona
+derived its account from one shared `vars.BOT_USER` variable. Two personas that
+must act as *different* accounts (dev-lead as `don-petry`, pr-review as the
+review-only machine user `donpetry-bot`) shared that one variable, so setting it
+for one silently changed the other — a real regression where dev-lead began
+committing as the review bot. A per-persona `identity` makes collisions
+impossible: the runtime resolves `BOT_USER` from `identity.account`, and CI
+asserts the workflow's credential reference matches `identity.credential`.
+
+**Credential naming.** Secrets follow `GH_PAT_<ACCOUNT>[_<QUALIFIER>]`, where
+`<ACCOUNT>` is the login upper-snake-cased (`don-petry` → `GH_PAT_DON_PETRY`);
+`<QUALIFIER>` distinguishes multiple PATs for one account (e.g.
+`GH_PAT_DON_PETRY_COPILOT`). Pre-existing account-named secrets such as
+`DON_PETRY_BOT_GH_PAT` are grandfathered.
+
 ---
 
 ## 6. Canary onboarding (the last step)
@@ -369,6 +402,10 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] If it ships a reusable: caller stub grants a **superset** of
       `runtime.permissions`, carries the `SOURCE OF TRUTH` header, and pins a
       channel tag.
+- [ ] `runtime.identity` declares the `account` the persona acts as and the
+      `credential` secret holding its PAT; the credential follows
+      `GH_PAT_<ACCOUNT>[_<QUALIFIER>]` (or is a grandfathered account-named
+      secret), and the runtime workflow resolves `BOT_USER` from it (§5.1).
 - [ ] AgentShield passes on all layers; no immutable file is touched.
 - [ ] `evals/<id>/` holds `dev/` + `holdout/` splits with ≥ `evals.min_cases`
       held-out cases; `validate-cases.py` passes and the eval gate is green.
