@@ -126,7 +126,12 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_USER: ${{ github.event.comment.user.login }}
           COMMENT_ASSOC: ${{ github.event.comment.author_association }}
-          COMMENT_URL: ${{ github.event.comment.html_url }}
+          # The comment's API url (.url), not .html_url: the dispatch target (the
+          # persona runner) fetches the comment body with `gh api "$COMMENT_URL"`
+          # to learn what the persona was asked, and gh api cannot fetch a
+          # github.com browser url. The API response still carries .html_url if a
+          # human-facing link is ever needed.
+          COMMENT_URL: ${{ github.event.comment.url }}
           EVENT_NAME: ${{ github.event_name }}
           ITEM_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || github.event.discussion.number }}
           SOURCE_REPO: ${{ github.repository }}
