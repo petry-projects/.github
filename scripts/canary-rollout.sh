@@ -373,36 +373,104 @@ candidate_cut_date() {
   git log -1 --format=%cI "$commit" 2>/dev/null || echo ""
 }
 
+# _gh_err_summary <stderr-text> — condense gh's stderr into a single line for the
+# ::warning::/::error:: annotations so an operator can tell WHY a read failed (#810):
+# a 403 secondary-rate-limit throttle, an auth failure, a transient 5xx, or a network
+# blip demand very different responses. Emits "HTTP <status> <class>: <reason>" (or
+# just "<class>: <reason>" when no HTTP status is present). Never fails.
+_gh_err_summary() {
+  local err="$1" status="" class reason="" lc line
+  if [[ "$err" =~ HTTP[/\ ]?([0-9]{3}) ]]; then status="${BASH_REMATCH[1]}"; fi
+  lc="${err,,}"
+  if [[ "$lc" == *"secondary rate limit"* ]]; then class="secondary-rate-limit"
+  elif [[ "$lc" == *"rate limit"* ]]; then class="rate-limit"
+  elif [ "$status" = "401" ] || [[ "$lc" == *"bad credentials"* ]] || [[ "$lc" == *"requires authentication"* ]]; then class="auth"
+  elif [ -n "$status" ] && [ "$status" -ge 500 ]; then class="server-error"
+  elif [ "$status" = "403" ]; then class="forbidden"
+  elif [ -n "$status" ] && [ "$status" -ge 400 ]; then class="client-error"
+  else class="network-or-unknown"; fi
+  # first non-blank line of gh's stderr, trimmed, capped so an annotation stays readable
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ -n "${line//[[:space:]]/}" ]; then reason="$line"; break; fi
+  done <<< "$err"
+  reason="${reason:0:200}"
+  if [ -n "$status" ]; then printf 'HTTP %s %s: %s' "$status" "$class" "$reason"
+  else printf '%s: %s' "$class" "$reason"; fi
+}
+
+# _gh_retry_after <stderr-text> — seconds to wait per an EXPLICIT throttle hint gh
+# surfaced (#810): a `Retry-After: N` header echo, a bare "retry after Ns", or an
+# `x-ratelimit-reset: <epoch>` we convert to a delta from now. Empty when none —
+# the caller then falls back to exponential+jittered backoff. Honoring the server's
+# own hint avoids hammering a secondary-rate-limit window and getting throttled harder.
+_gh_retry_after() {
+  local err="$1" lc="${1,,}" secs="" now
+  if [[ "$lc" =~ retry[-\ ]?after:?[\ ]*([0-9]+) ]]; then
+    secs="${BASH_REMATCH[1]}"
+  elif [[ "$lc" =~ x-ratelimit-reset:?[\ ]*([0-9]+) ]]; then
+    now="$(date +%s)"; secs=$(( BASH_REMATCH[1] - now )); [ "$secs" -lt 0 ] && secs=0
+  fi
+  printf '%s' "$secs"
+}
+
 # _run_json <repo> <workflow> <since_z> — gh run-list JSON (conclusion,createdAt,databaseId,workflowName) for a
 # repo since the given Zulu timestamp. Empty repo/wildcard → []. Never fails the caller.
 _run_json() {
-  local repo="$1" wf="$2" since="$3" out
+  local repo="$1" wf="$2" since="$3" out err summary ra delay span expo errfile
   if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
   # The 4h scheduled tick fans this out across every agent × tier repo, so a single
   # transient blip (network / secondary rate-limit / brief 5xx) among dozens of reads
   # used to fail the whole fleet sweep (#738). Retry a non-zero `gh` a bounded number of
-  # times with backoff to ride out a momentary hiccup. A SUSTAINED failure still exhausts
-  # the retries and returns non-zero: fail CLOSED on a genuine outage (returning an empty
-  # [] would read as "zero failures" and could green-light a bad promotion — a non-zero
-  # return halts the run under `set -e` instead). An empty-but-successful result (no runs)
-  # is still a valid []. Tunable via CANARY_GH_RETRIES / CANARY_GH_RETRY_SLEEP (tests set 0).
-  local attempts="${CANARY_GH_RETRIES:-3}" delay="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
-  case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
-  case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
+  # times to ride out a momentary hiccup, capturing gh's stderr so the annotations name
+  # the REAL failure (HTTP status + class) instead of a bare "transient" (#810). Backoff
+  # is exponential + full-jitter and honors a server Retry-After / x-ratelimit-reset hint
+  # so a secondary-rate-limit window is respected rather than hammered. A SUSTAINED failure
+  # still exhausts the retries and returns non-zero: fail CLOSED on a genuine outage
+  # (returning an empty [] would read as "zero failures" and could green-light a bad
+  # promotion — a non-zero return halts the run under `set -e` instead). An empty-but-
+  # successful result (no runs) is still a valid []. Tunable via CANARY_GH_RETRIES /
+  # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
+  local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
+  local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
+  case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
+  case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
+  case "$base" in ''|*[!0-9]*) base=2 ;; esac
+  errfile="$(mktemp)"
+  if ! declare -p tmpfiles &>/dev/null; then
+    declare -g -a tmpfiles=()
+    trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
+  fi
+  tmpfiles+=("$errfile")
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
-        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>/dev/null)"; then
-      echo "${out:-[]}"; return 0
+        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
+      rm -f "$errfile"; echo "${out:-[]}"; return 0
     fi
+    err=""
+    if [ -r "$errfile" ]; then
+      err="$(<"$errfile")"
+    fi
+    summary="$(_gh_err_summary "$err")"
     if [ "$attempt" -ge "$attempts" ]; then
-      echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s)" >&2
-      return 1
+      echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s) — $summary" >&2
+      rm -f "$errfile"; return 1
     fi
-    echo "::warning::_run_json: transient failure fetching run list for $repo (workflow=$wf), attempt $attempt/$attempts — retrying in ${delay}s" >&2
+    # Prefer the server's explicit throttle hint; otherwise exponential + full jitter.
+    ra="$(_gh_retry_after "$err")"
+    if [ -n "$ra" ] && [ "$ra" -gt 0 ]; then
+      delay="$ra"
+      [ "$delay" -gt "$ra_cap" ] && delay="$ra_cap"   # honor hint but cap runaway values
+    else
+      expo=$((attempt - 1)); [ "$expo" -gt 20 ] && expo=20     # guard the exponent from overflow
+      delay=$(( base << expo ))
+      span=$(( delay - base )); [ "$span" -lt 0 ] && span=0
+      delay=$(( base + RANDOM % (span + 1) ))                    # full jitter in [base, delay]
+      [ "$delay" -gt 30 ] && delay=30
+    fi
+    echo "::warning::_run_json: transient failure fetching run list for $repo (workflow=$wf), attempt $attempt/$attempts — $summary — retrying in ${delay}s" >&2
     sleep "$delay"
     attempt=$((attempt + 1))
-    delay=$((delay * 2))
-    [ "$delay" -gt 30 ] && delay=30
   done
 }
 
