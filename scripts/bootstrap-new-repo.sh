@@ -414,15 +414,28 @@ step_gitignore() {
   fi
 
   local blockfile existfile existing upserted current branch
-  blockfile="$(mktemp)"; printf '%s\n' "$block" > "$blockfile"
+  local -a tmpfiles=()
+  trap '[ "${#tmpfiles[@]}" -eq 0 ] || rm -f "${tmpfiles[@]}"' EXIT
+
+  blockfile="$(mktemp)"
+  tmpfiles+=("$blockfile")
+  printf '%s\n' "$block" > "$blockfile"
+
   existfile="$(mktemp)"
-  existing="$(gh api "repos/${repo}/contents/.gitignore" --jq '.content' 2>/dev/null \
+  tmpfiles+=("$existfile")
+
+  existing="$(gh api "repos/${repo}/contents/.gitignore" --jq '.content? // empty' 2>/dev/null \
     | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } || true)"
   printf '%s' "$existing" > "$existfile"
 
-  upserted="$(upsert_gitignore_baseline "$blockfile" "$existfile")" \
-    || { rm -f "$blockfile" "$existfile"; echo "::error::gitignore upsert failed for ${repo}" >&2; return 1; }
-  rm -f "$blockfile" "$existfile"
+  upserted="$(upsert_gitignore_baseline "$blockfile" "$existfile")" || {
+    echo "::error::gitignore upsert failed for ${repo}" >&2
+    rm -f "${tmpfiles[@]}"
+    trap - EXIT
+    return 1
+  }
+  rm -f "${tmpfiles[@]}"
+  trap - EXIT
 
   current="$(printf '%s' "$existing")"
   if [ "$current" = "$upserted" ]; then

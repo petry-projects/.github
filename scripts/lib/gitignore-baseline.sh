@@ -40,12 +40,12 @@ GIB_END_MARKER='# <<< END petry-projects secrets baseline <<<'
 gib_extract_baseline_block() {
   local file="${1:-}"
   [ -n "$file" ] && [ -f "$file" ] || { echo "gib: canonical gitignore not found: ${file:-<none>}" >&2; return 2; }
-  awk -v b="$GIB_BEGIN_MARKER" -v e="$GIB_END_MARKER" '
+  tr -d '\r' < "$file" | awk -v b="$GIB_BEGIN_MARKER" -v e="$GIB_END_MARKER" '
     $0 == b { inb = 1 }
     inb     { print }
     $0 == e && inb { found = 1; exit }
     END     { exit(found ? 0 : 1) }
-  ' "$file" || { echo "gib: no complete BEGIN..END baseline block in $file" >&2; return 1; }
+  ' || { echo "gib: no complete BEGIN..END baseline block in $file" >&2; return 1; }
 }
 
 # _gib_has_markers — read stdin; succeed iff BOTH markers are present as whole lines.
@@ -85,18 +85,35 @@ upsert_gitignore_baseline() {
     existing="$(cat "$existing_file")"
   fi
 
-  # Brand-new (or marker-less) target: block on top, existing becomes L2.
-  if [ -z "$existing" ] || ! printf '%s\n' "$existing" | _gib_has_markers; then
+  # Brand-new file: output block only.
+  if [ -z "$existing" ]; then
     printf '%s\n' "$block"
-    [ -n "$existing" ] && printf '%s\n' "$existing"
+    return 0
+  fi
+
+  # Check marker state — detect half-open before assuming "marker-less" to avoid
+  # silently duplicating markers and preserving the broken fragment.
+  local has_begin has_end
+  printf '%s\n' "$existing" | grep -qxF "$GIB_BEGIN_MARKER" && has_begin=1 || has_begin=0
+  printf '%s\n' "$existing" | grep -qxF "$GIB_END_MARKER"   && has_end=1   || has_end=0
+  if [ "$((has_begin + has_end))" -eq 1 ]; then
+    echo "gib: half-open marker state in ${existing_file:-<stdin>} (exactly one of BEGIN/END present); refusing to upsert" >&2
+    return 2
+  fi
+
+  # Marker-less target: block on top, existing content becomes L2.
+  if [ "$has_begin" -eq 0 ]; then
+    printf '%s\n' "$block"
+    printf '%s\n' "$existing"
     return 0
   fi
 
   # Replace in place: keep anything above BEGIN (standard forbids it, but don't
   # drop bytes) and the full L2 below END; swap only the block itself.
+  # Strip CRLF so exact-match works on files with Windows line endings.
   local pre post
-  pre="$(awk -v b="$GIB_BEGIN_MARKER" '$0 == b { exit } { print }' <<< "$existing")"
-  post="$(awk -v e="$GIB_END_MARKER" 'seen { print } $0 == e { seen = 1 }' <<< "$existing")"
+  pre="$(tr -d '\r' <<< "$existing" | awk -v b="$GIB_BEGIN_MARKER" '$0 == b { exit } { print }')"
+  post="$(tr -d '\r' <<< "$existing" | awk -v e="$GIB_END_MARKER" 'seen { print } $0 == e { seen = 1 }')"
 
   [ -n "$pre" ] && printf '%s\n' "$pre"
   printf '%s\n' "$block"

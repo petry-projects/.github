@@ -1,0 +1,76 @@
+# Quality gates for the org-wide .gitignore secrets baseline tooling.
+#
+# Triggered on any PR that touches:
+#   - scripts/lib/gitignore-baseline.sh
+#   - scripts/sync-gitignore-baseline.sh
+#   - .dev-lead/scripts/seed-repo-template.sh
+#   - test/scripts/lib/gitignore-baseline.bats
+#   - test/scripts/sync-gitignore-baseline/**
+#   - tests/test_seed_repo_template_gitignore.bats
+#
+# Gates (all must pass before merge):
+#   1. shellcheck — static analysis of the lib + sync script + seed script
+#   2. bats       — unit tests for baseline extraction/upsert, sync, and seed behaviors
+
+name: Gitignore Baseline Tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/lib/gitignore-baseline.sh'
+      - 'scripts/sync-gitignore-baseline.sh'
+      - '.dev-lead/scripts/seed-repo-template.sh'
+      - 'test/scripts/lib/gitignore-baseline.bats'
+      - 'test/scripts/sync-gitignore-baseline/**'
+      - 'tests/test_seed_repo_template_gitignore.bats'
+      - '.github/workflows/gitignore-baseline-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/lib/gitignore-baseline.sh'
+      - 'scripts/sync-gitignore-baseline.sh'
+      - '.dev-lead/scripts/seed-repo-template.sh'
+      - 'test/scripts/lib/gitignore-baseline.bats'
+      - 'test/scripts/sync-gitignore-baseline/**'
+      - 'tests/test_seed_repo_template_gitignore.bats'
+      - '.github/workflows/gitignore-baseline-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitignore-baseline-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Install bats, shellcheck, and jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats shellcheck jq
+
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          shellcheck --severity=warning -x \
+            scripts/lib/gitignore-baseline.sh \
+            scripts/sync-gitignore-baseline.sh \
+            .dev-lead/scripts/seed-repo-template.sh
+
+      - name: Run bats suite
+        run: |
+          bats --print-output-on-failure \
+            test/scripts/lib/gitignore-baseline.bats \
+            test/scripts/sync-gitignore-baseline/ \
+            tests/test_seed_repo_template_gitignore.bats

@@ -34,6 +34,14 @@ source "$SCRIPT_DIR/lib/standards-deploy.sh"
 source "$SCRIPT_DIR/lib/gitignore-baseline.sh"
 
 # ---------------------------------------------------------------------------
+# Dependency check
+# ---------------------------------------------------------------------------
+for _cmd in gh jq base64; do
+  command -v "$_cmd" >/dev/null 2>&1 || { echo "::error::${_cmd} is required but not installed." >&2; exit 1; }
+done
+unset _cmd
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 ORG="petry-projects"
@@ -115,6 +123,7 @@ sync_repo() {
   fi
 
   existfile="$(mktemp)"
+  tmpfiles+=("$existfile")
   printf '%s' "$existing" > "$existfile"
   upserted="$(upsert_gitignore_baseline "$BLOCK_FILE" "$existfile")" \
     || { rm -f "$existfile"; err "$repo — upsert failed"; return 1; }
@@ -137,6 +146,7 @@ sync_repo() {
 
   local upfile outcome
   upfile="$(mktemp)"
+  tmpfiles+=("$upfile")
   printf '%s\n' "$upserted" > "$upfile"
   outcome=$(sd_deploy_via_pr "$ORG/$repo" ".gitignore" "$upfile" "$branch" "$SYNC_LABEL" "$title" "$body") || true
   rm -f "$upfile"
@@ -156,13 +166,15 @@ sync_repo() {
 
 # Extract the canonical block once, up front — a missing/half-open block is a
 # hard error (never ship a partial baseline).
+declare -a tmpfiles=()
+trap '[ "${#tmpfiles[@]}" -eq 0 ] || rm -f "${tmpfiles[@]}"' EXIT
+
 BLOCK_FILE="$(mktemp)"
+tmpfiles+=("$BLOCK_FILE")
 if ! gib_extract_baseline_block "$GITIGNORE_CANONICAL" > "$BLOCK_FILE"; then
   err "could not read the marker-wrapped baseline block from $GITIGNORE_CANONICAL"
-  rm -f "$BLOCK_FILE"
   exit 1
 fi
-trap 'rm -f "$BLOCK_FILE"' EXIT
 
 # Resolve target repos.
 declare -a REPOS

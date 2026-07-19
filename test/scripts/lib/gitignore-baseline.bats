@@ -157,3 +157,28 @@ EOF
   grep -qxF '!.env.example' <<< "$output"
   grep -qxF '!*.pub' <<< "$output"
 }
+
+# ── half-open marker detection ────────────────────────────────────────────────
+@test "upsert fails on a file with only BEGIN marker (half-open state)" {
+  local half_open="${TT_TMP}/half-open-begin"
+  cat > "$half_open" <<EOF
+${GIB_BEGIN_MARKER}
+.env
+node_modules/
+EOF
+  run upsert_gitignore_baseline "$BLOCK" "$half_open"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"half-open"* ]]
+}
+
+@test "upsert fails on a file with only END marker (half-open state)" {
+  local half_open="${TT_TMP}/half-open-end"
+  cat > "$half_open" <<EOF
+.env
+node_modules/
+${GIB_END_MARKER}
+EOF
+  run upsert_gitignore_baseline "$BLOCK" "$half_open"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"half-open"* ]]
+}

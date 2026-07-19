@@ -11,7 +11,7 @@
 # --dry-run guarantees no mutating gh calls.
 
 setup() {
-  TT_TMP="$(mktemp -d)"
+  TT_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   REPO_ROOT="$(cd -- "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   SCRIPT="${REPO_ROOT}/scripts/sync-gitignore-baseline.sh"
   CANONICAL="${REPO_ROOT}/.gitignore"
