@@ -61,31 +61,10 @@ teardown() {
   [ ! -s "$GH_STUB_LOG" ]
 }
 
-# ---------------------------------------------------------------------------
-# push-protection/gitignore_baseline
-# ---------------------------------------------------------------------------
-
-@test "gitignore_baseline skips with .gitignore baseline-block guidance" {
-  findings="$(tt_write_finding "broodminder-export" "push-protection" "gitignore_baseline")"
-  report_dir="${TT_TMP}/report"
-
-  GH_TOKEN=fake \
-    FINDINGS_FILE="$findings" \
-    REPORT_DIR="$report_dir" \
-    DRY_RUN=false \
-    run bash "$TT_SCRIPT"
-
-  [ "$status" -eq 0 ]
-
-  grep -q 'gitignore_baseline' "$report_dir/skipped.md"
-  ! grep -q 'gitignore_baseline' "$report_dir/remediation-report.md"
-
-  # Accurate reason: copy the org secrets-baseline block verbatim.
-  grep -q 'secrets-baseline block' "$report_dir/skipped.md"
-
-  # The misleading apply-repo-settings.sh pointer must be gone for this check.
-  ! grep -q 'apply-repo-settings.sh' "$report_dir/skipped.md"
-}
+# NOTE: push-protection/gitignore_baseline is no longer a skip — STORY4 (#800)
+# promoted it to an auto-remediation (upsert the org secrets baseline, ship a
+# PR). Its coverage lives in gitignore-baseline.bats, which stubs the full PR
+# flow. It is intentionally absent here.
 
 # ---------------------------------------------------------------------------
 # standards/missing-copilot-instructions
