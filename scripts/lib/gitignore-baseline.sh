@@ -81,7 +81,10 @@ _gib_has_markers() {
 # comment lines. Runs of blank lines left behind by the removed patterns are
 # squeezed (leading and consecutive blanks dropped) so migration output stays tidy.
 # Idempotent: exact-match lines are gone after one pass; the re-allow tail lines
-# match exactly on re-run and are dropped before being re-appended.
+# match exactly on re-run and are dropped before being re-appended. The tail is
+# only appended when at least one real (non-comment, non-blank) pattern survives
+# in L2 — a comment-only L2 cannot re-hide anything, so no tail is emitted and
+# an already-current file stays byte-for-byte identical on re-run.
 _gib_neutralize_l2() {
   local block="$1"
   block="$(tr -d '\r' <<< "$block")"
@@ -107,7 +110,7 @@ _gib_neutralize_l2() {
       if (is_blank && prev_blank) next
       print line
       prev_blank = is_blank
-      had_output = 1
+      if (!is_blank && !(key ~ /^[ \t]*#/)) had_pattern = 1
     }
     END {
       # Re-emit baseline negation anchors last so they win over any L2 pattern
@@ -115,7 +118,10 @@ _gib_neutralize_l2() {
       # baseline-negated path (e.g. `.env*` re-hides `!.env.example`, or
       # `**/*.pem` re-hides `!public.pem`). Idempotent: the appended negations
       # are in `drop`, so a second pass strips them before re-appending here.
-      if (had_output && neg_count > 0) {
+      # Guard: only emit when a real pattern survived — comment-only L2 cannot
+      # re-hide anything, and emitting the tail would make an already-current
+      # file appear changed (triggering spurious REFRESH PRs).
+      if (had_pattern && neg_count > 0) {
         if (!prev_blank) print ""
         for (i = 1; i <= neg_count; i++) print neg[i]
       }
