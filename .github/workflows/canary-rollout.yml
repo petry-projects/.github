@@ -11,11 +11,28 @@
 #
 # Auth: the mover credential is a GitHub App installation token minted at runtime via
 # actions/create-github-app-token from RELEASE_MANAGER_APP_CLIENT_ID (variable) + RELEASE_MANAGER_APP_KEY (secret) (scoped,
-# rotatable, auditable) — NOT a raw PAT and NOT github.token. The App carries
-# Contents:write (tag moves on the host repos), Deployments:write, Issues:write (the
-# per-agent blocker issues in sync-issues; the fleet-status table goes to the job summary,
-# not an issue), Actions:read (the gate reads workflow-run history across every tier repo)
-# and Metadata:read. Minting
+# rotatable, auditable) — NOT a raw PAT and NOT github.token.
+#
+# REQUIRED release-manager App repository permissions (set BOTH on the App AND
+# requested in the token-mint step — `create-github-app-token` restricts the minted
+# token to exactly the `permission-*` it lists, so a grant the step doesn't request
+# is silently absent):
+#   • Contents:  write  — tag moves / annotated-tag creation on the host repos.
+#   • Workflows: write  — REQUIRED to move a channel tag on a repo whose HEAD touches
+#                         `.github/workflows/**`. GitHub blocks an App without it from
+#                         creating/updating such a tag; via the git-refs API this
+#                         surfaces as 403 "Resource not accessible by integration"
+#                         (NOT a ruleset error). The `.github` repo is all reusable
+#                         workflows, so EVERY promotion there needs it (#807; broke the
+#                         fleet 2026-07-13..07-19 while only Contents:write was granted).
+#   • Deployments: write — the promotion Deployment record.
+#   • Issues:    write  — the per-agent blocker issues in sync-issues (fleet-status
+#                         table goes to the job summary, not an issue).
+#   • Actions:   read   — the gate reads workflow-run history across every tier repo.
+#   • Metadata:  read.
+# The App must also be a bypass actor on each host repo's `release-channel-tags`
+# ruleset (that gate is separate from, and insufficient without, the perms above).
+# Minting
 # is a HARD requirement: if the token cannot be minted the job fails — it must not
 # silently degrade to github.token, which cannot move protected `.github` tags (#868).
 #
