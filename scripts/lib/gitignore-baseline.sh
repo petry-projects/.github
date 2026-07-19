@@ -55,6 +55,80 @@ _gib_has_markers() {
     && printf '%s\n' "$content" | grep -qxF "$GIB_END_MARKER"
 }
 
+# _gib_neutralize_l2 <block>
+# Read candidate L2 content on stdin; print it with every line that would fight
+# the L1 block removed. A line is dropped when — after CRLF and trailing-whitespace
+# trimming — it exactly matches a *pattern* line of <block> (comment and blank
+# lines of the block are ignored, so they never strip a repo's own comments). This
+# does double duty:
+#
+#   • Negations win (identical patterns): a bare re-hiding pattern the target kept
+#     in L2 (e.g. `*.pem` with no `!public.pem`) is identical to the block's own
+#     broad pattern, so it is stripped.
+#   • Negations win (non-identical globs): a glob-variant pattern (e.g. `**/*.pem`
+#     or `.env*`) that is NOT an exact match for any block line but would still
+#     re-hide a baseline-negated path (e.g. `!public.pem` or `!.env.example`) is
+#     handled by the *re-allow tail*: all baseline negation lines are re-emitted at
+#     the very end of the L2 output so they always evaluate after any L2 pattern —
+#     identical or not — and the negated paths remain re-allowed.
+#   • Migrate, don't duplicate: an old *unmarkered* baseline pasted into L2 has its
+#     pattern lines folded away (they all live in the block now), so upsert stops
+#     shipping a second full copy. The genuine ecosystem/OS entries the repo added
+#     stay put.
+#
+# Only pattern lines are matched for dropping — never comments — because block
+# comments include bare `#` separators that would otherwise clobber a repo's own
+# comment lines. Runs of blank lines left behind by the removed patterns are
+# squeezed (leading and consecutive blanks dropped) so migration output stays tidy.
+# Idempotent: exact-match lines are gone after one pass; the re-allow tail lines
+# match exactly on re-run and are dropped before being re-appended. The tail is
+# only appended when at least one real (non-comment, non-blank) pattern survives
+# in L2 — a comment-only L2 cannot re-hide anything, so no tail is emitted and
+# an already-current file stays byte-for-byte identical on re-run.
+_gib_neutralize_l2() {
+  local block="$1"
+  block="$(tr -d '\r' <<< "$block")"
+  tr -d '\r' | awk -v block="$block" '
+    BEGIN {
+      n = split(block, barr, "\n")
+      for (i = 1; i <= n; i++) {
+        bl = barr[i]
+        sub(/[ \t]+$/, "", bl)
+        if (bl ~ /^[ \t]*$/) continue    # skip blank block lines
+        if (bl ~ /^[ \t]*#/) continue    # skip comment block lines (incl. bare #)
+        drop[bl] = 1
+        if (bl ~ /^!/) neg[++neg_count] = bl   # collect negation anchors for tail
+      }
+      prev_blank = 1   # squeeze any blank lines that would lead the output
+    }
+    {
+      line = $0
+      key = line
+      sub(/[ \t]+$/, "", key)
+      if (key in drop) next
+      is_blank = (key ~ /^[ \t]*$/)
+      if (is_blank && prev_blank) next
+      print line
+      prev_blank = is_blank
+      if (!is_blank && !(key ~ /^[ \t]*#/)) had_pattern = 1
+    }
+    END {
+      # Re-emit baseline negation anchors last so they win over any L2 pattern
+      # (identical or non-identical glob) that would otherwise re-hide a
+      # baseline-negated path (e.g. `.env*` re-hides `!.env.example`, or
+      # `**/*.pem` re-hides `!public.pem`). Idempotent: the appended negations
+      # are in `drop`, so a second pass strips them before re-appending here.
+      # Guard: only emit when a real pattern survived — comment-only L2 cannot
+      # re-hide anything, and emitting the tail would make an already-current
+      # file appear changed (triggering spurious REFRESH PRs).
+      if (had_pattern && neg_count > 0) {
+        if (!prev_blank) print ""
+        for (i = 1; i <= neg_count; i++) print neg[i]
+      }
+    }
+  '
+}
+
 # upsert_gitignore_baseline <block_file> [existing_file]
 # Print the upserted .gitignore content to stdout:
 #   • <block_file>   — a file containing the marker-wrapped L1 block (e.g. the
@@ -64,10 +138,17 @@ _gib_has_markers() {
 #
 # Behaviour (idempotent):
 #   • existing has the markers  → REPLACE the block in place; content above BEGIN
-#                                 and the entire L2 below END are preserved verbatim.
-#   • existing lacks the markers → INSERT the block on top; the whole existing file
-#                                 becomes L2 below the END marker.
+#                                 is preserved verbatim and the L2 below END is
+#                                 neutralized (see below).
+#   • existing lacks the markers → INSERT the block on top; the existing file
+#                                 becomes L2 below the END marker, neutralized.
 #   • existing empty/absent      → output is exactly the block.
+#
+# L2 neutralization (#809): every L2 line that duplicates a block *pattern* line is
+# dropped, so a re-hiding pattern the target kept in L2 (e.g. a bare `*.pem` with no
+# `!public.pem`) can't override the block's negations, and an old unmarkered
+# baseline pasted into L2 folds into the single block instead of duplicating.
+# Genuine per-repo L2 (ecosystem/OS entries) is preserved. See _gib_neutralize_l2.
 # Re-running on its own output is a no-op.
 upsert_gitignore_baseline() {
   local block_file="${1:-}" existing_file="${2:-}"
@@ -101,10 +182,13 @@ upsert_gitignore_baseline() {
     return 2
   fi
 
-  # Marker-less target: block on top, existing content becomes L2.
+  # Marker-less target: block on top, existing content becomes L2 — but neutralize
+  # any L2 line that duplicates/fights the block (see _gib_neutralize_l2).
   if [ "$has_begin" -eq 0 ]; then
+    local l2
+    l2="$(_gib_neutralize_l2 "$block" <<< "$existing")"
     printf '%s\n' "$block"
-    printf '%s\n' "$existing"
+    [ -n "$l2" ] && printf '%s\n' "$l2"
     return 0
   fi
 
@@ -114,6 +198,7 @@ upsert_gitignore_baseline() {
   local pre post
   pre="$(tr -d '\r' <<< "$existing" | awk -v b="$GIB_BEGIN_MARKER" '$0 == b { exit } { print }')"
   post="$(tr -d '\r' <<< "$existing" | awk -v e="$GIB_END_MARKER" 'seen { print } $0 == e { seen = 1 }')"
+  post="$(_gib_neutralize_l2 "$block" <<< "$post")"
 
   [ -n "$pre" ] && printf '%s\n' "$pre"
   printf '%s\n' "$block"
