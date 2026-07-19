@@ -2,7 +2,7 @@
 
 **Status:** Required
 **Applies to:** All repos in `petry-projects` org
-**Enforced by:** [`compliance-audit.sh`](../scripts/compliance-audit.sh) (`pp_check_gitignore_secrets_block`, in [`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh))
+**Enforced by:** [`compliance-audit.sh`](../scripts/compliance-audit.sh) (`pp_check_gitignore_baseline`, in [`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh))
 
 Every repository's `.gitignore` starts from the org-managed **secrets baseline**
 maintained in this repo at [`/.gitignore`](../.gitignore). This standard is the
@@ -81,13 +81,20 @@ preserved:
 ## Compliance check
 
 The weekly audit ([`compliance-audit.sh`](../scripts/compliance-audit.sh), via
-`pp_check_gitignore_secrets_block` in
-[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh)) verifies
-that a repo's `.gitignore` contains at least the baseline anchors `.env`,
-`*.pem`, and `*.key` (negation lines starting with `!` do not satisfy a
-requirement). Repos that copy the L1 block verbatim satisfy this automatically.
-A missing file or missing anchor is reported as a `gitignore_secrets_block`
-warning.
+`pp_check_gitignore_baseline` in
+[`scripts/lib/push-protection.sh`](../scripts/lib/push-protection.sh)) locates
+the [managed-block markers](#managed-block-markers) in a repo's `.gitignore`
+and compares the L1 span — by SHA-256 content hash (trailing-newline tolerant)
+— against the canonical block in this repo's [`/.gitignore`](../.gitignore).
+Everything **below** the END marker is never inspected, so per-repo L2
+extensions can never trip the check. The finding is reported at **`error`**
+(blocking) severity, as `gitignore_baseline`, in three cases:
+
+- **no `.gitignore`** at the repo root,
+- **baseline block missing** (the BEGIN … END markers are absent), or
+- **baseline block drifted** (the span was edited — hash mismatch).
+
+Repos that copy the L1 block verbatim, markers included, pass automatically.
 
 ## Application to a repository
 

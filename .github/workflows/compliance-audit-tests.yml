@@ -15,6 +15,7 @@ on:
   pull_request:
     paths:
       - 'scripts/compliance-audit.sh'
+      - 'scripts/lib/**'
       - 'test/scripts/compliance-audit/**'
       - '.github/workflows/compliance-audit-tests.yml'
   push:
@@ -22,6 +23,7 @@ on:
       - main
     paths:
       - 'scripts/compliance-audit.sh'
+      - 'scripts/lib/**'
       - 'test/scripts/compliance-audit/**'
       - '.github/workflows/compliance-audit-tests.yml'
 
