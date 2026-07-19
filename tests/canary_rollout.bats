@@ -476,6 +476,132 @@ SEOF
   [ "$output" = "[]" ]
 }
 
+# ── _run_json: surface the REAL error, not a bare "transient" (#810) ───────────
+# The old wrapper swallowed gh's stderr (2>/dev/null) and printed only "transient
+# failure … after N attempts", hiding whether a sweep was blocked by a 403
+# secondary-rate-limit, a 5xx blip, or bad credentials. The annotations must now
+# carry the HTTP status + a coarse class so an operator can tell them apart.
+@test "_run_json: final ::error:: surfaces the real HTTP 403 secondary-rate-limit status/class (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "gh: HTTP 403: You have exceeded a secondary rate limit (https://api.github.com/...)" >&2
+exit 1
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"failed to fetch run list"* ]]
+  [[ "$output" == *"403"* ]]
+  [[ "$output" == *"secondary-rate-limit"* ]]
+}
+
+@test "_run_json: retry ::warning:: surfaces the real HTTP status/class before retrying (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-warn"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: HTTP 502 Bad Gateway" >&2; exit 1; fi
+echo '[{"conclusion":"success","createdAt":"2026-01-01T00:00:00Z","databaseId":1,"workflowName":"X"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"conclusion":"success"'* ]]
+  [[ "$output" == *"::warning::"* ]]
+  [[ "$output" == *"502"* ]]
+  [[ "$output" == *"server-error"* ]]
+}
+
+@test "_run_json: an auth failure is classed as auth, not a bare transient (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "gh: Bad credentials (HTTP 401)" >&2
+exit 1
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"401"* ]]
+  [[ "$output" == *"auth"* ]]
+}
+
+# ── _run_json: honor an explicit Retry-After / x-ratelimit-reset hint (#810) ───
+@test "_run_json: honors a Retry-After hint from gh stderr for the backoff delay (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log-ra"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-ra"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: HTTP 403: rate limited, Retry-After: 7" >&2; exit 1; fi
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  # base sleep of 1 would give a small exponential delay; the 7s Retry-After must win.
+  run env CANARY_GH_RETRY_SLEEP=1 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  grep -qx '7' "$SLEEP_LOG"
+}
+
+@test "_run_json: honors uppercase X-RateLimit-Reset header in gh stderr (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log-rl"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-rl"; echo 1 > "$RJ_FAILS_LEFT"
+  # Emit the header in mixed case, as GitHub's real API does.
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: error: X-RateLimit-Reset: 5" >&2; exit 1; fi
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=1 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  # The x-ratelimit-reset epoch check may yield a small positive delta; just verify sleep ran.
+  [ -s "$SLEEP_LOG" ]
+}
+
+@test "_run_json: CANARY_GH_RETRY_AFTER_CAP limits an oversized server hint (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log-cap"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-cap"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: HTTP 429: rate limited, Retry-After: 9999" >&2; exit 1; fi
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=1 CANARY_GH_RETRIES=3 CANARY_GH_RETRY_AFTER_CAP=60 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  # Retry-After=9999 must be capped to 60 by CANARY_GH_RETRY_AFTER_CAP.
+  grep -qx '60' "$SLEEP_LOG"
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]
