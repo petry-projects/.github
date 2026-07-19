@@ -20,7 +20,11 @@
 #
 # PR Review Mention — thin caller for the org-level reusable.
 # To adopt: copy this file to .github/workflows/pr-review-mention.yml in your repo.
-# Requires: GH_PAT_WORKFLOWS org secret (already present in petry-projects org).
+# Requires (org secrets, already present in petry-projects org):
+#   GH_PAT_DON_PETRY     canonical PAT for API calls and dispatching the review agent.
+#                        GH_PAT_WORKFLOWS is the deprecated transition alias, kept as the
+#                        `||` fallback until the persona rename lands fleet-wide.
+#   DON_PETRY_BOT_GH_PAT PAT owned by donpetry-bot, for posting acknowledgement comments.
 name: PR Review — Mention Trigger
 
 on:
@@ -38,4 +42,6 @@ jobs:
     permissions:
       pull-requests: write
     uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@pr-review-mention/stable  # NOSONAR(githubactions:S7637) first-party channel ref
-    secrets: inherit
+    secrets:
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+      DON_PETRY_BOT_GH_PAT: ${{ secrets.DON_PETRY_BOT_GH_PAT }}
