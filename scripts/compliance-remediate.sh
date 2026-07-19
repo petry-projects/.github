@@ -665,12 +665,26 @@ remediate_gitignore_baseline() {
     return 0
   fi
 
-  # Fetch the repo's current .gitignore (empty file if absent / 404).
-  local existing_file
+  # Fetch the repo's current .gitignore.  A genuine 404 (file absent) is
+  # fine — continue with an empty file.  Any other failure (auth, rate-limit,
+  # 5xx) means we cannot know what L2 content the file holds; fail fast rather
+  # than silently replacing it with a baseline-only file.
+  local existing_file api_out api_err
   existing_file="$(mktemp)"
-  gh api "repos/$ORG/$repo/contents/.gitignore" 2>/dev/null \
-    | jq -r '.content // empty' 2>/dev/null \
-    | b64_decode > "$existing_file" 2>/dev/null || true
+  api_out="$(mktemp)"
+  api_err="$(mktemp)"
+  if gh api "repos/$ORG/$repo/contents/.gitignore" > "$api_out" 2>"$api_err"; then
+    jq -r '.content // empty' "$api_out" 2>/dev/null | b64_decode > "$existing_file" 2>/dev/null || true
+    rm -f "$api_out" "$api_err"
+  elif grep -qiF 'HTTP 404' "$api_err" 2>/dev/null || grep -qiF 'Not Found' "$api_err" 2>/dev/null; then
+    rm -f "$api_out" "$api_err"
+  else
+    local api_err_msg; api_err_msg="$(cat "$api_err")"
+    rm -f "$block_file" "$existing_file" "$api_out" "$api_err"
+    err "gh api failed fetching .gitignore for $ORG/$repo: $api_err_msg"
+    report_fail "$repo" "$check" "gh api error fetching .gitignore (auth/rate-limit/server error)"
+    return 0
+  fi
 
   # Upsert: place/refresh the L1 block on top, preserving L2 below END verbatim.
   # Compare as command-substituted strings (trailing-newline tolerant), matching

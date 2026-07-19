@@ -60,10 +60,16 @@ case "$sub" in
         if printf '%s' "$args" | grep -q -- '--method PUT'; then
           exit "${GH_PUT_RC:-0}"
         fi
+        # Configurable non-404 API error (auth/rate-limit/server-error tests).
+        if [ -n "${GH_GITIGNORE_API_RC:-}" ]; then
+          printf 'gh: HTTP 429: API rate limit exceeded\n' >&2
+          exit "${GH_GITIGNORE_API_RC}"
+        fi
         # Plain GET of the target repo's current .gitignore.
         if [ -n "${GH_GITIGNORE_B64:-}" ]; then
           printf '{"sha":"existingsha","content":"%s"}' "$GH_GITIGNORE_B64"
         else
+          printf 'gh: Not Found (HTTP 404)\n' >&2
           exit 1   # 404 — .gitignore absent
         fi ;;
       repos/*)                       printf '%s' "${GH_DEFAULT_BRANCH:-main}" ;;
@@ -230,6 +236,55 @@ run_remediate() {
   run_remediate "$findings"
 
   [ "$status" -eq 0 ]
+  grep -q 'gitignore_baseline' "${TT_TMP}/report/skipped.md"
+  ! grep -q 'gh pr create' "$GH_CALLS"
+}
+
+# ---------------------------------------------------------------------------
+# Failure — incomplete canonical block (missing END marker) is a hard error.
+# ---------------------------------------------------------------------------
+@test "incomplete canonical baseline block is reported as a failure" {
+  GITIGNORE_CANONICAL="${TT_TMP}/broken-canonical"; export GITIGNORE_CANONICAL
+  printf '%s\n' \
+    '# >>> BEGIN petry-projects secrets baseline (managed by .github — do not edit) >>>' \
+    '.env' > "$GITIGNORE_CANONICAL"  # missing END marker
+
+  findings="$(tt_write_finding "markets" "push-protection" "gitignore_baseline")"
+  run_remediate "$findings"
+
+  grep -q 'FAILED' "${TT_TMP}/report/skipped.md"
+  grep -q 'gitignore_baseline' "${TT_TMP}/report/skipped.md"
+  ! grep -q 'gh pr create' "$GH_CALLS"
+}
+
+# ---------------------------------------------------------------------------
+# Failure — half-open existing .gitignore (one marker) is refused by upsert.
+# ---------------------------------------------------------------------------
+@test "half-open existing .gitignore (one marker) is reported as a failure" {
+  printf '%s\n' \
+    '# >>> BEGIN petry-projects secrets baseline (managed by .github — do not edit) >>>' \
+    '.env' \
+    'node_modules/' > "${TT_TMP}/half-open"  # missing END marker
+  GH_GITIGNORE_B64="$(b64 < "${TT_TMP}/half-open")"; export GH_GITIGNORE_B64
+
+  findings="$(tt_write_finding "markets" "push-protection" "gitignore_baseline")"
+  run_remediate "$findings"
+
+  grep -q 'FAILED' "${TT_TMP}/report/skipped.md"
+  grep -q 'gitignore_baseline' "${TT_TMP}/report/skipped.md"
+  ! grep -q 'gh pr create' "$GH_CALLS"
+}
+
+# ---------------------------------------------------------------------------
+# Failure — a non-404 gh api error (auth/rate-limit/5xx) fails fast.
+# ---------------------------------------------------------------------------
+@test "non-404 gh api error fetching .gitignore is reported as a failure" {
+  GH_GITIGNORE_API_RC=1; export GH_GITIGNORE_API_RC
+
+  findings="$(tt_write_finding "markets" "push-protection" "gitignore_baseline")"
+  run_remediate "$findings"
+
+  grep -q 'FAILED' "${TT_TMP}/report/skipped.md"
   grep -q 'gitignore_baseline' "${TT_TMP}/report/skipped.md"
   ! grep -q 'gh pr create' "$GH_CALLS"
 }
