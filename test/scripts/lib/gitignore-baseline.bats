@@ -182,3 +182,105 @@ EOF
   [ "$status" -eq 2 ]
   [[ "$output" == *"half-open"* ]]
 }
+
+# ── #809: baseline negations must win over a re-hiding L2 pattern ──────────────
+# Reproduces the fleet dry-run failure on `markets` / `google-app-scripts`: an
+# ad-hoc L2 with a broad `*.pem` and no `!public.pem` re-hid the file the L1 block
+# re-allows. Assert against real git semantics with `git check-ignore`.
+
+# _gib_check_ignored <gitignore_content> <path>
+# Return 0 if <path> is ignored, 1 if not — mirrors the issue's repro probe.
+_gib_check_ignored() {
+  local content="$1" path="$2" d
+  d="$(mktemp -d)"
+  ( cd "$d" && git init -q )
+  printf '%s\n' "$content" > "$d/.gitignore"
+  ( cd "$d" && git check-ignore -q "$path" )
+  local rc=$?
+  rm -rf "$d"
+  return "$rc"
+}
+
+@test "#809 markets-like: broad *.pem in L2 does not re-hide baseline-negated public.pem" {
+  # Use the REAL canonical block (it carries !public.pem after *.pem).
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/markets"
+  printf '# markets ad-hoc\n*.pem\nnode_modules/\n' > "$existing"
+
+  # Capture the upsert output in its own var — bats clobbers $output on every `run`.
+  local gi
+  gi="$(upsert_gitignore_baseline "$realblock" "$existing")"
+
+  run _gib_check_ignored "$gi" public.pem
+  [ "$status" -eq 1 ]   # NOT ignored
+  # A genuine secret pem is still ignored by the baseline.
+  run _gib_check_ignored "$gi" secret.pem
+  [ "$status" -eq 0 ]
+  # Genuine L2 survives.
+  grep -qxF 'node_modules/' <<< "$gi"
+}
+
+@test "#809 google-app-scripts-like: broad *.pem in L2 does not re-hide public.pem" {
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/gas"
+  printf '.clasp.json\n*.pem\n' > "$existing"
+
+  local gi
+  gi="$(upsert_gitignore_baseline "$realblock" "$existing")"
+
+  run _gib_check_ignored "$gi" public.pem
+  [ "$status" -eq 1 ]   # NOT ignored
+  grep -qxF '.clasp.json' <<< "$gi"
+}
+
+# ── #809: migrate an existing unmarkered baseline, don't duplicate it ──────────
+@test "#809 TalkTerm-like: unmarkered baseline in L2 is folded into one block, not duplicated" {
+  # L2 IS a copy of the old unmarkered baseline (same secret lines, no markers),
+  # plus genuine ecosystem/OS entries the repo legitimately added.
+  local existing="${TT_TMP}/talkterm"
+  cat > "$existing" <<EOF
+.env
+!.env.example
+*.pem
+!*.pub
+*.key
+node_modules/
+dist/
+*.log
+.DS_Store
+EOF
+
+  run upsert_gitignore_baseline "$BLOCK" "$existing"
+  [ "$status" -eq 0 ]
+
+  # Exactly one marker-wrapped block.
+  [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_BEGIN_MARKER")" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_END_MARKER")" -eq 1 ]
+  # Secret patterns appear exactly once (they live in the block; the L2 copy is folded away).
+  [ "$(printf '%s\n' "$output" | grep -cxF '.env')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -cxF '*.pem')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -cxF '!.env.example')" -eq 1 ]
+  # Genuine ecosystem/OS L2 entries are preserved.
+  grep -qxF 'node_modules/' <<< "$output"
+  grep -qxF 'dist/' <<< "$output"
+  grep -qxF '*.log' <<< "$output"
+  grep -qxF '.DS_Store' <<< "$output"
+}
+
+@test "#809 negation-win + migration is idempotent" {
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/markets2"
+  printf '# markets ad-hoc\n*.pem\nnode_modules/\n' > "$existing"
+
+  local first second
+  first="$(upsert_gitignore_baseline "$realblock" "$existing")"
+  printf '%s\n' "$first" > "${TT_TMP}/after1"
+  second="$(upsert_gitignore_baseline "$realblock" "${TT_TMP}/after1")"
+  [ "$first" = "$second" ]
+}

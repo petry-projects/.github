@@ -55,6 +55,57 @@ _gib_has_markers() {
     && printf '%s\n' "$content" | grep -qxF "$GIB_END_MARKER"
 }
 
+# _gib_neutralize_l2 <block>
+# Read candidate L2 content on stdin; print it with every line that would fight
+# the L1 block removed. A line is dropped when — after CRLF and trailing-whitespace
+# trimming — it exactly matches a *pattern* line of <block> (comment and blank
+# lines of the block are ignored, so they never strip a repo's own comments). This
+# does double duty:
+#
+#   • Negations win: a bare re-hiding pattern the target kept in L2 (e.g. `*.pem`
+#     with no `!public.pem`) is identical to the block's own broad pattern, so it
+#     is stripped. The file it re-hid stays ignored by the block, and the block's
+#     `!public.pem` (which sits after `*.pem` inside the block) is no longer
+#     overridden by a later L2 line — the negated path is re-allowed as intended.
+#   • Migrate, don't duplicate: an old *unmarkered* baseline pasted into L2 has its
+#     pattern lines folded away (they all live in the block now), so upsert stops
+#     shipping a second full copy. The genuine ecosystem/OS entries the repo added
+#     stay put.
+#
+# Only pattern lines are matched — never comments — because block comments include
+# bare `#` separators that would otherwise clobber a repo's own comment lines.
+# Runs of blank lines left behind by the removed patterns are squeezed (leading and
+# consecutive blanks dropped) so migration output stays tidy. Idempotent: once the
+# duplicate patterns are gone a second pass finds nothing to strip.
+_gib_neutralize_l2() {
+  local block="$1"
+  awk -v block="$block" '
+    BEGIN {
+      n = split(block, barr, "\n")
+      for (i = 1; i <= n; i++) {
+        bl = barr[i]
+        sub(/\r$/, "", bl)
+        sub(/[ \t]+$/, "", bl)
+        if (bl ~ /^[ \t]*$/) continue    # skip blank block lines
+        if (bl ~ /^[ \t]*#/) continue    # skip comment block lines (incl. bare #)
+        drop[bl] = 1
+      }
+      prev_blank = 1   # squeeze any blank lines that would lead the output
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      key = line
+      sub(/[ \t]+$/, "", key)
+      if (key in drop) next
+      is_blank = (key ~ /^[ \t]*$/)
+      if (is_blank && prev_blank) next
+      print line
+      prev_blank = is_blank
+    }
+  '
+}
+
 # upsert_gitignore_baseline <block_file> [existing_file]
 # Print the upserted .gitignore content to stdout:
 #   • <block_file>   — a file containing the marker-wrapped L1 block (e.g. the
@@ -64,10 +115,17 @@ _gib_has_markers() {
 #
 # Behaviour (idempotent):
 #   • existing has the markers  → REPLACE the block in place; content above BEGIN
-#                                 and the entire L2 below END are preserved verbatim.
-#   • existing lacks the markers → INSERT the block on top; the whole existing file
-#                                 becomes L2 below the END marker.
+#                                 is preserved verbatim and the L2 below END is
+#                                 neutralized (see below).
+#   • existing lacks the markers → INSERT the block on top; the existing file
+#                                 becomes L2 below the END marker, neutralized.
 #   • existing empty/absent      → output is exactly the block.
+#
+# L2 neutralization (#809): every L2 line that duplicates a block *pattern* line is
+# dropped, so a re-hiding pattern the target kept in L2 (e.g. a bare `*.pem` with no
+# `!public.pem`) can't override the block's negations, and an old unmarkered
+# baseline pasted into L2 folds into the single block instead of duplicating.
+# Genuine per-repo L2 (ecosystem/OS entries) is preserved. See _gib_neutralize_l2.
 # Re-running on its own output is a no-op.
 upsert_gitignore_baseline() {
   local block_file="${1:-}" existing_file="${2:-}"
@@ -101,10 +159,13 @@ upsert_gitignore_baseline() {
     return 2
   fi
 
-  # Marker-less target: block on top, existing content becomes L2.
+  # Marker-less target: block on top, existing content becomes L2 — but neutralize
+  # any L2 line that duplicates/fights the block (see _gib_neutralize_l2).
   if [ "$has_begin" -eq 0 ]; then
+    local l2
+    l2="$(_gib_neutralize_l2 "$block" <<< "$existing")"
     printf '%s\n' "$block"
-    printf '%s\n' "$existing"
+    [ -n "$l2" ] && printf '%s\n' "$l2"
     return 0
   fi
 
@@ -114,6 +175,7 @@ upsert_gitignore_baseline() {
   local pre post
   pre="$(tr -d '\r' <<< "$existing" | awk -v b="$GIB_BEGIN_MARKER" '$0 == b { exit } { print }')"
   post="$(tr -d '\r' <<< "$existing" | awk -v e="$GIB_END_MARKER" 'seen { print } $0 == e { seen = 1 }')"
+  post="$(_gib_neutralize_l2 "$block" <<< "$post")"
 
   [ -n "$pre" ] && printf '%s\n' "$pre"
   printf '%s\n' "$block"
