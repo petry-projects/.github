@@ -42,9 +42,22 @@ _stub_gh() {
 #!/usr/bin/env bash
 args="\$*"
 case "\$args" in
-  *"--method POST"*|*"--method PUT"*|*"PATCH"*|*"label create"*|*"-X PUT"*) echo "\$args" >> "$CALLS" ;;
+  *"--method POST"*|*"--method PUT"*|*"PATCH"*|*"label create"*|*"-X PUT"*)
+    echo "\$args" >> "$CALLS"
+    echo '{"full_name":"stub/repo"}'
+    ;;
+  *"contents/personas"*)
+    # Persona listing: apply-repo-settings.sh pipes this through
+    # jq '.[]? | select(.type == "dir") | .name'. An object response causes
+    # jq to error when it tries .type on a string value. Return an empty
+    # array so the listing succeeds with zero personas (no opt-out labels,
+    # no sync failure).
+    echo '[]'
+    ;;
+  *)
+    echo '{"full_name":"stub/repo"}'
+    ;;
 esac
-echo '{"full_name":"stub/repo"}'
 EOF
   chmod +x "$STUB_BIN/gh"
 }
