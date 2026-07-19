@@ -319,7 +319,7 @@ for a PR to merge.
 The `.gitignore` secrets baseline is codified in its own standard. See
 [`gitignore-standard.md`](gitignore-standard.md) for the two-layer (L1
 secrets baseline / L2 per-repo) model, the managed-block markers, the
-negation-discipline rules, and the `gitignore_secrets_block` compliance check.
+negation-discipline rules, and the `gitignore_baseline` compliance check.
 
 ### Writing tests and fixtures
 
@@ -440,7 +440,7 @@ both at once:
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
-| `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
+| `gitignore_baseline` | error | `.gitignore` secrets-baseline marker block matches the org canonical block (SHA-256) |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 
 Findings are reported as GitHub Issues labeled `security` + `compliance-audit`

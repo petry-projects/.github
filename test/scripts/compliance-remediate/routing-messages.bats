@@ -7,7 +7,7 @@
 #
 # Before this change:
 #   - push-protection/secret_scan_ci_job_present and
-#     push-protection/gitignore_secrets_block hit the push-protection/* catch-all,
+#     push-protection/gitignore_baseline hit the push-protection/* catch-all,
 #     which tells the reader to "run scripts/apply-repo-settings.sh" — but that
 #     script only applies security_and_analysis settings and cannot add a CI job
 #     or edit .gitignore.
@@ -62,11 +62,11 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# push-protection/gitignore_secrets_block
+# push-protection/gitignore_baseline
 # ---------------------------------------------------------------------------
 
-@test "gitignore_secrets_block skips with .gitignore baseline guidance" {
-  findings="$(tt_write_finding "broodminder-export" "push-protection" "gitignore_secrets_block")"
+@test "gitignore_baseline skips with .gitignore baseline-block guidance" {
+  findings="$(tt_write_finding "broodminder-export" "push-protection" "gitignore_baseline")"
   report_dir="${TT_TMP}/report"
 
   GH_TOKEN=fake \
@@ -77,11 +77,11 @@ teardown() {
 
   [ "$status" -eq 0 ]
 
-  grep -q 'gitignore_secrets_block' "$report_dir/skipped.md"
-  ! grep -q 'gitignore_secrets_block' "$report_dir/remediation-report.md"
+  grep -q 'gitignore_baseline' "$report_dir/skipped.md"
+  ! grep -q 'gitignore_baseline' "$report_dir/remediation-report.md"
 
-  # Accurate reason: copy the org baseline .gitignore.
-  grep -q 'org baseline' "$report_dir/skipped.md"
+  # Accurate reason: copy the org secrets-baseline block verbatim.
+  grep -q 'secrets-baseline block' "$report_dir/skipped.md"
 
   # The misleading apply-repo-settings.sh pointer must be gone for this check.
   ! grep -q 'apply-repo-settings.sh' "$report_dir/skipped.md"
