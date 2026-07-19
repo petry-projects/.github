@@ -65,13 +65,23 @@ PP_GHAS_GATED_KEYS=(
   "secret_scanning_non_provider_patterns"
 )
 
-# Minimum entries that every repo's .gitignore MUST contain. Every repo
-# starting from the org baseline at /.gitignore satisfies these by default.
-PP_REQUIRED_GITIGNORE_PATTERNS=(
-  ".env"
-  "*.pem"
-  "*.key"
-)
+# Canonical marker lines wrapping the org-managed L1 secrets baseline block in
+# every repo's .gitignore. The block between (and including) these markers is
+# copied verbatim from this repo's /.gitignore; everything BELOW the END marker
+# is per-repo L2 (ecosystem/OS) and is never inspected. See
+# standards/gitignore-standard.md#managed-block-markers.
+PP_GITIGNORE_BEGIN_MARKER='# >>> BEGIN petry-projects secrets baseline (managed by .github — do not edit) >>>'
+PP_GITIGNORE_END_MARKER='# <<< END petry-projects secrets baseline <<<'
+
+# Path to the org canonical /.gitignore — the source of truth the baseline
+# drift check hashes against. Defaults to this repo's root .gitignore (this
+# library lives at scripts/lib/, so ../../ is the repo root). Overridable so
+# the bats suite can point at a synthetic fixture.
+PP_CANONICAL_GITIGNORE="${PP_CANONICAL_GITIGNORE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.gitignore}"
+
+# Standard reference for the .gitignore baseline check. This check enforces the
+# dedicated .gitignore standard, not the push-protection standard.
+PP_GITIGNORE_STANDARD_REF="standards/gitignore-standard.md"
 
 # Number of days back the bypass-recency check looks for unjustified
 # push-protection bypasses.
@@ -319,18 +329,54 @@ pp_check_secret_scan_ci_job() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: .gitignore contains the baseline secret-protection entries
+# Check: .gitignore secrets-baseline marker block matches the org canonical
 # ---------------------------------------------------------------------------
-pp_check_gitignore_secrets_block() {
+# Extract the L1 secrets-baseline span (BEGIN … END markers, inclusive) from
+# the .gitignore content on stdin. Prints nothing when the block is absent or
+# incomplete (BEGIN without a matching END). Everything below the END marker is
+# ignored, so per-repo L2 ecosystem/OS entries never affect the output.
+pp_extract_baseline_block() {
+  awk -v b="$PP_GITIGNORE_BEGIN_MARKER" -v e="$PP_GITIGNORE_END_MARKER" '
+    $0 == b { inblock = 1 }
+    inblock { buf = buf $0 "\n" }
+    $0 == e && inblock { printf "%s", buf; found = 1; exit }
+    END { if (!found) exit 1 }
+  '
+}
+
+# Emit the SHA-256 of stdin (hex digest only). Prefers coreutils sha256sum;
+# falls back to `shasum -a 256` on systems (e.g. macOS) without it.
+pp_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+pp_check_gitignore_baseline() {
   local repo="$1"
+
+  # Canonical L1 block from the org /.gitignore — the source of truth. Guard
+  # against a missing/unreadable canonical so a broken baseline can't silently
+  # pass every repo.
+  local canonical_block canonical_hash
+  canonical_block=$(pp_extract_baseline_block < "$PP_CANONICAL_GITIGNORE" 2>/dev/null) || canonical_block=""
+  if [ -z "$canonical_block" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "Could not read the canonical secrets-baseline block from the org \`.gitignore\` — the audit cannot verify baseline drift" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
+    return
+  fi
+  canonical_hash=$(printf '%s' "$canonical_block" | pp_sha256)
 
   local gi_b64
   gi_b64=$(gh_api "repos/$ORG/$repo/contents/.gitignore" --jq '.content // ""' 2>/dev/null || echo "")
 
   if [ -z "$gi_b64" ]; then
-    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-      "No \`.gitignore\` at repo root — start from the org baseline at /.gitignore" \
-      "$PP_STANDARD_REF#required-gitignore-entries"
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "No \`.gitignore\` at repo root — copy the secrets-baseline block verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#application-to-a-repository"
     return
   fi
 
@@ -338,23 +384,28 @@ pp_check_gitignore_secrets_block() {
   gi_content=$(echo "$gi_b64" | tr -d '\n ' | base64 -d 2>/dev/null || echo "")
 
   if [ -z "$gi_content" ]; then
+    # Content present but not base64-decodable (e.g. an API error body leaked
+    # in) — inconclusive. Do not emit a false pass or a false drift finding.
     return
   fi
 
-  local missing=()
-  local pattern
-  for pattern in "${PP_REQUIRED_GITIGNORE_PATTERNS[@]}"; do
-    # Use fixed-string match anchored to a line; ignore lines that start with `!`
-    # so a negation can't satisfy the requirement for the broad pattern.
-    if ! echo "$gi_content" | grep -vE '^[[:space:]]*!' | grep -qxF "$pattern"; then
-      missing+=("$pattern")
-    fi
-  done
+  local repo_block
+  repo_block=$(printf '%s\n' "$gi_content" | pp_extract_baseline_block) || repo_block=""
 
-  if [ ${#missing[@]} -gt 0 ]; then
-    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-      "\`.gitignore\` is missing baseline secret patterns: $(IFS=', '; echo "${missing[*]}") — copy the org baseline at /.gitignore" \
-      "$PP_STANDARD_REF#required-gitignore-entries"
+  if [ -z "$repo_block" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` is missing the \`BEGIN … END petry-projects secrets baseline\` block — copy it verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
+    return
+  fi
+
+  local repo_hash
+  repo_hash=$(printf '%s' "$repo_block" | pp_sha256)
+
+  if [ "$repo_hash" != "$canonical_hash" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` secrets-baseline block has drifted from the org canonical block (hash mismatch) — re-copy it verbatim; never edit inside the markers" \
+      "$PP_GITIGNORE_STANDARD_REF#l1--secrets-baseline-org-managed-verbatim-required"
   fi
 }
 
@@ -415,6 +466,6 @@ pp_run_all_checks() {
   pp_check_security_and_analysis "$repo"
   pp_check_open_secret_alerts "$repo"
   pp_check_secret_scan_ci_job "$repo"
-  pp_check_gitignore_secrets_block "$repo"
+  pp_check_gitignore_baseline "$repo"
   pp_check_push_protection_bypasses "$repo"
 }

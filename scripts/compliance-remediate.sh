@@ -733,9 +733,9 @@ remediate_finding() {
       report_skip "$repo" "$check" \
         "Adding the \`secret-scan\` gitleaks job to \`.github/workflows/ci.yml\` requires \`workflow\` token scope — copy the CI secret-scan job from standards/push-protection.md using a PAT"
       ;;
-    push-protection/gitignore_secrets_block)
+    push-protection/gitignore_baseline)
       report_skip "$repo" "$check" \
-        "\`.gitignore\` is missing baseline secret patterns — copy the org baseline from /.gitignore (\`.env\`, \`*.pem\`, \`*.key\`) into the repo's root \`.gitignore\`"
+        "\`.gitignore\` secrets-baseline block is missing or drifted — copy the \`BEGIN … END petry-projects secrets baseline\` block verbatim from the org \`/.gitignore\` into the repo's root \`.gitignore\` (do not edit inside the markers; L2 entries stay below END)"
       ;;
     push-protection/*)
       report_skip "$repo" "$check" \
