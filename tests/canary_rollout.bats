@@ -555,6 +555,53 @@ GHEOF
   grep -qx '7' "$SLEEP_LOG"
 }
 
+@test "_run_json: honors uppercase X-RateLimit-Reset header in gh stderr (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log-rl"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-rl"; echo 1 > "$RJ_FAILS_LEFT"
+  # Emit the header in mixed case, as GitHub's real API does.
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: error: X-RateLimit-Reset: 5" >&2; exit 1; fi
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=1 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  # The x-ratelimit-reset epoch check may yield a small positive delta; just verify sleep ran.
+  [ -s "$SLEEP_LOG" ]
+}
+
+@test "_run_json: CANARY_GH_RETRY_AFTER_CAP limits an oversized server hint (#810)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  SLEEP_LOG="$BATS_TEST_TMPDIR/sleep-log-cap"
+  cat > "$STUB_BIN/sleep" <<SEOF
+#!/usr/bin/env bash
+echo "\$1" >> "$SLEEP_LOG"
+SEOF
+  chmod +x "$STUB_BIN/sleep"
+  export RJ_FAILS_LEFT="$BATS_TEST_TMPDIR/rj-fails-cap"; echo 1 > "$RJ_FAILS_LEFT"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+n="$(cat "$RJ_FAILS_LEFT")"
+if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "$RJ_FAILS_LEFT"; echo "gh: HTTP 429: rate limited, Retry-After: 9999" >&2; exit 1; fi
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=1 CANARY_GH_RETRIES=3 CANARY_GH_RETRY_AFTER_CAP=60 \
+    bash -c "source '$ORCH' && _run_json some/repo some-wf ''"
+  [ "$status" -eq 0 ]
+  # Retry-After=9999 must be capped to 60 by CANARY_GH_RETRY_AFTER_CAP.
+  grep -qx '60' "$SLEEP_LOG"
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]

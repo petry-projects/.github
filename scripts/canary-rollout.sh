@@ -381,7 +381,7 @@ candidate_cut_date() {
 _gh_err_summary() {
   local err="$1" status="" class reason="" lc line
   if [[ "$err" =~ HTTP[/\ ]?([0-9]{3}) ]]; then status="${BASH_REMATCH[1]}"; fi
-  lc="$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')"
+  lc="${err,,}"
   if [[ "$lc" == *"secondary rate limit"* ]]; then class="secondary-rate-limit"
   elif [[ "$lc" == *"rate limit"* ]]; then class="rate-limit"
   elif [ "$status" = "401" ] || [[ "$lc" == *"bad credentials"* ]] || [[ "$lc" == *"requires authentication"* ]]; then class="auth"
@@ -390,7 +390,8 @@ _gh_err_summary() {
   elif [ -n "$status" ] && [ "$status" -ge 400 ]; then class="client-error"
   else class="network-or-unknown"; fi
   # first non-blank line of gh's stderr, trimmed, capped so an annotation stays readable
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
     if [ -n "${line//[[:space:]]/}" ]; then reason="$line"; break; fi
   done <<< "$err"
   reason="${reason:0:200}"
@@ -404,10 +405,10 @@ _gh_err_summary() {
 # the caller then falls back to exponential+jittered backoff. Honoring the server's
 # own hint avoids hammering a secondary-rate-limit window and getting throttled harder.
 _gh_retry_after() {
-  local err="$1" secs="" now
-  if [[ "$err" =~ [Rr]etry[-\ ]?[Aa]fter:?[\ ]*([0-9]+) ]]; then
+  local err="$1" lc="${1,,}" secs="" now
+  if [[ "$lc" =~ retry[-\ ]?after:?[\ ]*([0-9]+) ]]; then
     secs="${BASH_REMATCH[1]}"
-  elif [[ "$err" =~ x-ratelimit-reset:?[\ ]*([0-9]+) ]]; then
+  elif [[ "$lc" =~ x-ratelimit-reset:?[\ ]*([0-9]+) ]]; then
     now="$(date +%s)"; secs=$(( BASH_REMATCH[1] - now )); [ "$secs" -lt 0 ] && secs=0
   fi
   printf '%s' "$secs"
@@ -429,17 +430,27 @@ _run_json() {
   # (returning an empty [] would read as "zero failures" and could green-light a bad
   # promotion — a non-zero return halts the run under `set -e` instead). An empty-but-
   # successful result (no runs) is still a valid []. Tunable via CANARY_GH_RETRIES /
-  # CANARY_GH_RETRY_SLEEP (tests set 0).
+  # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
+  local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
+  case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
   case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
   case "$base" in ''|*[!0-9]*) base=2 ;; esac
   errfile="$(mktemp)"
+  if ! declare -p tmpfiles &>/dev/null; then
+    declare -g -a tmpfiles=()
+    trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
+  fi
+  tmpfiles+=("$errfile")
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
         -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
       rm -f "$errfile"; echo "${out:-[]}"; return 0
     fi
-    err="$(cat "$errfile")"
+    err=""
+    if [ -r "$errfile" ]; then
+      err="$(<"$errfile")"
+    fi
     summary="$(_gh_err_summary "$err")"
     if [ "$attempt" -ge "$attempts" ]; then
       echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s) — $summary" >&2
@@ -449,7 +460,7 @@ _run_json() {
     ra="$(_gh_retry_after "$err")"
     if [ -n "$ra" ] && [ "$ra" -gt 0 ]; then
       delay="$ra"
-      [ "$delay" -gt 120 ] && delay=120   # honor the hint, but never wall for minutes
+      [ "$delay" -gt "$ra_cap" ] && delay="$ra_cap"   # honor hint but cap runaway values
     else
       expo=$((attempt - 1)); [ "$expo" -gt 20 ] && expo=20     # guard the exponent from overflow
       delay=$(( base << expo ))
