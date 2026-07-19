@@ -3,7 +3,7 @@
 # Triggered on any PR that touches:
 #   - scripts/lib/gitignore-baseline.sh
 #   - scripts/sync-gitignore-baseline.sh
-#   - .dev-lead/scripts/seed-repo-template.sh
+#   - scripts/seed-repo-template.sh
 #   - test/scripts/lib/gitignore-baseline.bats
 #   - test/scripts/sync-gitignore-baseline/**
 #   - tests/test_seed_repo_template_gitignore.bats
@@ -19,7 +19,7 @@ on:
     paths:
       - 'scripts/lib/gitignore-baseline.sh'
       - 'scripts/sync-gitignore-baseline.sh'
-      - '.dev-lead/scripts/seed-repo-template.sh'
+      - 'scripts/seed-repo-template.sh'
       - 'test/scripts/lib/gitignore-baseline.bats'
       - 'test/scripts/sync-gitignore-baseline/**'
       - 'tests/test_seed_repo_template_gitignore.bats'
@@ -30,7 +30,7 @@ on:
     paths:
       - 'scripts/lib/gitignore-baseline.sh'
       - 'scripts/sync-gitignore-baseline.sh'
-      - '.dev-lead/scripts/seed-repo-template.sh'
+      - 'scripts/seed-repo-template.sh'
       - 'test/scripts/lib/gitignore-baseline.bats'
       - 'test/scripts/sync-gitignore-baseline/**'
       - 'tests/test_seed_repo_template_gitignore.bats'
@@ -66,7 +66,7 @@ jobs:
           shellcheck --severity=warning -x \
             scripts/lib/gitignore-baseline.sh \
             scripts/sync-gitignore-baseline.sh \
-            .dev-lead/scripts/seed-repo-template.sh
+            scripts/seed-repo-template.sh
 
       - name: Run bats suite
         run: |
