@@ -62,21 +62,26 @@ _gib_has_markers() {
 # lines of the block are ignored, so they never strip a repo's own comments). This
 # does double duty:
 #
-#   • Negations win: a bare re-hiding pattern the target kept in L2 (e.g. `*.pem`
-#     with no `!public.pem`) is identical to the block's own broad pattern, so it
-#     is stripped. The file it re-hid stays ignored by the block, and the block's
-#     `!public.pem` (which sits after `*.pem` inside the block) is no longer
-#     overridden by a later L2 line — the negated path is re-allowed as intended.
+#   • Negations win (identical patterns): a bare re-hiding pattern the target kept
+#     in L2 (e.g. `*.pem` with no `!public.pem`) is identical to the block's own
+#     broad pattern, so it is stripped.
+#   • Negations win (non-identical globs): a glob-variant pattern (e.g. `**/*.pem`
+#     or `.env*`) that is NOT an exact match for any block line but would still
+#     re-hide a baseline-negated path (e.g. `!public.pem` or `!.env.example`) is
+#     handled by the *re-allow tail*: all baseline negation lines are re-emitted at
+#     the very end of the L2 output so they always evaluate after any L2 pattern —
+#     identical or not — and the negated paths remain re-allowed.
 #   • Migrate, don't duplicate: an old *unmarkered* baseline pasted into L2 has its
 #     pattern lines folded away (they all live in the block now), so upsert stops
 #     shipping a second full copy. The genuine ecosystem/OS entries the repo added
 #     stay put.
 #
-# Only pattern lines are matched — never comments — because block comments include
-# bare `#` separators that would otherwise clobber a repo's own comment lines.
-# Runs of blank lines left behind by the removed patterns are squeezed (leading and
-# consecutive blanks dropped) so migration output stays tidy. Idempotent: once the
-# duplicate patterns are gone a second pass finds nothing to strip.
+# Only pattern lines are matched for dropping — never comments — because block
+# comments include bare `#` separators that would otherwise clobber a repo's own
+# comment lines. Runs of blank lines left behind by the removed patterns are
+# squeezed (leading and consecutive blanks dropped) so migration output stays tidy.
+# Idempotent: exact-match lines are gone after one pass; the re-allow tail lines
+# match exactly on re-run and are dropped before being re-appended.
 _gib_neutralize_l2() {
   local block="$1"
   block="$(tr -d '\r' <<< "$block")"
@@ -89,6 +94,7 @@ _gib_neutralize_l2() {
         if (bl ~ /^[ \t]*$/) continue    # skip blank block lines
         if (bl ~ /^[ \t]*#/) continue    # skip comment block lines (incl. bare #)
         drop[bl] = 1
+        if (bl ~ /^!/) neg[++neg_count] = bl   # collect negation anchors for tail
       }
       prev_blank = 1   # squeeze any blank lines that would lead the output
     }
@@ -101,6 +107,18 @@ _gib_neutralize_l2() {
       if (is_blank && prev_blank) next
       print line
       prev_blank = is_blank
+      had_output = 1
+    }
+    END {
+      # Re-emit baseline negation anchors last so they win over any L2 pattern
+      # (identical or non-identical glob) that would otherwise re-hide a
+      # baseline-negated path (e.g. `.env*` re-hides `!.env.example`, or
+      # `**/*.pem` re-hides `!public.pem`). Idempotent: the appended negations
+      # are in `drop`, so a second pass strips them before re-appending here.
+      if (had_output && neg_count > 0) {
+        if (!prev_blank) print ""
+        for (i = 1; i <= neg_count; i++) print neg[i]
+      }
     }
   '
 }

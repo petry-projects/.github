@@ -195,7 +195,7 @@ _gib_check_ignored() {
   d="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   ( cd "$d" && git init -q )
   printf '%s\n' "$content" > "$d/.gitignore"
-  ( cd "$d" && git check-ignore -q "$path" )
+  ( cd "$d" && git -c core.excludesfile=/dev/null check-ignore -q "$path" )
   local rc=$?
   rm -rf "$d"
   return "$rc"
@@ -237,6 +237,46 @@ _gib_check_ignored() {
   grep -qxF '.clasp.json' <<< "$gi"
 }
 
+@test "#809 non-identical: .env* glob in L2 does not re-hide baseline-negated .env.example" {
+  # `.env*` is NOT an exact match for `.env` or `.env.*` in the baseline, so
+  # the current exact-drop logic leaves it in L2 — but it would re-hide
+  # `!.env.example`. The re-allow tail must win.
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/envglob"
+  printf '# project extras\n.env*\nnode_modules/\n' > "$existing"
+
+  local gi
+  gi="$(upsert_gitignore_baseline "$realblock" "$existing")"
+
+  run _gib_check_ignored "$gi" .env.example
+  [ "$status" -eq 1 ]   # NOT ignored — baseline negation must win
+  run _gib_check_ignored "$gi" .env.production
+  [ "$status" -eq 0 ]   # ignored — broad coverage still applies
+  grep -qxF 'node_modules/' <<< "$gi"
+}
+
+@test "#809 non-identical: **/*.pem glob in L2 does not re-hide baseline-negated public.pem" {
+  # `**/*.pem` is NOT an exact match for `*.pem` in the baseline, so the
+  # exact-drop logic leaves it in L2 — but it would re-hide `!public.pem`.
+  # The re-allow tail must win.
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/doublepem"
+  printf '# project extras\n**/*.pem\nnode_modules/\n' > "$existing"
+
+  local gi
+  gi="$(upsert_gitignore_baseline "$realblock" "$existing")"
+
+  run _gib_check_ignored "$gi" public.pem
+  [ "$status" -eq 1 ]   # NOT ignored — baseline negation must win
+  run _gib_check_ignored "$gi" secret.pem
+  [ "$status" -eq 0 ]   # ignored — broad coverage still applies
+  grep -qxF 'node_modules/' <<< "$gi"
+}
+
 # ── #809: migrate an existing unmarkered baseline, don't duplicate it ──────────
 @test "#809 TalkTerm-like: unmarkered baseline in L2 is folded into one block, not duplicated" {
   # L2 IS a copy of the old unmarkered baseline (same secret lines, no markers),
@@ -260,10 +300,13 @@ EOF
   # Exactly one marker-wrapped block.
   [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_BEGIN_MARKER")" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_END_MARKER")" -eq 1 ]
-  # Secret patterns appear exactly once (they live in the block; the L2 copy is folded away).
+  # Broad patterns appear exactly once (the L2 copies are folded away; they are
+  # not negations so they are not re-emitted in the re-allow tail).
   [ "$(printf '%s\n' "$output" | grep -cxF '.env')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -cxF '*.pem')" -eq 1 ]
-  [ "$(printf '%s\n' "$output" | grep -cxF '!.env.example')" -eq 1 ]
+  # Negation anchors appear twice: once inside the block and once in the
+  # re-allow tail that ensures they win over any surviving L2 pattern.
+  [ "$(printf '%s\n' "$output" | grep -cxF '!.env.example')" -eq 2 ]
   # Genuine ecosystem/OS L2 entries are preserved.
   grep -qxF 'node_modules/' <<< "$output"
   grep -qxF 'dist/' <<< "$output"
