@@ -336,7 +336,7 @@ pp_check_secret_scan_ci_job() {
 # incomplete (BEGIN without a matching END). Everything below the END marker is
 # ignored, so per-repo L2 ecosystem/OS entries never affect the output.
 pp_extract_baseline_block() {
-  awk -v b="$PP_GITIGNORE_BEGIN_MARKER" -v e="$PP_GITIGNORE_END_MARKER" '
+  tr -d '\r' | awk -v b="$PP_GITIGNORE_BEGIN_MARKER" -v e="$PP_GITIGNORE_END_MARKER" '
     $0 == b { inblock = 1 }
     inblock { buf = buf $0 "\n" }
     $0 == e && inblock { printf "%s", buf; found = 1; exit }
@@ -360,8 +360,10 @@ pp_check_gitignore_baseline() {
   # Canonical L1 block from the org /.gitignore — the source of truth. Guard
   # against a missing/unreadable canonical so a broken baseline can't silently
   # pass every repo.
-  local canonical_block canonical_hash
-  canonical_block=$(pp_extract_baseline_block < "$PP_CANONICAL_GITIGNORE" 2>/dev/null) || canonical_block=""
+  local canonical_block="" canonical_hash
+  if [ -r "$PP_CANONICAL_GITIGNORE" ]; then
+    canonical_block=$(pp_extract_baseline_block < "$PP_CANONICAL_GITIGNORE" 2>/dev/null) || canonical_block=""
+  fi
   if [ -z "$canonical_block" ]; then
     add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
       "Could not read the canonical secrets-baseline block from the org \`.gitignore\` — the audit cannot verify baseline drift" \
@@ -380,12 +382,16 @@ pp_check_gitignore_baseline() {
     return
   fi
 
-  local gi_content
-  gi_content=$(echo "$gi_b64" | tr -d '\n ' | base64 -d 2>/dev/null || echo "")
+  local gi_content b64_flag="-d"
+  if ! printf '' | base64 -d >/dev/null 2>&1; then
+    b64_flag="-D"
+  fi
+  gi_content=$(echo "$gi_b64" | tr -d '\n ' | base64 "$b64_flag" 2>/dev/null || echo "")
 
   if [ -z "$gi_content" ]; then
-    # Content present but not base64-decodable (e.g. an API error body leaked
-    # in) — inconclusive. Do not emit a false pass or a false drift finding.
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` content could not be decoded or is empty — copy the secrets-baseline block verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
     return
   fi
 

@@ -91,6 +91,16 @@ _gh_returns_gitignore() {
 # ---------------------------------------------------------------------------
 # Fixture 2 — missing block: file exists but has no markers → error
 # ---------------------------------------------------------------------------
+@test "undecodable API response (non-base64 content) → error finding (not silent skip)" {
+  # Simulate an API error body leaking through the gh wrapper; not valid base64
+  # so base64 decode fails and gi_content ends up empty.
+  run _run_check 'printf "error: repository not found\n"; exit 0'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gitignore_baseline"* ]]
+  [[ "$output" == *"error"* ]]
+}
+
+
 @test "no .gitignore at all → error finding" {
   run _run_check 'echo "gh: Not Found (HTTP 404)" >&2; exit 1'
   [ "$status" -eq 0 ]
