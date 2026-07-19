@@ -44,8 +44,13 @@ known-good version while the candidate soaks, and (d) roll back in one move.
 ## Consequences
 
 - **Zero caller churn; bounded blast radius; <5-min rollback** (one tag move).
-- The promotion workflow is the authorized tag mover (via `GH_PAT_WORKFLOWS` today;
-  a dedicated GitHub App scopes the ruleset bypass later).
+- The promotion workflow is the authorized tag mover, authenticated as the
+  **`petry-projects-release-manager` GitHub App** (a bypass actor on each host repo's
+  `release-channel-tags` ruleset). Its required repository permissions —
+  **Contents:write, Workflows:write, Deployments:write, Issues:write, Actions:read,
+  Metadata:read** — must be granted on the App *and* requested in the token-mint step;
+  see the header of `.github/workflows/canary-rollout.yml` for the rationale (notably
+  Workflows:write, without which `.github` tag moves 403 — #807).
 - New cost: the membership SoT and gate thresholds must be maintained; an unused
   reusable never auto-promotes (acceptable — its version doesn't matter until used).
 - `dev-lead` is the pathfinder (shipped `v1.4.0` this way); `pr-review` and other
