@@ -256,11 +256,49 @@ _ring_sot_copy() {
   [[ "$output" == *"needs-human-review"* ]]
   [[ "$output" == *"ack-test-deletion"* ]]
 
-  # (5/5) CODEOWNERS team verification.
+  # (5/6) CODEOWNERS team verification.
   [[ "$output" == *"CODEOWNERS"* ]]
   [[ "$output" == *"org-leads"* ]]
+
+  # (6/6) .gitignore secrets baseline — the marker-wrapped L1 block is seeded.
+  [[ "$output" == *".gitignore"* ]]
+  [[ "$output" == *">>> BEGIN petry-projects secrets baseline"* ]]
+  [[ "$output" == *"<<< END petry-projects secrets baseline"* ]]
 
   # PASS summary + the no-drift invariant: a pure DRY_RUN makes no write API calls.
   [[ "$output" == *"PASS"* ]]
   [ ! -f "$CALLS" ]
+}
+
+# ── .gitignore secrets baseline seeding (#798) ────────────────────────────────
+# A fresh repo must auto-onboard the org secrets baseline. In DRY_RUN the step
+# prints the marker-wrapped L1 block (so the intent is auditable) and makes no
+# write API calls.
+@test "gitignore: DRY_RUN seeds the marker-wrapped baseline with no write calls" {
+  # Stub the network-bound sub-scripts so the run reaches the gitignore step; the
+  # DRY_RUN gitignore step itself makes no gh calls, so $CALLS stays empty.
+  _stub_gh
+  _stub_substeps 0 0
+  _ring_sot_copy
+  run env DRY_RUN=true CANARY_RINGS="$RING_SOT" bash "$BOOTSTRAP" owner/new-repo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".gitignore"* ]]
+  [[ "$output" == *">>> BEGIN petry-projects secrets baseline"* ]]
+  [[ "$output" == *"<<< END petry-projects secrets baseline"* ]]
+  # STORY3 anchors ride inside the seeded block.
+  [[ "$output" == *"*.pem"* ]]
+  [[ "$output" == *"*.key"* ]]
+  # The DRY_RUN gitignore step makes no gh write calls (the only $CALLS entries are
+  # the stubbed sub-scripts' own "called" lines, never a PUT/POST/PATCH).
+  ! grep -qE '(--method (PUT|POST))|PATCH|-X PUT' "$CALLS"
+}
+
+@test "gitignore: missing canonical baseline fails the step" {
+  _stub_gh
+  _stub_substeps 0 0
+  _ring_sot_copy
+  run env GITIGNORE_CANONICAL="$STUB_DIR/does-not-exist.gitignore" \
+    bash "$BOOTSTRAP" owner/new-repo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"* ]]
 }

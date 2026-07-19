@@ -54,7 +54,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
+# Shared, idempotent .gitignore secrets-baseline upsert (issue #798). Sourced so
+# the new repo auto-onboards the marker-wrapped L1 block; L2 stays per-repo.
+# shellcheck source=scripts/lib/gitignore-baseline.sh
+source "$SCRIPT_DIR/lib/gitignore-baseline.sh"
+
 DRY_RUN="${DRY_RUN:-false}"
+# Canonical source of the marker-wrapped L1 block: this repo's own /.gitignore
+# (maintained under STORY1, #797). Overridable as a test seam.
+GITIGNORE_CANONICAL="${GITIGNORE_CANONICAL:-${SCRIPT_DIR}/../.gitignore}"
 CODEOWNERS_TEAM="${CODEOWNERS_TEAM:-@petry-projects/org-leads}"
 APPLY_REPO_SETTINGS="${APPLY_REPO_SETTINGS:-${SCRIPT_DIR}/apply-repo-settings.sh}"
 APPLY_RULESETS="${APPLY_RULESETS:-${SCRIPT_DIR}/apply-rulesets.sh}"
@@ -254,7 +262,7 @@ _cross_repo_repin_stub_pr() {
 # step_ring <repo> — confirm + record the release ring; register a non-stable ring.
 step_ring() {
   local repo="${1:-}" proposed
-  echo "[bootstrap] (1/5) release ring confirmation (${RING_AGENT}/${RING})"
+  echo "[bootstrap] (1/6) release ring confirmation (${RING_AGENT}/${RING})"
   if [ ! -f "$CANARY_RINGS" ]; then
     echo "::error::ring SoT not found at $CANARY_RINGS" >&2
     return 1
@@ -314,7 +322,7 @@ fail_summary() {
 step_repo_settings() {
   local repo="${1:-}" settings_dry=false
   _is_dry && settings_dry=true
-  echo "[bootstrap] (2/5) repo settings + security/GHAS + push protection"
+  echo "[bootstrap] (2/6) repo settings + security/GHAS + push protection"
   # Canonical apply-repo-settings.sh (petry-projects/.github) reads DRY_RUN; bridge
   # onto it. DEV_LEAD_DRY_RUN is kept for backward-compat with any older copy.
   DRY_RUN="$settings_dry" DEV_LEAD_DRY_RUN="$settings_dry" bash "$APPLY_REPO_SETTINGS" "$repo"
@@ -328,14 +336,14 @@ step_repo_settings() {
 step_rulesets() {
   local repo="${1:-}" rulesets_dry=false
   _is_dry && rulesets_dry=true
-  echo "[bootstrap] (3/5) sanctioned fleet rulesets (pr-quality + code-quality)"
+  echo "[bootstrap] (3/6) sanctioned fleet rulesets (pr-quality + code-quality)"
   DRY_RUN="$rulesets_dry" RULESETS_DIR="" bash "$APPLY_RULESETS" --repo "$repo"
 }
 
 # step_labels <repo> — apply the standard label set (best-effort, idempotent).
 step_labels() {
   local repo="${1:-}" spec name color desc
-  echo "[bootstrap] (4/5) standard label set"
+  echo "[bootstrap] (4/6) standard label set"
   for spec in "${BOOTSTRAP_LABELS[@]}"; do
     IFS='|' read -r name color desc <<<"$spec"
     if _is_dry; then
@@ -353,7 +361,7 @@ step_labels() {
 # step_codeowners <repo> — verify CODEOWNERS lists $CODEOWNERS_TEAM first. Best-effort.
 step_codeowners() {
   local repo="${1:-}" encoded decoded first_owner
-  echo "[bootstrap] (5/5) verify CODEOWNERS team (${CODEOWNERS_TEAM} first owner)"
+  echo "[bootstrap] (5/6) verify CODEOWNERS team (${CODEOWNERS_TEAM} first owner)"
   if _is_dry; then
     echo "  [dry-run] would verify ${CODEOWNERS_TEAM} is the first CODEOWNERS owner on ${repo}"
     return 0
@@ -379,6 +387,56 @@ step_codeowners() {
   else
     echo "  [warn] CODEOWNERS first owner is '${first_owner:-<none>}', expected ${CODEOWNERS_TEAM}" >&2
   fi
+}
+
+# step_gitignore <repo> — seed/refresh the org secrets baseline (L1) in the repo's
+# .gitignore so a new repo auto-onboards to the .gitignore standard (#798). Uses the
+# shared upsert_gitignore_baseline(): inserts the marker-wrapped block on a fresh
+# repo, refreshes it in place on an existing one, and never touches L2 below END.
+# The write is PR-based (never a direct default-branch push), like the ring steps.
+step_gitignore() {
+  local repo="${1:-}" block
+  echo "[bootstrap] (6/6) .gitignore secrets baseline"
+  if [ ! -f "$GITIGNORE_CANONICAL" ]; then
+    echo "::error::canonical .gitignore baseline not found at $GITIGNORE_CANONICAL" >&2
+    return 1
+  fi
+  block="$(gib_extract_baseline_block "$GITIGNORE_CANONICAL")" || {
+    echo "::error::could not extract the marker-wrapped baseline block from $GITIGNORE_CANONICAL" >&2
+    return 1
+  }
+
+  if _is_dry; then
+    echo "  [dry-run] would upsert the marker-wrapped secrets baseline into ${repo}:.gitignore"
+    echo "  (insert if absent, refresh in place if present; L2 below END preserved)"
+    printf '%s\n' "$block" | sed 's/^/    /'
+    return 0
+  fi
+
+  local blockfile existfile existing upserted current branch
+  blockfile="$(mktemp)"; printf '%s\n' "$block" > "$blockfile"
+  existfile="$(mktemp)"
+  existing="$(gh api "repos/${repo}/contents/.gitignore" --jq '.content' 2>/dev/null \
+    | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } || true)"
+  printf '%s' "$existing" > "$existfile"
+
+  upserted="$(upsert_gitignore_baseline "$blockfile" "$existfile")" \
+    || { rm -f "$blockfile" "$existfile"; echo "::error::gitignore upsert failed for ${repo}" >&2; return 1; }
+  rm -f "$blockfile" "$existfile"
+
+  current="$(printf '%s' "$existing")"
+  if [ "$current" = "$upserted" ]; then
+    echo "  ${repo}:.gitignore already carries the current baseline — nothing to do"
+    return 0
+  fi
+
+  branch="gitignore-baseline/$(date -u +%Y-%m-%d)"
+  _cross_repo_file_pr "$repo" ".gitignore" "$upserted" "$branch" \
+    "chore: seed org secrets baseline in .gitignore" \
+    "chore: seed org secrets baseline in .gitignore" \
+    "Seeds the marker-wrapped org secrets baseline (L1) into \`.gitignore\`, preserving any existing L2 entries below the END marker. Auto-onboards this repo to the .gitignore standard (bootstrap, #798)." \
+    || { echo "  [warn] ${repo}: could not open .gitignore baseline PR" >&2; return 1; }
+  echo "  opened .gitignore baseline PR on ${repo}"
 }
 
 main() {
@@ -425,6 +483,7 @@ main() {
   if ! step_rulesets "$repo"; then fail_summary "$repo" "rulesets"; return 1; fi
   if ! step_labels "$repo"; then fail_summary "$repo" "labels"; return 1; fi
   if ! step_codeowners "$repo"; then fail_summary "$repo" "codeowners"; return 1; fi
+  if ! step_gitignore "$repo"; then fail_summary "$repo" "gitignore"; return 1; fi
 
   pass_summary "$repo" "$([ "$DRY_RUN" = "true" ] && echo "dry-run")"
 }
