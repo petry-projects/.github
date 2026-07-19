@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# .dev-lead/scripts/seed-repo-template.sh — emit standard file content for the
+# scripts/seed-repo-template.sh — emit standard file content for the
 # org repo-template to distribute to all new repos (#798, Story: SEED + DISTRIBUTE).
 #
 # Usage:
-#   STANDARDS_DIR=<path> bash .dev-lead/scripts/seed-repo-template.sh --emit-baseline .gitignore
+#   STANDARDS_DIR=<path> bash scripts/seed-repo-template.sh --emit-baseline .gitignore
 #
 # --emit-baseline .gitignore
 #   Print the seeded .gitignore: the marker-wrapped L1 secrets baseline on top
@@ -17,9 +17,9 @@
 #                   Defaults to two levels above this script (the repo root).
 set -euo pipefail
 
-STANDARDS_DIR="${STANDARDS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)}"
+STANDARDS_DIR="${STANDARDS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
 
-# shellcheck source=../../scripts/lib/gitignore-baseline.sh
+# shellcheck source=lib/gitignore-baseline.sh
 source "${STANDARDS_DIR}/scripts/lib/gitignore-baseline.sh"
 
 _usage() {
