@@ -150,6 +150,13 @@ jobs:
             .github
             .github-private
           permission-contents: write
+          # workflows:write is REQUIRED to move a channel tag on a repo whose HEAD touches
+          # .github/workflows/** — GitHub refuses an App without it ("Resource not accessible
+          # by integration", surfacing the "create/update workflow without workflows permission"
+          # block via the git-refs API). The `.github` repo is all reusable workflows, so every
+          # promotion there tripped it. `create-github-app-token` restricts the token to the
+          # permissions requested here, so this MUST be listed even though the App now grants it.
+          permission-workflows: write
 
       - name: Checkout (with tags)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
