@@ -22,21 +22,22 @@ A compliant `.gitignore` has exactly two layers, in this order:
 ### L1 — Secrets baseline (org-managed, verbatim, required)
 
 - The canonical source is [`/.gitignore`](../.gitignore) in this repo. It is
-  **secrets-only** and language-agnostic: the dotenv family, cloud-provider
+  primarily **secrets-focused** and language-agnostic: the dotenv family, cloud-provider
   credential files, Kubernetes / Helm secrets, SSH/TLS/GPG key material,
   Terraform/IaC state and `*.tfvars`, secret-manager local caches (sops, age,
   vault, doppler, 1password, infisical), database dumps and DB client dotfiles,
   package-registry credential dotfiles (`.npmrc`, `.pypirc`,
   `.cargo/credentials`, etc.), cloud CLI session caches, IDE files known to
   cache credentials (JetBrains `workspace.xml`, VS Code `sftp.json`, Cursor
-  `mcp.json`), and modern AI/LLM tooling config files.
+  `mcp.json`), and modern AI/LLM tooling config files. It also includes
+  standard agent worktrees and CI tool artifacts per organization coding policy.
 - Every repo MUST copy this block **verbatim**. Do not edit, re-order, or
   remove entries inside it. Changes to the baseline are made **only** in this
   repo and propagated to child repos.
 
 ### L2 — Ecosystem / OS extension (per-repo, appended below the block)
 
-- The baseline covers **secrets only**. Each repo MUST append its own
+- The baseline covers **secrets and standard agent/CI paths**. Each repo MUST append its own
   language-, framework-, and OS-specific entries (`node_modules/`, `target/`,
   `__pycache__/`, `.DS_Store`, etc.).
 - Source these from the matching template at
