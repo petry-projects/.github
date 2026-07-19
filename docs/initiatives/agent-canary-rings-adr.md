@@ -47,8 +47,8 @@ known-good version while the candidate soaks, and (d) roll back in one move.
 - The promotion workflow is the authorized tag mover, authenticated as the
   **`petry-projects-release-manager` GitHub App** (a bypass actor on each host repo's
   `release-channel-tags` ruleset). Its required repository permissions —
-  **Contents:write, Workflows:write, Deployments:write, Issues:write, Actions:read,
-  Metadata:read** — must be granted on the App *and* requested in the token-mint step;
+  **contents:write, workflows:write, deployments:write, issues:write, actions:read,
+  metadata:read** — must be granted on the App *and* requested in the token-mint step;
   see the header of `.github/workflows/canary-rollout.yml` for the rationale (notably
   Workflows:write, without which `.github` tag moves 403 — #807).
 - New cost: the membership SoT and gate thresholds must be maintained; an unused
