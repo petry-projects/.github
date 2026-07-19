@@ -79,12 +79,12 @@ _gib_has_markers() {
 # duplicate patterns are gone a second pass finds nothing to strip.
 _gib_neutralize_l2() {
   local block="$1"
-  awk -v block="$block" '
+  block="$(tr -d '\r' <<< "$block")"
+  tr -d '\r' | awk -v block="$block" '
     BEGIN {
       n = split(block, barr, "\n")
       for (i = 1; i <= n; i++) {
         bl = barr[i]
-        sub(/\r$/, "", bl)
         sub(/[ \t]+$/, "", bl)
         if (bl ~ /^[ \t]*$/) continue    # skip blank block lines
         if (bl ~ /^[ \t]*#/) continue    # skip comment block lines (incl. bare #)
@@ -94,7 +94,6 @@ _gib_neutralize_l2() {
     }
     {
       line = $0
-      sub(/\r$/, "", line)
       key = line
       sub(/[ \t]+$/, "", key)
       if (key in drop) next

@@ -192,7 +192,7 @@ EOF
 # Return 0 if <path> is ignored, 1 if not — mirrors the issue's repro probe.
 _gib_check_ignored() {
   local content="$1" path="$2" d
-  d="$(mktemp -d)"
+  d="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   ( cd "$d" && git init -q )
   printf '%s\n' "$content" > "$d/.gitignore"
   ( cd "$d" && git check-ignore -q "$path" )
