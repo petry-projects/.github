@@ -2619,6 +2619,117 @@ GHEOF
   jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$SYNC_RINGS"
 }
 
+# ── sync-issues fail-closed on partial/failed run-history data (#820) ─────────────────
+# sync-issues reads run history through _run_json; on a SUSTAINED fetch failure (#738)
+# _frontier_state aborts to empty output under `set -e`, and the agent used to fall into the
+# "not BLOCKED" branch — silently skipping (or auto-closing) its regression tracking issue.
+# The resilience contract: on a data gap, still determine everything that does NOT need run
+# history (candidate/frontier/transition/reusable-differs → triage) and FAIL CLOSED to a
+# tracked BLOCKED issue with the gap annotated. A TOTAL inability (not even candidate/frontier
+# resolvable) stays a hard error (non-zero), never a green no-op.
+#
+# _sync_gap_stub — like _sync_stub but `gh run list` FAILS every attempt (the fetch outage),
+# while tag/blob resolution stays intact and the candidate's reusable DIFFERS from the prior
+# channel (ref=cccc vs ref=bbbb blobs differ → differs=1 → REGRESSION fail-closed triage).
+_sync_gap_stub() {
+  local blocker_list="${1:-[]}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local cut_iso
+  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)    echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*)               printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseCAND" ;;
+  *"ref=bbbb"*) echo "reusePRIOR" ;;
+  *"run list"*) echo "gh: run history unavailable (HTTP 500)" >&2; exit 1 ;;
+  "issue list"*) echo '$blocker_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  SYNC_RINGS="$BATS_TEST_TMPDIR/sync-rings-gap.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$SYNC_RINGS"
+}
+
+@test "orchestrator: sync-issues fails CLOSED on a partial run-history fetch — opens a REGRESSION needs-human blocker with the gap annotated (#820)" {
+  # The run-history fetch is down but tags/blobs resolve and the reusable DIFFERS → the gate
+  # cannot confirm health but MUST NOT report a false all-clear: it fails closed to a tracked
+  # BLOCKED issue, triage REGRESSION (fail-closed), routed to dev-lead + needs-human.
+  _sync_gap_stub '[]'
+  local summ="$BATS_TEST_TMPDIR/summary_gap.md"; : > "$summ"
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" \
+      CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 GITHUB_STEP_SUMMARY="$summ" \
+      bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  # A blocker issue is OPENED (never silently skipped) and routed for action + human review.
+  [[ "$output" == *"opened blocker issue #777 for dev-lead"* ]]
+  grep -q '^CREATE|' "$ISSUE_LOG"
+  grep -q -- "--add-label dev-lead" "$ISSUE_LOG"
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+  # The created issue body annotates the data gap so a human knows counts are unreliable.
+  grep -q "PARTIAL DATA" "$ISSUE_LOG"
+  grep -qi "run.history" "$ISSUE_LOG"
+  # The fleet dashboard still renders.
+  grep -q "Canary Rollout — fleet status" "$summ"
+}
+
+@test "orchestrator: sync-issues partial-fetch UPDATE keeps an existing regression's issue open (no auto-close) (#820)" {
+  # An OPEN blocker exists for dev-lead. A fetch outage must NOT be read as 'cleared' and close
+  # it — it must be UPDATED (kept open) and re-annotated with the gap.
+  _sync_gap_stub '[{"number":501,"state":"OPEN","body":"<!-- canary-blocker:dev-lead -->"}]'
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" \
+      CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated blocker issue #501 for dev-lead"* ]]
+  grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+  # It must NOT have been auto-closed by the fetch outage.
+  ! grep -q "^CLOSE|" "$ISSUE_LOG"
+}
+
+@test "orchestrator: _frontier_state_resilient tags a normal state line with datagap=0 and passes it through (#820)" {
+  # When _frontier_state resolves normally the wrapper is transparent: same fields, trailing 0.
+  run bash -c "source '$ORCH'; _frontier_state() { echo 'ccccccc ring0 next->ring0 BLOCKED 0 4 0 3 2 0 0 REGRESSION - - 0 0 0 0'; }; _frontier_state_resilient dev-lead"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "ccccccc ring0 next->ring0 BLOCKED 0 4 0 3 2 0 0 REGRESSION - - 0 0 0 0 0" ]]
+}
+
+@test "orchestrator: _frontier_state_resilient fails CLOSED (non-zero) on a TOTAL inability to determine state (#820)" {
+  # _frontier_state aborts to empty AND the candidate/frontier cannot be re-resolved from tags:
+  # a total inability must stay a HARD ERROR (non-zero), never a green no-op.
+  run bash -c "source '$ORCH'; _frontier_state() { return 1; }; channel_commit() { echo ''; }; ordered_channels() { echo 'next,ring0,ring1,stable'; }; _frontier_state_resilient dev-lead"
+  [ "$status" -ne 0 ]
+}
+
+@test "orchestrator: sync-issues ends NON-ZERO when an agent's state is totally undeterminable (fail-closed, not a green no-op) (#820)" {
+  # Force a total inability for the single registered agent and assert the step fails closed.
+  _sync_gap_stub '[]'
+  run env CANARY_RINGS="$SYNC_RINGS" ISSUE_REPO="petry-projects/.github-private" \
+      CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 bash -c "
+        source '$ORCH'
+        _frontier_state_resilient() { return 1; }
+        cmd_sync_issues
+      "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot determine canary state"* ]]
+}
+
 @test "orchestrator: sync-issues CREATE path applies needs-human for SUSPECT triage" {
   # No existing issue → create path; SUSPECT (differs=1 + suspect step) must add needs-human.
   _sync_suspect_stub '[]'

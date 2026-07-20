@@ -454,6 +454,12 @@ _run_json() {
     summary="$(_gh_err_summary "$err")"
     if [ "$attempt" -ge "$attempts" ]; then
       echo "::error::_run_json: failed to fetch run list for $repo (workflow=$wf) after $attempts attempt(s) — $summary" >&2
+      # Record the fetch failure for the sync-issues resilience layer (#820). A sustained
+      # outage does NOT cleanly abort the caller (command substitutions don't inherit errexit),
+      # so _frontier_state can limp on and emit a misleadingly-clean line; a file flag survives
+      # the subshell and lets _frontier_state_resilient know the data is a partial/failed fetch.
+      # No-op unless sync-issues armed the flag, so every other read path is unchanged.
+      [ -n "${_CANARY_FETCH_FAIL_FLAG:-}" ] && printf '%s\n' "$repo" >> "$_CANARY_FETCH_FAIL_FLAG" 2>/dev/null || true
       rm -f "$errfile"; return 1
     fi
     # Prefer the server's explicit throttle hint; otherwise exponential + full jitter.
@@ -1311,7 +1317,7 @@ _suspect_guidance() {
 # _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>] [<downgrade>] [<dg_cand_rate>] [<dg_cand_sample>] [<dg_base_rate>] [<dg_base_sample>]
 _blocker_body() {
   local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" mix_shift="${9:--}" mix_table="${10:-}" note
-  local downgrade="${11:--}" dg_cand_rate="${12:-0}" dg_cand_sample="${13:-0}" dg_base_rate="${14:-0}" dg_base_sample="${15:-0}"
+  local downgrade="${11:--}" dg_cand_rate="${12:-0}" dg_cand_sample="${13:-0}" dg_base_rate="${14:-0}" dg_base_sample="${15:-0}" data_gap="${16:-0}"
   # Correctness variant (#668 L2): a decision-mix SHIFT holds as SUSPECT but is NOT a reliability
   # failure — the candidate exited green yet its decision distribution moved. Distinct note + a
   # candidate-vs-baseline mix table replace the failing-runs evidence (there are none).
@@ -1365,6 +1371,16 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
     # nothing environmental to report) — say what actually happened.
     note="> ℹ️ **INDETERMINATE (gate held — candidate cut date unresolved)** — the gate could not resolve this candidate's cut date, so it fails closed and holds the promotion instead of evaluating an unbounded run history. This is **not** a detected run failure (cumulative failures: $cum_fail). It usually clears on its own once the candidate's release tag/cut date becomes resolvable; if it persists, verify that candidate \`${cand:0:12}\` is a tagged, resolvable commit on \`$host\`."
   fi
+  # Data-gap fail-closed (#820): run history was unreadable this tick, so the cumulative counts
+  # are NOT reliable and the triage verdict rests on the reusable diff alone. Prepend a banner
+  # (before the triage note) and blank out the misleading "0" cumulative-failures cell.
+  local cum_row="**$cum_fail** (startup_failures: $cum_startup)"
+  if [ "$data_gap" = "1" ]; then
+    cum_row="_unknown — run history unavailable this tick_"
+    note="> ⚠️ **PARTIAL DATA (run-history fetch failed) — FAILING CLOSED.** The canary gate could not read this agent's recent run history this tick (a sustained GitHub API failure — see the workflow log). Rather than report a false all-clear, the gate holds the promotion and keeps this issue open. The cumulative counts below are **not reliable for this tick**; the triage verdict is derived from the reusable diff alone. This clears automatically once run history is readable again and the gate re-evaluates.
+>
+$note"
+  fi
   cat <<EOF
 <!-- canary-blocker:$agent -->
 **Automated canary-rollout blocker.** The release gate is holding \`$agent\` and will not promote it until this clears. Filed + maintained by the Canary Rollout workflow (gate standard: .github#548); this issue is **regenerated each run and auto-closes** when the gate passes — do not edit the table below by hand.
@@ -1375,7 +1391,7 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
 | transition | \`$transition\` |
 | candidate | \`${cand:0:12}\` |
 | host repo | \`$host\` |
-| cumulative failures | **$cum_fail** (startup_failures: $cum_startup) |
+| cumulative failures | $cum_row |
 | triage | **$triage** |
 
 $note
@@ -1454,10 +1470,71 @@ $1
 EOF
 }
 
+# _frontier_state_resilient <agent> — sync-issues resilience wrapper (#820). _frontier_state
+# reads run history (_run_json), and on a SUSTAINED fetch failure (#738 fail-closed) it does
+# NOT cleanly stop: command substitutions don't inherit errexit, so it limps on and emits a
+# misleadingly-CLEAN state line (or aborts to empty). Either way sync-issues could no longer
+# tell a CLEARED agent from an UNREADABLE one — silently dropping (or auto-closing) a
+# regression's tracked issue: the safety net defeated by exactly the failures it should record.
+# So _run_json records each fetch failure to a file flag we arm here; when it fires we DISCARD
+# _frontier_state's output and instead determine everything that does NOT need run history
+# (candidate, frontier, transition, reusable-differs → triage) from tag/blob resolution, and
+# FAIL CLOSED to BLOCKED so the tracked issue is upserted (never a green no-op). Emits the 18
+# _frontier_state fields PLUS a trailing DATA-GAP flag (0=normal state resolved, 1=partial
+# run-history). Returns NON-ZERO only when even the candidate/frontier cannot be resolved — a
+# TOTAL inability stays a hard error, surfaced by the caller.
+_frontier_state_resilient() {
+  local agent="$1" out="" rc=0 fetch_failed=0
+  # Arm a file flag that _run_json appends to on a sustained fetch failure. A file (not a shell
+  # var) is used because _frontier_state runs in a command-substitution subshell, and a var set
+  # there would not survive back to us — the file does.
+  local flag; flag="$(mktemp 2>/dev/null || echo "")"
+  # `|| rc=$?` catches any abort so set -e does not tear down the fleet loop on one agent.
+  if [ -n "$flag" ]; then
+    export _CANARY_FETCH_FAIL_FLAG="$flag"
+    out="$(_frontier_state "$agent")" || rc=$?
+    unset _CANARY_FETCH_FAIL_FLAG
+    [ -s "$flag" ] && fetch_failed=1
+    rm -f "$flag"
+  else
+    out="$(_frontier_state "$agent")" || rc=$?
+  fi
+  # Normal path (no fetch failure, a state line was produced): transparent pass-through, datagap=0.
+  if [ "$fetch_failed" -eq 0 ] && [ -n "$out" ] && [ "$rc" -eq 0 ]; then
+    printf '%s 0\n' "$out"
+    return 0
+  fi
+  # Data gap: the run-history fetch failed (or _frontier_state produced no state line).
+  # Reconstruct the tag-only facts — none of these read run history.
+  local cand chans frontier="" ch c transition prior differs triage
+  cand="$(channel_commit "$agent" next || true)"
+  chans="$(ordered_channels "$agent" || true)"
+  local chan_array=()
+  IFS=, read -r -a chan_array <<< "$chans"
+  for ch in "${chan_array[@]}"; do
+    c="$(channel_commit "$agent" "$ch" || true)"
+    if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
+  done
+  # Total inability: cannot resolve even the candidate or a pending frontier → hard error.
+  # Fail closed (never a silent green); the caller surfaces ::error:: and ends non-zero.
+  { [ -z "$cand" ] || [ -z "$frontier" ]; } && return 1
+  transition="$(transition_key "$frontier" "$chans")"
+  prior="$(channel_commit "$agent" "$frontier" || true)"
+  differs="$(_reusable_differs "$agent" "$cand" "$prior")"
+  # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
+  # (fail closed — a changed reusable with UNREADABLE health is treated as a suspected
+  # regression that needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot
+  # be a candidate regression). Either verdict still tracks the agent as BLOCKED.
+  triage="$(classify_failure "$differs" unknown 0)"
+  echo "$cand $frontier $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
+}
+
 # cmd_sync_issues [--dry-run] — upsert one blocker issue per BLOCKED agent, and render the
 # fleet-status table into the run's job summary (GITHUB_STEP_SUMMARY). Blocker issues are
-# idempotent (marker-keyed) and auto-close when the gate clears. Best-effort: never fails the
-# run. Reads ISSUE_REPO (default THIS_REPO).
+# idempotent (marker-keyed) and auto-close when the gate clears. Best-effort for issue-write
+# failures (never aborts mid-fleet), but FAILS CLOSED (non-zero) when an agent's state is
+# totally undeterminable — a green no-op would mask a regression (#820). Reads ISSUE_REPO
+# (default THIS_REPO).
 cmd_sync_issues() {
   local dry=false; [ "${1:-}" = "--dry-run" ] && dry=true
   local agents; agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
@@ -1477,12 +1554,21 @@ cmd_sync_issues() {
     # frontier — a SEPARATE label/issue from canary-blocker so the two concerns never collide.
     gh label create canary-confirm --repo "$ISSUE_REPO" --color fbca04 --description "canary-rollout: human go/no-go at a require_confirmation ring boundary" >/dev/null 2>&1 || true
   fi
-  local rows="" agent
+  local rows="" agent hard_fail=0
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift host
-    local downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample
-    read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample < <(_frontier_state "$agent")
+    local downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap
+    # Resilient read (#820): the wrapper fails closed to a BLOCKED+datagap line on a run-history
+    # fetch outage, and returns non-zero (no output) only on a TOTAL inability to determine
+    # state. A failed `read` there means we could not even resolve the candidate/frontier —
+    # fail closed rather than report a false all-clear (a green no-op could mask a regression).
+    if ! read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap < <(_frontier_state_resilient "$agent"); then
+      echo "::error::sync-issues: cannot determine canary state for '$agent' (run-history AND tag resolution unavailable) — failing closed rather than reporting a false all-clear." >&2
+      hard_fail=1
+      rows+="| \`$agent\` | UNKNOWN | \`-\` | ? | ? | ⚠️ data unavailable (fail-closed) |"$'\n'
+      continue
+    fi
     host="$(_agent_field "$agent" host)"
     local blk="—" num_state num istate
     # Best-effort (#1081): these substitutions call gh/jq. Under `set -euo pipefail`
@@ -1493,11 +1579,18 @@ cmd_sync_issues() {
     num="${num_state%%$'\t'*}"; istate="${num_state##*$'\t'}"
     if [ "$state" = "BLOCKED" ]; then
       local evidence body title mix_table=""
-      evidence="$(_blocker_evidence "$agent" "$cand" || true)"
+      if [ "${datagap:-0}" = "1" ]; then
+        # Run history was unreadable this tick — there are no listable failing runs to cite.
+        evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
+      else
+        evidence="$(_blocker_evidence "$agent" "$cand" || true)"
+      fi
       [ "$mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$cand" || true)"
-      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table" "$downgrade" "$dg_cand_rate" "$dg_cand_sample" "$dg_base_rate" "$dg_base_sample")"
+      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table" "$downgrade" "$dg_cand_rate" "$dg_cand_sample" "$dg_base_rate" "$dg_base_sample" "${datagap:-0}")"
       if [ "$mix_shift" = "SHIFT" ]; then
         title="Canary blocker: $agent $transition (decision-mix shift, SUSPECT)"
+      elif [ "${datagap:-0}" = "1" ]; then
+        title="Canary blocker: $agent $transition ($triage, partial run-history — fail-closed)"
       else
         title="Canary blocker: $agent $transition (cum_fail=$cum_fail, $triage)"
       fi
@@ -1596,6 +1689,9 @@ cmd_sync_issues() {
     echo "──── fleet status ────"
     printf '%s\n' "$dmd"
   fi
+  # Fail closed (#820): if any agent's state was totally undeterminable this tick, end non-zero
+  # AFTER rendering the dashboard — a green no-op would mask a possible regression.
+  [ "$hard_fail" -eq 1 ] && return 1
   return 0
 }
 
