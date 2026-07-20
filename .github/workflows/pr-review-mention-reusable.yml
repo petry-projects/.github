@@ -16,6 +16,9 @@ name: PR Review — Mention Trigger (Reusable)
 on:
   workflow_call:
     secrets:
+      GH_PAT_DON_PETRY:
+        description: "Canonical org PAT — preferred over GH_PAT_WORKFLOWS when present"
+        required: false
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true
@@ -73,7 +76,7 @@ jobs:
       - name: Check commenter trust level
         id: trust
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           # Only OWNER, MEMBER, and COLLABORATOR can trigger reviews.
           # This prevents external contributors or bots from burning review quota.
@@ -115,7 +118,7 @@ jobs:
         id: pr
         if: steps.trust.outputs.trusted == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           # Resolve by event name: review_requested and review-comment payloads
           # expose the PR directly; only issue_comment needs a gh api round-trip.
           # Guard the empty case so we never call `gh api ""` (#500).
@@ -192,7 +195,7 @@ jobs:
       - name: Trigger review agent
         if: steps.trust.outputs.trusted == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
         run: |
           # repository_dispatch requires only Contents: write, not Actions: write.

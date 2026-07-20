@@ -76,6 +76,9 @@ on:
         default: ''
         type: string
     secrets:
+      GH_PAT_DON_PETRY:
+        description: "Canonical org PAT — preferred over GH_PAT_WORKFLOWS when present"
+        required: false
       GH_PAT_WORKFLOWS:
         description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false
@@ -104,8 +107,8 @@ jobs:
 
       - name: Update behind non-Dependabot PRs
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS || github.token }}
-          HAS_PAT: ${{ secrets.GH_PAT_WORKFLOWS != '' }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS || github.token }}
+          HAS_PAT: ${{ (secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS) != '' }}
           REPO: ${{ github.repository }}
           ELIGIBILITY: ${{ inputs.eligibility }}
           READY_LABEL: ${{ inputs.ready_label }}
