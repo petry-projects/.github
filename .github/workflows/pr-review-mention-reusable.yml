@@ -16,9 +16,6 @@ name: PR Review — Mention Trigger (Reusable)
 on:
   workflow_call:
     secrets:
-      GH_PAT_DON_PETRY:
-        description: "Replacement PAT for GH_PAT_WORKFLOWS — preferred when present, falls back to GH_PAT_WORKFLOWS"
-        required: false
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true

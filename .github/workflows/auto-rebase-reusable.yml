@@ -76,9 +76,6 @@ on:
         default: ''
         type: string
     secrets:
-      GH_PAT_DON_PETRY:
-        description: "Replacement PAT for GH_PAT_WORKFLOWS — preferred when present, falls back to GH_PAT_WORKFLOWS"
-        required: false
       GH_PAT_WORKFLOWS:
         description: "PAT with workflows scope — required for sentinel comment to trigger dev-lead rebase"
         required: false

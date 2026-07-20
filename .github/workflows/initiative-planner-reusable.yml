@@ -33,9 +33,6 @@ on:
         default: "petry-projects/.github-private"
         type: string
     secrets:
-      GH_PAT_DON_PETRY:
-        description: "Replacement PAT for GH_PAT_WORKFLOWS — preferred when present, falls back to GH_PAT_WORKFLOWS"
-        required: false
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo + workflow scope used to dispatch the central initiative-planner (GITHUB_TOKEN cannot start a workflow_dispatch run)."
         required: true
