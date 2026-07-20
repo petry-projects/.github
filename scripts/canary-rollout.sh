@@ -432,7 +432,7 @@ _gh_retry_after() {
 # calling _run_json directly), every call fetches. Tunable via CANARY_GH_RETRIES /
 # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
 _repo_wf_runs_cached() {
-  local repo="$1" wf="$2" out err summary ra delay span expo errfile cachef key
+  local repo="$1" wf="$2" out err summary ra delay span expo errfile cachef key keyhash
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
@@ -441,7 +441,15 @@ _repo_wf_runs_cached() {
   # Cache hit? A non-empty cache file for this (repo, workflow) — including a cached "[]"
   # for a no-runs / not-found workflow, so it is never re-queried within the sweep.
   if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
-    key="${repo}//${wf}"; cachef="$_RUNS_CACHE_DIR/${key//[^A-Za-z0-9._-]/_}.json"
+    # Hash the (repo, workflow) key into the filename so distinct pairs can never collide.
+    # A plain char-substitution (e.g. non-alnum → "_") would map a workflow named "A B" and
+    # one named "A/B" on the same repo to the same file — cross-contaminating their cached
+    # run history and so their gate health. Workflow display names carry spaces and em-dashes,
+    # so this is a real collision surface. Fall back to substitution only if no hasher exists.
+    key="${repo}//${wf}"
+    keyhash="$(printf '%s' "$key" | sha1sum 2>/dev/null | cut -d' ' -f1)"
+    [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
+    cachef="$_RUNS_CACHE_DIR/${keyhash}.json"
     [ -s "$cachef" ] && { cat "$cachef"; return 0; }
   fi
   errfile="$(mktemp)"

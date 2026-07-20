@@ -629,6 +629,28 @@ GHEOF
   [ "$(wc -l < "$CALLS")" -eq 1 ]
 }
 
+@test "_run_json: cache key is collision-free — 'A B' vs 'A/B' workflows don't share a file (#835 CodeRabbit)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  # gh echoes back the requested workflow name so we can prove which cache entry served the call.
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+wf=""; prev=""
+for a in "$@"; do [ "$prev" = "--workflow" ] && wf="$a"; prev="$a"; done
+printf '[{"conclusion":"success","createdAt":"2026-01-10T00:00:00Z","databaseId":1,"workflowName":"%s"}]\n' "$wf"
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env _RUNS_CACHE_DIR="$BATS_TEST_TMPDIR/rc2" bash -c '
+    mkdir -p "$_RUNS_CACHE_DIR"; source "'"$ORCH"'"
+    _run_json some/repo "A B" "" | jq -r ".[0].workflowName"
+    _run_json some/repo "A/B" "" | jq -r ".[0].workflowName"
+  '
+  [ "$status" -eq 0 ]
+  # Under a char-substitution key both names would collapse to "A_B" and the second call
+  # would be served the first's cached "A B" row. A hashed key keeps them distinct.
+  [ "$(printf '%s\n' "$output" | sed -n 1p)" = "A B" ]
+  [ "$(printf '%s\n' "$output" | sed -n 2p)" = "A/B" ]
+}
+
 @test "_run_json: applies the since cut LOCALLY — pre-cut rows excluded, empty since keeps all (#819)" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   cat > "$STUB_BIN/gh" <<'GHEOF'
