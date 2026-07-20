@@ -16,9 +16,9 @@ beekeeping tech, and agent orchestration.
 | [ContentTwin](https://github.com/petry-projects/ContentTwin) | AI-powered Social Media Agent for small organizations — enterprise-quality social presence at non-profit pricing | Shell |
 | [bmad-bgreat-suite](https://github.com/petry-projects/bmad-bgreat-suite) | BMad Operations Suite — SRE and DevOps agents and workflows for the BMad Method ecosystem | Shell |
 | [google-app-scripts](https://github.com/petry-projects/google-app-scripts) | A place to share Google AppScripts for personal productivity | JavaScript |
-| [incubator](https://github.com/petry-projects/incubator) | Product incubator: pre-product idea Discussions, decision briefs/PRD-lite, and disposable POCs. Ideas graduate to their own product repo once a POC proves out. | Shell |
+| [incubator](https://github.com/petry-projects/incubator) | Product incubator: pre-product idea Discussions, decision briefs/PRD-lite, and disposable POCs. Ideas graduate to their own product repo once a POC proves out. Front-of-funnel for the .github-private ideation pipeline. | Shell |
 | [repo-template](https://github.com/petry-projects/repo-template) | Org template repository: one-click scaffold for new petry-projects repos. Files via 'Use this template'; non-file standards via bootstrap. | Shell |
-| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, skills, and agentic workflow infrastructure | Shell |
+| [.github-private](https://github.com/petry-projects/.github-private) | Org-wide Copilot custom agents, automated workflows, prompts, and scripts | Shell |
 | [.github](https://github.com/petry-projects/.github) | Organization-wide GitHub configuration, CI templates, and engineering standards | Shell |
 
 ---
@@ -37,6 +37,9 @@ All repositories in this org follow shared engineering standards defined in
 
 - **[Push Protection](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md)** — GitHub push protection (primary enforcement);
   local pre-commit prevention; CI secret scanning (secondary defense); incident response runbook.
+
+- **[Gitignore Standard](https://github.com/petry-projects/.github/blob/main/standards/gitignore-standard.md)** — Two-layer model (L1 org-managed secrets
+  baseline, L2 ecosystem extension); managed-block markers; negation discipline; compliance check.
 
 - **[Agent Standards](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md)** — AgentShield deep security scan; required agent
   files and compliance exemptions; BMAD Method workflows; decision-making reusables.
