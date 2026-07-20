@@ -8,7 +8,9 @@
 # name as a `||` fallback, so retiring GH_PAT_WORKFLOWS org-wide leaves behavior
 # intact (.github-private#1326).
 
-load 'helpers/setup'
+setup() {
+  load 'helpers/setup'
+}
 
 FALLBACK='${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}'
 
