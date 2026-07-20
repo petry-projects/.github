@@ -1446,15 +1446,26 @@ GHEOF
 # evidence; a cleared agent's issue auto-closes; the fleet-status table is rendered to the job
 # summary. dev-lead-only registry keeps the fleet loop to one agent; the gh stub logs issue ops.
 _sync_stub() {
-  # $1 conclusion (failure→BLOCKED | success→cleared); $2 blocker-list JSON returned by `gh issue list`
+  # $1 = conclusion (failure→BLOCKED | success→cleared | gap→run-list always fails)
+  # $2 = blocker-list JSON returned by `gh issue list`
+  # $3 = blob_mode: "same" (default, ref=cccc and ref=bbbb return identical blobs)
+  #               or "differ" (ref=cccc and ref=bbbb return distinct blobs → reusable differs)
   # dev-lead is cross-repo (host=.github-private, THIS_REPO=.github): channel tags, release
   # date, and reusable blobs resolve via gh api; git is a no-op.
-  local concl="$1" blocker_list="${2:-[]}"
+  local concl="$1" blocker_list="${2:-[]}" blob_mode="${3:-same}"
+  local cccc_blob="blobAAAA" bbbb_blob="blobAAAA"
+  [ "$blob_mode" = "differ" ] && { cccc_blob="reuseCAND"; bbbb_blob="reusePRIOR"; }
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
   local cut_iso run_iso
   cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  local run_list_case
+  if [ "$concl" = "gap" ]; then
+    run_list_case='echo "gh: run history unavailable (HTTP 500)" >&2; exit 1'
+  else
+    run_list_case="jq -nc --arg d \"$run_iso\" --arg c \"$concl\" '[range(3)|{conclusion:\$c,createdAt:\$d,databaseId:12345,workflowName:\"Dev-Lead Agent\"}]'"
+  fi
   cat > "$STUB_BIN/git" <<'GITEOF'
 #!/usr/bin/env bash
 : # dev-lead is cross-repo; all tag/blob resolution goes via gh api
@@ -1469,9 +1480,9 @@ case "\$*" in
   *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
   *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
   *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
-  *"ref=cccc"*) echo "blobAAAA" ;;
-  *"ref=bbbb"*) echo "blobAAAA" ;;
-  *"run list"*) jq -nc --arg d "$run_iso" --arg c "$concl" '[range(3)|{conclusion:\$c,createdAt:\$d,databaseId:12345,workflowName:"Dev-Lead Agent"}]' ;;
+  *"ref=cccc"*) echo "$cccc_blob" ;;
+  *"ref=bbbb"*) echo "$bbbb_blob" ;;
+  *"run list"*) $run_list_case ;;
   *"run view"*) echo '{"jobs":[{"steps":[{"name":"Some step","conclusion":"failure"}]}]}' ;;
   "issue list"*) echo '$blocker_list' ;;
   "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
@@ -2632,38 +2643,10 @@ GHEOF
 # while tag/blob resolution stays intact and the candidate's reusable DIFFERS from the prior
 # channel (ref=cccc vs ref=bbbb blobs differ → differs=1 → REGRESSION fail-closed triage).
 _sync_gap_stub() {
+  # Thin wrapper: delegates to _sync_stub with gap mode (run list always fails) and differing
+  # blobs (ref=cccc vs ref=bbbb are distinct, so reusable-differs=1 → REGRESSION fail-closed).
   local blocker_list="${1:-[]}"
-  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
-  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
-  local cut_iso
-  cut_iso="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  cat > "$STUB_BIN/git" <<'GITEOF'
-#!/usr/bin/env bash
-: # dev-lead is cross-repo; all tag/blob resolution goes via gh api
-GITEOF
-  chmod +x "$STUB_BIN/git"
-  cat > "$STUB_BIN/gh" <<GHEOF
-#!/usr/bin/env bash
-case "\$*" in
-  *"git/ref/tags/dev-lead/next"*)    echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
-  *"git/ref/tags/dev-lead/ring0"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
-  *"git/ref/tags/dev-lead/ring1"*)   echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
-  *"git/ref/tags/dev-lead/stable"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
-  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
-  *"git/tags/tagobj"*)               printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
-  *"ref=cccc"*) echo "reuseCAND" ;;
-  *"ref=bbbb"*) echo "reusePRIOR" ;;
-  *"run list"*) echo "gh: run history unavailable (HTTP 500)" >&2; exit 1 ;;
-  "issue list"*) echo '$blocker_list' ;;
-  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/777" ;;
-  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
-  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
-  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
-  "label create"*) : ;;
-  *) echo "{}" ;;
-esac
-GHEOF
-  chmod +x "$STUB_BIN/gh"
+  _sync_stub "gap" "$blocker_list" "differ"
   SYNC_RINGS="$BATS_TEST_TMPDIR/sync-rings-gap.json"
   jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$SYNC_RINGS"
 }

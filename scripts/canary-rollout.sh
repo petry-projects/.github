@@ -1314,7 +1314,7 @@ _suspect_guidance() {
      | "- **\(.id):** \(.guidance)"'
 }
 
-# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>] [<downgrade>] [<dg_cand_rate>] [<dg_cand_sample>] [<dg_base_rate>] [<dg_base_sample>]
+# _blocker_body <agent> <transition> <cand> <cum_fail> <cum_startup> <triage> <host> <evidence> [<mix_shift>] [<mix_table>] [<downgrade>] [<dg_cand_rate>] [<dg_cand_sample>] [<dg_base_rate>] [<dg_base_sample>] [<data_gap>]
 _blocker_body() {
   local agent="$1" transition="$2" cand="$3" cum_fail="$4" cum_startup="$5" triage="$6" host="$7" evidence="$8" mix_shift="${9:--}" mix_table="${10:-}" note
   local downgrade="${11:--}" dg_cand_rate="${12:-0}" dg_cand_sample="${13:-0}" dg_base_rate="${14:-0}" dg_base_sample="${15:-0}" data_gap="${16:-0}"
@@ -1489,23 +1489,31 @@ _frontier_state_resilient() {
   # var) is used because _frontier_state runs in a command-substitution subshell, and a var set
   # there would not survive back to us — the file does.
   local flag; flag="$(mktemp 2>/dev/null || echo "")"
-  # `|| rc=$?` catches any abort so set -e does not tear down the fleet loop on one agent.
-  if [ -n "$flag" ]; then
+  if [ -z "$flag" ]; then
+    # Cannot arm the fetch-failure detector at all — treat as an unreadable tick rather
+    # than silently falling back to the old undetectable-outage behavior.
+    fetch_failed=1
+    out="$(_frontier_state "$agent")" || rc=$?
+  else
+    # `|| rc=$?` catches any abort so set -e does not tear down the fleet loop on one agent.
     export _CANARY_FETCH_FAIL_FLAG="$flag"
     out="$(_frontier_state "$agent")" || rc=$?
     unset _CANARY_FETCH_FAIL_FLAG
     [ -s "$flag" ] && fetch_failed=1
     rm -f "$flag"
-  else
-    out="$(_frontier_state "$agent")" || rc=$?
   fi
   # Normal path (no fetch failure, a state line was produced): transparent pass-through, datagap=0.
   if [ "$fetch_failed" -eq 0 ] && [ -n "$out" ] && [ "$rc" -eq 0 ]; then
     printf '%s 0\n' "$out"
     return 0
   fi
-  # Data gap: the run-history fetch failed (or _frontier_state produced no state line).
-  # Reconstruct the tag-only facts — none of these read run history.
+  # Non-data-gap _frontier_state failure: the fetch succeeded but _frontier_state still failed —
+  # propagate the error rather than mis-annotating it as a data gap and emitting datagap=1.
+  if [ "$fetch_failed" -eq 0 ]; then
+    [ "$rc" -ne 0 ] && return "$rc"
+    return 1
+  fi
+  # Data gap: the run-history fetch failed — reconstruct the tag-only facts (none read run history).
   local cand chans frontier="" ch c transition prior differs triage
   cand="$(channel_commit "$agent" next || true)"
   chans="$(ordered_channels "$agent" || true)"
