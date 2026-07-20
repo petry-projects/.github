@@ -1987,6 +1987,7 @@ cmd_sync_promotion_failures() {
       fi
     fi
   done <<< "$attempted"
+)
   return 0
 }
 
