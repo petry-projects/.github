@@ -602,6 +602,98 @@ GHEOF
   grep -qx '60' "$SLEEP_LOG"
 }
 
+# ── _run_json: per-(repo,workflow) cache + not-found-is-empty + local since (#819) ──
+# The 4h sweep asks for a workflow's runs once per sample window (candidate / baseline /
+# downgrade / correctness). Enumerating per window per workflow tripped secondary rate
+# limits, AND a zero-run workflow made `gh run list --workflow` exit non-zero with "could
+# not find any workflows named …" — which #810's wrapper retried 6× as a transient, blowing
+# a sweep out to ~20 min until the job was cancelled. #819: one UNBOUNDED read per
+# (repo,workflow), memoized; the since cut applied locally; a not-found is a cached [].
+@test "_run_json: memoizes per (repo,workflow) — two windows share ONE gh call (#819)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALLS="$BATS_TEST_TMPDIR/gh-calls"; : > "$CALLS"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "call" >> "$CALLS"
+echo '[{"conclusion":"success","createdAt":"2026-01-10T00:00:00Z","databaseId":1,"workflowName":"W"},
+       {"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":2,"workflowName":"W"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env _RUNS_CACHE_DIR="$BATS_TEST_TMPDIR/rc" bash -c '
+    mkdir -p "$_RUNS_CACHE_DIR"; source "'"$ORCH"'"
+    _run_json some/repo W "2026-01-05T00:00:00Z"   # candidate window (since = 01-05)
+    _run_json some/repo W ""                          # baseline window (no lower bound)
+  '
+  [ "$status" -eq 0 ]
+  # Both windows served by a single fetch of (some/repo, W).
+  [ "$(wc -l < "$CALLS")" -eq 1 ]
+}
+
+@test "_run_json: applies the since cut LOCALLY — pre-cut rows excluded, empty since keeps all (#819)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo '[{"conclusion":"success","createdAt":"2026-01-10T00:00:00Z","databaseId":1,"workflowName":"W"},
+       {"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":2,"workflowName":"W"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  # since = 01-05 → only the 01-10 row survives.
+  run bash -c "source '$ORCH' && _run_json some/repo W '2026-01-05T00:00:00Z' | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]; [ "$output" = "[1]" ]
+  # empty since → both rows.
+  run bash -c "source '$ORCH' && _run_json some/repo W '' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]; [ "$output" = "[1,2]" ]
+}
+
+@test "_run_json: fetch is unbounded — passes --workflow but NOT --created (#819)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ARGS="$BATS_TEST_TMPDIR/gh-args"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "$*" >> "$ARGS"
+echo '[]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _run_json some/repo 'Dev-Lead Agent' '2026-01-05T00:00:00Z'"
+  [ "$status" -eq 0 ]
+  grep -q -- '--workflow' "$ARGS"
+  ! grep -q -- '--created' "$ARGS"
+}
+
+@test "_run_json: a not-found workflow returns [] immediately — no retry, no fail-flag (#819)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALLS="$BATS_TEST_TMPDIR/nf-calls"; : > "$CALLS"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "call" >> "$CALLS"
+echo "could not find any workflows named Persona — Mention Router" >&2
+exit 1
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  export FLAG="$BATS_TEST_TMPDIR/fetch-fail-flag"; : > "$FLAG"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=6 _CANARY_FETCH_FAIL_FLAG="$FLAG" \
+    bash -c "source '$ORCH' && _run_json some/repo 'Persona — Mention Router' ''"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  # Not retried (single gh call) and NOT recorded as a fetch outage (#820 flag empty).
+  [ "$(wc -l < "$CALLS")" -eq 1 ]
+  [ ! -s "$FLAG" ]
+}
+
+@test "_cumulative_health: does not crash when a window fails CLOSED to an empty payload (#819 arith guard)" {
+  # A sustained fetch failure makes _run_json return non-zero → json="" in the caller. The
+  # `$(( fail + $(jq … <<< "${json:-[]}") ))` guard must count 0, never emit `+  ` (bash
+  # arithmetic operand-expected syntax error, the second half of the #803 canary regression).
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho "gh: HTTP 503: server error" >&2\nexit 1\n' > "$STUB_BIN/gh"
+  chmod +x "$STUB_BIN/gh"
+  run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 some/repo"
+  # Fail-closed path returns non-zero, but NEVER with an arithmetic syntax error.
+  [[ "$output" != *"syntax error"* ]]
+  [[ "$output" != *"operand expected"* ]]
+}
+
 # ── next_channel_in_order ─────────────────────────────────────────────────────
 @test "next_channel_in_order: walks the ring order" {
   [ "$(next_channel_in_order next  'next,ring0,ring1,stable')" = "ring0" ]

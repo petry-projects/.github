@@ -414,28 +414,36 @@ _gh_retry_after() {
   printf '%s' "$secs"
 }
 
-# _run_json <repo> <workflow> <since_z> — gh run-list JSON (conclusion,createdAt,databaseId,workflowName) for a
-# repo since the given Zulu timestamp. Empty repo/wildcard → []. Never fails the caller.
-_run_json() {
-  local repo="$1" wf="$2" since="$3" out err summary ra delay span expo errfile
-  if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
-  # The 4h scheduled tick fans this out across every agent × tier repo, so a single
-  # transient blip (network / secondary rate-limit / brief 5xx) among dozens of reads
-  # used to fail the whole fleet sweep (#738). Retry a non-zero `gh` a bounded number of
-  # times to ride out a momentary hiccup, capturing gh's stderr so the annotations name
-  # the REAL failure (HTTP status + class) instead of a bare "transient" (#810). Backoff
-  # is exponential + full-jitter and honors a server Retry-After / x-ratelimit-reset hint
-  # so a secondary-rate-limit window is respected rather than hammered. A SUSTAINED failure
-  # still exhausts the retries and returns non-zero: fail CLOSED on a genuine outage
-  # (returning an empty [] would read as "zero failures" and could green-light a bad
-  # promotion — a non-zero return halts the run under `set -e` instead). An empty-but-
-  # successful result (no runs) is still a valid []. Tunable via CANARY_GH_RETRIES /
-  # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
+# _repo_wf_runs_cached <repo> <workflow> — ALL recent runs of one workflow on a repo
+# (conclusion,createdAt,databaseId,workflowName), UNBOUNDED by date and memoized for the
+# process, so the candidate / baseline / downgrade / correctness windows a single agent
+# samples collapse from one `gh run list` per (repo × workflow × window) into ONE read
+# per (repo × workflow) (#819). This is the fix for the secondary-rate-limit burst AND
+# for the retry storm it caused: a workflow that has never run on a repo makes `gh run
+# list --workflow` exit non-zero with "could not find any workflows named …" — a PERMANENT
+# condition, not a transient one, so retrying it 6× with backoff (as #810's wrapper did
+# for every error class) blew a fleet sweep out to ~20 min and got the job cancelled. We
+# now classify that message as a legitimate empty result ([]) and never retry it; only a
+# genuine transport error (403/5xx/network/auth) is retried and, if sustained, fails CLOSED.
+#
+# The cache is FILE-backed under $_RUNS_CACHE_DIR (exported by main() before the fan-out),
+# because callers invoke this via command substitution — a subshell — so an in-memory array
+# populated in one call would not survive to the next. When the dir is unset (a unit test
+# calling _run_json directly), every call fetches. Tunable via CANARY_GH_RETRIES /
+# CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
+_repo_wf_runs_cached() {
+  local repo="$1" wf="$2" out err summary ra delay span expo errfile cachef key
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
   case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
   case "$base" in ''|*[!0-9]*) base=2 ;; esac
+  # Cache hit? A non-empty cache file for this (repo, workflow) — including a cached "[]"
+  # for a no-runs / not-found workflow, so it is never re-queried within the sweep.
+  if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
+    key="${repo}//${wf}"; cachef="$_RUNS_CACHE_DIR/${key//[^A-Za-z0-9._-]/_}.json"
+    [ -s "$cachef" ] && { cat "$cachef"; return 0; }
+  fi
   errfile="$(mktemp)"
   if ! declare -p tmpfiles &>/dev/null; then
     declare -g -a tmpfiles=()
@@ -443,13 +451,23 @@ _run_json() {
   fi
   tmpfiles+=("$errfile")
   while :; do
-    if out="$(gh run list --repo "$repo" --workflow "$wf" ${since:+--created ">=$since"} \
+    if out="$(gh run list --repo "$repo" --workflow "$wf" \
         -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
-      rm -f "$errfile"; echo "${out:-[]}"; return 0
+      rm -f "$errfile"; out="${out:-[]}"
+      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
+      printf '%s\n' "$out"; return 0
     fi
     err=""
     if [ -r "$errfile" ]; then
       err="$(<"$errfile")"
+    fi
+    # A workflow with no runs on this repo is NOT a fetch failure — `gh` just can't resolve
+    # the name. Treat it as an empty result (and cache []) so it is neither retried nor
+    # counted as an outage; retrying it was the #810→#803 cancellation storm.
+    if [[ "${err,,}" == *"could not find any workflow"* ]] || [[ "${err,,}" == *"no workflows"* ]]; then
+      rm -f "$errfile"
+      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' '[]' > "$cachef" 2>/dev/null || true
+      echo '[]'; return 0
     fi
     summary="$(_gh_err_summary "$err")"
     if [ "$attempt" -ge "$attempts" ]; then
@@ -480,6 +498,22 @@ _run_json() {
   done
 }
 
+# _run_json <repo> <workflow> <since_z> — the target workflow's runs on a repo since the
+# given Zulu timestamp, filtered LOCALLY from the per-(repo,workflow) cache so the several
+# windows an agent samples share one fetch (#819). Empty repo/wildcard → []. A genuine
+# fetch failure fails CLOSED (non-zero) so an empty [] never masks real failures and
+# green-lights a bad promotion. Empty since = no lower bound.
+_run_json() {
+  local repo="$1" wf="$2" since="$3" raw
+  if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
+  raw="$(_repo_wf_runs_cached "$repo" "$wf")" || return 1
+  # Local since cut, inclusive — the same window the old server-side `--created ">=$since"`
+  # produced. jq on an empty/garbage payload falls back to [].
+  jq -c --arg since "$since" \
+    '[ .[]? | select($since == "" or (.createdAt // "") >= $since) ]' \
+    <<< "${raw:-[]}" 2>/dev/null || echo '[]'
+}
+
 # _tier_sample <agent> <since_z> <repo...> — EXECUTED runs (success+failure) on the
 # source tier since the candidate cut. Prints "<executed> <earliest_createdAt|->".
 _tier_sample() {
@@ -488,7 +522,7 @@ _tier_sample() {
   wf="$(_agent_field "$agent" run_workflow)"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
-    executed=$(( executed + $(jq '[.[]?|select(.conclusion=="success" or .conclusion=="failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
+    executed=$(( executed + $(jq '[.[]?|select(.conclusion=="success" or .conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     e="$(jq -r '[.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt?]|min // empty' 2>/dev/null <<< "$json" || echo "")"
     if [ -n "$e" ] && { [ -z "$earliest" ] || [[ "$e" < "$earliest" ]]; }; then earliest="$e"; fi
   done
@@ -663,11 +697,11 @@ _cumulative_health() {
   suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
-    startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
+    startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     if [ -z "$patterns" ] && [ -z "$suspect_patterns" ]; then
       # No benign or suspect patterns to match — count all failures with one jq pass,
       # avoiding a gh run view call per failure.
-      fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "$json" || echo 0) ))
+      fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     else
       while IFS=$'\t' read -r rid rwf; do
         if [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
@@ -2117,6 +2151,14 @@ main() {
   if [ -n "${SOAK_WINDOW_DAYS:-}" ] && ! [[ "${SOAK_WINDOW_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
     echo "::error::SOAK_WINDOW_DAYS, when set, must be a positive integer" >&2
     return 2
+  fi
+  # Per-process run-list cache shared across the fan-out's command-substitution subshells
+  # (#819) — exported so subshells inherit the path. On these ephemeral runners the dir is
+  # reaped with the job; a stray /tmp dir per local run is harmless, so no EXIT trap is set
+  # here (it would clobber _repo_wf_runs_cached's tmpfiles trap).
+  if [ -z "${_RUNS_CACHE_DIR:-}" ]; then
+    _RUNS_CACHE_DIR="$(mktemp -d 2>/dev/null || true)"
+    [ -n "$_RUNS_CACHE_DIR" ] && export _RUNS_CACHE_DIR
   fi
   local sub="${1:-}"; shift || true
   case "$sub" in
