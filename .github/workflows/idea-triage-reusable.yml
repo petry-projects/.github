@@ -27,6 +27,9 @@ on:
         default: "petry-projects/.github-private"
         type: string
     secrets:
+      GH_PAT_DON_PETRY:
+        description: "Canonical org PAT — preferred over GH_PAT_WORKFLOWS when present"
+        required: false
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo + workflow scope used to dispatch the central idea-triage (GITHUB_TOKEN cannot start a workflow_dispatch run)."
         required: true
