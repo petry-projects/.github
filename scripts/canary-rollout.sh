@@ -445,9 +445,11 @@ _repo_wf_runs_cached() {
     # A plain char-substitution (e.g. non-alnum → "_") would map a workflow named "A B" and
     # one named "A/B" on the same repo to the same file — cross-contaminating their cached
     # run history and so their gate health. Workflow display names carry spaces and em-dashes,
-    # so this is a real collision surface. Fall back to substitution only if no hasher exists.
+    # so this is a real collision surface. sha256 (not sha1/md5 — those trip weak-hash linters
+    # and are collision-broken) keeps the mapping injective; fall back to substitution only if
+    # no hasher exists. This is a filename derivation, not a security context.
     key="${repo}//${wf}"
-    keyhash="$(printf '%s' "$key" | sha1sum 2>/dev/null | cut -d' ' -f1)"
+    keyhash="$(printf '%s' "$key" | sha256sum 2>/dev/null | cut -d' ' -f1)"
     [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
     cachef="$_RUNS_CACHE_DIR/${keyhash}.json"
     [ -s "$cachef" ] && { cat "$cachef"; return 0; }
