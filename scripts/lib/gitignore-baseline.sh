@@ -163,14 +163,15 @@ _gib_negation_tail() {
     return 0
   fi
 
-  local d; d="$(mktemp -d)"
+  local d; d="$(mktemp -d -t gitignore-baseline.XXXXXX)"
   {
     printf '%s\n' "$block"
     [ -n "$body" ] && printf '%s\n' "$body"
   } > "$d/.gitignore"
   ( cd "$d" && git init -q 2>/dev/null )
-  local ignored
-  ignored="$(cd "$d" && git -c core.excludesfile=/dev/null check-ignore -- "${paths[@]}" 2>/dev/null)"
+  local ignored exit_code
+  ignored="$(cd "$d" && git -c core.excludesfile=/dev/null check-ignore -- "${paths[@]}" 2>/dev/null)" || exit_code=$?
+  [ "${exit_code:-0}" -gt 1 ] && ignored=""
   rm -rf "$d"
 
   local i
