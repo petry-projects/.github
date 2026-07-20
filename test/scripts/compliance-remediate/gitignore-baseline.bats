@@ -182,11 +182,10 @@ run_remediate() {
 # no mutating call, and it is recorded as a skip (not a failure).
 # ---------------------------------------------------------------------------
 @test "already-current baseline is an idempotent no-op (no PR opened)" {
-  # "Current" = the upsert steady state (block + neutralized L2 + negation tail
-  # per #809), i.e. a repo already synced — not the raw canonical.
-  source "${TT_REPO_ROOT}/scripts/lib/gitignore-baseline.sh"
-  _blk="$(mktemp "$TT_TMP/block.XXXXXX")"; gib_extract_baseline_block "$CANONICAL" > "$_blk"
-  GH_GITIGNORE_B64="$(upsert_gitignore_baseline "$_blk" "$CANONICAL" | b64)"; export GH_GITIGNORE_B64
+  # "Current" = the raw canonical .gitignore. Per #817 the negation tail is now
+  # conditional, so upsert(canonical) == canonical again — the raw canonical is
+  # the steady state and must be detected as an already-current no-op.
+  GH_GITIGNORE_B64="$(b64 < "$CANONICAL")"; export GH_GITIGNORE_B64
 
   findings="$(tt_write_finding "markets" "push-protection" "gitignore_baseline")"
   run_remediate "$findings"

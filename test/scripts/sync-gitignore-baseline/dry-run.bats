@@ -61,11 +61,10 @@ b64() { base64 -w 0 2>/dev/null || base64 -b 0; }
 }
 
 @test "dry-run skips a repo whose .gitignore already carries the current baseline" {
-  # "Current" = the upsert steady state (block + neutralized L2 + negation tail
-  # per #809), i.e. a repo already synced by this tool — not the raw canonical.
-  source "${REPO_ROOT}/scripts/lib/gitignore-baseline.sh"
-  _blk="$(mktemp "$TT_TMP/block.XXXXXX")"; gib_extract_baseline_block "$CANONICAL" > "$_blk"
-  GH_CONTENT_B64="$(upsert_gitignore_baseline "$_blk" "$CANONICAL" | b64)"; export GH_CONTENT_B64
+  # "Current" = the raw canonical .gitignore. Per #817 the negation tail is now
+  # conditional, so upsert(canonical) == canonical again (its L2 re-hides nothing
+  # and its bare-# separator is preserved) — the raw canonical is the steady state.
+  GH_CONTENT_B64="$(b64 < "$CANONICAL")"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets
   [ "$status" -eq 0 ]
