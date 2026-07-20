@@ -57,47 +57,54 @@ _gib_has_markers() {
 
 # _gib_neutralize_l2 <block>
 # Read candidate L2 content on stdin; print it with every line that would fight
-# the L1 block removed. A line is dropped when — after CRLF and trailing-whitespace
-# trimming — it exactly matches a *pattern* line of <block> (comment and blank
-# lines of the block are ignored, so they never strip a repo's own comments). This
-# does double duty:
+# the L1 block removed, then append a *minimal* re-allow tail. Two passes:
 #
-#   • Negations win (identical patterns): a bare re-hiding pattern the target kept
-#     in L2 (e.g. `*.pem` with no `!public.pem`) is identical to the block's own
-#     broad pattern, so it is stripped.
-#   • Negations win (non-identical globs): a glob-variant pattern (e.g. `**/*.pem`
-#     or `.env*`) that is NOT an exact match for any block line but would still
-#     re-hide a baseline-negated path (e.g. `!public.pem` or `!.env.example`) is
-#     handled by the *re-allow tail*: all baseline negation lines are re-emitted at
-#     the very end of the L2 output so they always evaluate after any L2 pattern —
-#     identical or not — and the negated paths remain re-allowed.
-#   • Migrate, don't duplicate: an old *unmarkered* baseline pasted into L2 has its
-#     pattern lines folded away (they all live in the block now), so upsert stops
-#     shipping a second full copy. The genuine ecosystem/OS entries the repo added
-#     stay put.
+# Pass 1 (pure awk) drops L2 lines that duplicate the block:
+#   • Pattern lines: a line is dropped when — after CRLF and trailing-whitespace
+#     trimming — it exactly matches a *pattern* line of <block>. This strips a
+#     bare re-hider the target kept in L2 (e.g. `*.pem` with no `!public.pem`,
+#     identical to the block's own broad pattern) and folds away an old
+#     *unmarkered* baseline pasted into L2 (all its pattern lines now live in the
+#     block, so upsert stops shipping a second copy).
+#   • Comment lines (#817 Part B): a comment line is dropped only when it exactly
+#     matches a *comment* line of the block AND is not a bare `#` separator. This
+#     removes the orphaned section comments a migrated unmarkered baseline leaves
+#     behind, while never clobbering a repo's own comments — bare `#` dividers
+#     (which the block also uses) are always preserved.
+# Genuine per-repo ecosystem/OS entries are untouched. Runs of blank lines left
+# behind by removed lines are squeezed (leading and consecutive blanks dropped)
+# so migration output stays tidy.
 #
-# Only pattern lines are matched for dropping — never comments — because block
-# comments include bare `#` separators that would otherwise clobber a repo's own
-# comment lines. Runs of blank lines left behind by the removed patterns are
-# squeezed (leading and consecutive blanks dropped) so migration output stays tidy.
-# Idempotent: exact-match lines are gone after one pass; the re-allow tail lines
-# match exactly on re-run and are dropped before being re-appended. The tail is
-# only appended when at least one real (non-comment, non-blank) pattern survives
-# in L2 — a comment-only L2 cannot re-hide anything, so no tail is emitted and
-# an already-current file stays byte-for-byte identical on re-run.
+# Pass 2 (#817 Part A) appends a *conditional* re-allow tail. A glob-variant L2
+# pattern that is NOT an exact match for any block line (e.g. `**/*.pem` or
+# `.env*`) can still re-hide a baseline-negated path (`!public.pem`, `!.env.example`).
+# Rather than re-emit ALL ~32 baseline negations unconditionally (noise on every
+# repo), we compose `block + neutralized-L2` and ask git — the authority on
+# gitignore semantics — which negated paths are STILL ignored. Only those
+# negations are re-emitted, in block order, so they win over the surviving L2
+# pattern. A clean L2 that re-hides nothing gets NO tail. See _gib_negation_tail.
+#
+# Idempotent: exact-match lines are gone after pass 1; any re-emitted tail lines
+# are themselves block negation patterns, so a second pass strips them before
+# pass 2 recomputes them identically. An already-current file stays byte-for-byte
+# identical on re-run — and, with the conditional tail, on the FIRST application.
 _gib_neutralize_l2() {
   local block="$1"
   block="$(tr -d '\r' <<< "$block")"
-  tr -d '\r' | awk -v block="$block" '
+
+  local body
+  body="$(tr -d '\r' | awk -v block="$block" '
     BEGIN {
       n = split(block, barr, "\n")
       for (i = 1; i <= n; i++) {
         bl = barr[i]
         sub(/[ \t]+$/, "", bl)
-        if (bl ~ /^[ \t]*$/) continue    # skip blank block lines
-        if (bl ~ /^[ \t]*#/) continue    # skip comment block lines (incl. bare #)
+        if (bl ~ /^[ \t]*$/) continue                 # skip blank block lines
+        if (bl ~ /^[ \t]*#/) {                         # block comment line
+          if (bl !~ /^[ \t]*#[ \t]*$/) bcomment[bl] = 1  # …dedup target unless bare #
+          continue
+        }
         drop[bl] = 1
-        if (bl ~ /^!/) neg[++neg_count] = bl   # collect negation anchors for tail
       }
       prev_blank = 1   # squeeze any blank lines that would lead the output
     }
@@ -106,27 +113,73 @@ _gib_neutralize_l2() {
       key = line
       sub(/[ \t]+$/, "", key)
       if (key in drop) next
+      if ((key ~ /^[ \t]*#/) && (key in bcomment)) next   # #817B: drop orphaned block comment
       is_blank = (key ~ /^[ \t]*$/)
       if (is_blank && prev_blank) next
       print line
       prev_blank = is_blank
-      if (!is_blank && !(key ~ /^[ \t]*#/)) had_pattern = 1
     }
-    END {
-      # Re-emit baseline negation anchors last so they win over any L2 pattern
-      # (identical or non-identical glob) that would otherwise re-hide a
-      # baseline-negated path (e.g. `.env*` re-hides `!.env.example`, or
-      # `**/*.pem` re-hides `!public.pem`). Idempotent: the appended negations
-      # are in `drop`, so a second pass strips them before re-appending here.
-      # Guard: only emit when a real pattern survived — comment-only L2 cannot
-      # re-hide anything, and emitting the tail would make an already-current
-      # file appear changed (triggering spurious REFRESH PRs).
-      if (had_pattern && neg_count > 0) {
-        if (!prev_blank) print ""
-        for (i = 1; i <= neg_count; i++) print neg[i]
-      }
-    }
-  '
+  ')"
+
+  local tail
+  tail="$(_gib_negation_tail "$block" "$body")"
+
+  [ -n "$body" ] && printf '%s\n' "$body"
+  if [ -n "$tail" ]; then
+    [ -n "$body" ] && printf '\n'
+    printf '%s\n' "$tail"
+  fi
+}
+
+# _gib_negation_tail <block> <neutralized_l2>
+# Print the baseline negation lines (in block order) that MUST be re-emitted
+# because a surviving L2 pattern would otherwise re-hide their re-allowed path.
+# Decided by real gitignore semantics: compose `block + neutralized-L2` into a
+# throwaway git repo and ask `git check-ignore` which negated paths remain
+# ignored; those (and only those) are re-emitted. A representative concrete path
+# is derived from each negation by replacing `*` globs with a literal token.
+# If git is unavailable, fall back to re-emitting every negation (the safe,
+# pre-#817 behavior) so a non-identical L2 glob can never silently re-hide a
+# baseline-negated path.
+_gib_negation_tail() {
+  local block="$1" body="$2"
+  local negs=() paths=() bl key rep
+  while IFS= read -r bl; do
+    key="$bl"
+    key="${key%"${key##*[![:space:]]}"}"   # rstrip trailing whitespace
+    case "$key" in
+      '!'?*)
+        negs+=("$key")
+        rep="${key#!}"
+        rep="${rep//\*/X}"                 # representative concrete path
+        paths+=("$rep")
+        ;;
+    esac
+  done <<< "$block"
+  [ "${#negs[@]}" -eq 0 ] && return 0
+
+  if ! command -v git >/dev/null 2>&1; then
+    printf '%s\n' "${negs[@]}"
+    return 0
+  fi
+
+  local d; d="$(mktemp -d -t gitignore-baseline.XXXXXX)"
+  {
+    printf '%s\n' "$block"
+    [ -n "$body" ] && printf '%s\n' "$body"
+  } > "$d/.gitignore"
+  ( cd "$d" && git init -q 2>/dev/null )
+  local ignored exit_code
+  ignored="$(cd "$d" && git -c core.excludesfile=/dev/null check-ignore -- "${paths[@]}" 2>/dev/null)" || exit_code=$?
+  [ "${exit_code:-0}" -gt 1 ] && ignored=""
+  rm -rf "$d"
+
+  local i
+  for ((i = 0; i < ${#negs[@]}; i++)); do
+    if printf '%s\n' "$ignored" | grep -qxF -- "${paths[$i]}"; then
+      printf '%s\n' "${negs[$i]}"
+    fi
+  done
 }
 
 # upsert_gitignore_baseline <block_file> [existing_file]

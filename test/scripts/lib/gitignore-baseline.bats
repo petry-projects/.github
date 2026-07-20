@@ -277,8 +277,8 @@ _gib_check_ignored() {
   grep -qxF 'node_modules/' <<< "$gi"
 }
 
-# ── #809: migrate an existing unmarkered baseline, don't duplicate it ──────────
-@test "#809 TalkTerm-like: unmarkered baseline in L2 is folded into one block, not duplicated" {
+# ── #809/#817: migrate an existing unmarkered baseline, don't duplicate it ─────
+@test "#809/#817 TalkTerm-like: unmarkered baseline in L2 is folded into one block, no tail, genuine L2 kept" {
   # L2 IS a copy of the old unmarkered baseline (same secret lines, no markers),
   # plus genuine ecosystem/OS entries the repo legitimately added.
   local existing="${TT_TMP}/talkterm"
@@ -300,18 +300,103 @@ EOF
   # Exactly one marker-wrapped block.
   [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_BEGIN_MARKER")" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -cxF "$GIB_END_MARKER")" -eq 1 ]
-  # Broad patterns appear exactly once (the L2 copies are folded away; they are
-  # not negations so they are not re-emitted in the re-allow tail).
+  # Broad patterns are folded into the block and appear exactly once.
   [ "$(printf '%s\n' "$output" | grep -cxF '.env')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -cxF '*.pem')" -eq 1 ]
-  # Negation anchors appear twice: once inside the block and once in the
-  # re-allow tail that ensures they win over any surviving L2 pattern.
-  [ "$(printf '%s\n' "$output" | grep -cxF '!.env.example')" -eq 2 ]
+  # #817: the genuine L2 (node_modules/, dist/, *.log, .DS_Store) re-hides none
+  # of the baseline-negated paths, so NO negation tail is appended — each
+  # negation appears exactly once (inside the block only).
+  [ "$(printf '%s\n' "$output" | grep -cxF '!.env.example')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -cxF '!*.pub')" -eq 1 ]
   # Genuine ecosystem/OS L2 entries are preserved.
   grep -qxF 'node_modules/' <<< "$output"
   grep -qxF 'dist/' <<< "$output"
   grep -qxF '*.log' <<< "$output"
   grep -qxF '.DS_Store' <<< "$output"
+}
+
+# ── #817: negation tail is CONDITIONAL — only re-emit what L2 actually re-hides ─
+@test "#817 clean L2 (no re-hider) appends NO negation tail; upsert is a first-application fixed point" {
+  # A marker-wrapped file whose L2 is genuine ecosystem/OS cruft that re-hides
+  # nothing the block negates. The steady state must be block + L2 verbatim (no
+  # negation tail), and re-upserting it must be a byte-for-byte no-op — on the
+  # FIRST application, not only from the second pass on.
+  local existing="${TT_TMP}/clean"
+  {
+    cat "$BLOCK"
+    printf 'node_modules/\n.DS_Store\n'
+  } > "$existing"
+
+  local out
+  out="$(upsert_gitignore_baseline "$BLOCK" "$existing")"
+
+  # No negation tail: !.env.example / !*.pub appear ONLY inside the block (once).
+  [ "$(printf '%s\n' "$out" | grep -cxF '!.env.example')" -eq 1 ]
+  [ "$(printf '%s\n' "$out" | grep -cxF '!*.pub')" -eq 1 ]
+  # Genuine L2 preserved.
+  grep -qxF 'node_modules/' <<< "$out"
+  grep -qxF '.DS_Store' <<< "$out"
+  # Fixed point on the FIRST application: upsert(block + clean-L2) == input.
+  [ "$out" = "$(cat "$existing")" ]
+}
+
+# ── #817 Part B: dedup migrated baseline comments (never a bare-# or repo one) ──
+@test "#817 migrated baseline section comment (block-identical) is dropped; repo comments kept" {
+  # Simulate migrating an OLD unmarkered baseline whose section comment is
+  # byte-identical to the current block's comment — it must fold away, while
+  # the repo's own comment stays put.
+  local existing="${TT_TMP}/migrated"
+  cat > "$existing" <<EOF
+# petry-projects baseline — SECRETS ONLY
+.env
+!.env.example
+*.pem
+# repo's own note
+node_modules/
+EOF
+
+  local out l2
+  out="$(upsert_gitignore_baseline "$BLOCK" "$existing")"
+  l2="$(printf '%s\n' "$out" | awk -v e="$GIB_END_MARKER" 'seen{print} $0==e{seen=1}')"
+
+  # The block-identical section comment is dropped from L2 (folded away)…
+  [ "$(printf '%s\n' "$l2" | grep -cxF '# petry-projects baseline — SECRETS ONLY')" -eq 0 ]
+  # …but the block still carries it exactly once (inside the block).
+  [ "$(printf '%s\n' "$out" | grep -cxF '# petry-projects baseline — SECRETS ONLY')" -eq 1 ]
+  # The repo's own comment and genuine L2 survive.
+  grep -qxF "# repo's own note" <<< "$l2"
+  grep -qxF 'node_modules/' <<< "$l2"
+}
+
+@test "#817 bare-# separator in L2 survives even though the canonical block also uses bare #" {
+  # The real canonical block contains bare `#` separator lines. Part B must
+  # NEVER drop a bare `#` from L2 — repos legitimately reuse it as a divider,
+  # and dropping it would clobber the repo's own layout (and break the
+  # already-current fixed point, since the canonical L2 leads with a bare #).
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local existing="${TT_TMP}/withbarehash"
+  printf '#\n# my section\nnode_modules/\n' > "$existing"
+
+  local out l2
+  out="$(upsert_gitignore_baseline "$realblock" "$existing")"
+  l2="$(printf '%s\n' "$out" | awk -v e="$GIB_END_MARKER" 'seen{print} $0==e{seen=1}')"
+
+  grep -qxF '#' <<< "$l2"            # bare # kept
+  grep -qxF '# my section' <<< "$l2"
+  grep -qxF 'node_modules/' <<< "$l2"
+}
+
+@test "#817 already-current canonical .gitignore is a byte-for-byte fixed point" {
+  # With the conditional tail, upsert(block, canonical) == canonical again
+  # (the canonical L2 re-hides nothing and its bare-# separator is preserved).
+  local realblock="${TT_TMP}/realblock"
+  gib_extract_baseline_block "${TT_REPO_ROOT}/.gitignore" > "$realblock"
+
+  local out
+  out="$(upsert_gitignore_baseline "$realblock" "${TT_REPO_ROOT}/.gitignore")"
+  [ "$out" = "$(cat "${TT_REPO_ROOT}/.gitignore")" ]
 }
 
 @test "#809 negation-win + migration is idempotent" {
