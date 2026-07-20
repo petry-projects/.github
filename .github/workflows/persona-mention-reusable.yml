@@ -118,7 +118,7 @@ jobs:
 
       - name: Route the mention
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           PERSONA_REF: ${{ inputs.persona_ref }}
           # Every event field arrives via env, never interpolated inline into the
           # run: body. A comment body and a login are attacker-controlled, and an

@@ -49,4 +49,4 @@ jobs:
       actions: read
     uses: ./.github/workflows/pr-auto-review-reusable.yml  # local ref — always current
     secrets:
-      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_WORKFLOWS }}
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}

@@ -51,7 +51,7 @@ jobs:
     steps:
       - name: Guard — PAT present
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           if [ -z "${GH_TOKEN}" ]; then
             echo "::error::GH_PAT_WORKFLOWS is required — a workflow_dispatch fired with GITHUB_TOKEN will not start a run."
@@ -60,7 +60,7 @@ jobs:
 
       - name: Dispatch central idea-enhancer for this repo
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           CENTRAL_REPO: ${{ inputs.central_repo }}
           TARGET_REPO: ${{ github.repository }}
         run: |

@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Guard — PAT present
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           if [ -z "${GH_TOKEN}" ]; then
             echo "::error::GH_PAT_WORKFLOWS is required — a workflow_dispatch fired with GITHUB_TOKEN will not start a run."
@@ -64,7 +64,7 @@ jobs:
       - name: Guard — trusted actor
         id: trust
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           REPO: ${{ github.repository }}
           ACTOR: ${{ github.event.sender.login }}
         run: |
@@ -86,7 +86,7 @@ jobs:
       - name: Dispatch central planner for this repo
         if: steps.trust.outputs.trusted == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           PLANNER_REPO: ${{ inputs.planner_repo }}
           TARGET_REPO: ${{ github.repository }}
           DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
