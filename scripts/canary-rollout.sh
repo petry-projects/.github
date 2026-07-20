@@ -445,11 +445,13 @@ _repo_wf_runs_cached() {
     [ -s "$cachef" ] && { cat "$cachef"; return 0; }
   fi
   errfile="$(mktemp)"
-  if ! declare -p tmpfiles &>/dev/null; then
-    declare -g -a tmpfiles=()
-    trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
-  fi
+  declare -p tmpfiles &>/dev/null || declare -g -a tmpfiles=()
   tmpfiles+=("$errfile")
+  # Register the cleanup in THIS (sub)shell: command substitution forks a subshell that
+  # does NOT inherit the parent's traps, so registering only on first declaration of
+  # tmpfiles would leave every subshell invocation without one. Re-running `trap … EXIT`
+  # in the same shell just reinstalls the same idempotent handler.
+  trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" \
         -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
@@ -2153,12 +2155,15 @@ main() {
     return 2
   fi
   # Per-process run-list cache shared across the fan-out's command-substitution subshells
-  # (#819) — exported so subshells inherit the path. On these ephemeral runners the dir is
-  # reaped with the job; a stray /tmp dir per local run is harmless, so no EXIT trap is set
-  # here (it would clobber _repo_wf_runs_cached's tmpfiles trap).
+  # (#819) — exported so subshells inherit the path, and reaped on exit. This trap lives in
+  # the PARENT shell; _repo_wf_runs_cached's errfile trap lives in the per-call subshells, so
+  # the two are in different shells and never clobber each other.
   if [ -z "${_RUNS_CACHE_DIR:-}" ]; then
     _RUNS_CACHE_DIR="$(mktemp -d 2>/dev/null || true)"
-    [ -n "$_RUNS_CACHE_DIR" ] && export _RUNS_CACHE_DIR
+    if [ -n "$_RUNS_CACHE_DIR" ]; then
+      export _RUNS_CACHE_DIR
+      trap 'rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
+    fi
   fi
   local sub="${1:-}"; shift || true
   case "$sub" in
