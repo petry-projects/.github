@@ -20,7 +20,7 @@ Pure, side-effect-free helpers. Source the file, then call:
 | `pr_auto_review_required_contexts` | branch-rules JSON on stdin (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) | prints a compact JSON array of required status-check context names (`[]` if none / non-array) |
 | `pr_auto_review_checks_ready REQUIRED_JSON SELF_NAME` | checks JSON on stdin (`gh pr checks --json bucket,name`) | prints a one-line reason; `0` ready, `1` not ready |
 | `pr_auto_review_blocking_thread_count` | review-threads JSON on stdin (`reviewThreads(first:100){nodes{isResolved isOutdated}}`) | prints the count of **blocking** threads — unresolved AND not outdated |
-| `pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME REVIEW_DECISION UNRESOLVED_COUNT` | the PR facts the workflow gathers (all as arguments — no stdin) | prints the **decision class** on stdout; `0` ready, `1` not ready |
+| `pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME REVIEW_DECISION BLOCKING_THREAD_COUNT` | the PR facts the workflow gathers (all as arguments — no stdin) | prints the **decision class** on stdout; `0` ready, `1` not ready |
 
 ### The unified decision core — `pr_auto_review_ready`
 
@@ -78,7 +78,8 @@ the thread resolved**. The code is fixed and CI is green, yet the PR sits
 fix: it counts a thread as **blocking only when it is unresolved AND not
 outdated**. GitHub sets `reviewThread.isOutdated == true` exactly when the diff
 position the thread anchors to no longer exists at the current HEAD (the line
-changed or the file moved) — i.e. the finding no longer applies. So an
+changed or the file moved) — a heuristic that the diff anchor shifted, not a
+guarantee the concern was resolved. So an
 unresolved-but-outdated thread — the signature of a fix that changed the flagged
 line without resolving the thread — is treated as non-blocking, and the PR
 converges without manual thread resolution.

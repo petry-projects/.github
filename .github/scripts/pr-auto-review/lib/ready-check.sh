@@ -105,7 +105,8 @@ pr_auto_review_checks_ready() {
 #   so the unresolved-threads gate stalls the PR even though the code is fixed.
 #   GitHub sets reviewThread.isOutdated == true exactly when the diff position
 #   the thread anchors to no longer exists at HEAD (the line changed / file
-#   moved) — i.e. the finding no longer applies to current HEAD. Treating an
+#   moved) — a heuristic that the diff anchor shifted, not a guarantee the
+#   underlying concern was resolved. Treating an
 #   unresolved-but-outdated thread as non-blocking clears the stall without the
 #   producer having to resolve the thread first.
 #
@@ -122,7 +123,7 @@ pr_auto_review_blocking_thread_count() {
 }
 
 # pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME \
-#                      REVIEW_DECISION UNRESOLVED_COUNT
+#                      REVIEW_DECISION BLOCKING_THREAD_COUNT
 #   Unified, pure readiness core for the pr-auto-review reusable workflow. Given
 #   the PR facts gathered by the workflow's I/O glue, it evaluates all four
 #   readiness criteria in gate order and PRINTS the decision class on stdout —
@@ -141,7 +142,7 @@ pr_auto_review_blocking_thread_count() {
 #                     pr_auto_review_required_contexts; may be []).
 #   SELF_NAME         this workflow's own check-run name, excluded from the gate.
 #   REVIEW_DECISION   effective review decision (gh: .reviewDecision; may be "").
-#   UNRESOLVED_COUNT  number of unresolved review threads (may be "" → 0).
+#   BLOCKING_THREAD_COUNT  count of blocking threads — unresolved AND not outdated (may be "" → 0).
 #
 #   Criteria are evaluated in order, so an earlier skip wins over a later one
 #   (e.g. a draft PR that also has CHANGES_REQUESTED reports skip-draft). The
@@ -149,7 +150,7 @@ pr_auto_review_blocking_thread_count() {
 #   so the required-vs-non-required behaviour (issue #680) is unchanged.
 pr_auto_review_ready() {
   local state="$1" is_draft="$2" checks_json="${3:-[]}" required_json="${4:-[]}" \
-        self_name="$5" review_decision="$6" unresolved_count="${7:-0}"
+        self_name="$5" review_decision="$6" blocking_thread_count="${7:-0}"
 
   # 1. PR must be open and not a draft.
   if [ "$state" != "OPEN" ] || [ "$is_draft" = "true" ]; then
@@ -175,9 +176,9 @@ pr_auto_review_ready() {
     return 1
   fi
 
-  # 4. No unresolved review threads.
-  [ -z "$unresolved_count" ] && unresolved_count="0"
-  if [ "$unresolved_count" -gt 0 ]; then
+  # 4. No blocking review threads (unresolved AND not outdated).
+  [ -z "$blocking_thread_count" ] && blocking_thread_count="0"
+  if [ "$blocking_thread_count" -gt 0 ]; then
     echo "skip-unresolved-threads"
     return 1
   fi

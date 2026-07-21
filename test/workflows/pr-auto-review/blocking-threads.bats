@@ -10,8 +10,9 @@
 # Consumer-side, defense-in-depth: a review thread that is unresolved but
 # OUTDATED (its anchored diff position no longer exists at HEAD — line changed /
 # file moved) no longer blocks auto-dispatch. GitHub sets reviewThread.isOutdated
-# for exactly this case, so a fixed-but-unresolved finding stops blocking without
-# the producer having to resolve the thread.
+# when the diff anchor shifts (a heuristic, not proof the concern is fixed), so
+# unresolved-but-outdated threads stop blocking without requiring the producer to
+# resolve them.
 #
 # The function reads the `gh api graphql` reviewThreads response on stdin (each
 # node exposing .isResolved and .isOutdated) and prints the count of *blocking*
@@ -52,9 +53,9 @@ resp() {
   [ "$output" = "1" ]
 }
 
-# ── the #806 fix: addressed-in-code makes the thread outdated ─────────────────
+# ── the #806 fix: outdated thread (diff anchor shifted at HEAD) → non-blocking ─
 
-@test "blocking count: unresolved but OUTDATED → 0 (fixed-in-code, non-blocking)" {
+@test "blocking count: unresolved but OUTDATED → 0 (diff anchor shifted, non-blocking)" {
   run pr_auto_review_blocking_thread_count <<<"$(resp '[{"isResolved":false,"isOutdated":true}]')"
   [ "$status" -eq 0 ]
   [ "$output" = "0" ]
@@ -110,7 +111,7 @@ resp() {
   [ "$output" = "1" ]
 }
 
-# ── robustness: error / malformed bodies default to 0 ────────────────────────
+# ── robustness: GraphQL error / missing-data bodies yield 0 ──────────────────
 
 @test "blocking count: GraphQL error body (no data) → 0" {
   run pr_auto_review_blocking_thread_count <<<'{"errors":[{"message":"Could not resolve to a Repository"}]}'

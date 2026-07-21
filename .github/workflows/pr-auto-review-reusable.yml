@@ -11,7 +11,7 @@
 #   3. Effective review decision is not CHANGES_REQUESTED
 #   4. No BLOCKING review threads. A thread blocks only when it is unresolved
 #      AND not outdated; an unresolved-but-outdated thread (its anchored code
-#      changed at HEAD, so the finding no longer applies) is non-blocking — see
+#      changed at HEAD — a heuristic, not a guarantee the concern was resolved) is non-blocking — see
 #      pr_auto_review_blocking_thread_count in ready-check.sh (issue #806).
 #
 # Triggered by (events forwarded from the thin caller):
@@ -217,14 +217,14 @@ jobs:
             -f owner="${REPO%%/*}" \
             -f repo="${REPO##*/}" \
             -F number="${PR_NUMBER}")
-          UNRESOLVED=$(printf '%s' "$THREADS_JSON" | pr_auto_review_blocking_thread_count)
+          BLOCKING_THREAD_COUNT=$(printf '%s' "$THREADS_JSON" | pr_auto_review_blocking_thread_count)
 
           # ── Decide (pure core) ───────────────────────────────────────────────
           # The lib returns the decision class on stdout and exit 0 iff ready;
           # the glue only echoes it to $GITHUB_OUTPUT (Layer 2 telemetry reads it).
           if DECISION=$(pr_auto_review_ready \
                 "$STATE" "$IS_DRAFT" "$CHECKS" "$REQUIRED_JSON" \
-                "$SELF_CHECK" "$REVIEW_DECISION" "$UNRESOLVED"); then
+                "$SELF_CHECK" "$REVIEW_DECISION" "$BLOCKING_THREAD_COUNT"); then
             READY=true
           else
             READY=false
