@@ -362,8 +362,9 @@ pins by hand — a release is rolled out by moving the channel tag (see
 `deploy-standard-workflows.sh` exempts a small set of **self-managing meta-repos**
 from the blanket sweep via its `SKIP_REPOS` list — currently `.github` (the source
 of truth; its callers use local `./` refs a channel-pinned stub must never
-overwrite) and `.github-private` (self-manages its own workflow fleet). The sweep
-does not deploy any stub to a `SKIP_REPO`.
+overwrite) and `.github-private` (self-manages its own workflow fleet). A `SKIP_REPO`
+is exempt from the blanket sweep; explicit `SKIP_OVERRIDES` entries bypass that
+exemption and may deploy an opted-in workflow stub.
 
 But the compliance audit requires every **universal-required** workflow (see
 [Required Workflows](#required-workflows)) on **every** repo — a `SKIP_REPO` is not
