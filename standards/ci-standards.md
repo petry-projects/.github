@@ -357,6 +357,41 @@ open for that workflow. Deployment never edits a caller's `uses:`/`agent_ref`
 pins by hand — a release is rolled out by moving the channel tag (see
 [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
 
+#### Self-managing meta-repos: `SKIP_REPOS` + `SKIP_OVERRIDES`
+
+`deploy-standard-workflows.sh` exempts a small set of **self-managing meta-repos**
+from the blanket sweep via its `SKIP_REPOS` list — currently `.github` (the source
+of truth; its callers use local `./` refs a channel-pinned stub must never
+overwrite) and `.github-private` (self-manages its own workflow fleet). The sweep
+does not deploy any stub to a `SKIP_REPO`.
+
+But the compliance audit requires every **universal-required** workflow (see
+[Required Workflows](#required-workflows)) on **every** repo — a `SKIP_REPO` is not
+exempt from the audit. So a `SKIP_REPO` must still *satisfy* each
+required-and-deployable workflow. There are exactly **two** canonical ways it may
+do so, and every such workflow MUST use one of them:
+
+1. **Self-manage it.** The repo hosts the workflow file in its own tree (present
+   verbatim, or re-pinned in place as a channel consumer). Declare this in the
+   deploy script's `SKIP_SELF_MANAGED` map so the config is a complete account of
+   how the repo satisfies the standard.
+2. **Opt into the sweep** for that one workflow via `SKIP_OVERRIDES` (keyed by
+   workflow filename → space-separated repos). The sweep then deploys *that* stub
+   — pinned at the repo's computed canary tier — while the repo stays exempt from
+   all other stubs. This is how `.github-private` receives `pr-auto-review.yml`
+   (reconciled in [#847](https://github.com/petry-projects/.github/issues/847))
+   and `add-to-project.yml`.
+
+A required-and-deployable workflow left in **neither** bucket is drift: the sweep
+skips it and the audit flags it `missing-<workflow>` on that repo **forever**,
+with no reconciliation path. `reconcile_skip_repo_required_workflows()` in
+`deploy-standard-workflows.sh` is the codified guard for this invariant — it
+fails (and its bats suite goes red) if any `SKIP_REPO` has a required-and-deployable
+workflow that is neither self-managed nor opted-in. Promoting a new workflow to
+universal-required therefore REQUIRES deciding, for each `SKIP_REPO`, which of the
+two buckets it lands in. (Manual-only required workflows — `ci.yml`, `sonarcloud.yml`
+— are not part of the sweep and so are outside this guard.)
+
 ---
 
 ## Required Workflows

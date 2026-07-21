@@ -229,12 +229,31 @@ check_required_workflows() {
   fi_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.content' 2>/dev/null || echo "")
   if [ -n "$fi_content" ]; then
     fi_decoded=$(echo "$fi_content" | base64 -d 2>/dev/null || echo "")
-    if [ -n "$fi_decoded" ] && feature_ideation_context_is_placeholder "$fi_decoded"; then
+    if [ -n "$fi_decoded" ] && feature_ideation_should_flag_placeholder "$repo" "$fi_decoded"; then
       add_finding "$repo" "ci-workflows" "feature-ideation-placeholder-context" "warning" \
         "\`feature-ideation.yml\` is present but its \`project_context\` is still the seed template placeholder (\`TODO:\`/\`Example:\`) — replace it with a real per-repo project description so weekly ideation runs on real context" \
         "standards/ci-standards.md#required-workflows"
     fi
   fi
+}
+
+# Pure: the audit's decision on whether to raise feature-ideation-placeholder-context
+# for a given repo. Fires only when the context is still the seed placeholder AND the
+# repo is not exempt from the finding.
+feature_ideation_should_flag_placeholder() {
+  local repo="$1" decoded="$2"
+  feature_ideation_context_is_placeholder "$decoded" || return 1
+  feature_ideation_placeholder_exempt "$repo" && return 1
+  return 0
+}
+
+# Pure: return 0 if the repo is exempt from the feature-ideation-placeholder-context
+# finding. repo-template is the seed for new repos (#856): its feature-ideation.yml
+# legitimately KEEPS the TODO:/Example: placeholder project_context — new repos
+# customise it on adoption — so flagging it would be a permanent false positive.
+feature_ideation_placeholder_exempt() {
+  local repo="$1"
+  [[ "$repo" == "repo-template" ]]
 }
 
 # Pure: given a decoded feature-ideation.yml caller stub, return 0 if its
