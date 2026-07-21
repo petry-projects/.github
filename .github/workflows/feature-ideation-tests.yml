@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
 
@@ -61,8 +61,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends bats shellcheck jq
 
-      - name: Install Python jsonschema
-        run: pip install --quiet 'jsonschema>=4'
+      - name: Install Python jsonschema and PyYAML
+        run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/feature-ideation-tests-requirements.txt'
 
       - name: shellcheck
         run: |
@@ -71,6 +71,7 @@ jobs:
           shellcheck -x \
             collect-signals.sh \
             lint-prompt.sh \
+            lint-caller.sh \
             match-discussions.sh \
             discussion-mutations.sh \
             lib/gh-safe.sh \
@@ -80,6 +81,9 @@ jobs:
 
       - name: Lint direct prompt blocks
         run: bash .github/scripts/feature-ideation/lint-prompt.sh
+
+      - name: "Lint caller stubs for the #571 inputs-context startup failure"
+        run: bash .github/scripts/feature-ideation/lint-caller.sh
 
       - name: Validate schema fixtures
         run: |

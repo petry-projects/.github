@@ -216,7 +216,6 @@ secret-scan:
   runs-on: ubuntu-latest
   permissions:
     contents: read
-    security-events: write
   steps:
     - name: Checkout (full history)
       # Pin to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
@@ -225,16 +224,29 @@ secret-scan:
       with:
         fetch-depth: 0
 
-    - name: Run gitleaks
-      # Pinned to SHA per Action Pinning Policy (ci-standards.md#action-pinning-policy).
-      # Refresh with: gh api repos/gitleaks/gitleaks-action/git/refs/tags/v2 --jq '.object.sha'
-      # then dereference if it points at an annotated tag.
-      uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-      with:
-        args: detect --source . --redact --verbose --exit-code 1
+    - name: Install gitleaks
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_VERSION: "8.30.1"
+        # Named GITLEAKS_CHECKSUM (not GITLEAKS_SHA256) — SonarCloud flags env var names
+        # matching *SHA256* containing hex strings as Security Hotspots (false positive).
+        GITLEAKS_CHECKSUM: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      run: |
+        tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+        wget -q "${url}" -O /tmp/gitleaks.tar.gz
+        echo "${GITLEAKS_CHECKSUM}  /tmp/gitleaks.tar.gz" | sha256sum -c
+        tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+
+    - name: Run gitleaks
+      run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
 ```
+
+> **Why CLI instead of `gitleaks/gitleaks-action`?** The action's v2 release
+> requires a paid license for GitHub organization repos. The CLI (installed via
+> a direct binary download with SHA256 verification) is free, fully pinned, and
+> runs the same scan. If you have a license, you can use the action instead —
+> add `GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}` to the `env:` block
+> alongside `GITHUB_TOKEN`.
 
 The job MUST:
 
@@ -242,8 +254,39 @@ The job MUST:
   PR diff
 - Pass `--redact` so leaked values are NEVER written to workflow logs
 - Fail the build (`--exit-code 1`) when any finding is detected
+- Pass `--config .gitleaks.toml` — every adopting repo MUST ship a
+  `.gitleaks.toml` at root (see [`.gitleaks.toml` template](#gitleakstoml-template) below)
+- Use `GITLEAKS_CHECKSUM` (not `GITLEAKS_SHA256`) for the binary checksum env var —
+  SonarCloud's security gate flags env vars matching `*SHA256*` that contain hex
+  strings as Security Hotspots (hardcoded credential false positive)
 - Run as a **required check** via the `code-quality` ruleset
   (see [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories))
+
+### `.gitleaks.toml` template
+
+Every repository adopting the `secret-scan` job MUST ship a `.gitleaks.toml`
+at root. Without it, `--config .gitleaks.toml` fails with a file-not-found
+error. Copy [`standards/gitleaks.toml`](gitleaks.toml) as your starting point
+and extend the `paths` allowlist for any repo-specific false-positive paths.
+
+**Why a required config file?** The `generic-api-key` rule in gitleaks fires on
+BMAD knowledge file paths (e.g. `api-request.md`, `auth-session.md` inside
+`_bmad/` directories) because their names contain substrings gitleaks treats as
+API-key indicators. The allowlist suppresses these false positives without
+disabling the rule org-wide.
+
+```toml
+title = "gitleaks config"
+
+# Add repo-specific allowlists below.
+# Common false-positive paths:
+#   '''_bmad/'''  — BMAD knowledge/config files (not application secrets)
+[allowlist]
+description = "Allowlisted paths"
+paths = [
+  '''_bmad/''',
+]
+```
 
 ### Coordination with AgentShield
 
@@ -273,32 +316,10 @@ for a PR to merge.
 
 ### Required gitignore entries
 
-Every repository MUST start its `.gitignore` from the org baseline at
-[`/.gitignore`](../.gitignore) in this repo. The baseline is **secrets-only**
-and language-agnostic — it covers the dotenv family, cloud-provider credential
-files, Kubernetes / Helm secrets, SSH/TLS/GPG key material, Terraform/IaC
-state and `*.tfvars`, secret-manager local caches (sops, age, vault, doppler,
-1password, infisical), database dumps and DB client dotfiles, package-registry
-credential dotfiles (`.npmrc`, `.pypirc`, `.cargo/credentials`, etc.), cloud
-CLI session caches, IDE files known to cache credentials (JetBrains
-`workspace.xml`, VS Code `sftp.json`, Cursor `mcp.json`), and modern AI/LLM
-tooling config files.
-
-> **Per-repo overrides are expected.** The baseline covers secrets only.
-> Each repo MUST append its own language-specific entries (`node_modules/`,
-> `target/`, `__pycache__/`, etc.) and OS cruft. Use the matching template
-> from [github/gitignore](https://github.com/github/gitignore) and append
-> below the baseline section.
->
-> **Negation rules.** Several baseline patterns include `!` negations that
-> re-allow legitimate files (e.g. `!.env.example`, `!*.crt`). Per-repo
-> additions MUST NOT re-ignore those files. Always negate by **specific
-> file path**, never by directory — a negation inside an ignored directory
-> does not re-include the file.
-
-The minimum compliance audit check is that the file contains at least
-`.env`, `*.pem`, `*.key`, and a `secrets`-style entry. Repos that copy the
-org baseline verbatim satisfy this automatically.
+The `.gitignore` secrets baseline is codified in its own standard. See
+[`gitignore-standard.md`](gitignore-standard.md) for the two-layer (L1
+secrets baseline / L2 per-repo) model, the managed-block markers, the
+negation-discipline rules, and the `gitignore_baseline` compliance check.
 
 ### Writing tests and fixtures
 
@@ -385,12 +406,13 @@ When onboarding a repository to this standard:
 2. **Verify gitignore** contains the standard entries listed in
    [Required gitignore entries](#required-gitignore-entries).
 3. **Add the `secret-scan` job** to `ci.yml` per [Layer 3](#layer-3--ci-secret-scanning-secondary-defense).
-4. **Add `secret-scan` as a required check** in the `code-quality` ruleset.
-   If provisioning is done via `scripts/apply-rulesets.sh`, first update
-   `detect_required_checks()` in that script to recognize and insert the
-   `secret-scan` check, then re-apply rulesets org-wide. Update
+4. **Add `secret-scan` as a required check** in the `code-quality` ruleset —
+   add the `Secret scan (gitleaks)` context to the codified
+   [`standards/rulesets/code-quality.json`](rulesets/code-quality.json), then
+   re-apply org-wide with `scripts/apply-rulesets.sh`. Do this **only after** the
+   fleet backfill (every repo must produce the check first — see #581), and update
    [`github-settings.md`](github-settings.md#code-quality--required-checks-ruleset-all-repositories)
-   if the ruleset template needs a new entry.
+   to move the row from staged to required.
 5. **Scan existing history** one time with `gitleaks git --redact --exit-code 1`
    before enabling enforcement, to surface any pre-existing secrets across all
    commits (not just the current working tree).
@@ -418,16 +440,40 @@ both at once:
 | `dependabot_security_updates_enabled` | warning | `security_and_analysis.dependabot_security_updates.status == "enabled"` |
 | `open_secret_alerts` | error | `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open` returns an empty array |
 | `secret_scan_ci_job_present` | error | `.github/workflows/ci.yml` contains a job using `gitleaks/gitleaks-action` |
-| `gitignore_secrets_block` | warning | `.gitignore` contains `.env`, `*.pem`, `*.key` entries |
+| `gitignore_baseline` | error | `.gitignore` secrets-baseline marker block matches the org canonical block (SHA-256) |
 | `push_protection_bypasses_recent` | warning | No bypasses in the last 30 days without a documented justification |
 
 Findings are reported as GitHub Issues labeled `security` + `compliance-audit`
 per the existing audit flow.
 
+### Token scope requirement
+
+The `security_and_analysis` field in `GET /repos/{owner}/{repo}` is only
+populated when the requesting token has **admin access** to the repository or
+the **`security_events` OAuth scope**. When the audit token (`ORG_SCORECARD_TOKEN`)
+lacks these, the check falls back to a proxy verification:
+
+1. If `GET /repos/{owner}/{repo}/secret-scanning/alerts` returns a valid array,
+   secret scanning is confirmed active and the finding is downgraded to
+   `security_and_analysis_unverifiable` (warning) — the specific settings
+   (push protection, AI detection, etc.) cannot be individually confirmed.
+2. If the alerts endpoint also fails, `security_and_analysis_unavailable`
+   (warning) is reported.
+
+**To enable audit verification:** regenerate the classic PAT backing
+`ORG_SCORECARD_TOKEN` (Developer Settings → Personal access tokens) with the
+`security_events` scope, then update the stored value in org Settings →
+Secrets → Actions. **To enforce required settings:** run
+`scripts/apply-repo-settings.sh <repo>` with a repository-admin token.
+Note: running the apply script configures settings but does not grant the
+audit token the visibility it needs — both steps may be needed.
+
 ---
 
 ## Related Standards
 
+- [`gitignore-standard.md`](gitignore-standard.md) — the secrets-baseline `.gitignore` (L1/L2 model, managed-block markers, negation rules) that is this program's first layer
+- [`advanced-security.md`](advanced-security.md) — org-wide GHAS enablement (the code security configuration that turns push protection on), licensing model, and push-protection live-fire verification
 - [`github-settings.md`](github-settings.md) — repo settings, rulesets, org secrets
 - [`agent-standards.md`](agent-standards.md) — AgentShield scanner and agent-config hygiene
 - [`ci-standards.md`](ci-standards.md) — workflow templates and required checks

@@ -33,23 +33,19 @@ on:
   check_run:
     types: [completed]
   repository_dispatch:
-    types: [dev-lead-ci-failure]
+    types: [dev-lead-ci-failure, dev-lead-reviews-retry, dev-lead-issue-retry]
 
 permissions: {}
 
-concurrency:
-  # One active run per repo; ci-relay (check_run) keeps an ephemeral per-SHA slot
-  # so it can fire immediately without blocking or being blocked by the dispatch queue.
-  group: >-
-    ${{
-      github.event_name == 'check_run' && format('dev-lead-ci-relay-{0}', github.event.check_run.head_sha) ||
-      'dev-lead'
-    }}
-  cancel-in-progress: false
+# Concurrency is centralised in the reusable workflow (dev-lead-reusable.yml) with
+# per-issue / per-PR lanes, so issue pickups are never cancelled by PR follow-up
+# traffic and the grouping can't drift per-repo. See petry-projects/.github#402.
 
 jobs:
   dev-lead:
-    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@main
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v1-ring0
+    with:
+      agent_ref: dev-lead/v1-ring0
     secrets: inherit
     permissions:
       contents: write
@@ -57,3 +53,4 @@ jobs:
       issues: write
       actions: read
       checks: read
+      statuses: read   # required by dev-lead-reusable.yml since #435

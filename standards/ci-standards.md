@@ -22,7 +22,7 @@ where to send a fix when behavior needs to change.
 
 | Tier | Examples | What lives in `standards/workflows/` | Where logic lives | Edits allowed in adopting repo |
 |---|---|---|---|---|
-| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: petry-projects/.github/.github/workflows/<name>-reusable.yml@<version>`, where `<version>` is the canonical tag for that reusable (see `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh`; most are `@v1`, `pr-review-mention` is `@v2`) | The matching `*-reusable.yml` in this repo (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable in this repo — the canonical tag is bumped deliberately when a release is ready. |
+| **1. Stub** | `dev-lead.yml`, `dependency-audit.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `agent-shield.yml`, `feature-ideation.yml`, `pr-review-mention.yml` | A thin caller stub that delegates via `uses: …/<name>-reusable.yml@<name>/stable` — the reusable's moving `stable` channel tag ([Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)). Reusables not yet migrated to a channel keep their current canonical pin in the interim; `check_centralized_workflow_stubs` in `scripts/compliance-audit.sh` enforces the expected pin per reusable. | The matching `*-reusable.yml` (single source of truth) | **None** in normal use. May tune `with:` inputs where the reusable exposes them (e.g. `agent-shield` accepts `min-severity`, `required-files`; `feature-ideation` requires `project_context`). To change behavior, open a PR against the reusable; a release is cut and promoted by moving the channel tag, never by editing callers. |
 | **2. Per-repo template** | `ci.yml`, `sonarcloud.yml` | _(no template — see the patterns documented below)_ | In each repo, because the workflow is tech-stack-specific (language matrix, build tool, test framework) | **Limited.** Each adopting repo carries its own copy. Stay within the patterns in this document; do not change action SHAs, permission scopes, trigger events, or job names without raising a standards PR first. |
 | **GitHub-managed** | CodeQL default setup | _(no workflow file — managed via repo Settings → Code security)_ | GitHub | None. Configured via `apply-repo-settings.sh`; per-repo `codeql.yml` files are treated as drift by the compliance audit. See [§2 CodeQL Analysis](#2-codeql-analysis-github-managed-default-setup). |
 | **3. Free per-repo** | `release.yml`, project-specific automation | _(out of scope for this standard)_ | Per-repo | Free, but must still comply with the [Action Pinning Policy](#action-pinning-policy) and the [Required Workflows](#required-workflows) constraints. |
@@ -33,12 +33,266 @@ file with that header, **stop and read the header first** — if the change
 isn't allowed by the contract, the right move is a PR against the central
 reusable, not a local edit.
 
-> **Why pin to a canonical tag?** Stubs reference reusables by tag, not `@main`, so a
-> bad commit on the central repo's `main` branch cannot break every
-> downstream repo simultaneously. Each reusable has its own canonical tag
-> (most are `@v1`; `pr-review-mention` is `@v2`). A tag is bumped deliberately
-> when a backward-compatible release is ready; breaking changes publish a new
-> tag that downstream repos opt into explicitly.
+**Full-file identity (Tier 1).** A Tier-1 stub is **full-file identical across
+every adopting repo, modulo the tier channel pin** — the `uses:` ref and its
+matching `agent_ref`, pinned to the reusable's moving `stable` channel tag
+(`@<name>/stable`, or a canary-ring tag under the
+[stable channel](#reusable-workflow-versioning--the-stable-channel)).
+**Everything else is fixed: `on:`, `permissions:`, and `concurrency:` are
+_not_ repo-adjustable.** Trimming a trigger, narrowing a permission, or adding a
+`concurrency:` block when adopting the stub is drift, not a repo-specific
+liberty — the behavior lives in the reusable. To change any of it, open a PR
+against the reusable (or a standards PR that updates the template here) and let
+the channel tag promote the change centrally; never edit a caller to adjust its
+trigger, permission, or concurrency surface.
+
+### Reusable workflow versioning — the `stable` channel
+
+**Standard.** Every reusable workflow is versioned by a **moving `stable`
+channel tag**, and every caller pins to it **once** —
+`uses: …/<name>-reusable.yml@<name>/stable`. A caller must **never** pin a
+reusable to `@main` (a branch) and **never** to a frozen `@vX.Y.Z` (a version).
+This applies to **every** reusable workflow regardless of which repo hosts it
+(public or private) or which repo calls it (a downstream consumer or the
+reusable's own self-host duty).
+
+**Why not `@main` (a branch).** `@main` has no version boundary: the instant a
+commit lands on the reusable's default branch it is live for every caller at
+once — no canary, no health gate, no rollback. For a *self-hosting* reusable
+(one that gates changes to itself — e.g. an agent that reviews or merges its own
+PRs) it is worse: a broken change becomes the very version that must approve its
+own fix, so the fix is gated by the breakage — a circular dependency that fails
+closed.
+
+**Why not a frozen `@vX.Y.Z` (a version).** A bare version pin is immutable, so
+rolling out a change means **editing every caller** to the new tag: a fan-out PR
+per release, a partially-migrated fleet in between, and security fixes that wait
+behind that churn.
+
+**The `stable` channel gets both right.** It is a *moving* tag that always
+points at the current known-good release. Callers pin it once and are never
+edited again; a release is rolled out by **moving the tag centrally** and rolled
+back by moving it back.
+
+**Benefits.**
+
+- **Version boundary** — `main` can move freely; callers only ever see what `stable` points at.
+- **No caller churn** — pin once; promotion and rollback never touch caller repos.
+- **Instant, uniform rollback** — one tag move restores the last good release fleet-wide; no caller edits, no file surgery.
+- **Health-gated promotion** — a candidate is validated before `stable` advances, so callers never run an unvalidated version.
+- **Breaks self-host circular dependencies** — production runs the pinned channel, so an in-development version can no longer gate its own fix.
+- **Single source of version truth** — the `stable` tag is the one place that defines "what is in production"; immutable `vX.Y.Z` tags are the audit trail and rollback targets.
+- **Bounded supply-chain risk** — channel tags are first-party refs the org owns; a tag-protection ruleset restricts who may move them (see [Action Pinning Policy](#action-pinning-policy)).
+
+**Expected release process.**
+
+1. **Develop & merge** the change to the reusable's `main` as normal (reviewed, CI-green).
+2. **Cut** an immutable release tag `<name>/vX.Y.Z` at the merged commit — the audit trail and rollback target; never moved or deleted.
+3. **Promote through concentric rings** — advance each ring's channel to the new
+   `vX.Y.Z` from the innermost ring outward, moving to the next ring only after
+   the inner one has run it healthy for a soak window (see
+   [Staged promotion through concentric rings](#staged-promotion-through-concentric-rings)
+   below). Each promotion is a single central tag move, gated to an authorized identity.
+4. **`<name>/stable`** is the outermost ring and advances last — that is full-production rollout.
+5. **Roll back** (if a regression surfaces in any ring) by moving that ring's
+   channel back to the prior `vX.Y.Z` — the same move in reverse; callers recover
+   on their next run with no change on their side.
+
+Where a reusable also checks out its own scripts or prompts, thread an
+`agent_ref`-style input pinned to the same channel, so logic **and** code run at
+the one validated version.
+
+#### Staged promotion through concentric rings
+
+`stable` is not a single hop. A release reaches full production by passing
+through a series of **concentric rings** — channels ordered from the smallest
+blast radius to the whole fleet. A release is promoted **one ring at a time**,
+advancing to the next ring only after it has run healthy in the inner ring for a
+defined **soak window**:
+
+| Ring | Channel | Members (host-relative) | Blast radius |
+|---|---|---|---|
+| canary | `<name>/next` | the repo that **hosts** the reusable (dogfood at the source) | the host's own self-host duty |
+| 0 | `<name>/ring0` | the **other** org-infra repo (`.github` + `.github-private`, partitioned by host) | org infrastructure |
+| 1 | `<name>/ring1` | named low-traffic consumers | a couple of real consumers |
+| _n_ | `<name>/ring`_n_ | progressively more consumers | widening fleet |
+| Production | `<name>/stable` | everyone else | the whole fleet |
+
+`next` is **host-relative**: it resolves to whichever org-infra repo owns the reusable,
+and `ring0` is the other — so `next` + `ring0` always span `.github` + `.github-private`.
+For `dev-lead` (hosted in `.github-private`): `next` = `.github-private`, `ring0` = `.github`,
+`ring1` = `{TalkTerm, bmad-bgreat-suite}`, `stable` = the rest. The machine-readable source
+of truth is [`standards/canary-rings.json`](https://github.com/petry-projects/.github-private/blob/main/standards/canary-rings.json)
+in the host repo, consumed by the promotion automation.
+
+How it works:
+
+- **One immutable release, many channels.** Cut `<name>/vX.Y.Z` once; promotion is moving each ring's channel forward to it, innermost ring first.
+- **Callers stay put; the release moves.** A caller pins exactly one ring's
+  channel (most pin `stable`) and is never edited — the *release* advances
+  through the rings, the *callers* don't. Which ring a repo sits in is a
+  deployment choice, set once.
+- **Soak + health gate.** A ring's channel advances to the new release only
+  after the inner ring has run it healthy for the soak window (no regressions,
+  error budget intact). A failure in any ring **stops promotion** — the outer
+  rings never receive the bad version.
+- **Bounded blast radius + fast rollback.** A regression that slips past an inner ring is contained to that ring and rolled back with one tag move, long before it could reach `stable`.
+
+The canary ring (`next`) is the reusable's **own self-host**: it dogfoods every release first, at
+zero external blast radius. This is also what breaks the self-host circular
+dependency — production callers keep running `stable` while the new version is
+exercised on `next`, so a broken candidate can never gate its own fix.
+
+> **Rollout status.** The full ring model — host-relative `next`/`ring`_n_/`stable`
+> channels, immutable `<agent>/vX.Y.Z` releases, and promotion by a central tag move
+> — is **implemented and in production** for `dev-lead` (the pathfinder; `v1.4.0`
+> rolled out canary → rings → `stable` and verified). It is managed in
+> `petry-projects/.github-private` (the canary/ring versioning initiative, epic #495):
+>
+> - `scripts/cut-release.sh` cuts immutable releases.
+> - `standards/canary-rings.json` is the ring-membership source of truth.
+> - `scripts/canary-rollout.sh` + `.github/workflows/canary-rollout.yml` run the
+>   **automated, health-gated promotion**: a read-only `evaluate` every 4h reports
+>   each ring's gate state, and a dispatch-gated `promote` advances **one ring at a
+>   time** only when the rings already on the candidate pass the **soak gate** —
+>   volume `healthy_runs ≥ ceil(baseline_runs / 7)` **and** candidate failure-rate
+>   `≤` baseline (no synthetic floor; an unused reusable simply parks). Rollback is
+>   the same single tag move in reverse against the prior `vX.Y.Z`.
+> - The channel tags are protected by a `release-channel-tags` ruleset in the host repo
+>   (`.github-private`); the promotion workflow is the authorized mover.
+>
+> The authoritative process lives in that repo's `docs/release/` (`versioning.md`,
+> `runbook.md`); this section summarizes it. `pr-review` and the `.github`-hosted
+> reusables (e.g. `feature-ideation`) are being brought under the same model next
+> (#499/#616/#688). Until a given reusable has its ring channels cut, it may run on
+> `stable` alone and promote in one gated hop — an interim state, not the target.
+
+**Migration.** This is the target for all reusable workflows; they adopt it
+incrementally. A reusable that has not yet published a `stable` channel keeps its
+current pin until it migrates, at which point its callers re-pin once and the
+compliance audit (`scripts/compliance-audit.sh`) tightens to the channel for
+that reusable. The reference implementation and the full rationale live in the
+release-strategy initiative
+(`petry-projects/.github-private/docs/initiatives/agentic-release-strategy.md`).
+
+#### Caller-stub input forwarding across channel pins
+
+**Rule.** Never add or modify a `with:` forward on a channel-pinned caller stub
+to pass an input the **pinned channel does not yet declare**. GitHub validates a
+reusable's `with:` inputs against the workflow **as it exists at the pinned ref**,
+and only at **run startup** — so forwarding an input the channel has not yet
+published makes the stub fail closed with `startup_failure` the first time it is
+triggered on `main`.
+
+**Sequencing** — to add a new `workflow_call` input to a channel-pinned reusable
+and forward it from the stub, land the three steps **in this order**:
+
+1. **Land the input in the reusable** — merge the new `workflow_call` input into
+   the reusable's `main` (and cut its release tag).
+2. **Promote the pinned channel** to a commit that declares the input — move the
+   channel tag forward (`cut-release.sh --channel`, or the ring promotion) so the
+   ref the stub pins now includes the input.
+3. **Then teach the stub to forward it** — only now add the `with:` forward to the
+   caller stub.
+
+Doing these in any other order — most easily, adding the `with:` forward first —
+strands the stub on a channel that predates the input and breaks every trigger
+at startup.
+
+**Why PR CI does not catch this.** While a standard `pull_request` trigger
+executes the PR-branch stub, workflows triggered by comments or reviews (such as
+`pull_request_review` or `issue_comment`) always execute the **default-branch
+(base)** stub. Because the base-branch stub does not carry the new forward, and
+the pinned channel lags the PR, the new forward is exercised by **nothing** in
+PR CI. The change is green pre-merge and only dies at `startup_failure` on
+the **first real trigger after merge to `main`** (the failure mode behind
+incident #1034: a channel-pinned pr-review caller stub was edited to forward a
+`with:` input the pinned channel did not yet declare, breaking **every** review
+with `startup_failure`).
+
+**`actionlint` does not cover this.** `actionlint` input-checks only **local
+`./` reusable refs** — it never resolves the pinned **remote** channel, so it
+cannot see that the forwarded key is undeclared there. The dedicated guards below
+are required **in addition to** `actionlint`.
+
+**Reference guards** (landed in `.github-private` via #1052, companion to this
+standard):
+
+- `scripts/validate-caller-inputs.sh` — resolves each reusable `uses: …@<ref>`
+  carrying a `with:` block **at the pinned ref** and fails on any forwarded key
+  not declared there (includes an incident-#1034 regression test).
+- `scripts/stub_freeze_drift.sh` — byte-identity freeze of the ring-0 caller
+  stubs' forwarding block.
+- `pr-review-trigger-canary.yml` — a dry-run canary that fails loud on
+  `startup_failure` before a real trigger can.
+
+### Pure reusable workflows must be disabled
+
+**Standard.** A **pure reusable workflow** — one whose `on:` block declares
+**`workflow_call` and nothing else** — MUST be set to `disabled_manually` in the
+Actions UI, and MUST be named with a **`-reusable.yml`** suffix. Both apply to
+the single-source-of-truth reusable definition files hosted in
+`petry-projects/.github` and `petry-projects/.github-private`.
+
+**Naming.** The `-reusable.yml` suffix makes the "this is a library, safe to
+disable, never runnable on its own" property legible from the filename alone — a
+reader (or an auditor) should not have to open the file and parse its `on:` block
+to know it is a reusable. The suffix is a **readability aid, not the detection
+mechanism**: compliance tooling classifies by triggers, never by name (a name can
+lie — see the `pr-review.yml` engine, a pure reusable that predates this rule).
+When you extract logic into a new reusable, name it `<purpose>-reusable.yml` from
+the start. *Grandfathered exception:* `.github-private/.github/workflows/pr-review.yml`
+is a pure reusable that keeps its legacy name until it can be renamed in lockstep
+with its caller path and `pr-review/*` release-channel tags — tracked in
+`petry-projects/.github-private#1127`.
+
+**Why.** A pure reusable has no independent event triggers, so it can never run
+on its own — it executes **only** when another workflow invokes it via `uses:`.
+Left active, it clutters the Actions sidebar with an entry that never has its own
+runs, and a lone active-vs-disabled mix reads as "something is broken" to anyone
+auditing the repo. Disabling states plainly: *this is a library, not a runnable
+workflow.*
+
+**Disabling is safe — it has zero effect on callers.** GitHub **ignores** a
+reusable workflow's enabled/disabled state when it is invoked through
+`workflow_call`; the flag only suppresses a workflow's *own* event triggers, of
+which a pure reusable has none. A disabled reusable is still fully callable, at
+any ref, by any number of caller stubs. (Verified: `dev-lead-reusable.yml` sat
+disabled while 8 caller repos ran it successfully.) Caller count is irrelevant —
+a reusable with 0 callers and one with 8 are both disabled.
+
+**Exemption — anything with a real trigger stays active.** A workflow that
+declares `workflow_call` **alongside** a real trigger (`schedule`,
+`workflow_dispatch`, `push`, `pull_request`, `repository_dispatch`, …) is **not**
+a pure reusable: it runs on its own and MUST remain active. Example:
+`actions-fleet-monitor.yml` (has `schedule` + `workflow_dispatch` + `workflow_call`).
+
+Thin **caller / trigger stubs** are likewise not pure reusables — they carry the
+real event triggers and stay active. Note the common engine-plus-stub split: an
+**engine** that is `workflow_call`-only is a pure reusable and **is disabled**,
+while its **trigger stub** carries the events and **stays active**. For example
+`pr-review.yml` (the engine, `workflow_call`-only → disabled) is invoked by
+`pr-review-trigger.yml` (the stub, `check_suite`/`pull_request`/… → active).
+Disabling the engine does not stop reviews — the stub still fires and calls it.
+
+**How to disable.**
+
+```bash
+gh workflow disable <name>-reusable.yml -R petry-projects/<repo>
+# verify:
+gh api repos/petry-projects/<repo>/actions/workflows/<name>-reusable.yml --jq '.state'  # -> disabled_manually
+```
+
+**Compliance.** `check_reusable_workflows_disabled` in
+[`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh) flags any pure
+`workflow_call`-only workflow found in the `active` state as a `warning`
+finding. Note that disabled state is **not** captured in git — a newly added
+reusable is born `active` and must be disabled explicitly, which is exactly what
+this check catches on the next audit.
+
+It also flags, as a separate `warning` finding, any pure reusable whose
+filename doesn't carry the `-reusable.yml` suffix (grandfathered exception:
+`pr-review.yml`, tracked in `petry-projects/.github-private#1127`).
 
 ### Available templates
 
@@ -53,6 +307,7 @@ reusable, not a local edit.
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
 | [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
+| [`persona-mention.yml`](workflows/persona-mention.yml) | 1 | Route `@petry-projects/<role>` mentions to the addressed persona — one router for **all** personas ([persona-standards.md §4.1](persona-standards.md)) |
 | [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
@@ -66,6 +321,39 @@ beyond surface adaptation indicates either a missing template or a missing stand
 gh api repos/petry-projects/.github/contents/standards/workflows/<file>.yml \
   --jq '.content' | base64 -d > .github/workflows/<file>.yml
 ```
+
+### Deploying & syncing stubs
+
+**Standard.** Caller stubs are deployed and re-synced to consumer repos **via
+pull requests**, never by pushing directly to a repo's default branch.
+`scripts/deploy-standard-workflows.sh` is the canonical mechanism: for each
+target repo it creates a `standards-sync/<workflow>` branch off the default
+branch, writes the verbatim template onto it, and opens a PR labeled
+`standards-sync` (creating the label if the repo lacks it). It **never merges and
+never uses `--admin`** — the opened PRs run the repo's own CI and are landed by
+the normal review/auto-merge pipeline. The shared primitive lives in
+`scripts/lib/standards-deploy.sh` (`sd_deploy_via_pr`).
+
+**Why a PR, not a direct push.** A direct Contents-API push to the default
+branch is rejected (HTTP 409 `Required status check … expected`) on any repo
+whose ruleset enforces required status checks — the Contents API does **not**
+honor the org-admin ruleset bypass. It also skips review and CI on the repos
+where it *would* succeed. A PR works uniformly on protected and unprotected
+repos, runs CI against the change (e.g. AgentShield scans the new workflow), and
+leaves an auditable record. (Background: [#478](https://github.com/petry-projects/.github/issues/478).)
+
+```bash
+# Plan only — opens nothing:
+scripts/deploy-standard-workflows.sh --dry-run [--workflow <name>.yml] [--repo <name>]
+# Open the standards-sync PRs:
+scripts/deploy-standard-workflows.sh [--workflow <name>.yml] [--repo <name>] [--force]
+```
+
+The script is idempotent: it skips a repo whose stub already pins the template's
+`uses:` ref, and skips opening a second PR when a `standards-sync` one is already
+open for that workflow. Deployment never edits a caller's `uses:`/`agent_ref`
+pins by hand — a release is rolled out by moving the channel tag (see
+[Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
 
 ---
 
@@ -195,9 +483,9 @@ flipping default setup on causes both to run and double-bills CI minutes.
 
 **Status check name:** GitHub publishes default setup results under the
 required-status-check context name **`CodeQL`** (single context, regardless
-of how many languages are detected). The org `apply-rulesets.sh` script
-adds this context to the `code-quality` ruleset for any repo where default
-setup is configured.
+of how many languages are detected). The codified `code-quality` ruleset
+([`standards/rulesets/code-quality.json`](rulesets/code-quality.json)) carries
+the `CodeQL` context, applied to each repo by `apply-rulesets.sh`.
 
 **Escape hatch — when advanced setup is justified:** A repo MAY revert to
 an inline `codeql.yml` workflow only when it has a concrete need that
@@ -235,17 +523,140 @@ jobs:
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+      # First attempt. continue-on-error lets the retry step below recover from
+      # transient 403/5xx responses from binaries.sonarsource.com (the scanner
+      # CLI download), without failing the job on a single CDN blip.
       - name: SonarCloud Scan
-        if: ${{ env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        id: sonar
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        continue-on-error: true
+      - name: SonarCloud Scan (retry)
+        if: env.SONAR_TOKEN != '' && steps.sonar.outcome == 'failure'
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
 ```
 
 **Required secrets:** `SONAR_TOKEN`
 
 Each repo needs a `sonar-project.properties` file at root with project key and org.
+
+**Why the retry?** `SonarSource/sonarqube-scan-action` first downloads the
+SonarScanner CLI binary from `binaries.sonarsource.com`. That CDN occasionally
+returns transient `403`/`5xx` responses unrelated to the workflow, secrets, or
+runner — a single blip would otherwise fail the whole job and skew the fleet
+failure-rate metric. The first scan step uses `continue-on-error: true` and an
+`id`; the second step re-invokes the same pinned action only when the first
+attempt reports `outcome == 'failure'`. The job fails only when both attempts
+fail, so a single transient CDN error no longer trips the workflow.
+
+#### SonarCloud Exemption: First-Party Reusable-Ref S7637
+
+SonarCloud's GitHub Actions rule **`githubactions:S7637`** ("pin actions to a
+full-length commit SHA") fires on first-party
+`petry-projects/.github(-private)` reusable-workflow refs in thin caller stubs.
+Those refs are **intentionally not SHA-pinned** — the org pins them to a moving
+channel/tag (`@<name>/stable`, `@v1`/`@v2`) by design (see the
+[Action Pinning Policy exemption](#exception-internal-reusable-workflow-references)).
+The org compliance audit already exempts them via `check_action_pinning`, but
+SonarCloud is an **external** gate that doesn't know about that exemption, so it
+flags them as high-severity findings and can fail the quality gate.
+
+**Standard (canonical — inline NOSONAR in the stub):** the first-party
+channel-pinned `uses:` line in every caller stub MUST carry an inline
+`# NOSONAR(githubactions:S7637)` marker, e.g.:
+
+```yaml
+jobs:
+  dev-lead:
+    # First-party channel tag — do NOT SHA-pin (AGENTS.md mutable-ref exception).
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+```
+
+SonarCloud honors the inline comment and suppresses S7637 on exactly that line,
+so the exemption travels **with the stub file** — adopters who copy the template
+verbatim inherit it with **zero** per-repo `sonar-project.properties` entries and
+**no file rename**. Spike-validated on `bmad-bgreat-suite#334` (`3cbfa005`):
+Quality Gate ERROR → OK, `new_security_rating` C → A, required `SonarCloud`
+check fail → pass.
+
+The marker goes **only on first-party reusable-ref lines** pinned to a moving
+channel/tag (`@<name>/stable`, `@v1`/`@v2`). A SHA-pinned ref (e.g.
+`feature-ideation.yml`'s `@<sha> # v1`) already satisfies S7637 and gets **no**
+marker. Third-party actions stay SHA-pinned and S7637-enforced; never add a
+blanket glob or a file-wide disable.
+
+Caller-stub templates carrying a channel-pinned first-party reusable ref (and
+therefore the inline marker): `dev-lead.yml`, `agent-shield.yml`,
+`pr-review-mention.yml`, `pr-auto-review.yml`, `auto-rebase.yml`,
+`dependabot-rebase.yml`, `dependabot-automerge.yml`, `dependency-audit.yml`,
+`add-to-project.yml`, `idea-triage.yml`, `idea-enhancer.yml`,
+`initiative-planner.yml`. Copy each template verbatim from
+[`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows)
+and the marker comes with it.
+
+**Legacy (per-file `sonar-project.properties` — optional, transitional):** the
+older mechanism suppressed S7637 **only on the individual caller-stub workflow
+files** via one `sonar.issue.ignore.multicriteria` criterion per file path. It
+still works and is **accepted during the transition**, but is no longer required
+once the stubs carry the inline marker — the inline marker is the canonical
+mechanism and auto-covers any newly added channel-pinned stub without a per-repo
+edit. A blanket `resourceKey` such as `**/.github/workflows/*.yml`, `*.yml`, or
+`**` remains **forbidden**: it would also drop S7637 on `ci.yml` /
+`sonarcloud.yml`, leaving third-party actions un-enforced.
+
+```properties
+# Legacy / optional — only needed for stubs not yet carrying the inline marker.
+sonar.issue.ignore.multicriteria=s7637_agentshield,…
+sonar.issue.ignore.multicriteria.s7637_agentshield.ruleKey=githubactions:S7637
+sonar.issue.ignore.multicriteria.s7637_agentshield.resourceKey=**/agent-shield.yml
+# …one ruleKey/resourceKey pair per caller-stub file
+```
+
+The compliance audit's `check_sonar_s7637_exemption` enforces this org-wide: a
+repo is compliant when every channel-pinned first-party caller stub carries the
+inline marker **or** (during transition) the legacy per-file properties
+exemption is present. It files `sonar-s7637-exemption-missing` (warning) when a
+SonarCloud-gated repo has neither, and `sonar-s7637-exemption-too-broad` (error)
+when the legacy exemption uses a blanket workflow-path `resourceKey`.
+
+#### SonarCloud Exemption: First-Party `secrets: inherit` S7635
+
+SonarCloud's rule **`githubactions:S7635`** ("only pass required secrets to this
+workflow") fires on the **`secrets: inherit`** line of a first-party caller stub.
+Caller stubs pass `secrets: inherit` **by design** so the central reusable
+receives every secret it needs (e.g. `GH_PAT_WORKFLOWS` + `CLAUDE_CODE_OAUTH_TOKEN` + more) without each caller enumerating — and re-enumerating on every reusable
+change. The reusable is **first-party and fully trusted**, the same trust boundary
+that exempts the channel ref from S7637 above.
+
+**Standard (canonical — inline NOSONAR on the `secrets:` line):** every
+first-party caller stub that uses `secrets: inherit` MUST carry an inline
+`# NOSONAR(githubactions:S7635)` marker on that line, e.g.:
+
+```yaml
+jobs:
+  idea-triage:
+    uses: petry-projects/.github/.github/workflows/idea-triage-reusable.yml@idea-triage/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
+```
+
+Like the S7637 marker, SonarCloud suppresses S7635 on exactly that line, so the
+exemption travels **with the stub file** — verbatim adopters inherit it with
+**zero** per-repo `sonar-project.properties` entries. The grandfathered existing
+deployments pass because they are not "new code"; the rule only bites a stub the
+first time it is **added** to a SonarCloud-gated repo. (The legacy per-file
+`sonar.issue.ignore.multicriteria` mechanism with `ruleKey=githubactions:S7635`
+also works and is accepted during transition, but the inline marker is canonical.)
+
+Caller-stub templates that use `secrets: inherit` and therefore carry the S7635
+marker: `initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`.
+**Pending:** `dev-lead.yml`, `auto-rebase.yml`, `dependabot-automerge.yml`, and
+`pr-review-mention.yml` also use `secrets: inherit` but do not yet carry the
+marker; because they are already deployed fleet-wide (so re-syncing them fans out
+broadly) the marker is being added to them under a separate rollout — until then a
+**new** adoption of one of those four needs the legacy per-file S7635 exemption.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
@@ -307,7 +718,7 @@ If omitted, gitleaks runs in open-source mode (free, no license needed).
 > historical reference only.
 
 AI-assisted code review on PRs and issue automation via Claude Code Action.
-The template at [`standards/workflows/claude.yml`](workflows/claude.yml) is preserved for historical reference.
+The template has been removed; see [Migration from `claude.yml`](#migration-from-claudeyml) below for the historical reference and migration path.
 
 > **OIDC security constraint — `claude.yml` is immutable on PR branches.**
 > Anthropic's token endpoint validates that `.github/workflows/claude.yml` on
@@ -402,15 +813,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 1
+          # Full history so Claude can rebase / pull / resolve conflicts against main
+          # when the remote branch advances mid-run (e.g. auto-rebase merges).
+          fetch-depth: 0
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
             checks: read
+          # claude_args.--allowedTools replaces the action defaults — keep this
+          # list broad enough to cover interactive workflows (rebases, conflict
+          # resolution, gh CLI usage). Narrowing it has caused regressions.
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(grep:*),Bash(find:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(test:*),Edit,Write,Read,Grep,Glob,LS,MultiEdit,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillBash"
 
   # Automation mode: issue-triggered work — implement, open PR, review, and notify
   claude-issue:
@@ -435,7 +853,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           label_trigger: "claude"
@@ -444,7 +862,7 @@ jobs:
             actions: read
             checks: read
           claude_args: |
-            --allowedTools "Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
+            --allowedTools "Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue comment:*),Bash(gh run view:*),Bash(gh run watch:*),Edit,Write"
           prompt: |
             Implement a fix for issue #${{ github.event.issue.number }}.
 
@@ -518,12 +936,31 @@ A copy-paste ready template is available at [`standards/workflows/auto-rebase.ym
 On each run the workflow:
 
 1. Lists all open same-repo PRs excluding `dependabot[bot]` and fork PRs.
-2. For each PR that is behind the base branch, calls `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+2. Keeps only the PRs that are **eligible** under the `eligibility` input (see below),
+   then for each eligible PR that is behind the base branch, calls
+   `PUT /pulls/{n}/update-branch` with `merge` method to fast-forward it.
+   The `merge` method is used (never `rebase`) so existing approvals are not invalidated.
 3. On `workflows` permission error: posts an idempotent comment (sentinel `<!-- auto-rebase-blocked -->`) asking the author to rebase manually.
 4. On merge conflict (422): deletes any prior sentinel and posts a fresh comment
    (sentinel `<!-- auto-rebase-conflict -->`), which triggers the `claude-rebase`
    job in `claude-code-reusable.yml` to automatically resolve the conflict.
    If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
+
+**Eligibility (fan-out restriction):** Updating *every* behind PR generates a large
+volume of redundant branch-update CI runs, most re-staled before review. The reusable
+therefore gates updates on a tunable `eligibility` input:
+
+| `eligibility` | Updates a behind PR when… |
+|---------------|---------------------------|
+| `review-ready` (default) | the PR is **non-draft** AND (it has a **current `APPROVED` review** OR carries the `ready_label`, default `auto-rebase:ready`) |
+| `all` | always — restores the original unrestricted fan-out |
+
+Approval is determined from the **actual review states** (latest decision review per
+reviewer wins; a later `CHANGES_REQUESTED`/`DISMISSED` cancels an earlier `APPROVED`),
+**not** `reviewDecision`, which is `null` on repos without required reviews. The
+predicate lives in `.github/scripts/auto-rebase/lib/eligibility.sh` and is unit-tested
+via bats; new modes (e.g. a future "front-of-queue N") can be added there and selected
+through the `eligibility` input with no change to the workflow file.
 
 **Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** —
 comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation).
@@ -658,6 +1095,52 @@ feature proposals as GitHub Discussions in the **Ideas** category. Each proposal
 is a separate Discussion, updated by subsequent runs as the market and project
 evolve.
 
+**Triggers:** the weekly `schedule`, manual `workflow_dispatch`, **and
+`discussion: created`**. `claude-code-action` aborts on `discussion` event
+contexts, so the stub does **not** call the reusable inline on that event.
+Instead a `redispatch` job — gated to new Discussions in the **Ideas** category,
+skipping the bot's own creations — re-invokes the workflow via
+`workflow_dispatch` (using `GH_PAT_WORKFLOWS`), forwarding the Discussion number
+as the `target_discussion` input. The re-dispatched run puts the reusable in
+**single-idea enhancement mode**: it researches and refines that one new idea and
+posts a single enhancement comment, rather than running the broad scan.
+Enhancement is a comment (which does not re-fire `created`), so there is no
+trigger loop. This mirrors `initiative-planner.yml`'s redispatch bridge.
+
+> **#571 — never reference the `inputs` context in the reusable `with:`.** A
+> reusable-workflow call graph (`uses:` + `with:`) is validated at **workflow
+> setup**, before and regardless of the calling job's `if:`. The `inputs`
+> context is only populated for `workflow_dispatch` / `workflow_call`, so a
+> `with:` value referencing `${{ inputs.* }}` fails the whole run (zero jobs,
+> "Invalid workflow file") on the `discussion` trigger even though the `ideate`
+> job is gated off it. The stub therefore resolves dispatch inputs in an
+> ordinary `prep` job (whose step expressions run at job time and are skipped on
+> `discussion`) and passes them to `ideate` via `needs.prep.outputs.*` — an
+> always-valid context that defers the `with:` evaluation to run time. This is
+> enforced by [`lint-caller.sh`](../.github/scripts/feature-ideation/lint-caller.sh)
+> in the feature-ideation test suite.
+
+**Backlog enhancement (backfill) + dry-run.** Beyond enhancing *newly-created*
+Ideas, the reusable can **backfill the existing Ideas backlog**: dispatch with
+`enhance_backlog: true` to sweep this repo's open, **human-authored**,
+not-yet-enhanced Ideas and post **exactly one** enhancement comment on each
+(bots and already-enhanced Ideas are skipped). Combine with `dry_run: true` to
+**preview** — the intended per-Discussion comments are logged to the JSONL
+artifact and nothing is posted:
+
+```bash
+# Preview the backfill (posts nothing):
+gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true -f dry_run=true
+# Run it for real:
+gh workflow run feature-ideation.yml -R <owner>/<repo> -f enhance_backlog=true
+```
+
+Idempotency is **marker-continuous**: a Discussion is treated as already-enhanced
+if it carries **either** `<!-- feature-ideation:enhanced -->` **or** the legacy
+`<!-- idea-enhancer:enhanced -->`, so re-runs are no-ops and the cutover from the
+former standalone `idea-enhancer` never double-enhances. `target_discussion`
+(single-idea mode) takes precedence over `enhance_backlog` when both are set.
+
 **The pipeline (the reason this workflow exists):**
 
 | Phase | Skill | Purpose |
@@ -786,6 +1269,88 @@ understanding why they exist:**
 is the pilot adopter. The TalkTerm workflow is the standard caller stub
 with `project_context` set to a TalkTerm-specific paragraph — no other
 customisation.
+
+---
+
+### 10. Idea → Initiative pipeline (`initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`) — BMAD Method repos
+
+**Condition:** BMAD Method-enabled repos that want approved ideas turned into
+tracked initiatives (epic + story DAG) automatically. Builds on
+[Feature Ideation](#9-feature-ideation-feature-ideationyml--bmad-method-repos) —
+ideation produces ideas; this pipeline triages, enriches, and (on human approval)
+plans them.
+
+**Prerequisite:** Discussions enabled with an "Ideas" category, and the
+`idea:approved` label present on the repo.
+
+#### Architecture: thin caller stub → dispatch reusable → central planner
+
+Unlike feature-ideation (which runs the analyst inline), the BMAD Scrum Master
+planner and the vendored BMAD frameworks live **once** in
+`petry-projects/.github-private`. `claude-code-action` aborts on `discussion`
+event contexts, so each stub's reusable **re-dispatches** the central
+`workflow_dispatch` with the host repo passed as `target_repo`, rather than
+planning inline. Three stub + reusable pairs, all pinned to their `<name>/stable`
+channel:
+
+| Stub (`standards/workflows/`) | Reusable (`.github/workflows/`) | Trigger → action |
+|---|---|---|
+| [`initiative-planner.yml`](workflows/initiative-planner.yml) | [`initiative-planner-reusable.yml`](../.github/workflows/initiative-planner-reusable.yml) | `discussion [labeled] idea:approved` (trusted actor) → central planner builds an **inert** epic + story DAG (`initiative`, **not** `initiative:auto`) in the host repo |
+| [`idea-triage.yml`](workflows/idea-triage.yml) | [`idea-triage-reusable.yml`](../.github/workflows/idea-triage-reusable.yml) | weekly + dispatch → refresh the host repo's "Idea Promotion Queue" issue |
+| [`idea-enhancer.yml`](workflows/idea-enhancer.yml) | [`idea-enhancer-reusable.yml`](../.github/workflows/idea-enhancer-reusable.yml) | new Ideas Discussion + weekly → enrich the host repo's un-enhanced ideas |
+| [`initiative-driver.yml`](workflows/initiative-driver.yml) | _(none — direct `gh workflow run`)_ | `issues [closed, labeled] initiative:auto` + off-peak `schedule` → dispatches the central `initiative-driver` with `target_repo=<host>`; the central driver releases ready sub-issues of the host's `initiative:auto` epics to dev-lead |
+
+Two human gates keep judgement with a maintainer: adding `idea:approved` to a
+Discussion fires the planner; adding `initiative:auto` to the resulting epic
+hands it to `initiative-driver` for auto-implementation.
+
+#### Project-board funnel (hybrid)
+
+Where a planner-created epic lands depends on the repo:
+
+- **Consumer (fleet) repos** → the repo's **own** project board. Point the repo's
+  [`add-to-project`](workflows/add-to-project.yml) at its repo-level project.
+- **`petry-projects/.github` and `petry-projects/.github-private`** → the
+  **org-level** project (`orgs/petry-projects/projects/1`, "Initiatives").
+
+#### Adopting in a new repo
+
+1. Copy [`standards/workflows/initiative-planner.yml`](workflows/initiative-planner.yml)
+   and [`standards/workflows/initiative-driver.yml`](workflows/initiative-driver.yml)
+   to `.github/workflows/` (and, optionally,
+   [`standards/workflows/idea-triage.yml`](workflows/idea-triage.yml) and
+   [`standards/workflows/idea-enhancer.yml`](workflows/idea-enhancer.yml)) in the
+   target repo. Copy **verbatim** — the templates carry the inline
+   `# NOSONAR(githubactions:S7637)` and `# NOSONAR(githubactions:S7635)` markers,
+   so a SonarCloud-gated repo needs **no** `sonar-project.properties` edits (see
+   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637)
+   and [First-Party `secrets: inherit` S7635](#sonarcloud-exemption-first-party-secrets-inherit-s7635)).
+2. Ensure Discussions is enabled with an "Ideas" category, and **create the gate
+   labels** the pipeline relies on. The driver's `initiative:auto` gate **cannot be
+   armed if its label is missing** (the driver pilot hit exactly this — see #888),
+   so create them all up front:
+
+   ```bash
+   gh label create "idea:approved"      -R <owner>/<repo> -c 0E8A16 -d "Approved ideas ready for planning" 2>/dev/null || true
+   gh label create "initiative"         -R <owner>/<repo> -c 1D76DB -d "Tracked initiatives (epics)" 2>/dev/null || true
+   gh label create "initiative:auto"    -R <owner>/<repo> -c 0E8A16 -d "Armed initiatives for auto-implementation" 2>/dev/null || true
+   gh label create "dev-lead"           -R <owner>/<repo> -c 5319E7 -d "Issues assigned to the dev-lead agent" 2>/dev/null || true
+   gh label create "dev-lead:hands-off" -R <owner>/<repo> -c FBCA04 -d "Exclude from dev-lead agent automation" 2>/dev/null || true
+   gh label create "initiative:hold"    -R <owner>/<repo> -c FBCA04 -d "Initiatives on hold" 2>/dev/null || true
+   ```
+
+3. Confirm the org-level secret `GH_PAT_WORKFLOWS` is accessible **and its owner
+   has write access to the target repo** (the central planner writes the epic +
+   sub-issues cross-repo with that PAT).
+4. Point `add-to-project` per the hybrid funnel above.
+5. Approve an idea: add `idea:approved` to an Ideas Discussion. The central
+   planner materializes an inert epic + story DAG in the repo; review it and add
+   `initiative:auto` to the epic to begin auto-implementation.
+
+The cross-repo trigger is watched by the central
+`initiative-planner-canary.yml` and Fleet Monitor stub-drift checks, so a silent
+regression (e.g. the [#655](https://github.com/petry-projects/.github-private/issues/655)
+stale-base revert class) surfaces on the first approval rather than going unnoticed.
 
 ---
 
@@ -937,16 +1502,22 @@ incorrect pinned one.
 
 ### Exception: Internal Reusable Workflow References
 
-Calls to `petry-projects/.github` reusable workflows use tag references
-(`@v1`, `@v2`, or `@main`) — **not SHA pins** — and are exempt from this policy.
+Calls to first-party `petry-projects/*` reusable workflows are **exempt from
+SHA-pinning** — they are refs to workflows the org owns, not third-party
+actions. Per [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel),
+pin them to the reusable's moving `stable` channel tag (a reusable still being
+migrated keeps its current canonical tag in the interim). Never `@main`, never a
+SHA.
 
 ```yaml
-# CORRECT — tag ref for internal reusable workflow
-uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@v1
-uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@v2
+# CORRECT — pin a reusable workflow to its moving `stable` channel tag (pin once)
+uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@<name>/stable
 
-# WRONG — do not SHA-pin internal reusable workflow refs
-uses: petry-projects/.github/.github/workflows/dev-lead-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
+# WRONG — a branch ref has no version boundary; a bad commit is instantly live for all callers
+uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@main
+
+# WRONG — do not SHA-pin first-party reusable workflow refs (and a frozen pin needs a per-caller edit to roll out)
+uses: petry-projects/<repo>/.github/workflows/<name>-reusable.yml@ee22b427cbce9ecadcf2b436acb57c3adf0cb63d
 ```
 
 **Why:** Pinning the `uses:` line in a Tier 1 caller stub creates a diff from
@@ -958,6 +1529,13 @@ The canonical tags (e.g. `@v1`, `@v2`) on `petry-projects/.github` are managed
 deliberately (bumped only on backward-compatible releases) and are not subject
 to tag-force-push risk because the org controls the tag. **Do not open
 compliance PRs to pin these references.**
+
+> **SonarCloud agrees via a scoped exemption, not a blanket disable.**
+> SonarCloud's external `githubactions:S7637` gate doesn't know about this
+> exemption, so each SonarCloud-gated repo suppresses S7637 *only on the
+> first-party caller-stub files* — see
+> [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637).
+> Third-party actions stay SHA-pinned.
 
 ---
 
@@ -1060,8 +1638,22 @@ org-level workflows that run across all repositories:
 
 - **Schedule:** Weekly (Monday 9:00 UTC)
 - **Purpose:** Security posture scoring for all public repos
+- **Token Requirements (`ORG_SCORECARD_TOKEN`):** Must be a Fine-Grained Personal Access
+  Token with **Repository access** set to "All repositories" (or specific audit targets).
+  It requires **Administration: Read-only**, **Metadata: Read-only**, **Contents: Read-only**,
+  and **Issues: Read and write**. Additionally, it requires **Organization: Metadata (Read-only)**
+  to list repositories in the organization.
 - **Behavior:** Creates/updates GitHub Issues with findings, auto-closes resolved findings
 - **Skip list:** CII-Best-Practices, Contributors, Fuzzing, Maintained, Packaging, Signed-Releases
+- **Pinned-Dependencies — first-party exemption:** Our first-party reusable refs
+  deliberately use moving channel tags (see [Action Pinning Policy](#action-pinning-policy)),
+  so Scorecard permanently docks `Pinned-Dependencies` and that finding can never
+  reach 10/10. Third-party **action** pinning is already enforced by
+  `check_action_pinning` in `scripts/compliance-audit.sh` (which exempts first-party),
+  so an Actions-only Pinned-Dependencies finding is fully covered elsewhere and is
+  suppressed (no issue) rather than looping forever. A finding is **still raised**
+  when it includes a non-Actions gap (container image / pip / npm / go) that nothing
+  else tracks — the suppression keys off Scorecard's per-detail dependency type.
 
 ---
 
@@ -1167,7 +1759,7 @@ All repos MUST align to the latest version of each action:
 | Action | Target Version | Repos Needing Update |
 |--------|---------------|---------------------|
 | **SonarCloud action** | v7.0.0 | ContentTwin, google-app-scripts (currently v6) |
-| **Claude Code Action** | v1.0.89 (`6e2bd528`) | All repos should use the same pinned SHA |
+| **Claude Code Action** | v1.0.123 (`51ea8ea7`) | All repos should use the same pinned SHA |
 
 > **`github/codeql-action` is no longer pinned per repo** because the
 > standard no longer ships a `codeql.yml` workflow. GitHub manages the
@@ -1180,6 +1772,87 @@ All repos MUST align to the latest version of each action:
 The dev-lead agent is a reactive, write-enabled automation that keeps pull requests in a clean, approvable, and mergeable state.
 It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 
+### Concurrency, pinning, and the permission contract
+
+The dev-lead stub is a **Tier-1 caller** ([Centralization tiers](#centralization-tiers)):
+it is **full-file identical across every adopting repo, modulo the tier channel
+pin** on its `uses:` ref and matching `agent_ref` (`@dev-lead/stable`, or a
+canary-ring tag — see
+[Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
+Its **`on:`, `permissions:`, and `concurrency:` surface is _not_
+repo-adjustable**: editing a trigger, permission scope, or concurrency block on a
+PR branch is drift, not a repo-specific liberty. Behavior changes go through the
+reusable (or a standards PR that updates the template), promoted by moving the
+channel tag centrally — never by editing this caller.
+
+Three things are deliberately **not** tuned in the caller stub — they are owned
+centrally so they cannot drift per repo:
+
+- **Concurrency.** The stub carries **no `concurrency:` block**. Concurrency is
+  centralized in `dev-lead-reusable.yml` with per-issue / per-PR / ci-relay
+  lanes (`dev-lead-issue-<n>`, `dev-lead-pr-<n>`, `dev-lead-ci-relay-<sha>`,
+  `cancel-in-progress: false`). This keeps a labeled-issue pickup from being
+  cancelled by unrelated PR follow-up traffic — per-stub concurrency previously
+  drifted into three incompatible variants and starved issue pickups
+  (petry-projects/.github#402). Running lanes in parallel is safe because the
+  agent checks out PR branches in an isolated worktree (petry-projects/.github-private#448).
+- **Pin.** The stub pins the reusable's moving `stable` channel tag —
+  `petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable`
+  — and passes `with: { agent_ref: dev-lead/stable }` so dev-lead's own
+  scripts/prompts checkout runs at the same pinned channel (it defaults to `main`
+  when omitted). This is the org reusable-workflow versioning standard; see
+  [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)
+  for the policy, benefits, and release process.
+- **Permissions.** The stub's `jobs.dev-lead.permissions` must grant the **full
+  set that the reusable requests**:
+
+  ```yaml
+  permissions:
+    contents: write
+    pull-requests: write
+    issues: write
+    actions: read
+    checks: read
+    statuses: read
+  ```
+
+  A reusable workflow can only use permissions its caller grants; if the
+  reusable requests a scope the stub lacks, **every consumer fails at startup**
+  (`startup_failure`, with no runtime error). When the reusable needs a new
+  scope, add it to the template **and** every shim *before* the reusable
+  requests it — the `caller-permissions` CI guard in `.github-private` enforces
+  that ordering.
+
+To exclude a specific PR or issue from the agent — e.g. a PR that edits the
+dev-lead workflow itself, so the agent doesn't pile commits onto its own infra
+change — add the **`dev-lead:hands-off`** label; the classifier then skips every
+event on it.
+
+### Failed issue implementations: visibility & bounded auto-retry
+
+When a labeled-issue implementation fails at the engine step **before a PR
+exists** (e.g. a transient timeout — `124` — or a one-off engine error), the
+agent no longer fails silently (petry-projects/.github-private#781):
+
+- The failure is classified (`rate-limited` / `missing-binary` / `engine-error`)
+  and surfaced **on the issue** with the cause, a run deep-link, and a redacted
+  tail of the session output — plus a machine-readable marker
+  `<!-- dev-lead-issue <N> status=<failed|rate-limited> attempt=<K> … -->`.
+- The scheduled `dev-lead-retry` cron scans open `dev-lead`-labeled issues for
+  that marker and re-dispatches a **`dev-lead-issue-retry`** `repository_dispatch`
+  (honouring any rate-limit `reset=` window), up to **3 attempts**. A consumer's
+  caller stub must therefore list `dev-lead-issue-retry` in
+  `on.repository_dispatch.types` (the template does — see [Adopting](#adopting-the-dev-lead-agent)).
+- After 3 attempts — or immediately for a deterministic `missing-binary` infra
+  failure — the agent labels the issue **`dev-lead:needs-human`** and stops
+  retrying it. The cron skips any issue carrying that label. Remove the label
+  (and re-apply `dev-lead`) to re-engage.
+
+The cron's three `repository_dispatch` retry types — `dev-lead-ci-failure`,
+`dev-lead-reviews-retry`, and `dev-lead-issue-retry` — are all centrally owned in
+`dev-lead-reusable.yml` (issue retries route to the issue lane via
+`client_payload.issue_number`).
+
 ### Adopting the Dev-Lead Agent
 
 1. Copy `standards/workflows/dev-lead.yml` verbatim to `.github/workflows/dev-lead.yml` in your repo.
@@ -1187,6 +1860,24 @@ It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 3. Set `GH_PAT_WORKFLOWS` — a PAT with read access to `petry-projects/.github-private` — as an org or repo secret (required for cross-repo script access).
 4. Optionally set `vars.DEV_LEAD_ENGINE` to `claude` (default), `gemini`, or `copilot`.
 5. Optionally set `vars.DEV_LEAD_DRY_RUN=true` during the initial rollout period.
+6. **If the repo is SonarCloud-gated**, the S7637 exemption is already baked
+   into the stub: `dev-lead.yml`'s `uses:` line carries the inline
+   `# NOSONAR(githubactions:S7637)` marker, so copying the template verbatim
+   (step 1) is all that is required. `dev-lead.yml` is a first-party
+   reusable-ref caller stub pinned to a moving channel tag — `@dev-lead/stable`,
+   or a canary-ring tag (`@dev-lead/ring0` | `@dev-lead/ring1` | `@dev-lead/next`)
+   under the [canary-rings rollout](#reusable-workflow-versioning--the-stable-channel).
+   That mutable ref is intentionally **not** SHA-pinned, so without the marker
+   SonarCloud's `githubactions:S7637` would flag it at HIGH severity, drive
+   `new_security_rating` to **C**, and fail the Quality Gate — blocking the
+   required `SonarCloud` check. The inline marker suppresses S7637 on exactly
+   that line and travels with the file. **No `sonar-project.properties` entry is
+   needed.** (The legacy per-file `s7637_devlead` criterion keyed to
+   `**/dev-lead.yml` still works and is accepted during the transition, but is
+   optional once the stub carries the marker.) See
+   [SonarCloud Exemption: First-Party Reusable-Ref S7637](#sonarcloud-exemption-first-party-reusable-ref-s7637);
+   `check_sonar_s7637_exemption` files `sonar-s7637-exemption-missing` only when
+   a repo has neither the inline marker nor the legacy entry.
 
 ### Required secrets
 
@@ -1195,7 +1886,30 @@ It responds to CI failures, bot reviews, human `@mentions`, and labeled issues.
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes | Primary LLM engine |
 | `GH_PAT_WORKFLOWS` | Yes (cross-repo) | Read access to `.github-private` scripts; push workflow files |
 | `GOOGLE_API_KEY` | No | Gemini engine fallback |
-| `GH_PAT` | No | Copilot engine |
+| `GH_PAT` | No | Copilot engine — **must be a fine-grained PAT.** Classic tokens (`ghp_…`) are rejected at runtime |
+
+### Failure-mode runbook
+
+When Fleet Monitor flags a `dev-lead.yml` stub as DEGRADED (failure rate > 10%),
+the fix is almost never in the stub itself — the stub is a Tier-1 caller and
+the centralized contract makes it byte-equivalent across repos. Match the
+failed-run log line against the table below and act in the indicated repo.
+
+| Log signature in failing run | Root cause | Where to fix |
+|------------------------------|-----------|--------------|
+| `Process completed with exit code 124` after a long-running `dispatch` step | Engine call timed out inside the reusable (per-tier `timeout`). For a **labeled-issue** run this now posts a cause-bearing marker and is auto-retried up to 3× before escalating to `dev-lead:needs-human` (see [Failed issue implementations](#failed-issue-implementations-visibility--bounded-auto-retry)) | `petry-projects/.github-private` — engine timeout / step-level `timeout-minutes` in `dev-lead-reusable.yml` |
+| `_ApiError ... code:429 ... Resource has been exhausted` / `RetryableQuotaError` | `GOOGLE_API_KEY` project is out of quota or prepayment credits | Google AI Studio billing for the project backing `GOOGLE_API_KEY`; until refilled, the Gemini step of the engine-fallback cascade will keep failing |
+| `Error: Classic Personal Access Tokens (ghp_) are not supported by Copilot` | `GH_PAT` is a Classic PAT and the engine cascade fell through to Copilot | Rotate `GH_PAT` to a fine-grained PAT at the org-secret level |
+| `startup_failure` with no step logs | Stub is missing a permission the reusable now requests | Update **the template** in `standards/workflows/dev-lead.yml` and every adopting stub *before* the reusable starts requesting the scope (see [Concurrency, pinning, and the permission contract](#concurrency-pinning-and-the-permission-contract)) |
+
+High cancellation counts on the run history are expected and not a defect:
+the reusable uses per-issue / per-PR / ci-relay lanes with
+`cancel-in-progress: false`, so queued events that another lane preempts still
+register as cancelled runs in the metrics window.
+
+When triage points at the reusable or an external secret, **close the Fleet
+Monitor issue with a comment linking to the upstream fix** rather than editing
+the stub — local edits to a Tier-1 stub are drift.
 
 ### Migration from `claude.yml`
 

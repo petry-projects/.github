@@ -2,6 +2,7 @@
 # Creates/updates/closes GitHub Issues for findings across the org.
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#openssf-scorecard-org-scorecardyml
 name: Org Scorecard Review
+# readme-report: Weekly OpenSSF Scorecard security-posture review across public repos; findings tracked as issues.
 
 on:
   schedule:
@@ -127,6 +128,40 @@ jobs:
                 --json number,title \
                 -q ".[] | select(.title | startswith(\"$ISSUE_TITLE\")) | .number" \
                 | head -1)
+
+              # First-party channel-tag exemption for Pinned-Dependencies (#709).
+              # Our first-party reusable refs deliberately use mutable channel tags
+              # (<agent>/v<M>-<tier>) per ci-standards.md#action-pinning-policy, so
+              # Scorecard permanently docks Pinned-Dependencies and this issue never
+              # reached 10/10 or closed. Third-party ACTION pinning is already
+              # enforced by compliance-audit.sh check_action_pinning (which exempts
+              # first-party) — so an Actions-only Pinned-Dependencies finding is
+              # fully covered elsewhere and is pure noise. Scorecard's detail lines
+              # name the dependency type, so suppress the issue only when ALL of
+              # these hold: (1) at least one "not pinned" detail exists, confirming
+              # the expected detail format is present, and (2) every such detail is a
+              # GitHubAction. Keep it whenever there is a non-Actions gap
+              # (containerImage / pip / npm / go) or when no recognisable detail
+              # lines are found (format changed — errs toward keeping the issue).
+              if [ "$CHECK_NAME" = "Pinned-Dependencies" ] && [ "$SCORE" != "10" ]; then
+                TOTAL_WARN=$(echo "$ROW" | jq -r \
+                  '[.details[]? | select(test("not pinned by hash"; "i"))] | length' \
+                  2>/dev/null || echo "0")
+                NON_ACTION_WARN=$(echo "$ROW" | jq -r \
+                  '[.details[]? | select(test("not pinned by hash"; "i")) | select(test("GitHubAction"; "i") | not)] | length' \
+                  2>/dev/null || echo "1")
+                if [ "${TOTAL_WARN:-0}" -gt 0 ] && [ "${NON_ACTION_WARN:-1}" -eq 0 ]; then
+                  echo "Pinned-Dependencies for $REPO is Actions-only — covered by compliance-audit + deliberate first-party channel tags; suppressing issue (#709)"
+                  if [ -n "$EXISTING_ISSUE" ]; then
+                    EXEMPT_MSG="Auto-closing (accepted exception, #709): this Pinned-Dependencies finding is limited to GitHub Actions refs."
+                    EXEMPT_MSG="$EXEMPT_MSG Third-party action pinning is enforced by \`compliance-audit.sh\` (which exempts first-party),"
+                    EXEMPT_MSG="$EXEMPT_MSG and our first-party reusable refs deliberately use mutable channel tags per \`ci-standards.md#action-pinning-policy\`. No action needed."
+                    gh issue close "$EXISTING_ISSUE" --repo "$ORG/$REPO" --comment "$EXEMPT_MSG"
+                    CLOSED_COUNT=$((CLOSED_COUNT + 1))
+                  fi
+                  continue
+                fi
+              fi
 
               if [ "$SCORE" -eq 10 ]; then
                 # Check passed - close existing issue if any

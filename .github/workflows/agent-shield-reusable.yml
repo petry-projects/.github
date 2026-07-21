@@ -47,7 +47,7 @@ jobs:
     name: AgentShield
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # --- Deep security scan via AgentShield CLI ---
       # Uses ecc-agentshield (https://github.com/affaan-m/agentshield)
@@ -57,7 +57,7 @@ jobs:
           AS_VERSION: ${{ inputs.agentshield-version }}
           AS_SEVERITY: ${{ inputs.min-severity }}
         run: |
-          npx "ecc-agentshield@${AS_VERSION}" scan \
+          npx --ignore-scripts "ecc-agentshield@${AS_VERSION}" scan \
             --path . \
             --min-severity "${AS_SEVERITY}" \
             --format terminal

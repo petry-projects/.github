@@ -42,18 +42,46 @@
 PP_REQUIRED_SA_SETTINGS=(
   "secret_scanning:enabled:error:Secret scanning must be enabled"
   "secret_scanning_push_protection:enabled:error:Secret scanning push protection must be enabled"
-  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled"
-  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled"
+  "secret_scanning_ai_detection:enabled:warning:Secret scanning AI detection should be enabled (requires GitHub Copilot subscription; absent means the feature is unavailable for the current org plan)"
+  "secret_scanning_non_provider_patterns:enabled:warning:Secret scanning non-provider patterns should be enabled (requires GitHub Advanced Security)"
   "dependabot_security_updates:enabled:warning:Dependabot security updates should be enabled"
 )
 
-# Minimum entries that every repo's .gitignore MUST contain. Every repo
-# starting from the org baseline at /.gitignore satisfies these by default.
-PP_REQUIRED_GITIGNORE_PATTERNS=(
-  ".env"
-  "*.pem"
-  "*.key"
+# Plan-gated keys that cannot be configured without a plan upgrade. A null/absent
+# status for these keys is not actionable and should not generate a finding.
+PP_PLAN_GATED_KEYS=(
+  "secret_scanning_ai_detection"
+  "secret_scanning_non_provider_patterns"
+  "dependabot_security_updates"
 )
+
+# Keys that specifically require GitHub Advanced Security (GHAS). Unlike the
+# plan-gated keys above, when GHAS is unavailable GitHub reports these as
+# "disabled" (present, not absent) and silently ignores any PATCH to enable
+# them (HTTP 200, no change). A non-compliant status is therefore non-actionable
+# whenever security_and_analysis.advanced_security.status is not "enabled", so
+# the finding must be suppressed to avoid a recurring, un-fixable audit warning.
+PP_GHAS_GATED_KEYS=(
+  "secret_scanning_non_provider_patterns"
+)
+
+# Canonical marker lines wrapping the org-managed L1 secrets baseline block in
+# every repo's .gitignore. The block between (and including) these markers is
+# copied verbatim from this repo's /.gitignore; everything BELOW the END marker
+# is per-repo L2 (ecosystem/OS) and is never inspected. See
+# standards/gitignore-standard.md#managed-block-markers.
+PP_GITIGNORE_BEGIN_MARKER='# >>> BEGIN petry-projects secrets baseline (managed by .github — do not edit) >>>'
+PP_GITIGNORE_END_MARKER='# <<< END petry-projects secrets baseline <<<'
+
+# Path to the org canonical /.gitignore — the source of truth the baseline
+# drift check hashes against. Defaults to this repo's root .gitignore (this
+# library lives at scripts/lib/, so ../../ is the repo root). Overridable so
+# the bats suite can point at a synthetic fixture.
+PP_CANONICAL_GITIGNORE="${PP_CANONICAL_GITIGNORE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.gitignore}"
+
+# Standard reference for the .gitignore baseline check. This check enforces the
+# dedicated .gitignore standard, not the push-protection standard.
+PP_GITIGNORE_STANDARD_REF="standards/gitignore-standard.md"
 
 # Number of days back the bypass-recency check looks for unjustified
 # push-protection bypasses.
@@ -75,8 +103,11 @@ pp_apply_security_and_analysis() {
   current=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$current" = "{}" ] || [ -z "$current" ]; then
-    err "Could not fetch security_and_analysis for $ORG/$repo — check token has admin scope"
-    return 1
+    # Cannot read the current security_and_analysis state — the token may lack
+    # admin or security_events scope, or the settings have not yet been
+    # configured.  Apply all required settings unconditionally: every required
+    # value is "enabled", so this is idempotent and safe.
+    info "  security_and_analysis is currently unreadable — applying all required settings"
   fi
 
   local needs_patch=false
@@ -112,9 +143,36 @@ pp_apply_security_and_analysis() {
   full_payload=$(echo "$payload" | jq '{security_and_analysis: .}')
 
   if echo "$full_payload" | gh api -X PATCH "repos/$ORG/$repo" --input - > /dev/null 2>&1; then
-    ok "$ORG/$repo security_and_analysis updated successfully"
+    ok "$ORG/$repo security_and_analysis PATCH accepted"
+
+    # Verify each patched key was actually applied. Some settings (e.g.
+    # secret_scanning_ai_detection, secret_scanning_non_provider_patterns)
+    # require GitHub Advanced Security or a Copilot subscription; the API
+    # accepts the PATCH (HTTP 200) but silently ignores keys that the org
+    # plan does not support. Re-fetch and warn for any key still not applied.
+    local post_patch post_actuals
+    post_patch=$(gh api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
+    post_actuals=$(echo "$post_patch" | jq -r 'to_entries | .[] | "\(.key):\(.value.status? // "null")"' 2>/dev/null || echo "")
+
+    local -A actuals
+    while IFS=':' read -r k v; do
+      if [ -n "$k" ]; then
+        actuals["$k"]="$v"
+      fi
+    done <<< "$post_actuals"
+
+    local post_entry post_key post_expected post_actual
+    for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
+      IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
+      post_actual="${actuals[$post_key]:-null}"
+      if [ "$post_actual" != "$post_expected" ]; then
+        info "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
+      else
+        ok "  $post_key: $post_actual (verified)"
+      fi
+    done
   else
-    err "Failed to PATCH security_and_analysis for $ORG/$repo — check admin scope and that the org plan supports these features"
+    err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
     return 1
   fi
 }
@@ -131,21 +189,81 @@ pp_check_security_and_analysis() {
   sa=$(gh_api "repos/$ORG/$repo" --jq '.security_and_analysis // {}' 2>/dev/null || echo "{}")
 
   if [ "$sa" = "{}" ] || [ -z "$sa" ]; then
-    add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
-      "Could not fetch security_and_analysis — token may lack admin scope, or the repo's plan does not expose these settings" \
-      "$PP_STANDARD_REF#required-repo-level-settings"
+    # security_and_analysis is not readable via the current token (requires
+    # admin permissions on the repository).  Use the secret-scanning alerts
+    # endpoint as a proxy: an admin with the security_events scope (but not
+    # the full repo scope) can access the alerts endpoint even when
+    # security_and_analysis is unavailable due to scope differences.  Note:
+    # the alerts endpoint requires repository admin privileges regardless of
+    # visibility — public repositories do not bypass the admin requirement.
+    # A valid array response confirms scanning is active; a non-array
+    # response (404/error) suggests it may be disabled.
+    local alerts_response
+    alerts_response=$(gh_api \
+      "repos/$ORG/$repo/secret-scanning/alerts?state=open&per_page=1" \
+      2>/dev/null || echo "null")
+
+    if echo "$alerts_response" | jq -e 'type == "array"' > /dev/null 2>&1; then
+      # Alerts API returned a valid array — secret scanning is active.
+      # Remaining settings (push_protection, ai_detection, non_provider_patterns,
+      # dependabot_security_updates) cannot be individually verified without
+      # admin / security_events scope; report as partially unverifiable so the
+      # finding reflects the actual state of knowledge.
+      add_finding "$repo" "push-protection" "security_and_analysis_unverifiable" "warning" \
+        "Secret scanning is active but secret_scanning_push_protection, secret_scanning_ai_detection, secret_scanning_non_provider_patterns, and dependabot_security_updates cannot be individually verified — the audit token lacks repository admin permissions. To enable audit verification: regenerate the PAT backing ORG_SCORECARD_TOKEN with the security_events scope (Developer Settings → Personal access tokens) and update the secret value. To enforce all required settings: run \`scripts/apply-repo-settings.sh $repo\` with a repository-admin token." \
+        "$PP_STANDARD_REF#required-repo-level-settings"
+    else
+      # Both the primary API field and the proxy check indicate that scanning
+      # may be disabled or the token cannot reach the API at all.
+      add_finding "$repo" "push-protection" "security_and_analysis_unavailable" "warning" \
+        "Could not fetch security_and_analysis and the secret-scanning alerts proxy check also returned a non-array response — token may lack admin or \`security_events\` OAuth scope, or secret scanning may be disabled. Run \`scripts/apply-repo-settings.sh $repo\` with an admin token to enable all required settings, then add \`security_events\` scope to \`ORG_SCORECARD_TOKEN\` to allow the audit to verify them." \
+        "$PP_STANDARD_REF#required-repo-level-settings"
+    fi
     return
   fi
 
-  local entry key expected severity detail actual
+  # GitHub Advanced Security availability gates the GHAS-only settings below.
+  # When advanced_security is absent or not "enabled", GHAS is unavailable.
+  local ghas_status
+  ghas_status=$(echo "$sa" | jq -r '.advanced_security.status // "null"')
+
+  local entry key expected severity detail actual is_plan_gated is_ghas_gated
   for entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     actual=$(echo "$sa" | jq -r ".\"$key\".status // \"null\"")
-    if [ "$actual" != "$expected" ]; then
-      add_finding "$repo" "push-protection" "$key" "$severity" \
-        "$detail (current: \`$actual\`, expected: \`$expected\`)" \
-        "$PP_STANDARD_REF#required-repo-level-settings"
+    if [ "$actual" = "$expected" ]; then
+      continue
     fi
+    # A null/absent status for a plan-gated key means the feature is unavailable
+    # for the current org plan — skip rather than creating a non-actionable
+    # compliance finding that cannot be remediated without a plan upgrade.
+    is_plan_gated=false
+    for plan_key in "${PP_PLAN_GATED_KEYS[@]}"; do
+      if [ "$key" = "$plan_key" ]; then
+        is_plan_gated=true
+        break
+      fi
+    done
+    if [ "$is_plan_gated" = true ] && [ "$actual" = "null" ]; then
+      continue
+    fi
+    # A GHAS-gated key reported as anything other than "enabled" (including
+    # "disabled") is non-actionable when GHAS itself is unavailable — GitHub
+    # accepts but silently ignores PATCHes to enable it, so flagging it would
+    # produce a recurring finding that can never be remediated on this plan.
+    is_ghas_gated=false
+    for ghas_key in "${PP_GHAS_GATED_KEYS[@]}"; do
+      if [ "$key" = "$ghas_key" ]; then
+        is_ghas_gated=true
+        break
+      fi
+    done
+    if [ "$is_ghas_gated" = true ] && [ "$ghas_status" != "enabled" ]; then
+      continue
+    fi
+    add_finding "$repo" "push-protection" "$key" "$severity" \
+      "$detail (current: \`$actual\`, expected: \`$expected\`)" \
+      "$PP_STANDARD_REF#required-repo-level-settings"
   done
 }
 
@@ -200,8 +318,10 @@ pp_check_secret_scan_ci_job() {
     return
   fi
 
-  # Match actual action references, not bare mentions in comments or docs.
-  if ! echo "$ci_content" | grep -qE 'uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@'; then
+  # Accept either the gitleaks action or the gitleaks CLI (inline or block run:).
+  # The action requires a paid org license (gitleaks.io); the CLI installed via
+  # binary download is a license-free alternative.
+  if ! echo "$ci_content" | grep -qE '(^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(gitleaks/gitleaks-action|zricethezav/gitleaks-action)@|gitleaks[[:space:]]+detect([[:space:]]|$))'; then
     add_finding "$repo" "push-protection" "secret_scan_ci_job_present" "error" \
       "\`ci.yml\` does not contain a job using \`gitleaks\` — add the secret-scan job from the standard" \
       "$PP_STANDARD_REF#required-ci-job"
@@ -209,42 +329,89 @@ pp_check_secret_scan_ci_job() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: .gitignore contains the baseline secret-protection entries
+# Check: .gitignore secrets-baseline marker block matches the org canonical
 # ---------------------------------------------------------------------------
-pp_check_gitignore_secrets_block() {
+# Extract the L1 secrets-baseline span (BEGIN … END markers, inclusive) from
+# the .gitignore content on stdin. Prints nothing when the block is absent or
+# incomplete (BEGIN without a matching END). Everything below the END marker is
+# ignored, so per-repo L2 ecosystem/OS entries never affect the output.
+pp_extract_baseline_block() {
+  tr -d '\r' | awk -v b="$PP_GITIGNORE_BEGIN_MARKER" -v e="$PP_GITIGNORE_END_MARKER" '
+    $0 == b { inblock = 1 }
+    inblock { buf = buf $0 "\n" }
+    $0 == e && inblock { printf "%s", buf; found = 1; exit }
+    END { if (!found) exit 1 }
+  '
+}
+
+# Emit the SHA-256 of stdin (hex digest only). Prefers coreutils sha256sum;
+# falls back to `shasum -a 256` on systems (e.g. macOS) without it.
+pp_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+pp_check_gitignore_baseline() {
   local repo="$1"
+
+  # Canonical L1 block from the org /.gitignore — the source of truth. Guard
+  # against a missing/unreadable canonical so a broken baseline can't silently
+  # pass every repo.
+  local canonical_block="" canonical_hash
+  if [ -r "$PP_CANONICAL_GITIGNORE" ]; then
+    canonical_block=$(pp_extract_baseline_block < "$PP_CANONICAL_GITIGNORE" 2>/dev/null) || canonical_block=""
+  fi
+  if [ -z "$canonical_block" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "Could not read the canonical secrets-baseline block from the org \`.gitignore\` — the audit cannot verify baseline drift" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
+    return
+  fi
+  canonical_hash=$(printf '%s' "$canonical_block" | pp_sha256)
 
   local gi_b64
   gi_b64=$(gh_api "repos/$ORG/$repo/contents/.gitignore" --jq '.content // ""' 2>/dev/null || echo "")
 
   if [ -z "$gi_b64" ]; then
-    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-      "No \`.gitignore\` at repo root — start from the org baseline at /.gitignore" \
-      "$PP_STANDARD_REF#required-gitignore-entries"
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "No \`.gitignore\` at repo root — copy the secrets-baseline block verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#application-to-a-repository"
     return
   fi
 
-  local gi_content
-  gi_content=$(echo "$gi_b64" | tr -d '\n ' | base64 -d 2>/dev/null || echo "")
+  local gi_content b64_flag="-d"
+  if ! printf '' | base64 -d >/dev/null 2>&1; then
+    b64_flag="-D"
+  fi
+  gi_content=$(echo "$gi_b64" | tr -d '\n ' | base64 "$b64_flag" 2>/dev/null || echo "")
 
   if [ -z "$gi_content" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` content could not be decoded or is empty — copy the secrets-baseline block verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
     return
   fi
 
-  local missing=()
-  local pattern
-  for pattern in "${PP_REQUIRED_GITIGNORE_PATTERNS[@]}"; do
-    # Use fixed-string match anchored to a line; ignore lines that start with `!`
-    # so a negation can't satisfy the requirement for the broad pattern.
-    if ! echo "$gi_content" | grep -vE '^[[:space:]]*!' | grep -qxF "$pattern"; then
-      missing+=("$pattern")
-    fi
-  done
+  local repo_block
+  repo_block=$(printf '%s\n' "$gi_content" | pp_extract_baseline_block) || repo_block=""
 
-  if [ ${#missing[@]} -gt 0 ]; then
-    add_finding "$repo" "push-protection" "gitignore_secrets_block" "warning" \
-      "\`.gitignore\` is missing baseline secret patterns: $(IFS=', '; echo "${missing[*]}") — copy the org baseline at /.gitignore" \
-      "$PP_STANDARD_REF#required-gitignore-entries"
+  if [ -z "$repo_block" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` is missing the \`BEGIN … END petry-projects secrets baseline\` block — copy it verbatim from the org \`/.gitignore\`" \
+      "$PP_GITIGNORE_STANDARD_REF#managed-block-markers"
+    return
+  fi
+
+  local repo_hash
+  repo_hash=$(printf '%s' "$repo_block" | pp_sha256)
+
+  if [ "$repo_hash" != "$canonical_hash" ]; then
+    add_finding "$repo" "push-protection" "gitignore_baseline" "error" \
+      "\`.gitignore\` secrets-baseline block has drifted from the org canonical block (hash mismatch) — re-copy it verbatim; never edit inside the markers" \
+      "$PP_GITIGNORE_STANDARD_REF#l1--secrets-baseline-org-managed-verbatim-required"
   fi
 }
 
@@ -305,6 +472,6 @@ pp_run_all_checks() {
   pp_check_security_and_analysis "$repo"
   pp_check_open_secret_alerts "$repo"
   pp_check_secret_scan_ci_job "$repo"
-  pp_check_gitignore_secrets_block "$repo"
+  pp_check_gitignore_baseline "$repo"
   pp_check_push_protection_bypasses "$repo"
 }

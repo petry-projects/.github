@@ -111,8 +111,10 @@ escape_ere() {
 # Retry wrapper for gh api calls (handles rate limits)
 gh_api() {
   local retries=3
+  local output
   for i in $(seq 1 $retries); do
-    if gh api "$@" 2>/dev/null; then
+    if output=$(gh api "$@" 2>/dev/null); then
+      echo "$output"
       return 0
     fi
     if [ "$i" -lt "$retries" ]; then
@@ -128,6 +130,12 @@ gh_api() {
 # and the PP_REQUIRED_SA_SETTINGS list. Sourced AFTER gh_api() and
 # add_finding() are defined, since the lib's check functions call them.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Directory holding the codified ruleset source of truth
+# (pr-quality.json / code-quality.json). check_ruleset_contents diffs each live
+# ruleset against these files. Overridable for tests.
+RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
+
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
 
@@ -135,6 +143,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # dl_cycle_trigger_label(). Used to re-engage dev-lead on persistent findings.
 # shellcheck source=lib/dev-lead-retrigger.sh
 . "$SCRIPT_DIR/lib/dev-lead-retrigger.sh"
+
+# Canary-ring pin model — ring_tier_for_repo(), ring_canonical_ref(),
+# ring_legacy_csv(). Shared with deploy-standard-workflows.sh so the audit's
+# "non-compliant" and the deploy sweep's "drift" stay in lockstep (#482).
+# shellcheck source=lib/ring-pins.sh
+. "$SCRIPT_DIR/lib/ring-pins.sh"
+
+# Canonical workflow-stub templates — the source of truth the caller-stub
+# surface-drift guard (check_stub_surface_drift) compares deployed stubs against.
+STANDARDS_WF_DIR="$SCRIPT_DIR/../standards/workflows"
 
 # ---------------------------------------------------------------------------
 # Ecosystem detection
@@ -229,11 +247,10 @@ check_action_pinning() {
     # Find uses: directives that are NOT SHA-pinned
     # SHA-pinned: uses: owner/action@<40+ hex chars>
     # Exclude docker:// and ./ references
-    # Exclude internal reusable workflow calls to petry-projects/.github and
-    # petry-projects/.github-private — per ci-standards.md#action-pinning-policy,
-    # these use deliberate tag refs (@v1, @v2, @main) and are explicitly exempt.
+    # Exclude $ORG/.github reusable workflow refs — these use tag refs
+    # (@v1, @v2, @main) by design per ci-standards.md#action-pinning-policy
     local unpinned
-    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE 'uses:[[:space:]]+petry-projects/(\.github|\.github-private)/' || true)
+    unpinned=$(echo "$decoded" | grep -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]+[^#]*@' | grep -vE '@[0-9a-f]{40}' | grep -vE '(docker://|\.\/)' | grep -vE "uses:[[:space:]]+$ORG/\\.github(-private)?/\\.github/workflows/" || true)
 
     if [ -n "$unpinned" ]; then
       local count
@@ -264,6 +281,87 @@ check_reusable_workflow_paths() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: Pure reusable workflows must be disabled
+# ---------------------------------------------------------------------------
+# A "pure reusable" is a workflow whose `on:` block declares workflow_call and
+# NOTHING else — it has no independent event triggers and can never run on its
+# own, only when invoked via `uses:`. Per ci-standards.md such workflows must be
+# disabled in the Actions UI. GitHub ignores a reusable's enabled/disabled state
+# when it is called via workflow_call, so disabling has zero effect on callers.
+# Hybrid workflows that ALSO declare a real trigger (schedule/workflow_dispatch/
+# push/pull_request/...) are exempt and must stay active.
+#
+# Three YAML forms of `on:` are handled: block form, inline scalar
+# (`on: workflow_call`), and inline sequence (`on: [workflow_call]`).
+check_reusable_workflows_disabled() {
+  local repo="$1"
+
+  local workflows
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+
+  for wf in $workflows; do
+    [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
+
+    local content decoded
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+    decoded=$(printf '%s' "$content" | base64 -d 2>/dev/null) || continue
+    [ -z "$decoded" ] && continue
+
+    # Extract the top-level trigger keys from the `on:` declaration.
+    # Handles block form, inline scalar (`on: workflow_call`), and
+    # inline sequence (`on: [workflow_call, push]`).
+    local triggers on_line
+    on_line=$(echo "$decoded" | grep -m1 '^on:')
+    if echo "$on_line" | grep -qE '^on:[[:space:]]+[a-zA-Z_]+[[:space:]]*(#.*)?$'; then
+      # Inline scalar: on: workflow_call
+      triggers=$(echo "$on_line" | sed 's/^on:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '[:space:]')
+    elif echo "$on_line" | grep -qE '^on:[[:space:]]*\['; then
+      # Inline sequence: on: [workflow_call, push]
+      triggers=$(echo "$on_line" | sed 's/^on:[[:space:]]*//' | tr -d '[]"'"'"' ' | tr ',' '\n' | tr -d '[:space:]')
+    else
+      # Block form: on:\n  key:\n  ...
+      triggers=$(echo "$decoded" | awk '
+        /^on:/                     { inblock=1; next }
+        inblock && /^[^[:space:]#]/ { exit }          # dedent -> left the on: block
+        inblock && /^  [a-zA-Z_]/  {                   # exactly-2-space-indented key
+          key=$1; sub(/:.*/,"",key); gsub(/[[:space:]]/,"",key); print key
+        }
+      ')
+    fi
+
+    # Pure reusable = workflow_call present AND no other trigger key.
+    echo "$triggers" | grep -qx "workflow_call" || continue
+    if [ "$(echo "$triggers" | grep -vx "workflow_call" | grep -c .)" -ne 0 ]; then
+      continue   # hybrid (workflow_call + real trigger) — exempt, must stay active
+    fi
+
+    # Naming lint — a pure reusable must carry the `-reusable.yml` suffix so its
+    # "library, safe to disable, never runnable" nature is legible from the
+    # filename. Detection above is by triggers, never by name (a name can lie);
+    # this is a separate readability finding. Grandfathered: the legacy
+    # `pr-review.yml` engine is tracked for rename in .github-private#1127 —
+    # suppress its naming finding until the rename lands.
+    if [[ "$wf" != *-reusable.yml && "$repo/$wf" != ".github-private/pr-review.yml" ]]; then
+      add_finding "$repo" "reusable-workflows" "reusable-naming-$wf" "warning" \
+        "Pure reusable workflow \`$wf\` (workflow_call-only) does not use the required \`-reusable.yml\` name suffix; rename it to \`<purpose>-reusable.yml\` so its reusable nature is legible from the filename" \
+        "standards/ci-standards.md#pure-reusable-workflows-must-be-disabled"
+    fi
+
+    # Pure reusable — check its enabled/disabled state.
+    local state
+    state=$(gh_api "repos/$ORG/$repo/actions/workflows/$wf" --jq '.state' 2>/dev/null || echo "")
+    [ -z "$state" ] && continue   # not registered (e.g. absent from default branch)
+
+    if [ "$state" != "disabled_manually" ]; then
+      add_finding "$repo" "reusable-workflows" "reusable-not-disabled-manually-$wf" "warning" \
+        "Pure reusable workflow \`$wf\` (workflow_call-only) is in state \`$state\` (expected \`disabled_manually\`); it must be intentionally disabled in the Actions UI. Disable with: \`gh workflow disable $wf -R $ORG/$repo\`" \
+        "standards/ci-standards.md#pure-reusable-workflows-must-be-disabled"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: Dependabot configuration
 # ---------------------------------------------------------------------------
 check_dependabot_config() {
@@ -276,7 +374,7 @@ check_dependabot_config() {
     add_finding "$repo" "dependabot" "missing-config" "error" \
       "Missing \`.github/dependabot.yml\` configuration file" \
       "standards/dependabot-policy.md"
-    return
+    return 0
   fi
 
   local decoded
@@ -346,7 +444,7 @@ check_repo_settings() {
   for entry in "${REQUIRED_SETTINGS_BOOL[@]}"; do
     IFS=':' read -r key expected severity detail <<< "$entry"
     local actual
-    actual=$(echo "$settings" | jq -r ".$key | if . == null then \"null\" else tostring end")
+    actual=$(printf '%s' "$settings" | jq -r --arg key "$key" '.[$key] | if . == null then "null" else tostring end')
     if [ "$actual" != "$expected" ]; then
       add_finding "$repo" "settings" "$key" "$severity" \
         "$detail (current: \`$actual\`, expected: \`$expected\`)" \
@@ -356,7 +454,7 @@ check_repo_settings() {
 
   # Default branch
   local default_branch
-  default_branch=$(echo "$settings" | jq -r '.default_branch')
+  default_branch=$(printf '%s' "$settings" | jq -r '.default_branch')
   if [ "$default_branch" != "main" ]; then
     add_finding "$repo" "settings" "default-branch" "error" \
       "Default branch is \`$default_branch\`, should be \`main\`" \
@@ -405,21 +503,405 @@ check_labels() {
 # ---------------------------------------------------------------------------
 check_rulesets() {
   local repo="$1"
+  local repo_json="${2:-}"
 
-  local rulesets
-  rulesets=$(gh_api "repos/$ORG/$repo/rulesets" --jq '.[].name' 2>/dev/null || echo "")
+  # Default branch drives which rulesets are "targeting main" below.
+  local default_branch
+  default_branch=$(echo "$repo_json" | jq -r '.default_branch // "main"' 2>/dev/null || echo "main")
+  if [ -z "$default_branch" ] || [ "$default_branch" = "null" ]; then
+    default_branch="main"
+  fi
 
-  if ! echo "$rulesets" | grep -qx "pr-quality"; then
+  # Fetch the full ruleset list once (id + name + everything). We need ids to
+  # pull each ruleset's bypass_actors below, so we cannot use --jq '.[].name'.
+  # Use --paginate so all rulesets are fetched regardless of page count, then
+  # reconstitute the per-page arrays into one flat array with jq -s '[.[]]'.
+  local rulesets_json
+  rulesets_json=$(gh_api --paginate "repos/$ORG/$repo/rulesets" 2>/dev/null | jq -s '[.[][]]' 2>/dev/null || echo "[]")
+  [ -z "$rulesets_json" ] && rulesets_json="[]"
+
+  local names
+  names=$(echo "$rulesets_json" | jq -r '.[].name' 2>/dev/null || echo "")
+
+  if ! echo "$names" | grep -qx "pr-quality"; then
     add_finding "$repo" "rulesets" "missing-pr-quality" "error" \
       "Missing \`pr-quality\` repository ruleset" \
       "standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
   fi
 
-  if ! echo "$rulesets" | grep -qx "code-quality"; then
+  if ! echo "$names" | grep -qx "code-quality"; then
     add_finding "$repo" "rulesets" "missing-code-quality" "error" \
       "Missing \`code-quality\` repository ruleset (required status checks)" \
       "standards/github-settings.md#code-quality--required-checks-ruleset-all-repositories"
   fi
+
+  check_ruleset_bypass_actors "$repo" "$default_branch" "$rulesets_json"
+  check_legacy_rulesets "$repo" "$default_branch" "$rulesets_json"
+  check_ruleset_contents "$repo" "$rulesets_json"
+}
+
+# ---------------------------------------------------------------------------
+# Check: Ruleset CONTENTS match the codified source of truth
+# ---------------------------------------------------------------------------
+# check_rulesets above only verifies a ruleset EXISTS BY NAME. That is the whole
+# of the pre-#766 check: a repo could flip `required_review_thread_resolution`
+# to false, drop `require_code_owner_review`, lower the approving-review count,
+# or widen `allowed_merge_methods`, and compliance still passed because a
+# ruleset named `pr-quality` still existed. The codified standard and live
+# reality could diverge arbitrarily and silently (issue #766).
+#
+# This check compares each live ruleset against its codified source in
+# standards/rulesets/*.json and raises a finding per drifted PARAMETER, naming
+# the parameter, the expected value, and the actual value.
+#
+# Design constraints (issue #766):
+#   - The codified JSON is the source of truth (#575/#580). Intent is NEVER
+#     inferred from the live ruleset — that is the detection-based builder
+#     apply-rulesets.sh retired for diverging from the standard.
+#   - Normalisation: only the parameters WE CODIFY are compared. The API returns
+#     fields the codified JSON does not carry (id, source, source_type,
+#     _links, required_reviewers, dismissal_restriction, actor ids) and in a
+#     different key order; iterating only codified keys and comparing values (not
+#     serialised blobs) ignores that noise so a clean fleet stays clean.
+#   - required_status_checks uses SUBSET semantics: the codified contexts are the
+#     unconditional fleet-wide minimum (github-settings.md#code-quality); a repo
+#     may ADD repo-specific checks (build-and-test, Go, coverage, …) — those are
+#     not drift. A MISSING codified context IS drift. Every other parameter
+#     (pull_request scalars + allowed_merge_methods) is matched exactly, with
+#     arrays compared order-insensitively.
+#   - Fail closed: if a ruleset cannot be fetched or parsed, or the codified
+#     source is missing, that is a finding — never a silent pass. An error must
+#     never read as "no drift" (the systemic bug in #755).
+#
+# Missing-by-name is already reported by check_rulesets (missing-pr-quality /
+# missing-code-quality); this check stays silent in that case to avoid double
+# reporting, and instead audits the contents of the rulesets that DO exist.
+
+# Codified ruleset name → the rule `type` whose parameters we audit.
+RULESET_CONTENT_SPECS=(
+  "pr-quality:pull_request:standards/github-settings.md#pr-quality--standard-ruleset-all-repositories"
+  "code-quality:required_status_checks:standards/github-settings.md#code-quality--required-checks-ruleset-all-repositories"
+)
+
+# jq program: given codified params ($exp) and live params ($act), emit one
+# TSV line (param<TAB>expected<TAB>actual) per drifted codified parameter.
+#   - required_status_checks: subset check on the set of `.context` values;
+#     drift only when a codified context is absent from the live set. `actual`
+#     is rendered as the missing contexts so the finding is directly actionable.
+#   - all other params: exact compare (arrays sorted so order never matters).
+RULESET_DRIFT_JQ='
+  def ctxset($v): (if ($v | type) == "array" then [ $v[]? | .context? ] | unique else [] end);
+  ($act // {}) as $a
+  | $exp | to_entries[]
+  | .key as $k
+  | .value as $ev
+  | ($a[$k]) as $av
+  | if $k == "required_status_checks" then
+      (ctxset($ev)) as $e
+      | (ctxset($av)) as $c
+      | ($e - $c) as $missing
+      | select(($missing | length) > 0)
+      | [ $k, ($e | join(", ")), ("missing: " + ($missing | join(", "))) ]
+    else
+      (if ($ev | type) == "array" then ($ev | sort) else $ev end) as $e
+      | (if ($av | type) == "array" then ($av | sort) else $av end) as $c
+      | select($e != $c)
+      | [ $k,
+          ($e | if type == "array" then map(tostring) | join(", ") else tostring end),
+          ($c | if type == "array" then map(tostring) | join(", ") else tostring end) ]
+    end
+  | @tsv
+'
+
+check_ruleset_contents() {
+  local repo="$1" rulesets_json="$2"
+
+  local spec name rtype std_ref
+  for spec in "${RULESET_CONTENT_SPECS[@]}"; do
+    IFS=':' read -r name rtype std_ref <<< "$spec"
+    _ruleset_contents_one "$repo" "$rulesets_json" "$name" "$rtype" "$std_ref"
+  done
+}
+
+# _ruleset_contents_one <repo> <rulesets_json> <name> <rule_type> <std_ref>
+# Audit one named ruleset's codified parameters against its live counterpart.
+_ruleset_contents_one() {
+  local repo="$1" rulesets_json="$2" name="$3" rtype="$4" std_ref="$5"
+
+  # --- Codified source of truth (fail closed if missing/unparseable) --------
+  local codified_file="$RULESETS_SRC_DIR/$name.json"
+  if [ ! -f "$codified_file" ]; then
+    add_finding "$repo" "rulesets" "ruleset-contents-source-missing-$name" "error" \
+      "Cannot audit \`$name\` ruleset contents: codified source of truth \`standards/rulesets/$name.json\` was not found. Treating as a finding rather than a pass (fail closed) — an audit that cannot read the standard must never read as \"no drift\"." \
+      "$std_ref"
+    return 0
+  fi
+  local exp_params
+  exp_params=$(jq -c --arg t "$rtype" '[.rules[]? | select(.type==$t) | .parameters][0] // empty' "$codified_file" 2>/dev/null || echo "")
+  if [ -z "$exp_params" ]; then
+    add_finding "$repo" "rulesets" "ruleset-contents-source-invalid-$name" "error" \
+      "Cannot audit \`$name\` ruleset contents: codified source \`standards/rulesets/$name.json\` has no \`$rtype\` rule parameters to compare against (unparseable or malformed). Fail closed." \
+      "$std_ref"
+    return 0
+  fi
+
+  # --- Resolve the live ruleset id by name ----------------------------------
+  # Absence-by-name is already reported by check_rulesets; stay silent here.
+  local rs_id
+  rs_id=$(echo "$rulesets_json" | jq -r --arg n "$name" '.[]? | select(.name==$n) | .id' 2>/dev/null || echo "")
+  [ -z "$rs_id" ] && return 0
+
+  # --- Fetch the full live ruleset (fail closed on error/invalid JSON) ------
+  local rs
+  rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+  if [ -z "$rs" ] || ! echo "$rs" | jq empty >/dev/null 2>&1; then
+    add_finding "$repo" "rulesets" "ruleset-contents-unfetchable-$name" "error" \
+      "Could not fetch or parse the \`$name\` ruleset (id $rs_id) to audit its contents against \`standards/rulesets/$name.json\`. Treating as drift, not a pass (fail closed): an error must never be conflated with \"no drift\"." \
+      "$std_ref"
+    return 0
+  fi
+
+  # A ruleset that exists but has lost the codified rule type entirely is drift.
+  local has_rule
+  has_rule=$(echo "$rs" | jq --arg t "$rtype" 'any(.rules[]?; .type==$t)' 2>/dev/null || echo "false")
+  if [ "$has_rule" != "true" ]; then
+    add_finding "$repo" "rulesets" "ruleset-drift-$name-missing-rule" "error" \
+      "Ruleset \`$name\` exists but no longer carries a \`$rtype\` rule, so every codified parameter is unenforced. The codified standard (\`standards/rulesets/$name.json\`) requires it; run \`scripts/apply-rulesets.sh --repo $ORG/$repo\` to converge." \
+      "$std_ref"
+    return 0
+  fi
+
+  local act_params
+  act_params=$(echo "$rs" | jq -c --arg t "$rtype" '[.rules[]? | select(.type==$t) | .parameters][0] // {}' 2>/dev/null || echo "")
+  [ -z "$act_params" ] && act_params="{}"
+
+  # --- Diff codified vs live and emit one finding per drifted parameter ------
+  local drift
+  if ! drift=$(jq -rn --argjson exp "$exp_params" --argjson act "$act_params" "$RULESET_DRIFT_JQ" 2>/dev/null); then
+    add_finding "$repo" "rulesets" "ruleset-contents-uncomparable-$name" "error" \
+      "Could not compare the \`$name\` ruleset (id $rs_id) against \`standards/rulesets/$name.json\` (parameter comparison failed). Fail closed." \
+      "$std_ref"
+    return 0
+  fi
+
+  local param expected actual slug
+  while IFS=$'\t' read -r param expected actual || [ -n "$param" ]; do
+    [ -z "$param" ] && continue
+    slug=$(printf '%s' "$param" | tr '[:upper:]' '[:lower:]' | tr ' /' '--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="param"
+    add_finding "$repo" "rulesets" "ruleset-drift-$name-$slug" "error" \
+      "Ruleset \`$name\` parameter \`$param\` has drifted from the codified standard: expected \`$expected\`, actual \`$actual\`. The codified JSON (\`standards/rulesets/$name.json\`) is the source of truth (#575/#580); run \`scripts/apply-rulesets.sh --repo $ORG/$repo\` to converge." \
+      "$std_ref"
+  done <<< "$drift"
+}
+
+# ---------------------------------------------------------------------------
+# Check: Ruleset bypass actors (every ruleset targeting the default branch)
+# ---------------------------------------------------------------------------
+# The standard (github-settings.md § "Bypass Actors — Required on Every Ruleset
+# Targeting main") requires that EVERY ruleset whose conditions include the
+# default branch grant always-bypass to BOTH:
+#   1. the `dependabot-automerge-petry` GitHub App (Integration, actor_id 3167543)
+#   2. the `OrganizationAdmin` role
+# GitHub evaluates bypass eligibility independently per ruleset, so a missing
+# actor on code-quality (or a legacy protect-branches / main ruleset) silently
+# blocks Dependabot auto-merge or removes the emergency admin override even when
+# pr-quality is correct. This logic previously lived only as a copy-paste shell
+# snippet in the standard and was never enforced by the audit.
+#
+# Two correctness nuances the simple snippet missed:
+#   - bypass_mode MUST be `always`. `pull_request` mode only applies when the
+#     bypass actor opens the PR; Dependabot opens its own PRs, so a
+#     `pull_request`-mode app bypass is rejected at merge time.
+#   - The `Repository admin` role (RepositoryRole, actor_id 5) is NOT the
+#     `OrganizationAdmin` role. It renders similarly in the UI but is repo-scoped
+#     and does not satisfy the org-wide emergency-override requirement.
+DEPENDABOT_APP_ACTOR_ID=3167543
+
+check_ruleset_bypass_actors() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local std_ref="standards/github-settings.md#bypass-actors--required-on-every-ruleset-targeting-main"
+
+  local ids
+  ids=$(echo "$rulesets_json" | jq -r '.[].id' 2>/dev/null || echo "")
+  [ -z "$ids" ] && return 0
+
+  local rs_id
+  for rs_id in $ids; do
+    local rs
+    rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+    [ -z "$rs" ] && continue
+
+    # Does this ruleset target the default branch? Match the GitHub aliases
+    # (~DEFAULT_BRANCH, ~ALL) or an explicit refs/heads/<default> include.
+    local targets_default
+    targets_default=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" '
+      ((.conditions.ref_name.include) // []) as $inc
+      | ((.conditions.ref_name.exclude) // []) as $exc
+      | (
+          (($inc | index("~DEFAULT_BRANCH")) != null)
+          or (($inc | index("~ALL")) != null)
+          or (($inc | index($db)) != null)
+        )
+        and (($exc | index("~DEFAULT_BRANCH")) == null)
+        and (($exc | index($db)) == null)
+    ' 2>/dev/null || echo "false")
+    [ "$targets_default" != "true" ] && continue
+
+    local rs_name
+    rs_name=$(echo "$rs" | jq -r '.name' 2>/dev/null || echo "ruleset-$rs_id")
+    # Stable, filesystem/label-safe slug for the finding id so findings don't
+    # churn across runs. Ruleset names (pr-quality, code-quality, …) are stable.
+    local slug
+    slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="$rs_id"
+
+    # --- Bypass actor check (single jq invocation) ------------------------
+    local oa_always oa_any repo_admin dep_always dep_any
+    local bypass_info
+    bypass_info=$(jq -r --argjson id "$DEPENDABOT_APP_ACTOR_ID" '
+      [
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin" and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="OrganizationAdmin")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="RepositoryRole" and .actor_id==5)] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id and .bypass_mode=="always")] | length > 0),
+        ([.bypass_actors[]? | select(.actor_type=="Integration" and .actor_id==$id)] | length > 0)
+      ] | map(tostring) | join(" ")
+    ' <<< "$rs" 2>/dev/null || echo "false false false false false")
+    [ -z "$bypass_info" ] && bypass_info="false false false false false"
+    read -r oa_always oa_any repo_admin dep_always dep_any <<< "$bypass_info"
+
+    if [ "$oa_always" != "true" ]; then
+      if [ "$oa_any" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-mode-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants \`OrganizationAdmin\` bypass but not with \`bypass_mode: always\`. The standard requires \`always\` for emergency admin override on every ruleset targeting the default branch." \
+          "$std_ref"
+      elif [ "$repo_admin" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants bypass to the **Repository admin** role (RepositoryRole id 5), not the **OrganizationAdmin** role required by the standard. Repository admin is repo-scoped and does not satisfy the org-wide emergency-override requirement. Add \`OrganizationAdmin\` with \`bypass_mode: always\`." \
+          "$std_ref"
+      else
+        add_finding "$repo" "rulesets" "ruleset-bypass-orgadmin-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) is missing the required \`OrganizationAdmin\` bypass actor (\`bypass_mode: always\`) for emergency admin override." \
+          "$std_ref"
+      fi
+    fi
+
+    # --- dependabot-automerge-petry app -----------------------------------
+    if [ "$dep_always" != "true" ]; then
+      if [ "$dep_any" = "true" ]; then
+        add_finding "$repo" "rulesets" "ruleset-bypass-dependabot-mode-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) grants the \`dependabot-automerge-petry\` app (id $DEPENDABOT_APP_ACTOR_ID) bypass but with the wrong mode. \`pull_request\` mode only applies when the bypass actor opens the PR; Dependabot opens its own PRs, so its merge API calls are rejected. Set \`bypass_mode: always\`." \
+          "$std_ref"
+      else
+        add_finding "$repo" "rulesets" "ruleset-bypass-dependabot-$slug" "error" \
+          "Ruleset \`$rs_name\` (targets \`$default_branch\`) is missing the required \`dependabot-automerge-petry\` app (id $DEPENDABOT_APP_ACTOR_ID) bypass actor (\`bypass_mode: always\`). Without it, Dependabot auto-merge API calls are rejected by this ruleset — GitHub evaluates bypass per-ruleset, so it must be present on every ruleset targeting the default branch, not only \`pr-quality\`." \
+          "$std_ref"
+      fi
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: Legacy / non-sanctioned rulesets on the default branch
+# ---------------------------------------------------------------------------
+# `pr-quality` and `code-quality` are the ONLY sanctioned rulesets
+# (standards/github-settings.md § Repository Rulesets). Classic
+# `protect-branches` rules and ad-hoc `main` rulesets are deprecated and MUST be
+# migrated into the two sanctioned rulesets and deleted. A leftover legacy
+# ruleset is drift: it duplicates protections, and — because GitHub evaluates
+# bypass per-ruleset — it is a second place every bypass actor must be kept in
+# sync (the exact trap that produced the inconsistent OrganizationAdmin /
+# RepositoryAdmin bypass state across the fleet).
+#
+# Deleting a legacy ruleset is only safe once every required status check it
+# carries is ALSO required by a sanctioned ruleset; otherwise deletion silently
+# drops a merge gate. This check computes that migration delta and reports it so
+# remediation is deterministic: "safe to delete" vs the exact checks to migrate
+# first.
+SANCTIONED_RULESETS=("pr-quality" "code-quality")
+
+check_legacy_rulesets() {
+  local repo="$1" default_branch="$2" rulesets_json="$3"
+
+  local std_ref="standards/github-settings.md#repository-rulesets"
+
+  local ids
+  ids=$(echo "$rulesets_json" | jq -r '.[].id' 2>/dev/null || echo "")
+  [ -z "$ids" ] && return 0
+
+  # jq snippet: does a ruleset (full JSON on stdin) target the default branch?
+  # Kept identical to check_ruleset_bypass_actors so the two agree on scope.
+  local targets_jq='
+    ((.conditions.ref_name.include) // []) as $inc
+    | ((.conditions.ref_name.exclude) // []) as $exc
+    | (
+        (($inc | index("~DEFAULT_BRANCH")) != null)
+        or (($inc | index("~ALL")) != null)
+        or (($inc | index($db)) != null)
+      )
+      and (($exc | index("~DEFAULT_BRANCH")) == null)
+      and (($exc | index($db)) == null)
+  '
+
+  # Pass 1: fetch every default-branch ruleset once, caching name + JSON, and
+  # accumulate the set of status-check contexts required by the SANCTIONED
+  # rulesets (the coverage that will remain after a legacy ruleset is deleted).
+  local sanctioned_ctx=""        # newline-separated contexts
+  declare -A rs_cache=()         # rs_id -> full JSON (only default-branch ones)
+  declare -A rs_name_cache=()    # rs_id -> name
+  local rs_id rs targets rs_name
+  for rs_id in $ids; do
+    rs=$(gh_api "repos/$ORG/$repo/rulesets/$rs_id" 2>/dev/null || echo "")
+    [ -z "$rs" ] && continue
+    targets=$(echo "$rs" | jq --arg db "refs/heads/$default_branch" "$targets_jq" 2>/dev/null || echo "false")
+    [ "$targets" != "true" ] && continue
+
+    rs_name=$(echo "$rs" | jq -r '.name' 2>/dev/null || echo "ruleset-$rs_id")
+    rs_cache["$rs_id"]="$rs"
+    rs_name_cache["$rs_id"]="$rs_name"
+
+    if [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]]; then
+      local ctx
+      ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+      [ -n "$ctx" ] && sanctioned_ctx+="$ctx"$'\n'
+    fi
+  done
+
+  # Pass 2: flag every non-sanctioned default-branch ruleset and compute the
+  # set of required checks it carries that are NOT covered by the sanctioned
+  # rulesets — the checks that must be migrated before it is safe to delete.
+  for rs_id in "${!rs_cache[@]}"; do
+    rs_name="${rs_name_cache[$rs_id]}"
+    [[ " ${SANCTIONED_RULESETS[*]} " == *" $rs_name "* ]] && continue
+
+    rs="${rs_cache[$rs_id]}"
+    local slug
+    slug=$(printf '%s' "$rs_name" | tr '[:upper:] /' '[:lower:]--' | tr -cd 'a-z0-9_-')
+    [ -z "$slug" ] && slug="$rs_id"
+
+    local legacy_ctx uncovered=""
+    legacy_ctx=$(echo "$rs" | jq -r '[.rules[]? | select(.type=="required_status_checks") | .parameters.required_status_checks[]?.context] | .[]' 2>/dev/null || echo "")
+    local c
+    while IFS= read -r c; do
+      [ -z "$c" ] && continue
+      if ! grep -qxF "$c" <<< "$sanctioned_ctx"; then
+        uncovered+="\`$c\` "
+      fi
+    done <<< "$legacy_ctx"
+
+    local migrate_note
+    if [ -n "$uncovered" ]; then
+      migrate_note="**Migrate before deleting** — these required checks are not yet required by \`pr-quality\` or \`code-quality\`, so deleting this ruleset would drop them as merge gates: ${uncovered}Add them to \`code-quality\` first, then delete this ruleset."
+    else
+      migrate_note="Every required check it carries is already required by a sanctioned ruleset, so it is **safe to delete** (e.g. \`gh api -X DELETE repos/$ORG/$repo/rulesets/$rs_id\`)."
+    fi
+
+    add_finding "$repo" "rulesets" "legacy-ruleset-$slug" "error" \
+      "Legacy ruleset \`$rs_name\` (id $rs_id) targets the default branch. Only \`pr-quality\` and \`code-quality\` are sanctioned; classic \`protect-branches\` / ad-hoc \`main\` rulesets are deprecated and must be migrated into the two sanctioned rulesets and removed (a duplicate ruleset is a second place every bypass actor must be kept in sync). $migrate_note" \
+      "$std_ref"
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -431,22 +913,52 @@ check_codeowners() {
   # CODEOWNERS can be in root, .github/, or docs/
   local found=false
   local codeowners_content=""
+  # #437: distinguish a genuinely-absent file (a deterministic HTTP 404 on every
+  # candidate path) from a transient/auth read error (non-404), so a blip never
+  # becomes a false `missing-codeowners` finding that spends a whole dev-lead run
+  # confirming a file that was there all along. Mirrors check_check_suite_prefs
+  # (#487): capture the raw response + status that gh_api's `--jq` masks, retry
+  # non-deterministic failures, and treat any non-404 failure as inconclusive.
+  local any_unreadable=false
   for path in CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS; do
-    # Use || echo "" so a 404 is non-fatal under set -euo pipefail
-    local content
-    content=$(gh_api "repos/$ORG/$repo/contents/$path" --jq '.content' 2>/dev/null || echo "")
-    if [ -n "$content" ]; then
-      found=true
-      codeowners_content=$(echo "$content" | base64 -d 2>/dev/null || echo "$content")
-      break
+    local raw="" rc=1 i
+    for i in 1 2 3; do
+      raw=$(gh api "repos/$ORG/$repo/contents/$path" 2>&1) && rc=0 || rc=$?
+      [ "$rc" -eq 0 ] && break
+      # 404 is deterministic — the file is not at this path; stop retrying it.
+      # Matches both gh's stderr "(HTTP 404)" and the API's JSON {"status":"404"}.
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] && break
+      [ "$i" -lt 3 ] && sleep $((i * 2))
+    done
+    if [ "$rc" -ne 0 ]; then
+      # Non-404 failure (auth/scope/network/5xx/rate-limit) → inconclusive path.
+      [[ "$raw" == *"HTTP 404"* || "$raw" == *'"status":"404"'* ]] || any_unreadable=true
+      continue
     fi
+    local content decoded
+    content=$(printf '%s' "$raw" | jq -r '.content? // empty' 2>/dev/null || echo "")
+    [ -n "$content" ] || continue
+    # The contents API returns the body as base64. Reject anything that does not
+    # cleanly decode so an error body can never leak in as owner lines (#370).
+    decoded=$(printf '%s' "$content" | base64 -d 2>/dev/null) || continue
+    [ -n "$decoded" ] || continue
+    found=true
+    codeowners_content="$decoded"
+    break
   done
 
   if [ "$found" = false ]; then
+    if [ "$any_unreadable" = true ]; then
+      # Could not determine presence — do NOT file a `missing` finding (#437).
+      add_finding "$repo" "settings" "codeowners-unreadable" "warning" \
+        "Could not read CODEOWNERS (transient/auth error, not a 404) — verify GH_TOKEN scope and repo access. CODEOWNERS presence was not evaluated this run; NOT filed as missing to avoid a false finding." \
+        "standards/codeowners-standard.md"
+      return 0
+    fi
     add_finding "$repo" "settings" "missing-codeowners" "error" \
       "No \`CODEOWNERS\` file found — required for code owner review enforcement (pr-quality ruleset)" \
       "standards/codeowners-standard.md"
-    return
+    return 0
   fi
 
   # Extract non-comment, non-blank owner lines for accurate matching.
@@ -462,7 +974,7 @@ check_codeowners() {
     add_finding "$repo" "settings" "codeowners-empty" "error" \
       "CODEOWNERS file has no owner lines (only comments/blank)" \
       "standards/codeowners-standard.md"
-    return
+    return 0
   fi
 
   # Rule 1: @petry-projects/org-leads MUST be the first owner on every line
@@ -523,6 +1035,193 @@ check_sonarcloud() {
         "standards/ci-standards.md#3-sonarcloud-analysis-sonarcloudyml"
     fi
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: SonarCloud S7637 first-party reusable-ref exemption (#498)
+#
+# SonarCloud's githubactions:S7637 ("pin actions to a full-length commit SHA")
+# fires on first-party petry-projects/.github(-private) reusable-ref caller
+# stubs that the org standard intentionally pins by moving channel/tag rather
+# than SHA (see check_action_pinning's exemption and the Action Pinning Policy).
+# The two policies are otherwise mutually exclusive on a single pin, so each
+# SonarCloud-gated repo must carry a NARROW sonar.issue.ignore that suppresses
+# S7637 only on the thin caller-stub workflow files — never a blanket
+# workflows/*.yml exclusion, which would also drop SHA-pin enforcement on the
+# third-party actions in ci.yml/sonarcloud.yml.
+#
+# classify_sonar_s7637_exemption echoes exactly one verdict for a given
+# sonar-project.properties body:
+#   present   — at least one issue-ignore criterion suppresses
+#               githubactions:S7637 and every such criterion targets specific
+#               caller-stub files (no blanket workflow glob).
+#   too-broad — an S7637 criterion uses a blanket resourceKey (the filename
+#               segment carries a wildcard, e.g. workflows/*.yml or *.yml, or
+#               the pattern is a bare **). This also exempts third-party actions
+#               and violates the org policy.
+#   missing   — no criterion suppresses githubactions:S7637.
+# ---------------------------------------------------------------------------
+classify_sonar_s7637_exemption() {
+  local content="$1"
+
+  # Criterion keys whose ruleKey assigns githubactions:S7637 (whitespace around
+  # the key/`=`/value is tolerated; properties keys are [A-Za-z0-9_]).
+  local keys
+  keys=$(printf '%s\n' "$content" \
+    | grep -E '^[[:space:]]*sonar\.issue\.ignore\.multicriteria\.[A-Za-z0-9_]+\.ruleKey[[:space:]]*=[[:space:]]*githubactions:S7637[[:space:]]*$' \
+    | sed -E 's/^[[:space:]]*sonar\.issue\.ignore\.multicriteria\.([A-Za-z0-9_]+)\.ruleKey.*/\1/' || true)
+
+  if [ -z "$keys" ]; then
+    echo "missing"
+    return 0
+  fi
+
+  local key resourcekey base broad=0
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    resourcekey=$(printf '%s\n' "$content" \
+      | grep -E "^[[:space:]]*sonar\\.issue\\.ignore\\.multicriteria\\.${key}\\.resourceKey[[:space:]]*=" \
+      | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*$//' | head -n1 || true)
+    # A criterion is blanket (too broad) when the filename segment carries a
+    # wildcard — e.g. **/.github/workflows/*.yml, *.yml — or the whole pattern
+    # is a bare **. Such a pattern also matches ci.yml and would drop S7637 on
+    # the third-party actions there.
+    base="${resourcekey##*/}"
+    if [ "$resourcekey" = "**" ] || case "$base" in *'*'* | *'?'*) true ;; *) false ;; esac; then
+      broad=1
+    fi
+  done <<< "$keys"
+
+  if [ "$broad" -eq 1 ]; then
+    echo "too-broad"
+  else
+    echo "present"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Inline NOSONAR S7637 marker on first-party caller stubs (#549)
+#
+# Canonical mechanism (supersedes the per-file sonar-project.properties approach):
+# the inline `# NOSONAR(githubactions:S7637)` marker on the channel-pinned
+# first-party reusable-ref `uses:` line travels WITH the caller-stub file, so
+# adopters inherit the exemption on copy with zero per-repo properties entries.
+#
+# classify_inline_s7637_marker echoes exactly one verdict for a single workflow
+# file's decoded content:
+#   present — every channel-pinned first-party reusable-ref `uses:` line carries
+#             the inline `NOSONAR(githubactions:S7637)` marker.
+#   missing — at least one channel-pinned first-party reusable-ref line lacks the
+#             marker; SonarCloud's githubactions:S7637 would fire on it.
+#   n/a     — the file has no channel-pinned first-party reusable ref (it is
+#             SHA-pinned — which already satisfies S7637 — or carries no
+#             first-party reusable ref at all), so no inline marker is required.
+# ---------------------------------------------------------------------------
+classify_inline_s7637_marker() {
+  local content="$1"
+
+  # First-party reusable-workflow `uses:` lines (channel- or SHA-pinned).
+  local uses_lines
+  uses_lines=$(printf '%s\n' "$content" \
+    | grep -E '^[[:space:]]*uses:[[:space:]]*petry-projects/\.github(-private)?/\.github/workflows/[^@[:space:]]+@' || true)
+
+  if [ -z "$uses_lines" ]; then
+    echo "n/a"
+    return 0
+  fi
+
+  local line ref channel_seen=0 missing=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # The pinned ref is the token after the first '@', up to whitespace/comment.
+    ref=$(printf '%s\n' "$line" | sed -E 's/^[^@]*@([^[:space:]#]+).*/\1/')
+    # A 40-char hex SHA pin already satisfies S7637 — no inline marker needed.
+    if printf '%s' "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+      continue
+    fi
+    channel_seen=1
+    if ! printf '%s' "$line" | grep -qF 'NOSONAR(githubactions:S7637)'; then
+      missing=1
+    fi
+  done <<< "$uses_lines"
+
+  if [ "$channel_seen" -eq 0 ]; then
+    echo "n/a"
+  elif [ "$missing" -eq 1 ]; then
+    echo "missing"
+  else
+    echo "present"
+  fi
+}
+
+check_sonar_s7637_exemption() {
+  local repo="$1"
+
+  # Only relevant when the repo actually runs SonarCloud analysis.
+  gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1 || return 0
+
+  # Canonical (#549): scan the repo's caller-stub workflows for the inline
+  # `# NOSONAR(githubactions:S7637)` marker. If every channel-pinned first-party
+  # reusable-ref stub carries it, the repo is exempt with no per-file
+  # sonar-project.properties entries needed.
+  local workflows wf wf_content wf_decoded inline_verdict
+  local inline_seen=0 inline_missing=0
+  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  for wf in $workflows; do
+    case "$wf" in *.yml | *.yaml) ;; *) continue ;; esac
+    wf_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$wf_content" ] && continue
+    wf_decoded=$(echo "$wf_content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$wf_decoded" ] && continue
+    inline_verdict=$(classify_inline_s7637_marker "$wf_decoded")
+    case "$inline_verdict" in
+      present) inline_seen=1 ;;
+      missing) inline_seen=1; inline_missing=1 ;;
+    esac
+  done
+
+  # Every channel-pinned first-party stub carries the inline marker → exempt.
+  if [ "$inline_seen" -eq 1 ] && [ "$inline_missing" -eq 0 ]; then
+    return 0
+  fi
+
+  # Legacy per-file mechanism — accepted during the transition (#549). A repo
+  # whose stubs are not yet inline-marked is still compliant if its
+  # sonar-project.properties carries the narrow per-stub exemption.
+  local content decoded
+  content=$(gh_api "repos/$ORG/$repo/contents/sonar-project.properties" --jq '.content' 2>/dev/null || echo "")
+  if [ -z "$content" ]; then
+    # No properties file. Flag only when a stub needs but lacks the inline marker
+    # (a missing properties file itself is reported by check_sonarcloud).
+    if [ "$inline_missing" -eq 1 ]; then
+      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+        "First-party caller stub(s) carry a channel-pinned reusable ref (\`@<name>/stable\`, \`@v1\`/\`@v2\`) without the inline \`# NOSONAR(githubactions:S7637)\` marker, and there is no legacy \`sonar-project.properties\` exemption. SonarCloud will flag them as unpinned actions even though the org exempts them from SHA-pinning. Add the inline marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` entry." \
+        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+    fi
+    return 0
+  fi
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return 0
+
+  local verdict
+  verdict=$(classify_sonar_s7637_exemption "$decoded")
+
+  case "$verdict" in
+    missing)
+      # Only a real gap when a channel-pinned first-party stub actually lacks the
+      # inline marker; with no such stub there is nothing for S7637 to fire on.
+      if [ "$inline_missing" -eq 1 ]; then
+        add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+          "No \`githubactions:S7637\` exemption found. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the inline \`# NOSONAR(githubactions:S7637)\` marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` exemption in \`sonar-project.properties\`." \
+          "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      fi
+      ;;
+    too-broad)
+      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-too-broad" "error" \
+        "\`sonar-project.properties\` suppresses \`githubactions:S7637\` with a blanket workflow-path \`resourceKey\` (e.g. \`workflows/*.yml\` or \`**\`). This also exempts third-party actions in \`ci.yml\`/\`sonarcloud.yml\` from SHA-pin enforcement. Scope the exemption to the individual caller-stub files instead, or migrate to the inline \`# NOSONAR(githubactions:S7637)\` marker." \
+        "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -640,45 +1339,6 @@ check_workflow_permissions() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: claude.yml jobs both have a checkout step
-# ---------------------------------------------------------------------------
-check_claude_workflow_checkout() {
-  local repo="$1"
-
-  local content
-  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/claude.yml" --jq '.content' 2>/dev/null || echo "")
-  [ -z "$content" ] && return  # missing workflow is caught by check_required_workflows
-
-  local decoded
-  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-  [ -z "$decoded" ] && return
-
-  # For each job that uses claude-code-action, verify a checkout step precedes it.
-  # Strategy: scan for job blocks and check each for 'actions/checkout'.
-  for job in claude claude-issue; do
-    # Extract the block starting at the job definition
-    local job_block
-    job_block=$(echo "$decoded" | awk "/^  ${job}:/{found=1} found{print; if(/^  [a-zA-Z_-]+:/ && !/^  ${job}:/) exit}" )
-    if [ -z "$job_block" ]; then
-      continue  # job not present (e.g. repo only has one job)
-    fi
-
-    if ! echo "$job_block" | grep -q 'actions/checkout'; then
-      add_finding "$repo" "ci-workflows" "claude-job-missing-checkout-${job}" "error" \
-        "The \`${job}\` job in \`claude.yml\` is missing a checkout step — claude-code-action requires the repo to be checked out to read \`CLAUDE.md\` and \`AGENTS.md\`" \
-        "standards/workflows/claude.yml"
-    fi
-  done
-
-  # Verify the check_run trigger is present — without it the claude-ci-fix job
-  # in the reusable can never fire to diagnose and fix CI failures on PRs.
-  if ! echo "$decoded" | grep -qE "^[[:space:]]+check_run:"; then
-    add_finding "$repo" "ci-workflows" "claude-missing-check-run-trigger" "warning" \
-      "The \`claude.yml\` workflow is missing the \`check_run\` trigger. Without it the \`claude-ci-fix\` job cannot respond to CI failures on PRs automatically. Add \`check_run: types: [completed]\` to the \`on:\` block." \
-      "standards/ci-standards.md#4-claude-code-claudeyml"
-  fi
-}
-
 # ---------------------------------------------------------------------------
 # Check: ci.yml uses SHA-scoped concurrency group
 #
@@ -726,8 +1386,64 @@ check_ci_concurrency() {
 # exempt because it owns the reusables and may legitimately reference
 # its own workflows by @main during release prep.
 #
-# Array format: "workflow-filename:expected-reusable-basename:version-tag"
+# Array format: "workflow-filename:reusable-basename:canonical-pin:legacy-csv"
 # ---------------------------------------------------------------------------
+
+# stub_pin_acceptable <decoded> <reusable-basename> <canonical-ref> <legacy-csv>
+# True if a non-comment `uses:` line pins petry-projects/.github's <reusable> at
+# the canonical ref OR one of the comma-separated transitional legacy refs. The
+# legacy grace keeps a stub on its old @vN pin compliant while the fleet migrates
+# to the <name>/stable channel, so the audit neither flags nor reverts it
+# mid-migration (#482). Anchored to start-of-line so a `# uses: …` comment never
+# counts.
+stub_pin_acceptable() {
+  local decoded="$1" reusable="$2" canonical="$3" legacy_csv="$4"
+  local esc_reusable; esc_reusable=$(escape_ere "$reusable")
+
+  local -a legacy_arr=()
+  [ -n "$legacy_csv" ] && IFS=',' read -r -a legacy_arr <<< "$legacy_csv"
+
+  local alt="" r
+  for r in "$canonical" "${legacy_arr[@]}"; do
+    [ -z "$r" ] && continue
+    alt+="${alt:+|}$(escape_ere "$r")"
+  done
+
+  local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@(${alt})"
+  printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"
+}
+
+# ring_major_form_acceptable <decoded> <reusable-basename> <channel-base> <repo>
+# True if a non-comment `uses:` line pins petry-projects/.github's <reusable> at
+# the MAJOR-SCOPED channel form `<channel-base>/v<M>-<tier-for-repo>` for any
+# major M, where the tier matches <repo>'s ring tier (major-scoped-channels epic
+# #657, Phase F3). This is a backward-compatible ADD alongside stub_pin_acceptable's
+# bare-tier grace: it teaches the audit to also accept the `v<M>-` form the fleet
+# migrates onto in F5, without yet requiring it. A v-form pinned to the WRONG
+# tier (e.g. `…/v1-ring0` on a stable-tier repo) is NOT accepted here and falls
+# through to the drift finding. Anchored to start-of-line so a `# uses: …` comment
+# never counts. Pure — extracts the pinned ref, reads its major with
+# ring_pinned_major(), and checks it against ring_canonical_ref(…, major).
+ring_major_form_acceptable() {
+  local decoded="$1" reusable="$2" chan="$3" repo="$4"
+  local esc_reusable; esc_reusable=$(escape_ere "$reusable")
+
+  local pinned_ref
+  pinned_ref=$(printf '%s\n' "$decoded" \
+    | sed -nE "s#^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@([^[:space:]]+).*#\\1#p" \
+    | head -n1)
+  [ -n "$pinned_ref" ] || return 1
+
+  local pinned_major; pinned_major=$(ring_pinned_major "$pinned_ref")
+  [ -n "$pinned_major" ] || return 1
+
+  [ "$pinned_ref" = "$(ring_canonical_ref "$chan" "$repo" "$pinned_major")" ]
+}
+
+# ring_tier_for_repo(), ring_canonical_ref() and ring_legacy_csv() are provided by
+# lib/ring-pins.sh (sourced above) — the single source of truth shared with the
+# deploy sweep so the audit and the deploy never disagree on a stub's pin (#482).
+
 check_centralized_workflow_stubs() {
   local repo="$1"
 
@@ -735,16 +1451,30 @@ check_centralized_workflow_stubs() {
   # own reusables by @main; skip the stub check for it.
   [ "$repo" = ".github" ] && return
 
-  # workflow-filename:expected-reusable-basename:version-tag
+  # workflow-filename:reusable-basename:canonical-pin:legacy-accepted-csv
+  #   canonical-pin       — the org-standard ref a stub should pin. The sentinel
+  #                         `RING` means "this reusable is on the canary-ring
+  #                         model": the expected channel is the repo's RING TIER
+  #                         (next/ring0/ring1/stable — see ring_tier_for_repo),
+  #                         e.g. `agent-shield/ring1` on a ring1 repo. Any other
+  #                         value would be a fixed pin (e.g. `foo → v1`); every
+  #                         reusable below is now on the ring model (#606).
+  #   legacy-accepted-csv — additional refs still accepted *during* migration so
+  #                         the audit neither flags nor reverts a stub mid-move.
+  #                         For RING reusables the per-repo legacy set (the other
+  #                         ring channels — higher tiers) is computed below.
+  # NOTE: dev-lead.yml is intentionally NOT listed here — its reusable lives in
+  # the private petry-projects/.github-private repo and is pinned to the
+  # dev-lead/stable channel, validated by check_dev_lead_stub() below.
   local centralized=(
-    "dev-lead.yml:dev-lead-reusable:v1"
-    "auto-rebase.yml:auto-rebase-reusable:v1"
-    "dependency-audit.yml:dependency-audit-reusable:v1"
-    "dependabot-automerge.yml:dependabot-automerge-reusable:v1"
-    "dependabot-rebase.yml:dependabot-rebase-reusable:v1"
-    "agent-shield.yml:agent-shield-reusable:v1"
-    "feature-ideation.yml:feature-ideation-reusable:v1"
-    "pr-review-mention.yml:pr-review-mention-reusable:v2"
+    "auto-rebase.yml:auto-rebase-reusable:RING"
+    "dependency-audit.yml:dependency-audit-reusable:RING"
+    "dependabot-automerge.yml:dependabot-automerge-reusable:RING"
+    "dependabot-rebase.yml:dependabot-rebase-reusable:RING"
+    "agent-shield.yml:agent-shield-reusable:RING"
+    "feature-ideation.yml:feature-ideation-reusable:RING"
+    "pr-review-mention.yml:pr-review-mention-reusable:RING"
+    "pr-auto-review.yml:pr-auto-review-reusable:RING"
   )
 
   # List the repo's workflow directory once instead of probing each file.
@@ -753,10 +1483,27 @@ check_centralized_workflow_stubs() {
   workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
   [ -z "$workflow_list" ] && return
 
-  local entry wf reusable version
+  local entry wf reusable canonical legacy chan is_ring
   for entry in "${centralized[@]}"; do
-    IFS=':' read -r wf reusable version <<< "$entry"
-    [ -z "$version" ] && { echo "::error::centralized entry '$entry' missing version tag — expected format 'wf:reusable:version'" >&2; exit 1; }
+    IFS=':' read -r wf reusable canonical legacy <<< "$entry"
+    [ -z "$canonical" ] && { echo "::error::centralized entry '$entry' missing canonical pin — expected format 'wf:reusable:canonical:legacy-csv'" >&2; exit 1; }
+    is_ring=0
+    chan=""
+
+    # RING sentinel: this reusable is on the canary-ring model. The canonical
+    # ref is the channel for THIS repo's ring tier (next/ring0/ring1/stable),
+    # and the per-repo legacy grace accepts the `<name>/stable` channel plus the
+    # pre-ring @v1/@v2 pins so the audit neither flags nor reverts a stub while
+    # the fleet migrates onto the rings (#870, same revert-collision lesson as
+    # #482). Higher tiers are also acceptable so a repo pinned ahead of its tier
+    # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
+    # /stable) is never flagged — only @main / inline / off-channel pins are.
+    if [ "$canonical" = "RING" ]; then
+      is_ring=1
+      chan="${reusable%-reusable}"
+      canonical="$(ring_canonical_ref "$chan" "$repo")"
+      legacy="$(ring_legacy_csv "$chan" "$repo")"
+    fi
 
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
@@ -773,23 +1520,23 @@ check_centralized_workflow_stubs() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-    # Required pattern: a non-comment line whose `uses:` value is exactly
-    # petry-projects/.github/.github/workflows/<reusable>.yml@<version>
-    # Anchor to start-of-line + optional indent so a `# uses: ...` comment
-    # cannot satisfy the check.
-    local esc_reusable esc_version
-    esc_reusable=$(escape_ere "$reusable")
-    esc_version=$(escape_ere "$version")
-    local expected="petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@${esc_version}"
-
-    if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*${expected}([[:space:]]|$)"; then
-      continue  # stub is correctly pinned to the canonical version — compliant
+    # Compliant if a non-comment `uses:` line pins the reusable at the canonical
+    # channel or — transitionally, during the #482 migration — an accepted legacy
+    # @vN ref. stub_pin_acceptable anchors to start-of-line so a `# uses: …`
+    # comment never satisfies the check. For RING reusables, also accept the
+    # major-scoped `<name>/v<M>-<tier>` form (major-scoped-channels epic #657 F3)
+    # for any major M whose tier matches the repo — backward-compatible with the
+    # bare-tier pins the fleet still carries; the wrong tier stays drift.
+    if stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy" \
+      || { [ "$is_ring" = 1 ] && ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; then
+      continue
     fi
 
     # Determine why it's non-compliant for a more actionable message.
-    local why
+    local esc_reusable why
+    esc_reusable=$(escape_ere "$reusable")
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@${version}\` (org standard)"
+      why="references the reusable but is not pinned to \`@${canonical}\` (org standard)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -797,8 +1544,217 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${version}\`." \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${canonical}\`." \
       "standards/ci-standards.md#centralization-tiers"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: dev-lead.yml caller stub conforms to the centralized contract
+#
+# Unlike the other reusables, dev-lead lives in the PRIVATE repo and is pinned
+# to the moving `dev-lead/stable` channel tag (not @main, not a frozen @vN — see
+# standards/ci-standards.md#dev-lead-agent for the self-host channel model), and
+# its concurrency + permissions are owned centrally. A stub drifts — and breaks —
+# in three ways this check catches (all root causes of petry-projects/.github#402):
+#
+#   1. Wrong pin: not petry-projects/.github-private/.../dev-lead-reusable.yml@dev-lead/stable.
+#   2. Local concurrency block: per-stub concurrency drifts and cancels issue
+#      pickups; concurrency is owned by the reusable (per-issue/per-PR lanes).
+#   3. Missing `statuses: read`: the reusable requests it since #435, so without
+#      it every run fails at startup (startup_failure) with no runtime error.
+# ---------------------------------------------------------------------------
+check_dev_lead_stub() {
+  local repo="$1"
+
+  # .github holds the template (exercised by the reusable's own CI) and
+  # .github-private runs the workflow inline rather than as a caller stub.
+  [ "$repo" = ".github" ] && return
+  [ "$repo" = ".github-private" ] && return
+
+  local content decoded
+  content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/dev-lead.yml" --jq '.content' 2>/dev/null || echo "")
+  [ -z "$content" ] && return  # repo hasn't adopted dev-lead — nothing to check
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+  [ -z "$decoded" ] && return
+
+  # 1) Canonical pin (non-comment `uses:` line) — a moving dev-lead channel tag
+  #    (self-host channel model). The production default is `stable`; the staged
+  #    canary model (versioning.md Phase 2, #499/#500) also permits the candidate
+  #    channel `next` and per-ring channels `ring0`, `ring1`, … A frozen `@vX.Y.Z`
+  #    or `@<sha>` is NOT a channel and is intentionally rejected — callers pin the
+  #    moving channel so rollout/rollback is a single central tag move.
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+      "The \`dev-lead.yml\` caller stub must pin a \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 2) agent_ref must be threaded through to pin the same channel inside the
+  #    reusable's own script/prompt checkout (prevents split-brain on promotion).
+  #    Same channel set as the uses: pin above; should match the uses: channel.
+  uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p')
+  if [ -n "$uses_channel" ]; then
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$uses_channel([[:space:]]|$)"; then
+      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$uses_channel\` to match the pinned channel \`$uses_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "standards/ci-standards.md#dev-lead-agent"
+    fi
+  else
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "standards/ci-standards.md#dev-lead-agent"
+    fi
+  fi
+
+  # 3) No per-stub concurrency block — concurrency is owned by the reusable.
+  if echo "$decoded" | grep -qE "^concurrency:"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
+      "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+
+  # 4) Caller permissions must grant `statuses: read`.
+  if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
+    add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
+      "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
+      "standards/ci-standards.md#dev-lead-agent"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Caller-stub surface-drift guard (#607)
+#
+# The centralized caller stubs (dev-lead + the RING reusables) are thin: their
+# behavior lives in the reusable, so three surfaces are NOT repo-adjustable — the
+# `on:` trigger set, the `permissions:` grants, and the (usually absent)
+# `concurrency:` block. The field-allowlist pin checks above (stub_pin_acceptable,
+# check_dev_lead_stub) validate the channel pin / agent_ref but never look at
+# those surfaces, so a stub that trims a trigger, widens/narrows a permission, or
+# injects a per-stub concurrency group drifts SILENTLY (root cause of #607).
+#
+# These surfaces carry NO channel pin — the tier pin lives only on the
+# jobs.<id>.uses / agent_ref lines. So the comparison is tier-invariant by
+# construction: a stub that differs from the canonical ONLY by its correct tier
+# channel pin has identical surfaces and is never flagged. This is the "explicit
+# sub-checks" branch of #607 (vs a full-file byte guard, which would false-positive
+# on the per-repo `with:` liberties agent-shield / feature-ideation document, and
+# on feature-ideation's documented per-repo cron retune).
+#
+# The helpers below are PURE (args in, stdout out) and unit-tested by
+# test/scripts/compliance-audit/stub-surface-drift.bats.
+# ---------------------------------------------------------------------------
+
+# stub_extract_blocks <content> <key> — print every YAML block whose key line, at
+# ANY indentation, is `<indent><key>:`, including all lines indented deeper than
+# the key line (the block body). A key can appear more than once (e.g. dev-lead's
+# top-level `permissions: {}` plus its job-level `permissions:`), so all matches
+# are concatenated in file order. Comment/blank lines inside a body are kept and
+# stripped later by stub_normalize_surface; a `# concurrency:` comment never
+# starts a block (the key must be the first non-space token).
+stub_extract_blocks() {
+  local content="$1" key="$2"
+  printf '%s\n' "$content" | awk -v key="$key" '
+    function indent(s,   n) { n = match(s, /[^ ]/); return n == 0 ? 0 : n - 1 }
+    {
+      if (capturing) {
+        if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) { print; next }
+        if (indent($0) > keyindent) { print; next }
+        capturing = 0
+      }
+      if ($0 ~ ("^[[:space:]]*" key ":")) {
+        capturing = 1; keyindent = indent($0); print; next
+      }
+    }
+  '
+}
+
+# stub_normalize_surface — read a surface block on stdin and canonicalize it for
+# comparison: strip trailing ` #…` inline comments and whole-line comments, drop
+# blank lines, and collapse schedule cron VALUES to a placeholder (a repo MAY
+# retune the cron without it counting as trigger-surface drift — see
+# feature-ideation.yml's header). Pure: stdin -> stdout.
+stub_normalize_surface() {
+  tr -d '\r' | sed -E \
+    -e 's/[[:space:]]+#.*$//' \
+    -e 's/^[[:space:]]*#.*$//' \
+    -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
+    | grep -vE '^[[:space:]]*$' || true
+}
+
+# stub_surface_drift <canonical> <deployed> <key> — return 0 (success) when the
+# given surface has DRIFTED between the canonical template and the deployed stub,
+# 1 when it is clean. Success-means-drift so `if stub_surface_drift …; then
+# add_finding …; fi` reads naturally.
+stub_surface_drift() {
+  local canonical="$1" deployed="$2" key="$3" c d
+  c="$(stub_extract_blocks "$canonical" "$key" | stub_normalize_surface)"
+  d="$(stub_extract_blocks "$deployed" "$key" | stub_normalize_surface)"
+  [ "$c" = "$d" ] && return 1 || return 0
+}
+
+# ---------------------------------------------------------------------------
+# Check: caller-stub on:/permissions/concurrency surfaces match the canonical
+#
+# For each enrolled shim, compares the deployed stub's guarded surfaces against
+# the on-disk canonical in standards/workflows/. dev-lead's `permissions`
+# (statuses: read) and `concurrency` surfaces already have dedicated, higher-signal
+# checks in check_dev_lead_stub() (specific #402 / startup_failure remediation), so
+# this check owns dev-lead's previously-unguarded `on:` surface only, plus all
+# three surfaces for the RING shims (whose permissions/concurrency were unguarded).
+# ---------------------------------------------------------------------------
+check_stub_surface_drift() {
+  local repo="$1"
+
+  # .github is the source of truth for the templates; .github-private runs these
+  # workflows inline rather than as caller stubs.
+  [ "$repo" = ".github" ] && return 0
+  [ "$repo" = ".github-private" ] && return 0
+
+  # "workflow.yml:comma-separated-surfaces". Keep in lockstep with the RING list
+  # in check_centralized_workflow_stubs() and RING_REUSABLES in lib/ring-pins.sh.
+  local shims=(
+    "dev-lead.yml:on"
+    "agent-shield.yml:on,permissions,concurrency"
+    "auto-rebase.yml:on,permissions,concurrency"
+    "dependency-audit.yml:on,permissions,concurrency"
+    "dependabot-automerge.yml:on,permissions,concurrency"
+    "dependabot-rebase.yml:on,permissions,concurrency"
+    "pr-review-mention.yml:on,permissions,concurrency"
+    "feature-ideation.yml:on,permissions,concurrency"
+    "pr-auto-review.yml:on,permissions,concurrency"
+  )
+
+  local entry wf surfaces template canonical content deployed surface severity
+  local -a surface_list
+  for entry in "${shims[@]}"; do
+    IFS=':' read -r wf surfaces <<< "$entry"
+
+    template="$STANDARDS_WF_DIR/$wf"
+    if [ ! -f "$template" ]; then
+      warn "No canonical template at $template — skipping surface-drift check for $wf"
+      continue
+    fi
+    canonical="$(< "$template")"
+
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue  # repo hasn't adopted this stub — nothing to check
+    deployed=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$deployed" ] && continue
+
+    IFS=',' read -r -a surface_list <<< "$surfaces"
+    for surface in "${surface_list[@]}"; do
+      stub_surface_drift "$canonical" "$deployed" "$surface" || continue
+      # An injected/removed concurrency block degrades but does not hard-break the
+      # run (it can cancel lanes — #402); a trimmed trigger or altered permission
+      # breaks functionality, so those are errors.
+      severity="error"
+      [ "$surface" = "concurrency" ] && severity="warning"
+      add_finding "$repo" "ci-workflows" "stub-surface-drift-$wf-$surface" "$severity" \
+        "The \`$wf\` caller stub's \`$surface:\` surface has drifted from the canonical \`standards/workflows/$wf\`. These stubs are thin callers — the \`on:\` triggers, \`permissions:\` grants, and \`concurrency:\` block are owned centrally and are not repo-adjustable (only the documented \`with:\` inputs and the tier channel pin may differ per repo). Re-sync \`$surface:\` from \`standards/workflows/$wf\`." \
+        "standards/ci-standards.md#centralization-tiers"
+    done
   done
 }
 
@@ -917,7 +1873,7 @@ check_centralized_check_names() {
     fi
 
     add_finding "$repo" "rulesets" "$check_id" "error" \
-      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See \`scripts/apply-rulesets.sh\` (post petry-projects/.github#94) for the canonical required-checks list." \
+      "Required-status-check ruleset includes \`$context\`, which is incompatible with workflow-modifying PRs. claude-code-action's GitHub App refuses to mint an OAuth token for any PR whose diff includes a workflow file, so the check fails on every workflow PR and the merge gate becomes a deadlock. **Remove \`$context\` from required status checks** — do NOT rename it. The Claude review check still runs on normal PRs and surfaces feedback without being a merge gate. See the codified \`standards/rulesets/code-quality.json\` for the canonical required-checks list." \
       "standards/ci-standards.md#centralization-tiers"
   done <<< "$contexts"
 }
@@ -1042,7 +1998,7 @@ for raw in lines:
         child_indent = indent
 
     # Match the exact required direct child key (quoted or unquoted YAML key)
-    if child_indent is not None and indent == child_indent and re.match(r"^[\"']?copilot-setup-steps[\"']?:[ ]*(#.*)?$", line):
+    if child_indent is not None and indent == child_indent and re.match(r"^[\"\x27]?copilot-setup-steps[\"\x27]?:[ ]*(#.*)?$", line):
         found = True
         break
 
@@ -1089,7 +2045,7 @@ check_copilot_instructions() {
     --jq '.content' 2>/dev/null || echo "")
 
   if [ -z "$content" ]; then
-    add_finding "$repo" "standards" "missing-copilot-instructions" "warning" \
+    add_finding "$repo" "standards" "missing-copilot-instructions" "error" \
       "Missing \`.github/copilot-instructions.md\`. Every repo must have its own Copilot instructions file — Copilot instruction files are repository-scoped and do not propagate from the \`petry-projects/.github\` repo. Copy the canonical template from \`standards/copilot-instructions-standard.md\` in \`petry-projects/.github\`, then tailor it with this repo's specific tech stack, project structure, local dev commands, required environment variables, and testing configuration." \
       "standards/copilot-instructions-standard.md"
     return
@@ -1123,9 +2079,30 @@ check_copilot_instructions() {
 check_check_suite_prefs() {
   local repo="$1"
 
-  local prefs
-  prefs=$(gh_api "repos/$ORG/$repo/check-suites/preferences" 2>/dev/null || true)
-  if [ -z "$prefs" ]; then
+  # The GET endpoint returns 404 when check-suite preferences have never been
+  # set for this repo — i.e. no app (Claude/CodeRabbit) has created a check run
+  # yet, so no orphaned "queued" suite can exist. That is the compliant
+  # "missing" state (mirrors the per-app handling below), not a read failure, so
+  # it must not raise a finding. Only a genuine unreadable error (auth/scope/
+  # network) warrants the warning. apply-repo-settings.sh and
+  # fix-check-suite-prefs.sh tolerate this same 404. Capture the GET's combined
+  # output and exit status (gh_api swallows both) so the cases can be told apart.
+  local prefs="" rc=1 i
+  for i in 1 2 3; do
+    prefs=$(gh api "repos/$ORG/$repo/check-suites/preferences" 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      break
+    fi
+    # 404 is deterministic and benign — stop retrying and report nothing.
+    if grep -q 'HTTP 404' <<< "$prefs"; then
+      return 0
+    fi
+    if [ "$i" -lt 3 ]; then
+      sleep $((i * 2))
+    fi
+  done
+
+  if [ "$rc" -ne 0 ]; then
     add_finding "$repo" "settings" "check-suite-prefs-unreadable" "warning" \
       "Could not read check-suite preferences — verify GH_TOKEN has repo scope and the repo is accessible. Check-suite auto-trigger compliance was not evaluated." \
       "standards/github-settings.md"
@@ -1180,6 +2157,52 @@ ensure_required_labels() {
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
     "in-progress|fbca04|An agent is actively working this issue"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
+}
+
+# Create all required labels (idempotent — uses --force to update if present)
+ensure_required_labels() {
+  local repo="$1"
+  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
+  )
+
+  for config in "${label_configs[@]}"; do
+    IFS='|' read -r name color description <<< "$config"
+    gh label create "$name" \
+      --repo "$ORG/$repo" \
+      --description "$description" \
+      --color "$color" \
+      --force 2>/dev/null || true
+  done
+}
+
+# Create all required labels (idempotent — uses --force to update if present)
+ensure_required_labels() {
+  local repo="$1"
+  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
+  local label_configs=(
+    "security|d93f0b|Security-related PRs and issues"
+    "dependencies|0075ca|Dependency update PRs"
+    "scorecard|d93f0b|OpenSSF Scorecard findings"
+    "bug|d73a4a|Bug reports"
+    "enhancement|a2eeef|Feature requests"
+    "documentation|0075ca|Documentation changes"
   )
 
   for config in "${label_configs[@]}"; do
@@ -1273,14 +2296,14 @@ GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}
 This script applies all standard settings defined in \`standards/github-settings.md\` in one pass.
 For a dry run to preview changes without applying: \`DRY_RUN=true GH_TOKEN=<admin-pat> bash scripts/apply-repo-settings.sh ${repo}\`"
       ;;
-    workflows)
+    ci-workflows|workflows)
       remediation_steps="Copy the relevant workflow template from \`standards/workflows/\` verbatim — do not generate from scratch:
 
 \`\`\`bash
 gh api repos/${ORG}/.github/contents/standards/workflows/<template>.yml --jq '.content' | base64 -d > .github/workflows/<template>.yml
 \`\`\`
 
-Available templates: \`agent-shield.yml\`, \`claude.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
+Available templates: \`agent-shield.yml\`, \`dev-lead.yml\`, \`dependabot-automerge.yml\`, \`dependabot-rebase.yml\`, \`dependency-audit.yml\`, \`feature-ideation.yml\`"
       ;;
     labels)
       remediation_steps="Run \`scripts/apply-repo-settings.sh ${repo}\` — it applies standard labels alongside settings:
@@ -1385,6 +2408,7 @@ create_umbrella_issue() {
     "labels|Labels|apply_labels() in apply-repo-settings.sh"
     "rulesets|Repository Rulesets|apply-rulesets.sh"
     "ci-workflows|Workflows|per-repo workflow additions"
+    "reusable-workflows|Reusable Workflows (disabled_manually)|gh workflow disable <workflow> -R <repo>"
     "action-pinning|Action SHA Pinning|pin actions to SHA in each workflow file"
     "dependabot|Dependabot Configuration|per-repo .github/dependabot.yml"
     "standards|Agent Standards (CLAUDE.md / AGENTS.md / copilot-setup-steps.yml)|per-repo doc and workflow additions"
@@ -1595,7 +2619,7 @@ HEREDOC
 
 HEREDOC
 
-  for category in ci-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
+  for category in ci-workflows reusable-workflows action-pinning dependabot settings push-protection labels rulesets standards; do
     local cat_count
     cat_count=$(jq --arg cat "$category" '[.[] | select(.category == $cat)] | length' "$FINDINGS_FILE")
     if [ "$cat_count" -gt 0 ]; then
@@ -1719,7 +2743,7 @@ main() {
   fi
   if ! gh auth status >/dev/null 2>&1; then
     echo "::error::gh auth failed — GH_TOKEN is set but authentication did not succeed." \
-      "Check that ORG_SCORECARD_TOKEN is valid and has repo + read:org scopes." >&2
+      "Check that ORG_SCORECARD_TOKEN is valid. If using a Fine-Grained token, ensure it has repository permissions: 'Administration: Read-only', 'Metadata: Read-only', 'Contents: Read-only', 'Issues: Read and write'; and organization permission: 'Metadata: Read-only' (required to list repositories)." >&2
     exit 1
   fi
 
@@ -1768,17 +2792,20 @@ main() {
     check_required_workflows "$repo"
     check_action_pinning "$repo"
     check_reusable_workflow_paths "$repo"
+    check_reusable_workflows_disabled "$repo"
     check_dependabot_config "$repo"
     check_repo_settings "$repo" "$repo_json"
     check_labels "$repo"
-    check_rulesets "$repo"
+    check_rulesets "$repo" "$repo_json"
     check_codeowners "$repo"
     check_sonarcloud "$repo"
+    check_sonar_s7637_exemption "$repo"
     check_codeql_default_setup "$repo"
     check_workflow_permissions "$repo"
-    # check_claude_workflow_checkout "$repo"  # removed: claude.yml retired 2026-05
     check_ci_concurrency "$repo"
     check_centralized_workflow_stubs "$repo"
+    check_dev_lead_stub "$repo"
+    check_stub_surface_drift "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
@@ -1873,4 +2900,8 @@ HEREDOC
   cat "$SUMMARY_FILE"
 }
 
-main "$@"
+# Run main only when executed directly, not when sourced (e.g. by bats tests
+# that exercise individual helper functions).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

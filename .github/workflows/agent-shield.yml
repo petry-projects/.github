@@ -30,4 +30,4 @@ permissions:
 
 jobs:
   agent-shield:
-    uses: petry-projects/.github/.github/workflows/agent-shield-reusable.yml@v2
+    uses: ./.github/workflows/agent-shield-reusable.yml  # local ref — always current (ring0 dogfood, #541)

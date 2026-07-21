@@ -16,17 +16,48 @@ Read the relevant standard *before* making changes that touch CI, repo settings,
 | Topic | Standard | What it covers |
 |-------|----------|----------------|
 | **CI/CD workflows** | [`standards/ci-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md) | Required workflows, action pinning, permissions, job naming, tech-stack patterns |
-| **Workflow templates** | [`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows) | Copy-paste-ready templates: `agent-shield.yml`, `claude.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `dependency-audit.yml`, `feature-ideation.yml` |
+| **Workflow templates** | [`standards/workflows/`](https://github.com/petry-projects/.github/tree/main/standards/workflows) | Copy-paste-ready templates: `agent-shield.yml`, `dev-lead.yml`, `dependabot-automerge.yml`, `dependabot-rebase.yml`, `dependency-audit.yml`, `feature-ideation.yml` |
 | **Agent configuration** | [`standards/agent-standards.md`](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md) | CLAUDE.md / AGENTS.md / SKILL.md required structure, frontmatter rules, cross-references |
 | **Repo settings + labels** | [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md) | Required settings, label set with exact colors, code-quality ruleset, branch protection |
+| **Rulesets** | [`standards/rulesets/`](https://github.com/petry-projects/.github/tree/main/standards/rulesets) | Codified source-of-truth JSON for the org-wide `pr-quality`, `code-quality`, and `release-channel-tags` rulesets (applied by `apply-rulesets.sh`) |
 | **Dependabot config** | [`standards/dependabot-policy.md`](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md) and [`standards/dependabot/`](https://github.com/petry-projects/.github/tree/main/standards/dependabot) | Per-ecosystem dependabot.yml templates and policy |
+| **Advanced Security (GHAS)** | [`standards/advanced-security.md`](https://github.com/petry-projects/.github/blob/main/standards/advanced-security.md) | Org-wide GHAS enablement via the "GitHub recommended" code security configuration, licensing model, and how to verify push protection actually enforces |
 | **Push protection** | [`standards/push-protection.md`](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md) | Secret scanning + push protection, local gitleaks hooks, CI secret-scan job, incident response |
+| **Ruleset remediation** | [`standards/ruleset-remediation-runbook.md`](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md) | Manual admin-token procedure for ruleset bypass-actor + legacy-ruleset findings (snapshot → fix → migrate-then-delete → verify → rollback) |
+| **PR limits** | [`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md) | Org-wide soft cap on concurrent open automation PRs: source-of-truth (`pr-limits.json`), source-side apply path (`pr-limit-gate.sh`), exempt-actor rationale, operator runbook |
 
 **When fixing a compliance finding, the rule is: read the standard, then copy
 the template — do not generate from scratch.** Anything generated from scratch
 is, by definition, drift from the standard. If a needed standard or template
 is missing, file an issue against `petry-projects/.github` rather than
 diverging silently.
+
+### What lives where — `.github` vs `.github-private`
+
+Org-wide **standards and compliance policy are owned by `petry-projects/.github`**
+(this repo): everything in the table above, **plus the codified compliance
+rulesets** — `code-quality` and `pr-quality` — that `scripts/apply-rulesets.sh`
+(and org automation consuming it) apply to every repo. The canonical home for those
+ruleset JSONs is `standards/rulesets/`.
+
+**`petry-projects/.github-private` is scoped to agents, skills, and their reusable
+workflows/assets.** It must **not** be the source of truth for org-wide policy.
+No rulesets should be defined there; all rulesets are owned by `.github/standards/rulesets/`.
+
+**Rule of thumb:** all standards and rulesets belong in `.github/standards/`, whether
+they apply fleet-wide (like `pr-quality` and `code-quality`) or are targeted to specific
+repos (like `release-channel-tags` for meta-repos). When in doubt, put it in `.github`
+and have `.github-private` **consume** it — the way repo-seeding tooling fetches
+`standards/workflows/` from `.github`. Do **not** add new org-wide standards or rulesets
+to `.github-private`.
+
+> **Known exception being remediated:** `code-quality.json` and `pr-quality.json`
+> currently live in `.github-private/.github/rulesets/` (added ad-hoc under
+> compliance fix #60, before this boundary was documented) and are being relocated
+> to `standards/rulesets/` — see
+> [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
+> Treat `.github` as the intended canonical home; do not extend the `.github-private`
+> copies.
 
 ---
 
@@ -79,6 +110,24 @@ If a dependency cannot be resolved, report the specific blocker and a workaround
 - Unit tests MUST be fast, deterministic, and not access external networks.
 - Integration tests are allowed but MUST be clearly marked. They may be skipped locally during rapid iteration, but CI MUST always run them (for example, in a separate job or scheduled workflow).
 - Mock external services using project-provided helpers where available.
+
+### Decision Logic Lives in a Pure, Tested Script
+
+**A decision-making reusable keeps its decision logic in a pure, side-effect-free, unit-tested script (e.g. `scripts/**` or `.github/scripts/**`), with the workflow as thin I/O glue.**
+The workflow gathers facts (via `gh`, GraphQL, git, etc.) and passes them to a `source`-able function that computes the verdict with
+no external calls; the glue only echoes the result to `$GITHUB_OUTPUT` or acts on it. **Gate the script with bats in CI on any PR that changes the reusable.**
+
+Exemplars in this org:
+
+- **Canary rollout engine** — `scripts/lib/canary-rollout.sh` (pure gate core) + `tests/canary_rollout.bats`, CI-gated by `canary-rollout-tests.yml` (#685).
+  The orchestrator `scripts/canary-rollout.sh` feeds it numbers gathered from `gh`.
+- **PR auto-review readiness gate** — `.github/scripts/pr-auto-review/lib/ready-check.sh` (`pr_auto_review_ready` + helpers) + `test/workflows/pr-auto-review/`, CI-gated by
+  the **PR Auto-Review Tests** workflow. The reusable `pr-auto-review-reusable.yml` is thin glue that gathers PR state and calls the pure core.
+
+Why it pays off: correctness bugs are caught **pre-merge** by fast unit tests instead of at canary time or in production;
+the **whole decision matrix** is covered (every branch, precedence, edge cases) rather than the single fixture point a live run exercises;
+and it adds **zero canary-time cost** because the logic is verified before a version ever ships.
+Inline bash trapped in YAML can be exercised only by triggering the workflow — extract it.
 
 ---
 
@@ -543,17 +592,35 @@ The `dependabot-automerge.yml` workflow handles automatic merging of Dependabot 
 | **Eligible updates** | Patch, minor, and indirect dependency bumps |
 | **Major version bumps** | Require manual review and approval |
 | **Merge strategy** | `gh pr merge --squash --auto` (queues merge until all checks pass) |
-| **AI reviewers** | Claude Code job is skipped on Dependabot PRs (job-level `if`); Copilot/CodeRabbit threads are auto-resolved by the workflow |
+| **AI reviewers** | Copilot/CodeRabbit threads are auto-resolved by the workflow |
 | **Approval** | GitHub App token provides the required approving review |
 
-#### Claude Code Workflow on Dependabot PRs
+#### Pull Request Limits (automation open-PR cap)
 
-The `claude-code-reusable.yml` workflow skips the entire `claude` job for Dependabot PRs
-via a job-level `if` condition (`github.event.pull_request.user.login != 'dependabot[bot]'`).
-The job shows as **skipped** (not failed) in GitHub, which satisfies required status checks. The job is skipped because:
+The org enforces a **soft ceiling on concurrent open, non-draft automation PRs
+org-wide** so automation cannot outrun merge throughput and inflate the
+auto-rebase fan-out. Full standard, rationale, and operator runbook:
+[`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md).
 
-- `CLAUDE_CODE_OAUTH_TOKEN` is an Actions secret, not a Dependabot secret
-- AI code review on automated version bumps adds cost without value
+- **GitHub has no native "max open PRs" surface** (no repo setting, org setting,
+  or ruleset rule — verified in the [ADR](https://github.com/petry-projects/.github/blob/main/docs/initiatives/pull-request-limits-adr.md)),
+  so this is enforced **source-side** by [`scripts/lib/pr-limit-gate.sh`](https://github.com/petry-projects/.github/blob/main/scripts/lib/pr-limit-gate.sh):
+  a PR-creating workflow asks the gate before opening a PR and **defers** (never
+  fails or closes) when the queue is at the cap. Live-path wiring is Story 3 (#508).
+- **The configured value lives only in [`standards/pr-limits.json`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.json)** —
+  the single source of truth. Read it with `jq`; never hardcode or restate it.
+
+> **Exempt actors are sanctioned policy, not drift.** `dependabot[bot]`,
+> `OrganizationAdmin`, `@petry-projects/org-leads`, the `dependabot-automerge-petry`
+> app, and `security`-labeled PRs are on the cap's exempt list — never blocked
+> and never counted. This mirrors the ruleset bypass-actor allowance (see
+> [Ruleset remediation](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md)):
+> `dependabot[bot]` is already bounded by its own per-ecosystem
+> `open-pull-requests-limit` (so counting it here would double-cap and could
+> starve a security PR), the human/admin actors are break-glass and maintainer
+> traffic, and the app only operates on existing PRs. A compliance audit should
+> treat these as intentional exemptions. To change the cap or the exempt list,
+> follow the runbook in [`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md).
 
 ---
 

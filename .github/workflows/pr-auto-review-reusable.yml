@@ -5,7 +5,9 @@
 #
 # Fires a review-agent dispatch when a PR meets ALL of the following criteria:
 #   1. PR is open and not a draft
-#   2. All CI checks are completed and passing (no pending / failing)
+#   2. All REQUIRED status checks are completed and passing (no pending /
+#      failing / cancelled). Non-required advisory contexts are ignored — see
+#      .github/scripts/pr-auto-review/lib/ready-check.sh (issue #680).
 #   3. Effective review decision is not CHANGES_REQUESTED
 #   4. No unresolved review threads
 #
@@ -25,6 +27,8 @@ on:
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo scope used for API calls and dispatching the review agent"
         required: true
+
+permissions: {}  # no default permissions; each job grants only what it needs
 
 jobs:
   check-and-dispatch:
@@ -75,6 +79,7 @@ jobs:
               if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
                 echo "PR is a draft — skipping"
                 echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "decision=skip-draft" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               PR_URL="${{ github.event.pull_request.html_url }}"
@@ -99,6 +104,21 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "PR URL: $PR_URL"
 
+      # Source the ready-check decision logic from this reusable's own commit so
+      # the passing-gate always matches the pinned workflow version. Authenticated
+      # with GH_PAT_WORKFLOWS (already required by this workflow) so no extra
+      # `contents:` permission is needed from callers.
+      - name: Checkout ready-check tooling
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: petry-projects/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .pr-auto-review-tooling
+          token: ${{ secrets.GH_PAT_WORKFLOWS }}
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Check PR readiness criteria
         id: criteria
         if: steps.pr.outputs.skip != 'true'
@@ -108,40 +128,56 @@ jobs:
         run: |
           set -euo pipefail
 
+          # This step is thin I/O glue: it gathers the PR facts via gh / GraphQL
+          # and hands them to the pure decision core (pr_auto_review_ready). All
+          # readiness logic — and the decision class it returns — lives in the
+          # unit-tested lib (test/workflows/pr-auto-review/). See #668 increment 5.
+
+          # shellcheck source=/dev/null
+          . .pr-auto-review-tooling/.github/scripts/pr-auto-review/lib/ready-check.sh
+
           # Derive the base repository (owner/repo) from the PR URL.
           # gh pr view --json does not expose baseRepository; parsing the URL
           # is simpler and works for both same-repo and fork PRs.
           REPO=$(echo "$PR_URL" | sed 's|https://github.com/||; s|/pull/.*||')
 
-          # Fetch PR metadata in one call, including the effective review decision.
+          # ── Gather PR facts ──────────────────────────────────────────────────
+
+          # Fetch PR metadata in one call, including the effective review decision
+          # and the base branch (needed to resolve required status checks).
+          # reviewDecision reflects the aggregate current state (accounts for
+          # dismissals and superseding reviews), unlike the REST reviews list
+          # which returns full history and can produce false positives.
           PR_META=$(gh pr view "$PR_URL" \
-            --json state,isDraft,number,reviewDecision)
+            --json state,isDraft,number,reviewDecision,baseRefName)
           STATE=$(echo "$PR_META" | jq -r '.state')
           IS_DRAFT=$(echo "$PR_META" | jq -r '.isDraft')
           PR_NUMBER=$(echo "$PR_META" | jq -r '.number')
           REVIEW_DECISION=$(echo "$PR_META" | jq -r '.reviewDecision // ""')
+          BASE_BRANCH=$(echo "$PR_META" | jq -r '.baseRefName')
 
-          # 1. PR must be open and not a draft.
-          if [ "$STATE" != "OPEN" ] || [ "$IS_DRAFT" = "true" ]; then
-            echo "PR is $STATE (draft=$IS_DRAFT) — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "PR is open and not a draft ✓"
-
-          # 2. All CI checks must be completed and passing.
-          #    gh pr checks --json may exit non-zero when checks are
-          #    failing/pending but still writes the JSON payload to stdout;
-          #    use || true so set -e doesn't discard that output.
+          # gh pr checks --json may exit non-zero when checks are failing/pending
+          # but still writes the JSON payload to stdout; use || true so set -e
+          # doesn't discard that output.
           CHECKS=$(gh pr checks "$PR_URL" --json bucket,name 2>/dev/null || true)
           if [ -z "${CHECKS}" ]; then
             CHECKS="[]"
           fi
-          TOTAL=$(echo "$CHECKS" | jq 'length')
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "No CI checks found on this PR — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+
+          # Resolve the base branch's required status-check contexts. The gate
+          # counts ONLY these — non-required and cancelled advisory contexts
+          # (e.g. a superseded "dev-lead / ci-relay" run) must not block dispatch
+          # (issue #680). An empty set falls back to a fail/pending-only gate.
+          # gh api writes the error body to stdout on a 4xx (e.g. no ruleset), so
+          # capture it inside the `if` condition — a failing pipeline concatenated
+          # with a fallback would otherwise yield two JSON values.
+          if RULES_JSON=$(gh api "/repos/${REPO}/rules/branches/${BASE_BRANCH}" 2>/dev/null); then
+            REQUIRED_JSON=$(printf '%s' "$RULES_JSON" | pr_auto_review_required_contexts 2>/dev/null || echo "[]")
+          else
+            REQUIRED_JSON="[]"
+          fi
+          if [ -z "${REQUIRED_JSON}" ]; then
+            REQUIRED_JSON="[]"
           fi
 
           # Get the name of this workflow's own check run so it can be excluded
@@ -151,52 +187,43 @@ jobs:
             "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
 
-          # Use double-quoted jq expression with \$self so the shell produces
-          # a literal "$self" for jq without triggering SC2016 (which flags
-          # shell variables in single-quoted strings). $self is a jq variable.
-          NOT_PASSING=$(echo "$CHECKS" | jq \
-            --arg self "$SELF_CHECK" \
-            "map(select(.name != \$self)) | map(select(.bucket != \"pass\" and .bucket != \"skipping\")) | length")
-
-          if [ "$NOT_PASSING" -gt 0 ]; then
-            echo "$NOT_PASSING of $TOTAL check(s) are not yet passing — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "All $TOTAL CI check(s) passing ✓"
-
-          # 3. Effective review decision must not be CHANGES_REQUESTED.
-          #    reviewDecision reflects the aggregate current state (accounts for
-          #    dismissals and superseding reviews), unlike the REST reviews list
-          #    which returns full history and can produce false positives.
-          if [ "$REVIEW_DECISION" = "CHANGES_REQUESTED" ]; then
-            echo "Effective review decision is CHANGES_REQUESTED — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "No CHANGES_REQUESTED review decision ✓"
-
-          # 4. No unresolved review threads.
+          # Count unresolved review threads.
           #    REST API has no resolved field on review comments; GraphQL is
           #    required. \$owner/\$repo/\$number are GraphQL variable references;
           #    the backslash-dollar escaping prevents shell expansion while
           #    keeping the literal $ that GraphQL expects.
-          # TODO: paginate reviewThreads for PRs with >100 threads.
+          # Known limitation: only the first 100 review threads are inspected;
+          # PRs with more than 100 threads are not fully paginated. Accepted
+          # as-is — such PRs are vanishingly rare across this org's repos.
           UNRESOLVED=$(gh api graphql \
             -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved}}}}}" \
             -f owner="${REPO%%/*}" \
             -f repo="${REPO##*/}" \
             -F number="${PR_NUMBER}" \
             --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length")
-          if [ "$UNRESOLVED" -gt 0 ]; then
-            echo "$UNRESOLVED unresolved review thread(s) — skipping"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "No unresolved review threads ✓"
 
-          echo "All readiness criteria met — dispatching review agent"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
+          # ── Decide (pure core) ───────────────────────────────────────────────
+          # The lib returns the decision class on stdout and exit 0 iff ready;
+          # the glue only echoes it to $GITHUB_OUTPUT (Layer 2 telemetry reads it).
+          if DECISION=$(pr_auto_review_ready \
+                "$STATE" "$IS_DRAFT" "$CHECKS" "$REQUIRED_JSON" \
+                "$SELF_CHECK" "$REVIEW_DECISION" "$UNRESOLVED"); then
+            READY=true
+          else
+            READY=false
+          fi
+          echo "Readiness decision: $DECISION (ready=$READY)"
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          # Emit each class as a literal string so tests/canary_rollout.bats
+          # can grep for decision=<class> as a structural guard.
+          case "$DECISION" in
+            dispatched)              echo "decision=dispatched"              >> "$GITHUB_OUTPUT" ;;
+            skip-draft)              echo "decision=skip-draft"              >> "$GITHUB_OUTPUT" ;;
+            skip-checks-pending)     echo "decision=skip-checks-pending"     >> "$GITHUB_OUTPUT" ;;
+            skip-changes-requested)  echo "decision=skip-changes-requested"  >> "$GITHUB_OUTPUT" ;;
+            skip-unresolved-threads) echo "decision=skip-unresolved-threads" >> "$GITHUB_OUTPUT" ;;
+            *)                       echo "decision=$DECISION"               >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Dispatch review agent
         if: steps.criteria.outputs.ready == 'true'
@@ -211,3 +238,27 @@ jobs:
             --field event_type=pr-review-mention \
             --field "client_payload[pr_url]=$PR_URL"
           echo "::notice::Auto-review dispatched for $PR_URL"
+
+      # Decision telemetry (#668 increment 4, Layer 2). Each outcome branch is a no-op
+      # step whose NAME encodes the decision the gate reached; exactly one condition is
+      # true per run, so the taken branch runs (conclusion=success) and the rest are
+      # `skipped`. The canary-rollout engine reads these names off `gh run view --json
+      # jobs` (decision_class / _sample_decision_counts) to tally the decision-mix and
+      # detect a distribution shift in a candidate. Additive + side-effect-free: a run
+      # that short-circuits before a decision (n/a event, no PR) emits none, and no
+      # consumer other than the opt-in gate.correctness block reads them.
+      - name: 'decision: dispatched'
+        if: steps.criteria.outputs.decision == 'dispatched'
+        run: 'true'
+      - name: 'decision: skip-draft'
+        if: steps.pr.outputs.decision == 'skip-draft' || steps.criteria.outputs.decision == 'skip-draft'
+        run: 'true'
+      - name: 'decision: skip-checks-pending'
+        if: steps.criteria.outputs.decision == 'skip-checks-pending'
+        run: 'true'
+      - name: 'decision: skip-changes-requested'
+        if: steps.criteria.outputs.decision == 'skip-changes-requested'
+        run: 'true'
+      - name: 'decision: skip-unresolved-threads'
+        if: steps.criteria.outputs.decision == 'skip-unresolved-threads'
+        run: 'true'

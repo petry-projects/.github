@@ -37,6 +37,8 @@ SHOULD be audited and brought into compliance.
 
 All repositories MUST have the following security features enabled. These are
 the enforcement primitives behind the [Push Protection Standard](push-protection.md).
+They are enabled org-wide via the "GitHub recommended" code security
+configuration — see the [Advanced Security (GHAS) Standard](advanced-security.md).
 
 | Setting | Standard Value | Rationale |
 |---------|---------------|-----------|
@@ -121,6 +123,66 @@ Rulesets are the primary enforcement mechanism for branch policies. All
 repositories MUST use rulesets on the default branch. Classic branch protection
 rules are deprecated — migrate existing classic rules to rulesets.
 
+### Source of truth & repo boundary
+
+The codified ruleset JSONs are the source of truth for all rulesets;
+`scripts/apply-rulesets.sh` (and any org automation consuming it) applies them to each repo.
+As **org-wide compliance policy they are owned by `petry-projects/.github`**, and
+their canonical home is `standards/rulesets/`. Do **not** author rulesets in
+`petry-projects/.github-private` — that repo is scoped to agents/skills and their
+reusable assets. All rulesets, including targeted ones like `release-channel-tags`,
+are defined in `.github/standards/rulesets/`.
+See the repo-boundary rule in [`AGENTS.md`](../AGENTS.md).
+
+> **In transit:** `code-quality.json` and `pr-quality.json` currently still live
+> in `.github-private/.github/rulesets/` and are being relocated to
+> `standards/rulesets/` here — see
+> [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
+
+**`pr-quality` and `code-quality` are the only sanctioned rulesets.** Legacy
+`protect-branches` rulesets and ad-hoc `main` rulesets are deprecated: they
+duplicate protections and, because GitHub evaluates bypass eligibility per
+ruleset, they are a second place every bypass actor must be kept in sync (the
+trap that produced inconsistent `OrganizationAdmin` / `RepositoryAdmin` bypass
+state across the fleet). They MUST be migrated into the two sanctioned rulesets
+and removed. Deletion is only safe once every required status check the legacy
+ruleset carries is ALSO required by a sanctioned ruleset — otherwise deletion
+silently drops a merge gate. `check_legacy_rulesets()` in
+[`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh) flags each
+legacy ruleset and reports the exact migration delta (checks to move into
+`code-quality` first, or "safe to delete").
+
+**Source of truth.** All ruleset JSONs — `pr-quality`, `code-quality`, and
+`release-channel-tags` — live in this repo at [`standards/rulesets/`](rulesets/).
+`.github` owns org-wide compliance policy (see [`AGENTS.md`](../AGENTS.md#organization-standards)
+for the repo-boundary rule, codified in #576). Run `apply-rulesets.sh` to converge each
+repo's live ruleset to the desired state documented here.
+
+**Compliance check — contents, not just presence (#766).** The weekly audit does
+not merely verify that a ruleset with the right *name* exists.
+`check_ruleset_contents()` in [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)
+compares each live `pr-quality` / `code-quality` ruleset against its codified
+source in [`standards/rulesets/`](rulesets/) and raises a finding **per drifted
+parameter** — naming the parameter, the expected value, and the actual value.
+It covers `required_approving_review_count`, `require_code_owner_review`,
+`required_review_thread_resolution`, `dismiss_stale_reviews_on_push`,
+`require_last_push_approval`, `allowed_merge_methods`, and (for `code-quality`)
+`required_status_checks`. Only codified parameters are compared, so API-only
+fields never produce noise. `required_status_checks` uses **subset** semantics —
+every codified context must be present, but repo-specific *additional* checks are
+allowed (see [`code-quality`](#code-quality--required-checks-ruleset-all-repositories)
+below); a *missing* codified context is drift. The check **fails closed**: a
+ruleset that cannot be fetched or parsed is a finding, never a silent pass. This
+means flipping `required_review_thread_resolution` to `false`, lowering the
+review count, dropping `require_code_owner_review`, or widening
+`allowed_merge_methods` is now caught — previously the audit passed as long as a
+ruleset by that name existed.
+
+> **Remediating ruleset findings is a manual, admin-token procedure** —
+> `compliance-remediate.sh` skips the `rulesets` category. Follow the
+> [Ruleset Remediation Runbook](ruleset-remediation-runbook.md) (snapshot →
+> bypass actors → migrate-then-delete legacy → verify → rollback).
+
 ### Bypass Actors — Required on Every Ruleset Targeting `main`
 
 **The `dependabot-automerge-petry` GitHub App MUST be a bypass actor on every
@@ -140,30 +202,30 @@ bypass actor *opens* the PR. Dependabot opens its own PRs, so the
 rejected. `always` mode is safe here because the rebase workflow explicitly
 verifies CI pass and `MERGEABLE` state before calling the merge API.
 
-**API snippet to add the bypass actor to an existing ruleset:**
+**Remediation — `scripts/fix-ruleset-bypass.sh`:** normalizes bypass actors on
+**every** ruleset targeting the default branch (including legacy
+`protect-branches` / `main` rulesets that `apply-rulesets.sh` does not manage).
+Existing actors are preserved; the two required actors are added/normalized to
+`bypass_mode: always`. Dry-run emits ready-to-PUT payloads for review without
+mutating live rulesets:
 
 ```bash
-# Get current ruleset (capture bypass_actors and rules arrays)
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id>
+# Preview payloads for one repo (or --all):
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh <repo> --dry-run
 
-# PUT the full ruleset back, adding actor_id 3167543 to bypass_actors
-gh api repos/petry-projects/<repo>/rulesets/<ruleset-id> \
-  -X PUT --input ruleset.json
-# where ruleset.json adds {"actor_id": 3167543, "actor_type": "Integration", "bypass_mode": "always"}
-# to the existing bypass_actors array alongside all existing rules and conditions.
+# Apply:
+GH_TOKEN=<admin-token> ./scripts/fix-ruleset-bypass.sh --all
 ```
 
-**Compliance check:** verify all rulesets on all repos have the bypass actor:
+> `apply-rulesets.sh` full-replaces `pr-quality` / `code-quality` with the two
+> canonical bypass actors. `fix-ruleset-bypass.sh` is the least-destructive,
+> any-ruleset complement used to remediate audit findings.
 
-```bash
-for repo in $(gh repo list petry-projects --json name --jq '.[].name' --limit 1000); do
-  for rs_id in $(gh api "repos/petry-projects/$repo/rulesets" --jq '.[].id' 2>/dev/null); do
-    rs=$(gh api "repos/petry-projects/$repo/rulesets/$rs_id" 2>/dev/null)
-    missing=$(echo "$rs" | jq '[.bypass_actors[]? | select(.actor_id == 3167543)] | length == 0')
-    [[ "$missing" == "true" ]] && echo "MISSING: $repo / $(echo "$rs" | jq -r '.name')"
-  done
-done
-```
+**Compliance check:** enforced automatically by the weekly audit —
+`check_ruleset_bypass_actors()` in [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh)
+verifies that every ruleset targeting the default branch grants `bypass_mode:
+always` to both required actors, and flags the `Repository admin` role
+(`RepositoryRole` id 5) as a non-conforming substitute for `OrganizationAdmin`.
 
 ### `pr-quality` — Standard Ruleset (All Repositories)
 
@@ -216,20 +278,45 @@ a fresh approval under the current CODEOWNERS.
 
 ### `code-quality` — Required Checks Ruleset (All Repositories)
 
-Every repository MUST have the following quality checks configured and
-required. The specific check names and ecosystem configurations vary by repo,
-but the categories are universal.
+The **codified** [`standards/rulesets/code-quality.json`](rulesets/code-quality.json)
+is the source of truth for the required-check set; `apply-rulesets.sh` reads it and
+PUTs it to each repo. (The detection-based in-code builder that dynamically probed
+workflow files was **retired** in #580 — it diverged from this file.) The table below
+reconciles to `code-quality.json`; keep the two in sync. Note: `apply-rulesets.sh`
+manages only the `pr-quality` and `code-quality` branch rulesets — the
+`release-channel-tags` ruleset is managed in `.github-private` (see
+[§Source of truth & repo boundary](#source-of-truth--repo-boundary)).
 
 #### Required Check Categories
 
-| Check | Required | Check Name(s) | Notes |
-|-------|----------|---------------|-------|
-| **SonarCloud** | All repos | `SonarCloud` | Code quality, maintainability, security hotspots |
-| **CodeQL** | All repos | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
-| **Claude Code** | All repos | `claude` | AI code review on every PR |
-| **CI Pipeline** | All repos | Repo-specific (e.g., `build-and-test`, `TypeScript`, `Go`) | Lint, format, typecheck, test |
-| **Coverage** | All repos | `coverage` or embedded in CI job | Must meet repo-defined thresholds |
-| **Secret Scan** | All repos | `Secret scan (gitleaks)` | Full-history gitleaks scan — see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense) |
+The four contexts below are the **unconditional fleet-wide required checks** codified
+in `code-quality.json`. `Dev-Lead Agent` is intentionally excluded, and
+`Secret scan (gitleaks)` + `coverage` are staged (template / new repos first) — see
+the reclassification table and sequencing note that follow.
+
+| Check | Status | Check Name(s) | Notes |
+|-------|--------|---------------|-------|
+| **SonarCloud** | ✅ Required (codified) | `SonarCloud` | Code quality, maintainability, security hotspots. The context is exactly as codified in `code-quality.json`; verify with `gh pr checks <PR>` if a repo's SonarCloud workflow reports under a different name |
+| **CodeQL** | ✅ Required (codified) | `CodeQL` | SAST via GitHub-managed default setup — auto-detects all supported languages (see [ci-standards.md §2](ci-standards.md#2-codeql-analysis-github-managed-default-setup)) |
+| **AgentShield** | ✅ Required (codified) | `agent-shield / AgentShield` | Deep agent-config security scan on every PR |
+| **Dependency Audit** | ✅ Required (codified) | `dependency-audit / Detect ecosystems` | Only the unconditional `Detect ecosystems` job is required; per-ecosystem audit jobs are gated on lockfile presence and would fail as required-but-skipped |
+
+The following are **intentionally NOT** in `code-quality.json` today:
+
+| Check | Status | Check Name(s) | Why |
+|-------|--------|---------------|-----|
+| **Secret Scan** | ⏳ Template / new repos; not yet fleet-wide | `Secret scan (gitleaks)` | Produced by the template [`ci.yml`](workflows/ci.yml) (see [Push Protection Standard](push-protection.md#layer-3--ci-secret-scanning-secondary-defense)). Added to the ruleset fleet-wide only once existing repos produce it |
+| **Coverage** | ⏳ Template / new repos; not yet fleet-wide | `coverage` | **Not produced by the template [`ci.yml`](workflows/ci.yml) out of the box** — the template ships a single `build-and-test` job; a separate `coverage` check must be explicitly configured when adopting the template (see [ci-standards.md](ci-standards.md)). Requiring it fleet-wide before repos produce it would brick every PR — backfill first, then add the context |
+| **Dev-Lead Agent** | ❌ Not a required context | `Dev-Lead Agent / dev-lead` | Per-PR AI review, not a merge gate: the agent's GitHub App refuses to mint a token for any PR touching workflow files, so requiring it would deadlock every workflow-modifying PR |
+| **CI Pipeline** | Repo-specific (not a fixed org context) | e.g. `build-and-test`, `TypeScript`, `Go` | Lint/format/typecheck/test; the job name is repo-defined, so it is required per-repo (via branch protection), not as a codified org-wide context |
+
+**Sequencing (why Secret Scan + Coverage are staged).** Adding a required context
+to `code-quality.json` makes it a merge gate on **every** repo the ruleset targets;
+a repo that does not *produce* that check is bricked. Neither context is produced by
+the template `ci.yml` out of the box — repos must explicitly add a coverage job and
+the gitleaks secret-scan step before those check names appear. Both are added to the
+shared ruleset only **after** a fleet backfill. Until then, keep them scoped to repos
+that already produce them. See [petry-projects/.github#575](https://github.com/petry-projects/.github/issues/575).
 
 > **Check names must match exactly.** GitHub-managed CodeQL produces a check named
 > `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
@@ -276,17 +363,44 @@ See [CI Standards](ci-standards.md) for workflow templates and patterns.
 
 | App | Purpose | Installed |
 |-----|---------|-----------|
-| **Claude** | AI code review and PR assistance via Claude Code Action | 2026-03-20 |
+| **Claude** | AI code review and PR assistance via Claude Code Action (default dev-lead engine) | 2026-03-20 |
 | **dependabot-automerge-petry** | Provides approving review for Dependabot auto-merge | 2026-03-23 |
 | **petry-projects-pr-review-agent** | (deprecated) GitHub App formerly used for PR review — replaced by `donpetry-bot` machine user in `@petry-projects/org-leads` because Apps cannot be CODEOWNERS | 2026-04-01 |
 | **donpetry-bot** | Machine-user account in `@petry-projects/org-leads`; satisfies CODEOWNERS for automated PR review | 2026-05-04 |
 | **SonarQube Cloud (SonarCloud)** | Code quality, security hotspots, coverage tracking | 2026-03-25 |
 | **CodeRabbit AI** | AI-powered code review on PRs | 2026-03-25 |
 
+### AI Engine Support — Dev-Lead Workflow
+
+The **dev-lead agent** workflow (`dev-lead.yml`) supports multiple AI engines for PR review and automation.
+Set `vars.DEV_LEAD_ENGINE` per-repo to choose the engine; defaults to `claude`.
+
+| Engine | Engine ID | Required Secrets | Purpose | Status |
+|--------|-----------|-----------------|---------|--------|
+| **Claude** | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic Claude models for code review | Active (default) |
+| **Gemini** | `gemini` | `CLAUDE_CODE_OAUTH_TOKEN`, `GOOGLE_API_KEY` | Google Gemini for code review (fallback if Claude unavailable) | Supported |
+| **Copilot** | `copilot` | `CLAUDE_CODE_OAUTH_TOKEN`, `GH_PAT` | GitHub Copilot for code review (GitHub-native alternative) | Supported |
+
+**Configuration per-repo (set as a repository variable):**
+
+```bash
+# GitHub does not propagate caller workflow env: values into called reusable
+# workflows, so setting env: in the caller stub has no effect. Use a repository
+# variable instead, which the reusable workflow reads as vars.DEV_LEAD_ENGINE.
+gh variable set DEV_LEAD_ENGINE --body "gemini" --repo petry-projects/<repo>
+# Alternatively: Settings → Secrets and variables → Actions → Variables → New variable
+```
+
+**Secret requirements by engine:**
+
+- **Claude**: requires `CLAUDE_CODE_OAUTH_TOKEN` only
+- **Gemini**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GOOGLE_API_KEY`
+- **Copilot**: requires `CLAUDE_CODE_OAUTH_TOKEN` + `GH_PAT` (GitHub token with Copilot scope)
+
 ### Check-Suite Auto-Trigger Preferences
 
 GitHub automatically creates a check suite for any app that has previously created check runs in a repo, on every push.
-Some apps (Claude, CodeRabbit) create these suites proactively but only complete them when they have real work to do.
+Some apps (Claude, CodeRabbit, and alternative AI engines) create these suites proactively but only complete them when they have real work to do.
 When they have nothing to do, the suite stays in `queued` state indefinitely —
 **GitHub auto-merge waits for all check suites to reach a terminal state before merging**,
 so these orphaned suites permanently block auto-merge.
@@ -303,6 +417,9 @@ Disabling auto-trigger stops GitHub from creating suites on every push. The apps
 If an app has never created a check run in a repository, GitHub omits that app from `auto_trigger_checks` entirely.
 Both `scripts/apply-repo-settings.sh` and `scripts/compliance-audit.sh` treat this `missing` state as compliant —
 no PATCH is needed and no finding is raised until the app is first seen in the repo.
+
+**Additional AI engines** (Gemini, Copilot) — if a repo activates an alternative `DEV_LEAD_ENGINE`:
+Verify that the corresponding app has `auto_trigger_checks: false` set if/when it first creates a check run.
 
 **Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
 
@@ -325,12 +442,24 @@ GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
 These secrets are configured at the **organization level** and inherited by
 all repos automatically — no per-repo setup needed:
 
+#### Required secrets (all repos)
+
 | Secret | Purpose |
 |--------|---------|
 | `APP_ID` | GitHub App ID for Dependabot auto-merge (app_id: 3167543) |
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action and dev-lead agent (default engine) |
+| `DON_PETRY_BOT_GH_PAT` | Classic PAT (repo scope) owned by donpetry-bot; required by `pr-review-mention-reusable.yml` to post review-mention comments as the bot identity |
+| `GH_PAT_WORKFLOWS` | Classic PAT with `repo` scope; required for cross-repo script access and dev-lead to push workflow files |
+| `GITLEAKS_LICENSE` | Gitleaks license key required for `secret-scan` job in organization repositories (see [ci-standards.md](ci-standards.md#4-secret-scanning-ciymll--gitleaks-job)) |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
+
+#### Optional secrets (by feature)
+
+| Secret | Purpose | Required for |
+|--------|---------|---------------|
+| `GOOGLE_API_KEY` | Gemini API authentication | Repos using `vars.DEV_LEAD_ENGINE=gemini` |
+| `GH_PAT` | GitHub token with Copilot scope | Repos using `vars.DEV_LEAD_ENGINE=copilot` |
 
 Repos may require repo-specific secrets beyond this standard set.
 
@@ -338,7 +467,11 @@ Repos may require repo-specific secrets beyond this standard set.
 
 ## Labels — Standard Set
 
-All repositories MUST have these labels configured:
+All repositories MUST have these labels configured. They fall into two groups: a
+**fixed set** enumerated below, and a **derived family** (the persona opt-out labels)
+computed from the persona manifests rather than hand-listed.
+
+### Fixed set
 
 | Label | Color | Purpose |
 |-------|-------|---------|
@@ -349,6 +482,37 @@ All repositories MUST have these labels configured:
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
+
+### Derived family — persona opt-out labels (`<id>:hands-off`)
+
+| Label | Color | Purpose |
+|-------|-------|---------|
+| `<id>:hands-off` (one per persona) | `#ededed` (grey) | Opt an item out of the `<id>` persona's automation entirely (per [persona-standards.md §4 rule 4](persona-standards.md)) |
+
+This family is **derived, not enumerated.** [`scripts/apply-repo-settings.sh`](../scripts/apply-repo-settings.sh)
+(`apply_labels()` → `persona_opt_out_label_configs()`) lists the persona directories
+under `personas/<id>/` in [`petry-projects/.github-private`](https://github.com/petry-projects/.github-private)
+and provisions each persona's `opt_out_label` (read from its `persona.yml`, defaulting
+to the `<id>:hands-off` convention). The persona manifest is the index-of-record
+([persona-standards.md §1.1](persona-standards.md)), so **onboarding a new persona
+provisions its opt-out label automatically — no edit to the label list is required.**
+Draft (`status: draft`) personas are included: being able to say "hands-off" is exactly
+what a not-yet-stable persona needs.
+
+> **`.github-private` is PUBLIC** (`private: false`, verified) despite its name, so the
+> applier reads the manifests over the token it already uses for the rest of the run;
+> no extra cross-repo auth is required.
+
+All labels in this family share the single grey color `#ededed`, chosen to sit apart
+from the functional labels above (which use red/blue/teal/yellow to signal category).
+
+> **`dev-lead:hands-off` reconciliation.** `dev-lead:hands-off` already exists in
+> repos but predates this mechanism — it was created ad hoc and appeared in neither
+> the script nor this table (drift). It is now a member of this derived family: once
+> the `dev-lead` persona is represented by a `personas/dev-lead/persona.yml` manifest,
+> the applier provisions `dev-lead:hands-off` from that manifest like any other
+> persona. The applier only creates/updates labels (never deletes), so the existing
+> `dev-lead:hands-off` label is retained in the meantime.
 
 ---
 
@@ -405,36 +569,113 @@ When creating a new repository in `petry-projects`:
 
 ---
 
-## Current Compliance Status
+## Organization-Level Workflows
 
-**Repository settings:** All 7 repos are fully compliant as of 2026-05-13
-(check-suite auto-trigger preferences re-applied for `.github` via API — issue #274;
-last full remediation via `scripts/apply-repo-settings.sh --all` on 2026-04-05).
+The org runs several automated workflows across all repositories:
 
-**Ruleset status (as of 2026-05-04):**
+| Workflow | Schedule | Purpose | Details |
+|----------|----------|---------|---------|
+| **Actions Fleet Monitor** (`actions-fleet-monitor.yml` in `petry-projects/.github-private`) | Daily, 6:00 UTC | Monitor health of all GitHub Actions workflows across the org | Tracks success/failure rates, duration percentiles (p50/p95), and assigns status (HEALTHY/WARNING/DEGRADED/CRITICAL) per workflow; creates issues when workflows have failures |
+| **Org Scorecard Review** (`org-scorecard.yml`) | Weekly, Monday 9:00 UTC | Security posture scoring for all public repos via OpenSSF Scorecard | Creates/updates/closes GitHub Issues with findings; auto-closes when resolved |
+| **Org Standards Compliance Audit** (`compliance-audit-and-improvement.yml`) | Weekly, Friday 12:00 UTC | Deterministic audit of all repos against org standards + runtime health survey | Identifies missing workflows, misconfigured settings, stale PRs, security alerts; creates actionable issues labeled `dev-lead` for agent remediation |
+| **Daily Org Status** (`daily-org-status.yml`) | Daily, 6:00 UTC | Org-wide health snapshot — PR counts, CI failures, dependency vulnerabilities | Reports via PR comments and workflow summary |
+| **Dependency Audit** (`dependency-audit.yml`) | Per-repo CI (push/PR to `main`) | Multi-ecosystem dependency vulnerability scan (npm, pnpm, go, cargo, pip) | Fails the build when dependencies have known security advisories; adopted per-repo via the standard caller stub |
 
-| Repository | `pr-quality` | `code-quality` | Notes |
+### Actions Fleet Monitor Details
+
+The **Actions Fleet Monitor** runs daily and provides critical visibility into workflow health:
+
+**Metrics tracked per workflow:**
+
+- Total runs, successful runs, failed runs, cancelled runs (over lookback window)
+- Failure rate (`failed / total`)
+- Duration percentiles (p50 and p95)
+- Health status: `HEALTHY` (0% failures), `WARNING` (>0%, ≤20%), `DEGRADED` (>20%, ≤50%), `CRITICAL` (>50%)
+
+**Lookback window:** Defaults to 1 day; can be customized with `--field lookback_days=N` when running manually
+
+**Results delivery:**
+
+- Step Summary — workflow results table displayed in GitHub Actions UI (visible on every run)
+- GitHub Issue — created in `.github-private` when any workflow has failed runs
+
+**Manual trigger:**
+
+```bash
+gh workflow run actions-fleet-monitor.yml \
+  --repo petry-projects/.github-private \
+  --field org=petry-projects \
+  --field lookback_days=7
+```
+
+This tool is essential for detecting CI flakiness, performance degradation, and systemic workflow issues before they impact development velocity.
+
+**Ruleset bypass actors & legacy rulesets (remediated 2026-06-10):** a full
+sweep (now enforced by `check_ruleset_bypass_actors()` and
+`check_legacy_rulesets()`) found `.github-private` already compliant and every
+other repo carrying findings — `code-quality` rulesets missing the
+`dependabot-automerge-petry` bypass, `pr-quality` rulesets granting
+`RepositoryAdmin` where `OrganizationAdmin` is required, and four deprecated
+legacy rulesets still active. **All have been remediated.** A re-audit reports
+**zero ruleset findings** across the fleet.
+
+| Repository | Bypass actors | Legacy ruleset | Action taken |
 |------------|:---:|:---:|-------|
-| **.github** | ✅ | — | `pr-quality` added; `code-quality` not yet configured |
-| **bmad-bgreat-suite** | ✅ | ✅ | Both rulesets present; CodeQL check fixed (`CodeQL` not `Analyze (actions)`) |
-| **ContentTwin** | ✅ | ✅ | `dependabot-automerge-petry` bypass actor added; CodeQL check fixed |
-| **broodly** | ✅ | — | `code-quality` not yet configured |
-| **TalkTerm** | ✅ | ✅ | Both rulesets present; stale CI check names removed |
-| **markets** | ✅ | — | `code-quality` not yet configured |
-| **google-app-scripts** | ✅ | — | Migrated from `protect-branches` to `pr-quality`; legacy CodeQL check removed |
+| **.github-private** | ✅ | — | Already compliant |
+| **.github** | ✅ | retired | `code-quality` dependabot bypass added; `protect-branches` deleted |
+| **bmad-bgreat-suite** | ✅ | retired | `code-quality` bypass actors added; `protect-branches` deleted |
+| **ContentTwin** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin added |
+| **broodly** | ✅ | — | `code-quality` dependabot bypass added; `pr-quality` OrganizationAdmin + dependabot added |
+| **markets** | ✅ | — | `code-quality` bypass actors added; `pr-quality` OrganizationAdmin + dependabot added |
+| **TalkTerm** | ✅ | retired | `code-quality` dependabot bypass added; redundant `main` ruleset deleted |
+| **google-app-scripts** | ✅ | retired | `coverage` migrated into `code-quality`, then `protect-branches` deleted; `code-quality` bypass actors added |
+
+> **Remediation:** see the [Ruleset Remediation Runbook](ruleset-remediation-runbook.md).
+> Tooling: `scripts/fix-ruleset-bypass.sh` (bypass actors, least-destructive,
+> dry-run capable) and `scripts/apply-rulesets.sh` (canonical `pr-quality` /
+> `code-quality`). Legacy rulesets are retired with
+> `gh api -X DELETE repos/petry-projects/<repo>/rulesets/<id>` once
+> `check_legacy_rulesets()` reports an empty migration delta.
 
 ---
 
 ## Audit & Compliance
 
-The org runs a weekly [OpenSSF Scorecard](https://github.com/ossf/scorecard)
-audit via the [`org-scorecard.yml`](../.github/workflows/org-scorecard.yml)
-workflow. This workflow:
+### Compliance Audit Process
 
-- Scans all public repos in the org
+Every Friday at 12:00 UTC, the **Org Standards Compliance Audit** runs across all repositories:
+
+1. **Deterministic compliance checks** (`scripts/compliance-audit.sh`) verify each repo meets org standards:
+   - Required workflows present (CI, CodeQL, dev-lead agent, Dependabot, etc.)
+   - Branch protection rules and rulesets correctly configured
+   - Labels, CODEOWNERS, and settings match the standard
+   - GitHub App auto-trigger preferences set correctly
+
+2. **Runtime health survey** checks:
+   - CI failures and flaky tests
+   - Stale pull requests (open > 14 days)
+   - Security alerts (CodeQL, Dependabot, secret scanning)
+   - Dependency vulnerabilities
+
+3. **Issue creation and categorization:**
+   - Each finding becomes a GitHub Issue in the repository, labeled `compliance-audit`
+   - High-priority findings (errors) are escalated for immediate remediation
+   - Issues include a `dev-lead` label for agent-driven automation
+   - Fixed issues are auto-closed by the audit
+
+4. **Org-level summary and reporting:**
+   - Overall compliance health report
+   - Trend analysis and improvement suggestions
+   - Published as a GitHub Issue in the `.github` repository
+
+### Scorecard Results
+
+The weekly [OpenSSF Scorecard](https://github.com/ossf/scorecard) audit via
+[`org-scorecard.yml`](../.github/workflows/org-scorecard.yml) scans all public repos:
+
 - Creates/updates GitHub Issues for findings (labeled `scorecard`)
 - Auto-closes issues when checks reach a score of 10/10
 - Produces a summary report in the workflow step summary
 
-Scorecard results should be reviewed weekly and remediated per the
+Scorecard findings should be reviewed and remediated per the
 [OpenSSF Scorecard documentation](https://github.com/ossf/scorecard/blob/main/docs/checks.md).

@@ -14,16 +14,22 @@ adopt.
 
 Primary stack for work done in this repo: Bash · YAML · Markdown · Python (scripts).
 
-## Standards Reference
+## Org Standards
 
 Full AI agent development standards live in **[AGENTS.md](../AGENTS.md)**. This file is a
 Copilot-focused summary; AGENTS.md is authoritative when they conflict. Read the relevant
 standard in [`standards/`](../standards/) before touching CI, repo settings, or agent
 configuration.
 
-Language-specific rules are applied automatically via files in `.github/instructions/`:
-`typescript`, `javascript`, `python`, `go`, `terraform`, and `shell` — see those files for
-per-language guidance.
+Language-specific rules are applied automatically via files in `.github/instructions/` when you
+open a matching file type. Canonical files in this repo (deployed verbatim to each target repo):
+
+- [`typescript.instructions.md`](instructions/typescript.instructions.md) — strict config, branded types, DDD/CQRS, pino, React, Electron IPC
+- [`javascript.instructions.md`](instructions/javascript.instructions.md) — style, JSDoc type annotations, error handling
+- [`python.instructions.md`](instructions/python.instructions.md) — black/ruff, type annotations, structlog, pytest, GAS companion code
+- [`go.instructions.md`](instructions/go.instructions.md) — naming, gofmt, slog, error wrapping, concurrency, HTTP, testing, security
+- [`terraform.instructions.md`](instructions/terraform.instructions.md) — fmt, tflint, tfsec, trivy, state management, security
+- [`shell.instructions.md`](instructions/shell.instructions.md) — safety flags, ShellCheck, quoting, error handling, Makefile standards
 
 ## Core Development Rules
 

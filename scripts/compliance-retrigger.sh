@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# compliance-retrigger.sh — Re-trigger stale compliance-audit issues and enforce
-# dev-lead workflow health across the fleet.
+# compliance-retrigger.sh — Re-trigger stale compliance-audit issues.
 #
-# Run daily (see .github/workflows/compliance-retrigger.yml).
+# Run hourly (see .github/workflows/compliance-retrigger.yml). The per-run
+# one-engagement-per-repo throttle means each repo gets at most one issue
+# re-triggered per run (≈ one per hour on the scheduled cadence), draining
+# each repo's backlog steadily without bursts.
 #
 # What it does:
-#   1. Verifies that the dev-lead workflow is ACTIVE in every fleet repo.
-#      Disabled workflows silently swallow issue-labeled events — findings
-#      will never be fixed even if labels are applied correctly.
-#   2. Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
-#      have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
-#      label (remove + re-add) to re-fire the issues:labeled event and give
-#      dev-lead a fresh chance to create a fix PR.
+#   Finds all open compliance-audit issues that are ≥ STALE_DAYS old and
+#   have no associated open PR on a dev-lead branch.  Cycles the "dev-lead"
+#   label (remove + re-add) to re-fire the issues:labeled event and give
+#   dev-lead a fresh chance to create a fix PR.
+#
+#      Throttling: at most ONE issue per repo is engaged per run (shared across
+#      the primary and legacy-label sweeps), and a repo already active (open PR
+#      or in-progress issue) is skipped.  Issues are processed oldest-first, so
+#      the most-stuck finding in each repo is the one re-engaged; the hourly
+#      cadence drains the rest of each repo's backlog one at a time.  This keeps
+#      concurrent dev-lead runs in any single repo to one, avoiding the rebase
+#      storms and token exhaustion a fleet-wide burst would cause.
 #
 # Why re-trigger instead of relying on the original event?
 #   GitHub only fires issues:labeled once per label application.  If dev-lead
@@ -45,8 +52,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ISSUES_RETRIGGERED=0
 ISSUES_SKIPPED=0
-WORKFLOWS_DISABLED=0
-WORKFLOWS_ENABLED=0
+ISSUES_DEFERRED=0
+
+# Repos that already have an in-flight dev-lead engagement THIS run — either an
+# issue we re-triggered or one we found already active. At most one engagement
+# per repo per run keeps concurrent dev-lead runs in a single repo to one,
+# avoiding rebase storms and token exhaustion from a fleet-wide burst. Shared
+# across BOTH the primary and legacy-label sweeps so the per-repo budget covers
+# every path that could engage dev-lead.
+declare -A REPO_ENGAGED=()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,54 +83,7 @@ stale_cutoff() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1: Check dev-lead workflow health in fleet repos
-# ---------------------------------------------------------------------------
-
-check_devlead_workflows() {
-  info "Checking dev-lead workflow state across fleet repos..."
-  local repos
-  repos=$(gh api "orgs/$ORG/repos?per_page=100" \
-    --jq '[.[] | select(.archived == false and .disabled == false) | .name][]' \
-    2>/dev/null || echo "")
-
-  while IFS= read -r repo; do
-    [ -z "$repo" ] && continue
-    local state
-    state=$(gh api "repos/$ORG/$repo/actions/workflows/dev-lead.yml" \
-      --jq '.state' 2>/dev/null || echo "missing")
-
-    case "$state" in
-      active)
-        WORKFLOWS_ENABLED=$((WORKFLOWS_ENABLED + 1))
-        ;;
-      disabled_manually|disabled_inactivity)
-        warn "dev-lead workflow is '$state' in $repo — enabling it"
-        if [ "$DRY_RUN" != "true" ]; then
-          local wf_id
-          wf_id=$(gh api "repos/$ORG/$repo/actions/workflows/dev-lead.yml" \
-            --jq '.id' 2>/dev/null || echo "")
-          if [ -n "$wf_id" ] && [ "$wf_id" != "null" ]; then
-            gh api -X PUT "repos/$ORG/$repo/actions/workflows/$wf_id/enable" 2>/dev/null \
-              && info "Enabled dev-lead in $repo" \
-              || warn "Failed to enable dev-lead in $repo"
-          fi
-        fi
-        WORKFLOWS_DISABLED=$((WORKFLOWS_DISABLED + 1))
-        ;;
-      missing)
-        # Repo does not have dev-lead.yml — not a fleet repo, skip silently
-        ;;
-      *)
-        warn "Unexpected dev-lead state '$state' in $repo"
-        ;;
-    esac
-  done <<< "$repos"
-
-  info "dev-lead workflow check complete: ${WORKFLOWS_ENABLED} active, ${WORKFLOWS_DISABLED} re-enabled"
-}
-
-# ---------------------------------------------------------------------------
-# Step 2: Re-trigger stale compliance issues
+# Re-trigger stale compliance issues
 # ---------------------------------------------------------------------------
 
 retrigger_stale_issues() {
@@ -131,9 +98,15 @@ retrigger_stale_issues() {
   # producing a single "Skipping null#null" iteration when the token lacked
   # search scope. See: failure mode where ORG_SCORECARD_TOKEN scope did not
   # permit cross-org search but the script still reported success.
+  # is:issue is REQUIRED — GitHub now rejects search/issues queries that omit
+  # is:issue/is:pull-request with HTTP 422 (this was the bug that broke the daily
+  # sweep). sort=created&order=asc surfaces the oldest (most-stuck) issue per repo
+  # first, so the one-per-repo throttle below re-engages the right one. --paginate
+  # walks all result pages: with the throttle, a single repo's large backlog would
+  # otherwise fill the first 100 results and starve every other repo for the run.
   local raw rc
-  raw=$(gh api \
-    "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open&per_page=100" \
+  raw=$(gh api --paginate \
+    "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open+is:issue&sort=created&order=asc&per_page=100" \
     2>&1) && rc=0 || rc=$?
 
   if [ "$rc" -ne 0 ]; then
@@ -143,15 +116,18 @@ retrigger_stale_issues() {
     return 1
   fi
 
-  # Detect error-response JSON even when exit code was 0 (defensive).
-  if echo "$raw" | jq -e 'has("message") and (.items | not)' >/dev/null 2>&1; then
+  # With --paginate, gh concatenates one JSON object per page, so slurp (-s) and
+  # inspect every page. Detect an error-response object on any page even when the
+  # exit code was 0 (defensive).
+  if echo "$raw" | jq -se 'any(.[]; has("message") and (.items | not))' >/dev/null 2>&1; then
     error "search/issues returned an error response:"
-    echo "$raw" | jq -r '.message' >&2
+    echo "$raw" | jq -rs '.[] | select(has("message")) | .message' >&2
     return 1
   fi
 
+  # total_count is repeated identically on every page; take the first.
   local total
-  total=$(echo "$raw" | jq -r '.total_count // 0')
+  total=$(echo "$raw" | jq -rs '.[0].total_count // 0')
   info "search/issues returned ${total} matching issues"
 
   local issues
@@ -169,20 +145,35 @@ retrigger_stale_issues() {
     created_at=$(echo "$issue_json" | jq -r '.created_at')
     title=$(echo "$issue_json" | jq -r '.title')
 
-    # Check if stale
+    # Issues arrive oldest-first, so once we hit one newer than the cutoff every
+    # remaining issue is also newer (not stale) — stop scanning entirely.
     if [[ "$created_at" > "$cutoff" ]]; then
-      info "Skipping $repo#$number ($title) — created $created_at, not yet stale"
-      ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+      info "Reached first non-stale issue ($repo#$number, created $created_at); no older issues remain."
+      break
+    fi
+
+    # One engagement per repo per run. If this repo already got an issue
+    # re-triggered (or was found active) this run, defer the rest to a later sweep.
+    if [ -n "${REPO_ENGAGED[$repo]:-}" ]; then
+      info "Deferring $repo#$number ($title) — $repo already engaged this run (one issue per repo per run)"
+      ISSUES_DEFERRED=$((ISSUES_DEFERRED + 1))
       continue
     fi
 
     # Skip if dev-lead is already working this issue (open PR or in-progress).
+    # This consumes the repo's slot: a repo already churning on a fix must not
+    # get a second concurrent engagement.
     if dl_dev_lead_active "$ORG" "$repo" "$number"; then
-      info "Skipping $repo#$number — dev-lead already active (open PR or in-progress)"
+      info "Skipping $repo#$number — dev-lead already active (open PR or in-progress); $repo slot taken"
+      REPO_ENGAGED[$repo]=1
       ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
       continue
     fi
 
+    # Take the repo's slot for this run regardless of cycle outcome, so a
+    # transient failure cannot let a second issue in the same repo fire and
+    # reintroduce burst behaviour. The next hourly sweep retries this repo.
+    REPO_ENGAGED[$repo]=1
     info "Re-triggering $repo#$number: $title (created $created_at)"
     if dl_cycle_trigger_label "$ORG" "$repo" "$number" "$TRIGGER_LABEL" "$DRY_RUN"; then
       ISSUES_RETRIGGERED=$((ISSUES_RETRIGGERED + 1))
@@ -210,9 +201,11 @@ retrigger_stale_issues() {
     info "Sweeping pre-migration '$LEGACY_TRIGGER_LABEL'-labeled issues..."
     local legacy_issues legacy_rc
     # Exclude issues that already carry TRIGGER_LABEL — they were handled above.
-    # --paginate walks all result pages so issues beyond the first 100 are included.
+    # is:issue is required (HTTP 422 otherwise); oldest-first matches the primary
+    # sweep; --paginate walks all result pages so issues beyond the first 100 are
+    # included.
     legacy_issues=$(gh api --paginate \
-      "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open&per_page=100" \
+      "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open+is:issue&sort=created&order=asc&per_page=100" \
       --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
       2>&1) && legacy_rc=0 || legacy_rc=$?
     if [ "$legacy_rc" -ne 0 ]; then
@@ -227,15 +220,24 @@ retrigger_stale_issues() {
         repo=$(echo "$issue_json" | jq -r '.repo')
         created_at=$(echo "$issue_json" | jq -r '.created_at')
         title=$(echo "$issue_json" | jq -r '.title')
+        # Oldest-first: first non-stale issue means no older ones remain.
         if [[ "$created_at" > "$cutoff" ]]; then
-          ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
+          break
+        fi
+        # Honour the shared one-engagement-per-repo budget set by the primary
+        # sweep, so a repo already engaged above is not also label-bumped here.
+        if [ -n "${REPO_ENGAGED[$repo]:-}" ]; then
+          info "Deferring legacy $repo#$number ($title) — $repo already engaged this run"
+          ISSUES_DEFERRED=$((ISSUES_DEFERRED + 1))
           continue
         fi
         if dl_dev_lead_active "$ORG" "$repo" "$number"; then
-          info "Skipping legacy $repo#$number — dev-lead already active"
+          info "Skipping legacy $repo#$number — dev-lead already active; $repo slot taken"
+          REPO_ENGAGED[$repo]=1
           ISSUES_SKIPPED=$((ISSUES_SKIPPED + 1))
           continue
         fi
+        REPO_ENGAGED[$repo]=1
         info "Adding '$TRIGGER_LABEL' to pre-migration issue $repo#$number: $title"
         if [ "$DRY_RUN" = "true" ]; then
           info "[dry-run] would ensure '$TRIGGER_LABEL' label exists in $repo and add it to #$number"
@@ -260,7 +262,7 @@ retrigger_stale_issues() {
     fi
   fi
 
-  info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped"
+  info "Re-trigger complete: ${ISSUES_RETRIGGERED} retriggered, ${ISSUES_SKIPPED} skipped, ${ISSUES_DEFERRED} deferred (repo already engaged this run)"
 }
 
 # ---------------------------------------------------------------------------
@@ -276,8 +278,7 @@ print_summary() {
   echo "  Dry run         : ${DRY_RUN}"
   echo "  Issues retriggered  : ${ISSUES_RETRIGGERED}"
   echo "  Issues skipped      : ${ISSUES_SKIPPED}"
-  echo "  Workflows re-enabled: ${WORKFLOWS_DISABLED}"
-  echo "  Workflows already active: ${WORKFLOWS_ENABLED}"
+  echo "  Issues deferred     : ${ISSUES_DEFERRED} (repo already engaged this run)"
   echo "=========================================="
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -288,8 +289,7 @@ print_summary() {
       echo "| ------ | ----- |"
       echo "| Issues retriggered | $ISSUES_RETRIGGERED |"
       echo "| Issues skipped (PR exists or recent) | $ISSUES_SKIPPED |"
-      echo "| dev-lead workflows re-enabled | $WORKFLOWS_DISABLED |"
-      echo "| dev-lead workflows already active | $WORKFLOWS_ENABLED |"
+      echo "| Issues deferred (repo already engaged this run) | $ISSUES_DEFERRED |"
       echo "| Stale threshold | ${STALE_DAYS} days |"
       echo "| Dry run | $DRY_RUN |"
     } >> "$GITHUB_STEP_SUMMARY"
@@ -302,7 +302,6 @@ print_summary() {
 
 main() {
   info "compliance-retrigger starting (org=$ORG, stale_days=$STALE_DAYS, dry_run=$DRY_RUN)"
-  check_devlead_workflows
   retrigger_stale_issues
   print_summary
 }

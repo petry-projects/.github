@@ -24,7 +24,6 @@ if an existing agent-created PR touches them, close it without merging.
 
 | File | Reason |
 |------|--------|
-| `.github/workflows/claude.yml` | Anthropic OIDC invariant — any diff from the default branch causes `401 Workflow validation failed`; Claude Code cannot run on that PR |
 | `.github/workflows/agent-shield.yml` | Security boundary — agents are not permitted to weaken security scanning; changes require explicit human review |
 
 These files must be adopted verbatim from `standards/workflows/` and updated
@@ -109,6 +108,11 @@ on agent configuration files.
 For repos with `package.json` referencing BMAD modules (e.g., `bmad-method`,
 `bmad-bgreat-suite`), the `npm` ecosystem already covers version tracking.
 The AgentShield action adds the agent-specific security layer on top.
+
+## Decision-Making Reusables — Pure, Tested Decision Cores
+
+See [AGENTS.md § Decision Logic Lives in a Pure, Tested Script](../AGENTS.md#decision-logic-lives-in-a-pure-tested-script)
+for the full standard, exemplars, and rationale.
 
 ## BMAD Method Workflows
 

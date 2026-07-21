@@ -53,6 +53,8 @@ on:
         description: "GitHub App private key"
         required: true
 
+permissions: {}  # no default permissions; each job grants only what it needs
+
 jobs:
   update-and-merge:
     runs-on: ubuntu-latest
@@ -94,8 +96,13 @@ jobs:
           MERGED=false
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
-            BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
-              --jq '.behind_by')
+            # Branch may be transiently unavailable (race: PR list fetched before
+            # branch delete propagates). Skip gracefully instead of crashing.
+            if ! BEHIND=$(gh api "repos/$REPO/compare/main...$HEAD_REF" \
+              --jq '.behind_by' 2>/dev/null); then
+              echo "  Skipping PR #$PR_NUMBER — branch $HEAD_REF not found, skipping"
+              continue
+            fi
 
             if [[ "$BEHIND" -gt 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind — updating branch"

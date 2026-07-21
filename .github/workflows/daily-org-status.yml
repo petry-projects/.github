@@ -1,4 +1,5 @@
 name: Daily Org Status
+# readme-report: Daily "Org Status" digest posted as an issue for maintainers.
 
 on:
   schedule:
@@ -17,11 +18,11 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
       - name: Generate org status report
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           chmod +x scripts/org_status.sh scripts/org_report.sh
           bash scripts/org_status.sh > /tmp/report.md
@@ -46,11 +47,24 @@ jobs:
 
       - name: Create daily-report issue
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           DATE=$(date -u +%Y-%m-%d)
+          # This digest embeds the date in its title, so a fresh issue is created
+          # every day — 32 had accumulated open. Close prior open Org Status
+          # digests before opening today's so only the current snapshot stays open.
+          gh issue list --repo "$GITHUB_REPOSITORY" --label daily-report --state open \
+            --search "Org Status — in:title" --limit 200 \
+            --json number,title \
+            -q '.[] | select(.title | startswith("Org Status — ")) | .number' \
+          | while read -r prev; do
+              [ -n "$prev" ] || continue
+              gh issue close "$prev" --repo "$GITHUB_REPOSITORY" \
+                --comment "Superseded by the newer daily Org Status snapshot." \
+                || echo "::warning::Failed to close issue #$prev — it may remain open until the next daily run."
+            done
           gh issue create \
-            --repo petry-projects/.github \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Org Status — $DATE" \
             --body-file /tmp/report.md \
             --label daily-report
