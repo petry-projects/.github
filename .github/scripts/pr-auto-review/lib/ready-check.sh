@@ -116,8 +116,11 @@ pr_auto_review_checks_ready() {
 #   body (no data / null nodes) yields 0.
 pr_auto_review_blocking_thread_count() {
   jq -r '
-    [ .data?.repository?.pullRequest?.reviewThreads?.nodes?[]?
-      | select((.isResolved == false) and (.isOutdated != true))
+    [
+      try (
+        .data.repository.pullRequest.reviewThreads.nodes[] |
+        select((.isResolved == false) and (.isOutdated != true))
+      ) catch empty
     ] | length
   '
 }
