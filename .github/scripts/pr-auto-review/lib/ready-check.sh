@@ -178,7 +178,6 @@ pr_auto_review_ready() {
   fi
 
   # 4. No blocking review threads (unresolved AND not outdated).
-  [ -z "$blocking_thread_count" ] && blocking_thread_count="0"
   if [ "$blocking_thread_count" -gt 0 ]; then
     echo "skip-unresolved-threads"
     return 1
