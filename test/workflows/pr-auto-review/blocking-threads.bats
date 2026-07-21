@@ -123,3 +123,29 @@ resp() {
   [ "$status" -eq 0 ]
   [ "$output" = "0" ]
 }
+
+# ── null-safety: absent / null intermediate fields → 0 ──────────────────────
+
+@test "blocking count: absent .data key → 0" {
+  run pr_auto_review_blocking_thread_count <<<'{}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "blocking count: null .data → 0" {
+  run pr_auto_review_blocking_thread_count <<<'{"data":null}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "blocking count: absent .data.repository → 0" {
+  run pr_auto_review_blocking_thread_count <<<'{"data":{}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "blocking count: null .data.repository → 0" {
+  run pr_auto_review_blocking_thread_count <<<'{"data":{"repository":null}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
