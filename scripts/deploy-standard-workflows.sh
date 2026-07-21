@@ -67,8 +67,18 @@ SKIP_REPOS=(".github" ".github-private")
 # .github-private participates in the org Initiatives board, so it receives the
 # add-to-project.yml caller (the org board is a single shared target — the stub
 # is identical for every repo) while staying exempt from all other stubs.
+#
+# pr-auto-review.yml (#847): #844 made feature-ideation / pr-auto-review /
+# initiative-driver universally required. The sweep landed them fleet-wide except
+# on .github-private, which — as a SKIP_REPO — was exempted, leaving it missing
+# pr-auto-review while the audit now flags it non-compliant. Opting it in here
+# lets the sweep deploy the stub at .github-private's COMPUTED canary tier
+# (`next`, via emit_ref_for) rather than a hand-pinned wrong tier — the other two
+# are already present (feature-ideation re-pinned in place as a channel consumer,
+# initiative-driver a verbatim self-managed stub), so only pr-auto-review opts in.
 declare -A SKIP_OVERRIDES=(
   ["add-to-project.yml"]=".github-private"
+  ["pr-auto-review.yml"]=".github-private"
 )
 
 # Workflows deployable from standards/workflows/<name>.
