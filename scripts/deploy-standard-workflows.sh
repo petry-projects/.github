@@ -39,6 +39,10 @@ source "$SCRIPT_DIR/lib/standards-deploy.sh"
 # shellcheck source=scripts/lib/ring-pins.sh
 source "$SCRIPT_DIR/lib/ring-pins.sh"
 
+# Global temp-file registry — cleaned up by EXIT trap even on premature exit.
+declare -a _TMPFILES=()
+trap 'rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"' EXIT
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -67,9 +71,12 @@ declare -A SKIP_OVERRIDES=(
   ["add-to-project.yml"]=".github-private"
 )
 
-# Workflows deployable from standards/workflows/<name> verbatim.
-# Excludes ci.yml, sonarcloud.yml (tech-stack-specific) and
-# feature-ideation.yml (requires repo-specific project_context input).
+# Workflows deployable from standards/workflows/<name>.
+# Excludes only ci.yml and sonarcloud.yml (tech-stack-specific — set up manually).
+# Most deploy verbatim (thin caller stubs, identical fleet-wide). feature-ideation
+# is the exception: it carries a per-repo `project_context` edit, so it deploys
+# SEED-IF-ABSENT and otherwise re-pins its OWN body in place — never overwriting
+# the tuned body from the template. See BODY_PRESERVING_WORKFLOWS below.
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
   dev-lead.yml
@@ -79,7 +86,33 @@ DEPLOYABLE_WORKFLOWS=(
   dependabot-rebase.yml
   dependency-audit.yml
   add-to-project.yml
+  initiative-driver.yml
+  pr-auto-review.yml
+  feature-ideation.yml
 )
+
+# Deployable workflows whose stub BODY carries a documented per-repo edit the
+# sweep must never clobber. feature-ideation's `project_context` (its only
+# required per-repo customisation) is such an edit: re-syncing the body from the
+# template would revert every repo's tuned context to the template default on
+# every sweep — the config-loss footgun that forced #813's manual per-repo adds.
+# A workflow listed here deploys SEED-IF-ABSENT: seeded from the template only
+# when the stub is missing, and otherwise re-pinned in place from its OWN body
+# (preserving project_context). Non-listed workflows keep the verbatim-overwrite
+# re-sync (correct where the body is identical fleet-wide).
+readonly BODY_PRESERVING_WORKFLOWS=(
+  feature-ideation.yml
+)
+
+# is_body_preserving_workflow <name.yml> -> 0 if the workflow's body must be
+# preserved on re-deploy (seed-if-absent + re-pin-in-place).
+is_body_preserving_workflow() {
+  local w="$1" p
+  for p in "${BODY_PRESERVING_WORKFLOWS[@]}"; do
+    [[ "$w" == "$p" ]] && return 0
+  done
+  return 1
+}
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -164,8 +197,16 @@ fetch_existing() {
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
-  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r')
-  [[ -z "$expected_uses" ]] && return 1
+  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
+  # Verbatim-managed template (no reusable uses: line — e.g. initiative-driver which
+  # dispatches directly via gh CLI). Compare full content (CRLF-normalized) so a
+  # correctly-deployed stub is never flagged as drifted on every sweep.
+  if [[ -z "$expected_uses" ]]; then
+    local template_content normalized_existing
+    template_content=$(tr -d '\r' < "$template")
+    normalized_existing=$(printf '%s' "$existing_content" | tr -d '\r')
+    [[ "$normalized_existing" == "$template_content" ]] && return 0 || return 1
+  fi
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
   if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then
@@ -198,7 +239,7 @@ is_already_compliant() {
 # (org/repo/…/<base>-reusable.yml@<ref>), comment/CR stripped, or empty.
 reusable_uses_of() {
   grep -E '^[[:space:]]*uses:' "$1" | head -1 \
-    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r'
+    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true
 }
 
 # reusable_base_of <template> -> the ring channel base (e.g. `auto-rebase`) of the
@@ -255,10 +296,10 @@ deploy_repo() {
   # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
-  local -a paths=() templates=() names=() emits=() tmpfiles=()
-  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source
+  local -a paths=() templates=() names=() emits=() modes=()
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode
   for workflow in "${WORKFLOWS[@]}"; do
-    base=""; repin_source=""; emit=""; deploy_template=""
+    base=""; repin_source=""; emit=""; deploy_template=""; mode=""
     template="$STANDARDS_DIR/$workflow"
     target_path=".github/workflows/$workflow"
     if [[ ! -f "$template" ]]; then
@@ -290,8 +331,23 @@ deploy_repo() {
       # A channel consumer stub: re-pin the meta-repo's OWN stub body in place —
       # never overwrite its bespoke content with the generic template.
       if [[ "$DRY_RUN" != "true" ]]; then
-        repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+        repin_source="$(mktemp)"; _TMPFILES+=("$repin_source")
         printf '%s\n' "$existing_content" > "$repin_source"
+      fi
+    elif is_body_preserving_workflow "$workflow"; then
+      # feature-ideation carries a per-repo project_context the sweep must never
+      # clobber. Seed the generic template ONLY when the stub is absent; when it
+      # already exists, re-pin its OWN body in place (preserving project_context)
+      # — the same "re-pin OWN body" mechanism the meta-repo branch above uses,
+      # extended to regular target repos.
+      if [[ -z "$existing_sha" ]]; then
+        mode="seed"
+      else
+        mode="repin-in-place"
+        if [[ "$DRY_RUN" != "true" ]]; then
+          repin_source="$(mktemp)"; _TMPFILES+=("$repin_source")
+          printf '%s\n' "$existing_content" > "$repin_source"
+        fi
       fi
     fi
 
@@ -305,13 +361,13 @@ deploy_repo() {
       base="$(reusable_base_of "$template")"
       deploy_template="$(mktemp)"
       ring_repin_uses "$base" "$emit" < "$repin_source" > "$deploy_template"
-      tmpfiles+=("$deploy_template")
+      _TMPFILES+=("$deploy_template")
     fi
-    paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit")
+    paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit"); modes+=("$mode")
   done
 
   if [[ "${#names[@]}" -eq 0 ]]; then
-    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return  # nothing drifted for this repo
+    rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"; _TMPFILES=(); return  # nothing drifted for this repo
   fi
 
   local n="${#names[@]}" list branch
@@ -323,9 +379,13 @@ deploy_repo() {
     local i
     for (( i = 0; i < n; i++ )); do
       [[ -n "${emits[i]}" ]] && dry "$repo/${names[i]} would pin @${emits[i]}"
+      case "${modes[i]}" in
+        seed)           dry "$repo/${names[i]} seed-if-absent: seeding fresh from template" ;;
+        repin-in-place) dry "$repo/${names[i]} re-pin uses in place — existing body/project_context preserved" ;;
+      esac
     done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
-    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return
+    rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"; _TMPFILES=(); return
   fi
 
   # Interleave (path, template) into the variadic file-pair args.
@@ -336,7 +396,7 @@ deploy_repo() {
   body=$(batch_pr_body "${names[@]}")
   outcome=$(sd_deploy_files_via_pr "$ORG/$repo" "$branch" "$SYNC_LABEL" "$title" "$body" "${filepairs[@]}") || true
 
-  [[ "${#tmpfiles[@]}" -gt 0 ]] && rm -f "${tmpfiles[@]}"
+  [[ "${#_TMPFILES[@]}" -gt 0 ]] && rm -f "${_TMPFILES[@]}"; _TMPFILES=()
 
   case "$outcome" in
     "OPENED "*)       ok   "$repo — opened ${outcome#OPENED } (${n} stub(s): $list)" ;;
