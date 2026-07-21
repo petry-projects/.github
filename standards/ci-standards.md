@@ -1499,8 +1499,12 @@ These workflows are required only when a specific ecosystem is detected.
 
 ### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
-**Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
-`_bmad-output/`, or equivalent BMAD planning artifacts).
+**Status:** **Required org-wide** as of [#844](https://github.com/petry-projects/.github/issues/844)
+(previously BMAD-conditional). Every repo MUST carry the stub, and its
+`project_context` MUST be a real per-repo description — a stub still on the seed
+`TODO:`/`Example:` placeholder is flagged `feature-ideation-placeholder-context`
+(warning) by the audit. The BMAD Method framing below reflects the original
+pilot; the pipeline itself is not BMAD-specific.
 
 Scheduled weekly workflow that runs the BMAD Analyst (Mary) on **Claude Opus 4.6**
 through a 5-phase multi-skill ideation pipeline, producing evidence-grounded
