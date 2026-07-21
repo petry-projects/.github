@@ -82,6 +82,49 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# repo-template exemption (Epic #850, Story D).
+#
+# repo-template's feature-ideation seed keeps the TODO:/Example: placeholder on
+# purpose — it IS the seed new repos customise, so its context is *correct* while
+# still-placeholder. The audit must therefore NOT raise
+# feature-ideation-placeholder-context against repo-template. The exemption is
+# codified as a registry + pure predicate so future per-repo exemptions are data,
+# not inlined magic strings.
+# ---------------------------------------------------------------------------
+
+is_placeholder_exempt() {
+  run bash -c 'source "$1" >/dev/null 2>&1; repo_is_placeholder_context_exempt "$2"' \
+    _ "$SCRIPT" "$1"
+}
+
+@test "repo-template is exempt from the placeholder-context finding" {
+  is_placeholder_exempt "repo-template"
+  [ "$status" -eq 0 ]
+}
+
+@test "a normal fleet repo is NOT exempt from the placeholder-context finding" {
+  is_placeholder_exempt "markets"
+  [ "$status" -ne 0 ]
+}
+
+@test "the empty repo name is NOT exempt" {
+  is_placeholder_exempt ""
+  [ "$status" -ne 0 ]
+}
+
+@test "the placeholder-context exemption registry is defined and lists repo-template" {
+  run bash -c 'source "$1" >/dev/null 2>&1; printf "%s\n" "${PLACEHOLDER_CONTEXT_EXEMPT_REPOS[@]}"' _ "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx 'repo-template' <<< "$output"
+}
+
+@test "check_required_workflows guards the placeholder finding with the exemption predicate" {
+  run bash -c 'source "$1" >/dev/null 2>&1; declare -f check_required_workflows' _ "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -q 'repo_is_placeholder_context_exempt' <<< "$output"
+}
+
+# ---------------------------------------------------------------------------
 # REQUIRED_WORKFLOWS now includes all three promoted workflows (org-wide).
 # ---------------------------------------------------------------------------
 

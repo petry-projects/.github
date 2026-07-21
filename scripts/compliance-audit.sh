@@ -229,7 +229,8 @@ check_required_workflows() {
   fi_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.content' 2>/dev/null || echo "")
   if [ -n "$fi_content" ]; then
     fi_decoded=$(echo "$fi_content" | base64 -d 2>/dev/null || echo "")
-    if [ -n "$fi_decoded" ] && feature_ideation_context_is_placeholder "$fi_decoded"; then
+    if [ -n "$fi_decoded" ] && feature_ideation_context_is_placeholder "$fi_decoded" \
+        && ! repo_is_placeholder_context_exempt "$repo"; then
       add_finding "$repo" "ci-workflows" "feature-ideation-placeholder-context" "warning" \
         "\`feature-ideation.yml\` is present but its \`project_context\` is still the seed template placeholder (\`TODO:\`/\`Example:\`) — replace it with a real per-repo project description so weekly ideation runs on real context" \
         "standards/ci-standards.md#required-workflows"
@@ -245,6 +246,30 @@ check_required_workflows() {
 feature_ideation_context_is_placeholder() {
   local decoded="$1"
   grep -qE '^[[:space:]]*(TODO: Replace this with a description of the project|Example: "ProjectX)' <<< "$decoded"
+}
+
+# Repos exempt from the feature-ideation-placeholder-context finding (Epic #850,
+# Story D). For a normal repo a still-placeholder project_context is a real
+# warning — weekly ideation would run on "TODO". repo-template is the exception:
+# its feature-ideation seed KEEPS the placeholder on purpose, because it IS the
+# seed new repos copy and customise, so flagging it is a false positive. Codified
+# as a registry (not an inlined magic string) so further per-repo exemptions are
+# data, extended here rather than by editing check_required_workflows.
+readonly PLACEHOLDER_CONTEXT_EXEMPT_REPOS=(
+  repo-template
+)
+
+# repo_is_placeholder_context_exempt <repo> -> 0 if <repo> is exempt from the
+# feature-ideation-placeholder-context finding, non-zero otherwise. Pure (exact
+# match against PLACEHOLDER_CONTEXT_EXEMPT_REPOS). An empty repo name is never
+# exempt.
+repo_is_placeholder_context_exempt() {
+  local repo="$1" r
+  [ -n "$repo" ] || return 1
+  for r in "${PLACEHOLDER_CONTEXT_EXEMPT_REPOS[@]}"; do
+    [ "$r" = "$repo" ] && return 0
+  done
+  return 1
 }
 
 # ---------------------------------------------------------------------------
