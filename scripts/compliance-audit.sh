@@ -42,7 +42,13 @@ ISSUES_EXISTING=0
 ISSUES_REMOVED=0
 ISSUES_RETRIGGERED=0
 
-REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml)
+REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml pr-auto-review.yml initiative-driver.yml)
+# feature-ideation.yml, pr-auto-review.yml, and initiative-driver.yml were
+# promoted to required org-wide in #844 (previously feature-ideation was
+# bmad-method-conditional and the other two were optional/pin-checked-if-present).
+# feature-ideation additionally carries a project_context invariant enforced by
+# check_required_workflows: presence alone is necessary but not sufficient — a
+# stub still on the seed TODO:/Example: placeholder is flagged separately.
 # Note: codeql.yml is intentionally NOT in REQUIRED_WORKFLOWS. CodeQL is now
 # configured via GitHub-managed default setup (Settings → Code security →
 # Code scanning), not a per-repo workflow file. The check_codeql_default_setup
@@ -213,14 +219,32 @@ check_required_workflows() {
     fi
   done
 
-  # Conditional: bmad-method repos must have feature-ideation workflow
-  if [[ " ${ECOSYSTEMS[*]} " == *" bmad-method "* ]]; then
-    if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.name' > /dev/null 2>&1; then
-      add_finding "$repo" "ci-workflows" "missing-feature-ideation.yml" "error" \
-        "BMAD Method repo must have \`feature-ideation.yml\` workflow for automated ideation" \
-        "standards/ci-standards.md#8-feature-ideation-feature-ideationyml-bmad-method-repos"
+  # feature-ideation project_context invariant (#844): the file being *present*
+  # is necessary but not sufficient. The seed stub ships a TODO:/Example:
+  # placeholder project_context (the one required per-repo edit), so a repo that
+  # merely has the workflow but never customised it would run weekly ideation on
+  # "TODO". Flag a still-placeholder context — a warning, not an error: the file
+  # is present and correctly pinned; it only needs its one required per-repo edit.
+  local fi_content fi_decoded
+  fi_content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/feature-ideation.yml" --jq '.content' 2>/dev/null || echo "")
+  if [ -n "$fi_content" ]; then
+    fi_decoded=$(echo "$fi_content" | base64 -d 2>/dev/null || echo "")
+    if [ -n "$fi_decoded" ] && feature_ideation_context_is_placeholder "$fi_decoded"; then
+      add_finding "$repo" "ci-workflows" "feature-ideation-placeholder-context" "warning" \
+        "\`feature-ideation.yml\` is present but its \`project_context\` is still the seed template placeholder (\`TODO:\`/\`Example:\`) — replace it with a real per-repo project description so weekly ideation runs on real context" \
+        "standards/ci-standards.md#required-workflows"
     fi
   fi
+}
+
+# Pure: given a decoded feature-ideation.yml caller stub, return 0 if its
+# `project_context` is still the seed template placeholder (the TODO:/Example:
+# sentinel shipped by standards/workflows/feature-ideation.yml), non-zero once a
+# real per-repo description has replaced it. Anchored to start-of-line (after
+# indentation) so a `# ...` comment mentioning TODO can never satisfy the match.
+feature_ideation_context_is_placeholder() {
+  local decoded="$1"
+  grep -qE '^[[:space:]]*(TODO: Replace this with a description of the project|Example: "ProjectX)' <<< "$decoded"
 }
 
 # ---------------------------------------------------------------------------
