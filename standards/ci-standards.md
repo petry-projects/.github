@@ -305,7 +305,9 @@ filename doesn't carry the `-reusable.yml` suffix (grandfathered exception:
 | [`auto-rebase.yml`](workflows/auto-rebase.yml) | 1 | Keep non-Dependabot PRs up-to-date with the base branch on every push to `main` |
 | [`dependabot-rebase.yml`](workflows/dependabot-rebase.yml) | 1 | Update and auto-merge eligible Dependabot PRs on every push to `main` |
 | [`dependency-audit.yml`](workflows/dependency-audit.yml) | 1 | Multi-ecosystem audit (npm, pnpm, gomod, cargo, pip) |
-| [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | BMAD Method ideation pipeline (BMAD-enabled repos only) |
+| [`feature-ideation.yml`](workflows/feature-ideation.yml) | 1 | Weekly ideation pipeline — **required org-wide** (#844). Its `project_context` MUST be a real per-repo description, not the seed `TODO:`/`Example:` placeholder. |
+| [`pr-auto-review.yml`](workflows/pr-auto-review.yml) | 1 | Automated AI code review on PRs — **required org-wide** (#844) |
+| [`initiative-driver.yml`](workflows/initiative-driver.yml) | 1 | Dispatches the central initiative-driver to release ready sub-issues of `initiative:auto` epics to dev-lead — **required org-wide** (#844) |
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 | [`persona-mention.yml`](workflows/persona-mention.yml) | 1 | Route `@petry-projects/<role>` mentions to the addressed persona — one router for **all** personas ([persona-standards.md §4.1](persona-standards.md)) |
 | [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
@@ -359,17 +361,38 @@ pins by hand — a release is rolled out by moving the channel tag (see
 
 ## Required Workflows
 
-Every repository MUST have these 7 workflows. Reusable templates for Dependabot
+Every repository MUST have these 10 workflows. Reusable templates for Dependabot
 and AgentShield workflows are in [`standards/workflows/`](workflows/). The CI,
 SonarCloud, and Dev-Lead Agent workflows are documented as patterns
 below — copy and adapt the examples to each repo's tech stack. CodeQL is
 **not** a workflow file: it is configured via GitHub-managed default setup
 (see [§2](#2-codeql-analysis-github-managed-default-setup)).
 
-In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
-documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
-for the template.
+| # | Workflow | Notes |
+|---|----------|-------|
+| 1 | `ci.yml` | Build-and-test pipeline (per tech stack) |
+| 2 | `sonarcloud.yml` | SonarCloud analysis |
+| 3 | `dev-lead.yml` | Dev-Lead Agent |
+| 4 | `dependabot-automerge.yml` | Dependabot auto-merge |
+| 5 | `dependency-audit.yml` | Multi-ecosystem dependency audit |
+| 6 | `agent-shield.yml` | AgentShield agent-config scan |
+| 7 | `pr-review-mention.yml` | pr-review agent mention/assignment trigger |
+| 8 | `feature-ideation.yml` | Weekly ideation pipeline — see the `project_context` rule below |
+| 9 | `pr-auto-review.yml` | Automated AI code review on PRs |
+| 10 | `initiative-driver.yml` | Releases ready sub-issues of `initiative:auto` epics to dev-lead |
+
+`feature-ideation.yml`, `pr-auto-review.yml`, and `initiative-driver.yml` were
+promoted from optional/BMAD-conditional to **required org-wide** in
+[#844](https://github.com/petry-projects/.github/issues/844). All three ship as
+thin caller stubs deployed by `deploy-standard-workflows.sh`.
+
+> **`feature-ideation.yml` — the `project_context` invariant.** Presence of the
+> file is necessary but **not** sufficient. The seed stub ships a `TODO:`/`Example:`
+> placeholder `project_context`; each adopting repo MUST replace it with a real
+> 3-5 sentence per-repo description before the weekly run does anything useful.
+> The audit raises a separate `feature-ideation-placeholder-context` **warning**
+> for any repo whose stub is still on the seed placeholder. See
+> [§9 Feature Ideation](#9-feature-ideation-feature-ideationyml--bmad-method-repos).
 
 ### 1. CI Pipeline (`ci.yml`)
 
@@ -1084,10 +1107,22 @@ gh api repos/petry-projects/.github/contents/standards/workflows/copilot-setup-s
 
 These workflows are required only when a specific ecosystem is detected.
 
+> **Note:** `feature-ideation.yml` (§9) is **no longer** ecosystem-conditional —
+> it was promoted to **required org-wide** in
+> [#844](https://github.com/petry-projects/.github/issues/844) and is listed in
+> [Required Workflows](#required-workflows) above. The `initiative-driver.yml`
+> stub in §10 was likewise promoted to required org-wide. The remaining §10 stubs
+> (`initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`) stay
+> conditional. These sections are retained for their design detail.
+
 ### 9. Feature Ideation (`feature-ideation.yml`) — BMAD Method repos
 
-**Condition:** Repository has BMAD Method installed (presence of `_bmad/`,
-`_bmad-output/`, or equivalent BMAD planning artifacts).
+**Status:** **Required org-wide** as of [#844](https://github.com/petry-projects/.github/issues/844)
+(previously BMAD-conditional). Every repo MUST carry the stub, and its
+`project_context` MUST be a real per-repo description — a stub still on the seed
+`TODO:`/`Example:` placeholder is flagged `feature-ideation-placeholder-context`
+(warning) by the audit. The BMAD Method framing below reflects the original
+pilot; the pipeline itself is not BMAD-specific.
 
 Scheduled weekly workflow that runs the BMAD Analyst (Mary) on **Claude Opus 4.6**
 through a 5-phase multi-skill ideation pipeline, producing evidence-grounded
