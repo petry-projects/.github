@@ -67,9 +67,12 @@ declare -A SKIP_OVERRIDES=(
   ["add-to-project.yml"]=".github-private"
 )
 
-# Workflows deployable from standards/workflows/<name> verbatim.
-# Excludes ci.yml, sonarcloud.yml (tech-stack-specific) and
-# feature-ideation.yml (requires repo-specific project_context input).
+# Workflows deployable from standards/workflows/<name>.
+# Excludes only ci.yml and sonarcloud.yml (tech-stack-specific — set up manually).
+# Most deploy verbatim (thin caller stubs, identical fleet-wide). feature-ideation
+# is the exception: it carries a per-repo `project_context` edit, so it deploys
+# SEED-IF-ABSENT and otherwise re-pins its OWN body in place — never overwriting
+# the tuned body from the template. See BODY_PRESERVING_WORKFLOWS below.
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
   dev-lead.yml
@@ -79,7 +82,33 @@ DEPLOYABLE_WORKFLOWS=(
   dependabot-rebase.yml
   dependency-audit.yml
   add-to-project.yml
+  initiative-driver.yml
+  pr-auto-review.yml
+  feature-ideation.yml
 )
+
+# Deployable workflows whose stub BODY carries a documented per-repo edit the
+# sweep must never clobber. feature-ideation's `project_context` (its only
+# required per-repo customisation) is such an edit: re-syncing the body from the
+# template would revert every repo's tuned context to the template default on
+# every sweep — the config-loss footgun that forced #813's manual per-repo adds.
+# A workflow listed here deploys SEED-IF-ABSENT: seeded from the template only
+# when the stub is missing, and otherwise re-pinned in place from its OWN body
+# (preserving project_context). Non-listed workflows keep the verbatim-overwrite
+# re-sync (correct where the body is identical fleet-wide).
+readonly BODY_PRESERVING_WORKFLOWS=(
+  feature-ideation.yml
+)
+
+# is_body_preserving_workflow <name.yml> -> 0 if the workflow's body must be
+# preserved on re-deploy (seed-if-absent + re-pin-in-place).
+is_body_preserving_workflow() {
+  local w="$1" p
+  for p in "${BODY_PRESERVING_WORKFLOWS[@]}"; do
+    [[ "$w" == "$p" ]] && return 0
+  done
+  return 1
+}
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -255,10 +284,10 @@ deploy_repo() {
   # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
-  local -a paths=() templates=() names=() emits=() tmpfiles=()
-  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source
+  local -a paths=() templates=() names=() emits=() modes=() tmpfiles=()
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode
   for workflow in "${WORKFLOWS[@]}"; do
-    base=""; repin_source=""; emit=""; deploy_template=""
+    base=""; repin_source=""; emit=""; deploy_template=""; mode=""
     template="$STANDARDS_DIR/$workflow"
     target_path=".github/workflows/$workflow"
     if [[ ! -f "$template" ]]; then
@@ -293,6 +322,21 @@ deploy_repo() {
         repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
         printf '%s\n' "$existing_content" > "$repin_source"
       fi
+    elif is_body_preserving_workflow "$workflow"; then
+      # feature-ideation carries a per-repo project_context the sweep must never
+      # clobber. Seed the generic template ONLY when the stub is absent; when it
+      # already exists, re-pin its OWN body in place (preserving project_context)
+      # — the same "re-pin OWN body" mechanism the meta-repo branch above uses,
+      # extended to regular target repos.
+      if [[ -z "$existing_sha" ]]; then
+        mode="seed"
+      else
+        mode="repin-in-place"
+        if [[ "$DRY_RUN" != "true" ]]; then
+          repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+          printf '%s\n' "$existing_content" > "$repin_source"
+        fi
+      fi
     fi
 
     if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template" "$repo"; then
@@ -307,7 +351,7 @@ deploy_repo() {
       ring_repin_uses "$base" "$emit" < "$repin_source" > "$deploy_template"
       tmpfiles+=("$deploy_template")
     fi
-    paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit")
+    paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit"); modes+=("$mode")
   done
 
   if [[ "${#names[@]}" -eq 0 ]]; then
@@ -323,6 +367,10 @@ deploy_repo() {
     local i
     for (( i = 0; i < n; i++ )); do
       [[ -n "${emits[i]}" ]] && dry "$repo/${names[i]} would pin @${emits[i]}"
+      case "${modes[i]}" in
+        seed)           dry "$repo/${names[i]} seed-if-absent: seeding fresh from template" ;;
+        repin-in-place) dry "$repo/${names[i]} re-pin uses in place — existing body/project_context preserved" ;;
+      esac
     done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return
