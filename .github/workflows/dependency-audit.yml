@@ -137,7 +137,7 @@ jobs:
           go-version: "stable"
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4  # NOSONAR(githubactions:S8545) pinned @vX.Y.Z is reproducible (verified via Go checksum DB); no --locked equivalent
 
       - name: Audit Go dependencies
         run: |
