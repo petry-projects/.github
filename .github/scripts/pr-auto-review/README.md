@@ -19,6 +19,7 @@ Pure, side-effect-free helpers. Source the file, then call:
 |----------|-------|---------|
 | `pr_auto_review_required_contexts` | branch-rules JSON on stdin (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) | prints a compact JSON array of required status-check context names (`[]` if none / non-array) |
 | `pr_auto_review_checks_ready REQUIRED_JSON SELF_NAME` | checks JSON on stdin (`gh pr checks --json bucket,name`) | prints a one-line reason; `0` ready, `1` not ready |
+| `pr_auto_review_blocking_thread_count` | review-threads JSON on stdin (`reviewThreads(first:100){nodes{isResolved isOutdated}}`) | prints the count of **blocking** threads — unresolved AND not outdated |
 | `pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME REVIEW_DECISION UNRESOLVED_COUNT` | the PR facts the workflow gathers (all as arguments — no stdin) | prints the **decision class** on stdout; `0` ready, `1` not ready |
 
 ### The unified decision core — `pr_auto_review_ready`
@@ -64,6 +65,30 @@ gate merge:
 
 `SELF_NAME` is this workflow's own check-run name; it is excluded from the gate
 so an in-progress run never blocks itself.
+
+### Unresolved-thread semantics (issue #806)
+
+Criterion #4 blocks dispatch on open review threads, but not all open threads
+should block. dev-lead's fix-review cycle frequently **addresses an advisory
+finding (Copilot / Gemini / CodeRabbit) in a follow-up commit but never marks
+the thread resolved**. The code is fixed and CI is green, yet the PR sits
+`REVIEW_REQUIRED` until a human resolves the thread by hand.
+
+`pr_auto_review_blocking_thread_count` is the consumer-side, defense-in-depth
+fix: it counts a thread as **blocking only when it is unresolved AND not
+outdated**. GitHub sets `reviewThread.isOutdated == true` exactly when the diff
+position the thread anchors to no longer exists at the current HEAD (the line
+changed or the file moved) — i.e. the finding no longer applies. So an
+unresolved-but-outdated thread — the signature of a fix that changed the flagged
+line without resolving the thread — is treated as non-blocking, and the PR
+converges without manual thread resolution.
+
+Fail-safe: only an explicit `isOutdated == true` makes a thread non-blocking. A
+`null` or absent `isOutdated` on an unresolved thread still blocks, so a thread
+whose staleness cannot be confirmed is never silently dropped. This is
+defense-in-depth: the producer side (dev-lead resolving the threads it fixes) is
+still the preferred fix; this gate just stops forgotten resolutions from
+stalling otherwise-mergeable PRs.
 
 ### Context name matching
 

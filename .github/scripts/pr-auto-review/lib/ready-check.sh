@@ -94,6 +94,36 @@ pr_auto_review_checks_ready() {
   [[ "$decision" == "ready" ]]
 }
 
+# pr_auto_review_blocking_thread_count
+#   Reads a review-threads GraphQL response on stdin — the payload of
+#   `reviewThreads(first:100){nodes{isResolved isOutdated}}` under
+#   .data.repository.pullRequest — and prints the count of threads that should
+#   BLOCK auto-dispatch: those that are unresolved AND not outdated.
+#
+#   Why isOutdated (issue #806): dev-lead's fix-review cycle often addresses an
+#   advisory finding in a follow-up commit but never marks the thread resolved,
+#   so the unresolved-threads gate stalls the PR even though the code is fixed.
+#   GitHub sets reviewThread.isOutdated == true exactly when the diff position
+#   the thread anchors to no longer exists at HEAD (the line changed / file
+#   moved) — i.e. the finding no longer applies to current HEAD. Treating an
+#   unresolved-but-outdated thread as non-blocking clears the stall without the
+#   producer having to resolve the thread first.
+#
+#   Fail-safe: only an explicit isOutdated == true makes a thread non-blocking;
+#   a null / absent isOutdated on an unresolved thread still blocks, so a thread
+#   whose staleness we cannot confirm is never silently dropped. A GraphQL error
+#   body (no data / null nodes) yields 0.
+pr_auto_review_blocking_thread_count() {
+  jq -r '
+    (.data.repository.pullRequest.reviewThreads.nodes // [])
+    | if type == "array" then
+        [ .[] | select((.isResolved == false) and (.isOutdated != true)) ] | length
+      else
+        0
+      end
+  '
+}
+
 # pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME \
 #                      REVIEW_DECISION UNRESOLVED_COUNT
 #   Unified, pure readiness core for the pr-auto-review reusable workflow. Given

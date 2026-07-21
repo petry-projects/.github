@@ -9,7 +9,10 @@
 #      failing / cancelled). Non-required advisory contexts are ignored — see
 #      .github/scripts/pr-auto-review/lib/ready-check.sh (issue #680).
 #   3. Effective review decision is not CHANGES_REQUESTED
-#   4. No unresolved review threads
+#   4. No BLOCKING review threads. A thread blocks only when it is unresolved
+#      AND not outdated; an unresolved-but-outdated thread (its anchored code
+#      changed at HEAD, so the finding no longer applies) is non-blocking — see
+#      pr_auto_review_blocking_thread_count in ready-check.sh (issue #806).
 #
 # Triggered by (events forwarded from the thin caller):
 #   workflow_run:completed      — a named CI workflow finished green
@@ -187,20 +190,32 @@ jobs:
             "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[0].name // empty' 2>/dev/null || echo "")
 
-          # Count unresolved review threads.
+          # Count BLOCKING review threads — unresolved AND not outdated.
           #    REST API has no resolved field on review comments; GraphQL is
           #    required. \$owner/\$repo/\$number are GraphQL variable references;
           #    the backslash-dollar escaping prevents shell expansion while
           #    keeping the literal $ that GraphQL expects.
+          #    isOutdated (issue #806): a thread whose anchored diff position no
+          #    longer exists at HEAD (line changed / file moved) is treated as
+          #    non-blocking, so a dev-lead fix that addresses a finding in code
+          #    but leaves the thread unresolved no longer stalls the gate. The
+          #    unresolved-but-outdated → non-blocking rule lives in the pure,
+          #    unit-tested pr_auto_review_blocking_thread_count (test/workflows/
+          #    pr-auto-review/blocking-threads.bats); this glue only passes the
+          #    raw GraphQL response through it.
           # Known limitation: only the first 100 review threads are inspected;
           # PRs with more than 100 threads are not fully paginated. Accepted
           # as-is — such PRs are vanishingly rare across this org's repos.
-          UNRESOLVED=$(gh api graphql \
-            -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved}}}}}" \
+          # Keep the transport fail-closed (no `|| true`): a gh/network/auth
+          # failure aborts the step under `set -e` — as before — rather than
+          # silently reporting 0 blocking threads and dispatching. The pure
+          # function only has to tolerate a well-formed-but-empty payload.
+          THREADS_JSON=$(gh api graphql \
+            -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved isOutdated}}}}}" \
             -f owner="${REPO%%/*}" \
             -f repo="${REPO##*/}" \
-            -F number="${PR_NUMBER}" \
-            --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length")
+            -F number="${PR_NUMBER}")
+          UNRESOLVED=$(printf '%s' "$THREADS_JSON" | pr_auto_review_blocking_thread_count)
 
           # ── Decide (pure core) ───────────────────────────────────────────────
           # The lib returns the decision class on stdout and exit 0 iff ready;
