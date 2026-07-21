@@ -57,6 +57,29 @@ workflow_command_lines() {
   [ "$fail" -eq 0 ]
 }
 
+@test "every 'go install' in a workflow is version-pinned and S8545-exempted" {
+  # S8545 flags `go install` as non-lockfile-enforcing. Go has no --locked /
+  # --require-hashes equivalent: a pinned `@vX.Y.Z` is the reproducible install
+  # (verified via the module checksum DB / go.sum), so the finding is a confirmed
+  # false positive suppressed with an inline `# NOSONAR(githubactions:S8545)`
+  # marker. This guard fails loud if a new `go install` is added unpinned
+  # (@latest/@main) or without the marker.
+  local fail=0 file cmd
+  while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
+    case "$cmd" in
+      *" go install "*)
+        case "$cmd" in *"@v"[0-9]*) : ;; *)
+          echo "UNPINNED go install (needs @vX.Y.Z): ${file##*/}: $cmd"; fail=1 ;;
+        esac
+        case "$cmd" in *"NOSONAR(githubactions:S8545)"*) : ;; *)
+          echo "MISSING # NOSONAR(githubactions:S8545): ${file##*/}: $cmd"; fail=1 ;;
+        esac
+        ;;
+    esac
+  done < <(workflow_command_lines)
+  [ "$fail" -eq 0 ]
+}
+
 @test "each hash-locked requirements file referenced by a workflow exists" {
   local fail=0 file cmd path
   while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
