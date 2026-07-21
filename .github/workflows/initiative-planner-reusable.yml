@@ -33,6 +33,9 @@ on:
         default: "petry-projects/.github-private"
         type: string
     secrets:
+      GH_PAT_DON_PETRY:
+        description: "Canonical org PAT — preferred over GH_PAT_WORKFLOWS when present"
+        required: false
       GH_PAT_WORKFLOWS:
         description: "Classic PAT with repo + workflow scope used to dispatch the central initiative-planner (GITHUB_TOKEN cannot start a workflow_dispatch run)."
         required: true
@@ -54,17 +57,17 @@ jobs:
     steps:
       - name: Guard — PAT present
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::GH_PAT_WORKFLOWS is required — a workflow_dispatch fired with GITHUB_TOKEN will not start a run."
+            echo "::error::GH_PAT_DON_PETRY (or legacy GH_PAT_WORKFLOWS) is required — a workflow_dispatch fired with GITHUB_TOKEN will not start a run."
             exit 1
           fi
 
       - name: Guard — trusted actor
         id: trust
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           REPO: ${{ github.repository }}
           ACTOR: ${{ github.event.sender.login }}
         run: |
@@ -86,7 +89,7 @@ jobs:
       - name: Dispatch central planner for this repo
         if: steps.trust.outputs.trusted == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           PLANNER_REPO: ${{ inputs.planner_repo }}
           TARGET_REPO: ${{ github.repository }}
           DISCUSSION_NUMBER: ${{ github.event.discussion.number }}

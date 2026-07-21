@@ -22,7 +22,7 @@ jobs:
 
       - name: Generate org status report
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           chmod +x scripts/org_status.sh scripts/org_report.sh
           bash scripts/org_status.sh > /tmp/report.md
@@ -47,7 +47,7 @@ jobs:
 
       - name: Create daily-report issue
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
         run: |
           DATE=$(date -u +%Y-%m-%d)
           # This digest embeds the date in its title, so a fresh issue is created

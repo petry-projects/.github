@@ -46,6 +46,9 @@ on:
         default: 'main'
         type: string
     secrets:
+      GH_PAT_DON_PETRY:
+        description: "Canonical org PAT — preferred over GH_PAT_WORKFLOWS when present"
+        required: false
       GH_PAT_WORKFLOWS:
         description: 'Classic PAT with repo scope, used for API calls and dispatching the persona'
         required: true
@@ -118,7 +121,7 @@ jobs:
 
       - name: Route the mention
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_WORKFLOWS }}
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
           PERSONA_REF: ${{ inputs.persona_ref }}
           # Every event field arrives via env, never interpolated inline into the
           # run: body. A comment body and a login are attacker-controlled, and an
