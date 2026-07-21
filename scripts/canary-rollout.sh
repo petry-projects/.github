@@ -449,7 +449,9 @@ _repo_wf_runs_cached() {
     # and are collision-broken) keeps the mapping injective; fall back to substitution only if
     # no hasher exists. This is a filename derivation, not a security context.
     key="${repo}//${wf}"
-    keyhash="$(printf '%s' "$key" | sha256sum 2>/dev/null | cut -d' ' -f1)"
+    # sha256sum on Linux runners, shasum -a 256 on macOS; substitution only if neither
+    # exists (and then, at worst, the pre-existing collision surface — never a crash).
+    keyhash="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
     [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
     cachef="$_RUNS_CACHE_DIR/${keyhash}.json"
     [ -s "$cachef" ] && { cat "$cachef"; return 0; }
