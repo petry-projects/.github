@@ -39,6 +39,10 @@ source "$SCRIPT_DIR/lib/standards-deploy.sh"
 # shellcheck source=scripts/lib/ring-pins.sh
 source "$SCRIPT_DIR/lib/ring-pins.sh"
 
+# Global temp-file registry — cleaned up by EXIT trap even on premature exit.
+declare -a _TMPFILES=()
+trap 'rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"' EXIT
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -193,7 +197,7 @@ fetch_existing() {
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
-  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r')
+  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
   [[ -z "$expected_uses" ]] && return 1
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
@@ -227,7 +231,7 @@ is_already_compliant() {
 # (org/repo/…/<base>-reusable.yml@<ref>), comment/CR stripped, or empty.
 reusable_uses_of() {
   grep -E '^[[:space:]]*uses:' "$1" | head -1 \
-    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r'
+    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true
 }
 
 # reusable_base_of <template> -> the ring channel base (e.g. `auto-rebase`) of the
@@ -284,7 +288,7 @@ deploy_repo() {
   # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
-  local -a paths=() templates=() names=() emits=() modes=() tmpfiles=()
+  local -a paths=() templates=() names=() emits=() modes=()
   local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode
   for workflow in "${WORKFLOWS[@]}"; do
     base=""; repin_source=""; emit=""; deploy_template=""; mode=""
@@ -319,7 +323,7 @@ deploy_repo() {
       # A channel consumer stub: re-pin the meta-repo's OWN stub body in place —
       # never overwrite its bespoke content with the generic template.
       if [[ "$DRY_RUN" != "true" ]]; then
-        repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+        repin_source="$(mktemp)"; _TMPFILES+=("$repin_source")
         printf '%s\n' "$existing_content" > "$repin_source"
       fi
     elif is_body_preserving_workflow "$workflow"; then
@@ -333,7 +337,7 @@ deploy_repo() {
       else
         mode="repin-in-place"
         if [[ "$DRY_RUN" != "true" ]]; then
-          repin_source="$(mktemp)"; tmpfiles+=("$repin_source")
+          repin_source="$(mktemp)"; _TMPFILES+=("$repin_source")
           printf '%s\n' "$existing_content" > "$repin_source"
         fi
       fi
@@ -349,13 +353,13 @@ deploy_repo() {
       base="$(reusable_base_of "$template")"
       deploy_template="$(mktemp)"
       ring_repin_uses "$base" "$emit" < "$repin_source" > "$deploy_template"
-      tmpfiles+=("$deploy_template")
+      _TMPFILES+=("$deploy_template")
     fi
     paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit"); modes+=("$mode")
   done
 
   if [[ "${#names[@]}" -eq 0 ]]; then
-    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return  # nothing drifted for this repo
+    rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"; _TMPFILES=(); return  # nothing drifted for this repo
   fi
 
   local n="${#names[@]}" list branch
@@ -373,7 +377,7 @@ deploy_repo() {
       esac
     done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
-    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"; return
+    rm -f "${_TMPFILES[@]+"${_TMPFILES[@]}"}"; _TMPFILES=(); return
   fi
 
   # Interleave (path, template) into the variadic file-pair args.
@@ -384,7 +388,7 @@ deploy_repo() {
   body=$(batch_pr_body "${names[@]}")
   outcome=$(sd_deploy_files_via_pr "$ORG/$repo" "$branch" "$SYNC_LABEL" "$title" "$body" "${filepairs[@]}") || true
 
-  [[ "${#tmpfiles[@]}" -gt 0 ]] && rm -f "${tmpfiles[@]}"
+  [[ "${#_TMPFILES[@]}" -gt 0 ]] && rm -f "${_TMPFILES[@]}"; _TMPFILES=()
 
   case "$outcome" in
     "OPENED "*)       ok   "$repo — opened ${outcome#OPENED } (${n} stub(s): $list)" ;;

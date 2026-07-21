@@ -29,9 +29,7 @@ CHAIN='${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}'
   # Every GH_PAT_WORKFLOWS occurrence must be inside the canonical-first chain.
   run grep -nE 'secrets\.GH_PAT_WORKFLOWS' "$STUB"
   [ "$status" -eq 0 ]
-  while IFS= read -r line; do
-    [[ "$line" == *"GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS"* ]]
-  done <<< "$output"
+  ! echo "$output" | grep -vF "GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS"
 }
 
 @test "stub: adds no workflow_call.secrets block (self-contained dispatcher)" {
