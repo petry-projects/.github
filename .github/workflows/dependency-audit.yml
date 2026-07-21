@@ -137,7 +137,7 @@ jobs:
           go-version: "stable"
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4  # NOSONAR(githubactions:S8545) pinned @version is reproducible & go.sum/checksum-DB verified; go install has no --locked equivalent
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4  # NOSONAR(githubactions:S8545) pinned @version is reproducible & verified by the Go checksum DB (sum.golang.org); go install has no --locked equivalent
 
       - name: Audit Go dependencies
         run: |

@@ -60,7 +60,7 @@ workflow_command_lines() {
 @test "every 'go install' in a workflow is version-pinned and S8545-exempted" {
   # S8545 flags `go install` as non-lockfile-enforcing. Go has no --locked /
   # --require-hashes equivalent: a pinned `@vX.Y.Z` is the reproducible install
-  # (verified via the module checksum DB / go.sum), so the finding is a confirmed
+  # (verified via the Go checksum DB, sum.golang.org), so the finding is a confirmed
   # false positive suppressed with an inline `# NOSONAR(githubactions:S8545)`
   # marker. This guard fails loud if a new `go install` is added unpinned
   # (@latest/@main) or without the marker.
