@@ -198,7 +198,15 @@ is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
   expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
-  [[ -z "$expected_uses" ]] && return 1
+  # Verbatim-managed template (no reusable uses: line — e.g. initiative-driver which
+  # dispatches directly via gh CLI). Compare full content (CRLF-normalized) so a
+  # correctly-deployed stub is never flagged as drifted on every sweep.
+  if [[ -z "$expected_uses" ]]; then
+    local template_content normalized_existing
+    template_content=$(tr -d '\r' < "$template")
+    normalized_existing=$(printf '%s' "$existing_content" | tr -d '\r')
+    [[ "$normalized_existing" == "$template_content" ]] && return 0 || return 1
+  fi
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
   if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then

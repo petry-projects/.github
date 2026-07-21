@@ -114,6 +114,20 @@ fi_stub_pinning() {  # <ref>
   ! echo "$output" | grep -qF 'seed-if-absent'
 }
 
+@test "initiative-driver: an already-correct stub is left untouched (verbatim-compliant check)" {
+  # When the stub already matches the template verbatim, is_already_compliant must
+  # return true (no reusable uses: → full-content comparison), so the sweep skips
+  # re-deploying on every run (fixes perpetual-drift footgun).
+  local template="${REPO_ROOT}/standards/workflows/initiative-driver.yml"
+  GH_CONTENT_B64="$(base64 -w 0 < "$template" 2>/dev/null || base64 -b 0 < "$template")"
+  export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow initiative-driver.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  ! echo "$output" | grep -q 'Would open PR'
+}
+
 # ── pr-auto-review: ring add, re-pinned to the repo's tier ──────────────────────
 
 @test "pr-auto-review: deploys pinned to the repo's ring tier" {
