@@ -117,10 +117,8 @@ pr_auto_review_checks_ready() {
 pr_auto_review_blocking_thread_count() {
   jq -r '
     [
-      try (
-        .data.repository.pullRequest.reviewThreads.nodes[] |
-        select((.isResolved == false) and (.isOutdated != true))
-      ) catch empty
+      (.data.repository.pullRequest.reviewThreads.nodes[]? |
+      select((.isResolved == false) and (.isOutdated != true)))?
     ] | length
   '
 }
