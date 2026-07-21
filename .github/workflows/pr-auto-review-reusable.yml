@@ -210,8 +210,9 @@ jobs:
           # failure aborts the step under `set -e` — as before — rather than
           # silently reporting 0 blocking threads and dispatching. The pure
           # function only has to tolerate a well-formed-but-empty payload.
+          _GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated}}}}}'
           THREADS_JSON=$(gh api graphql \
-            -f "query=query(\$owner:String!,\$repo:String!,\$number:Int!){repository(owner:\$owner,name:\$repo){pullRequest(number:\$number){reviewThreads(first:100){nodes{isResolved isOutdated}}}}}" \
+            -f "query=$_GQL" \
             -f owner="${REPO%%/*}" \
             -f repo="${REPO##*/}" \
             -F number="${PR_NUMBER}")
