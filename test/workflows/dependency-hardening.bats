@@ -67,12 +67,17 @@ workflow_command_lines() {
   local fail=0 file cmd
   while IFS=$'\t' read -r file cmd || [ -n "$file" ]; do
     case "$cmd" in
-      *" go install "*)
-        case "$cmd" in *"@v"[0-9]*) : ;; *)
-          echo "UNPINNED go install (needs @vX.Y.Z): ${file##*/}: $cmd"; fail=1 ;;
-        esac
-        case "$cmd" in *"NOSONAR(githubactions:S8545)"*) : ;; *)
-          echo "MISSING # NOSONAR(githubactions:S8545): ${file##*/}: $cmd"; fail=1 ;;
+      *"go install"*)
+        case "$cmd" in
+          *[a-zA-Z0-9_-]go\ install*) : ;;
+          *)
+            case "$cmd" in *"@v"[0-9]*) : ;; *)
+              echo "UNPINNED go install (needs @vX.Y.Z): ${file##*/}: $cmd"; fail=1 ;;
+            esac
+            case "$cmd" in *"NOSONAR(githubactions:S8545)"*) : ;; *)
+              echo "MISSING # NOSONAR(githubactions:S8545): ${file##*/}: $cmd"; fail=1 ;;
+            esac
+            ;;
         esac
         ;;
     esac
