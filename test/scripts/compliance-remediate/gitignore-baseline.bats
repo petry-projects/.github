@@ -54,7 +54,17 @@ case "$sub" in
         else
           exit "${GH_REF_EXISTS_RC:-0}"
         fi ;;
-      *contents/.gitignore"?"ref=*)  printf '%s' "${GH_FILE_SHA:-}" ;;
+      *contents/.gitignore"?"ref=*)
+        # Simulate the Contents-API SHA lookup on the sync branch.
+        # When GH_FILE_SHA is unset the file does not exist on the branch yet
+        # (fresh-create path); exit 1 with a 404 message so the driver sets
+        # branch_sha="" and issues a create PUT (no sha field).
+        if [ -n "${GH_FILE_SHA:-}" ]; then
+          printf '%s' "$GH_FILE_SHA"
+        else
+          printf 'Not Found (HTTP 404)\n' >&2
+          exit 1
+        fi ;;
       *contents/.gitignore)
         # PUT of the upserted file onto the sync branch.
         if printf '%s' "$args" | grep -q -- '--method PUT'; then
@@ -72,7 +82,16 @@ case "$sub" in
           printf 'gh: Not Found (HTTP 404)\n' >&2
           exit 1   # 404 — .gitignore absent
         fi ;;
-      repos/*)                       printf '%s' "${GH_DEFAULT_BRANCH:-main}" ;;
+      repos/*)
+        # Permission preflight (sd_deploy_files_via_pr step 2) uses --jq
+        # '.permissions.push // false'; grant write access by default so the
+        # PR-flow tests exercise the full path.  Default-branch queries use
+        # --jq '.default_branch' and still get the configured branch name.
+        if printf '%s' "$args" | grep -q 'permissions.push'; then
+          printf 'true'
+        else
+          printf '%s' "${GH_DEFAULT_BRANCH:-main}"
+        fi ;;
     esac
     ;;
 esac
