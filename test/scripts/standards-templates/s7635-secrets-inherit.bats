@@ -30,14 +30,16 @@ secrets_inherit_lines() {
 
 @test "every template with 'secrets: inherit' carries the S7635 marker" {
   local violations=()
-  local f name lines line
+  local f name lines line lineno content
   for f in "${WF_DIR}"/*.yml; do
     name="$(basename "$f")"
     lines="$(secrets_inherit_lines "$f")"
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
-      if ! grep -qF "$MARKER" <<<"$line"; then
-        violations+=("${name}: 'secrets: inherit' line lacks ${MARKER}")
+      lineno="${line%%:*}"
+      content="${line#*:}"
+      if ! grep -qF "$MARKER" <<<"$content"; then
+        violations+=("${name}:${lineno}: 'secrets: inherit' line lacks ${MARKER}")
       fi
     done <<<"$lines"
   done
@@ -52,15 +54,17 @@ secrets_inherit_lines() {
   # (e.g. 'first-party trusted reusable' vs 'org secrets are scoped ...'), but
   # the marker itself must be byte-consistent so SonarCloud honours it.
   local violations=()
-  local f name lines line
+  local f name lines line lineno content
   for f in "${WF_DIR}"/*.yml; do
     name="$(basename "$f")"
     lines="$(secrets_inherit_lines "$f")"
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
-      grep -qF "$MARKER" <<<"$line" || continue
-      if ! grep -qE 'secrets: inherit  # NOSONAR\(githubactions:S7635\) ' <<<"$line"; then
-        violations+=("${name}: marker is not the canonical 'secrets: inherit  # NOSONAR(githubactions:S7635) <prose>' shape")
+      lineno="${line%%:*}"
+      content="${line#*:}"
+      grep -qF "$MARKER" <<<"$content" || continue
+      if ! grep -qE 'secrets: inherit  # NOSONAR\(githubactions:S7635\) ' <<<"$content"; then
+        violations+=("${name}:${lineno}: marker is not the canonical 'secrets: inherit  # NOSONAR(githubactions:S7635) <prose>' shape")
       fi
     done <<<"$lines"
   done

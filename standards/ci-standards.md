@@ -742,8 +742,7 @@ guard).
 
 Stubs that pass secrets **explicitly** (least privilege — no `secrets: inherit`
 line, e.g. `add-to-project.yml`, `pr-review-mention.yml`) never trip S7635 and
-carry **no** marker. Do not add one: the marker suppresses S7635 on a
-`secrets: inherit` line, and there is none to suppress.
+carry **no** marker. Do not add one, as the marker is only necessary for `secrets: inherit` lines, which these stubs lack.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
