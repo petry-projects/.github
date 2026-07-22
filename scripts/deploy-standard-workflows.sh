@@ -495,6 +495,19 @@ deploy_repo() {
       fi
     fi
 
+    # When repin_source is a copy of existing_content (meta-repo consumer or body-
+    # preserving repin-in-place) and the template requires the S7635 marker but the
+    # copy lacks it, inject the marker now. Without this, the deployed stub would
+    # still be marker-less after the PR lands and is_already_compliant would flag it
+    # as drift again on every subsequent sweep — an infinite redeployment loop (#878).
+    if [[ "$repin_source" != "$template" ]] && [[ "$DRY_RUN" != "true" ]]; then
+      if template_requires_s7635_marker "$template" && ! stub_has_s7635_marker < "$repin_source"; then
+        local patched; patched="$(mktemp)"; _TMPFILES+=("$patched")
+        sed -E 's/^([[:space:]]*secrets:[[:space:]]+inherit)([[:space:]]*#.*)?$/\1  # NOSONAR(githubactions:S7635) first-party trusted reusable/' "$repin_source" > "$patched"
+        repin_source="$patched"
+      fi
+    fi
+
     if [[ -n "$existing_sha" ]] && [[ "$FORCE" == "false" ]] && is_already_compliant "$existing_content" "$template" "$repo"; then
       skip "$repo/$target_path already compliant"
       continue
