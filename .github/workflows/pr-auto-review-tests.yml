@@ -60,7 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           shellcheck -x \
-            .github/scripts/pr-auto-review/lib/ready-check.sh
+            .github/scripts/pr-auto-review/lib/ready-check.sh \
+            .github/scripts/pr-auto-review/lib/sweep.sh \
+            .github/scripts/pr-auto-review/sweep-dispatch.sh
 
       - name: Run bats suite
         run: bats --print-output-on-failure test/workflows/pr-auto-review/
