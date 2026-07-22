@@ -70,3 +70,20 @@ ref_of() {
     [ -z "$lines" ] || { echo "${name} unexpectedly has a channel-ref line"; return 1; }
   done
 }
+
+@test "every non-verbatim template HAS a marker-tagged channel-ref line" {
+  # Guards against a deployable template silently losing its channel pin (or the
+  # NOSONAR marker): without this, the first test's `[ -n "$lines" ] || continue`
+  # would skip an unmarked file and pass. Any non-verbatim template must carry a
+  # first-party channel-ref line so it stays under the v-form pin check.
+  local f name missing=()
+  for f in "${WF_DIR}"/*.yml; do
+    name="$(basename "$f")"
+    case " $VERBATIM " in *" $name "*) continue ;; esac
+    [ -n "$(channel_ref_lines "$f")" ] || missing+=("$name")
+  done
+  if [ "${#missing[@]}" -ne 0 ]; then
+    printf 'non-verbatim template missing a first-party channel-ref line -> %s\n' "${missing[@]}"
+    return 1
+  fi
+}
