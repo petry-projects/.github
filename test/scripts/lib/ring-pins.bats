@@ -94,6 +94,27 @@ setup() {
   [ -z "$(ring_highest_major 2-next latest '')" ]
 }
 
+# ── channel major (#870): the CALLER-CONTRACT major, not the release major ──────
+
+@test "ring_highest_channel_major: picks the highest v<M>-<tier> channel token" {
+  # channel tokens are `<M>-<tier>` (the `v` prefix is already stripped by the
+  # caller, mirroring ring_host_current_channel_major's sed).
+  [ "$(ring_highest_channel_major 1-stable 1-ring1 1-next)" = "1" ]
+  [ "$(ring_highest_channel_major 2-stable 3-ring0 2-ring1)" = "3" ]
+  [ "$(ring_highest_channel_major 10-stable 9-ring1)" = "10" ]
+}
+
+@test "ring_highest_channel_major: ignores RELEASE semver; empty when no channel token (#870)" {
+  # The dev-lead regression: a high release major (14.0.0) must NOT be picked up —
+  # only the channel tokens count, so v1 is the caller-contract major.
+  [ "$(ring_highest_channel_major 14.0.0 1-stable 1-ring1)" = "1" ]
+  # release-only input (no channel token) yields empty → callers fall back to bare.
+  [ -z "$(ring_highest_channel_major 14.0.0 13.9.9)" ]
+  [ -z "$(ring_highest_channel_major)" ]
+  # a bare tier (no v<M>- major) is not a channel-major token.
+  [ -z "$(ring_highest_channel_major stable ring1)" ]
+}
+
 @test "ring_repin_uses: rewrites the reusable uses: ref, preserving the trailing comment" {
   local stub="jobs:
   auto-rebase:
@@ -153,5 +174,59 @@ setup() {
   something-else:
     uses: ./.github/workflows/other-reusable.yml"
   run ring_stub_selfhosts dev-lead <<< "$stub"
+  [ "$status" -ne 0 ]
+}
+
+# ── gh-backed channel-major / tag-existence helpers (#870) ──────────────────────
+# These read the host repo's tags via `gh api`, so a fake gh is put on PATH. It
+# serves matching-refs (already `--jq '.[]?.ref'`-projected, one ref per line) and
+# single-ref existence probes.
+
+_install_gh_stub() {
+  local bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  cat > "$bin/gh" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "api" ]; then
+  case "$2" in
+    *git/ref/tags/*)
+      tag="${2##*/git/ref/tags/}"
+      printf '%s\n' "${GH_EXISTING_TAGS:-}" | grep -qxF "$tag" && exit 0
+      exit 1 ;;
+    *matching-refs/tags/*)
+      [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
+      exit 0 ;;
+  esac
+fi
+exit 0
+STUB
+  chmod +x "$bin/gh"
+  PATH="${bin}:${PATH}"; export PATH
+}
+
+@test "ring_host_current_channel_major: picks v1 for dev-lead despite a v14 release tag (#870)" {
+  export GH_MATCHING_REFS="refs/tags/dev-lead/v14.0.0
+refs/tags/dev-lead/v1-stable
+refs/tags/dev-lead/v1-next
+refs/tags/dev-lead/v1-ring0
+refs/tags/dev-lead/v1-ring1"
+  _install_gh_stub
+  [ "$(ring_host_current_channel_major petry-projects/.github-private dev-lead)" = "1" ]
+}
+
+@test "ring_host_current_channel_major: empty when only release tags exist (#870)" {
+  export GH_MATCHING_REFS="refs/tags/auto-rebase/v2.3.1
+refs/tags/auto-rebase/v1.0.0"
+  _install_gh_stub
+  [ -z "$(ring_host_current_channel_major petry-projects/.github auto-rebase)" ]
+}
+
+@test "ring_tag_exists: true only for a ref present on the host (#870)" {
+  export GH_EXISTING_TAGS="dev-lead/v1-ring1
+dev-lead/v1-stable"
+  _install_gh_stub
+  run ring_tag_exists petry-projects/.github-private dev-lead/v1-ring1
+  [ "$status" -eq 0 ]
+  run ring_tag_exists petry-projects/.github-private dev-lead/v1-ring0
   [ "$status" -ne 0 ]
 }

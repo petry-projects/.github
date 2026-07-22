@@ -7,8 +7,9 @@
 #     a wrong-tier v-form is still drift.
 #
 # All runs are --dry-run (no mutating gh calls) against a single --repo/--workflow so
-# they are deterministic. A fake `gh` returns the reusable's release tags (for the
-# major derivation) and the target repo's existing stub content.
+# they are deterministic. A fake `gh` returns the reusable's CHANNEL tags (for the
+# caller-contract major derivation — #870), the target repo's existing stub content,
+# and single-ref existence probes (the assert-exists guard).
 
 setup() {
   TT_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
@@ -19,9 +20,14 @@ setup() {
 teardown() { rm -rf "$TT_TMP"; }
 
 # Install a fake gh.
-#   GH_RELEASE_REFS  newline-separated `refs/tags/<agent>/vX.Y.Z` for matching-refs
-#                    (unset/empty → the agent has no release → bare form expected).
+#   GH_MATCHING_REFS newline-separated `refs/tags/<agent>/…` for matching-refs. The
+#                    major is derived from the CHANNEL tags (`<agent>/v<M>-<tier>`),
+#                    NOT the release tags (`<agent>/vX.Y.Z`) — the #870 fix. Unset/no
+#                    channel tag → the agent has no channel major → bare form.
 #   GH_CONTENT_B64   base64 of the existing stub (unset → contents 404 = missing stub).
+#   GH_EXISTING_TAGS newline-separated `<agent>/<ref>` the assert-exists probe treats
+#                    as resolvable. UNSET → every ref resolves (legacy default, so a
+#                    test that does not model tag existence is unaffected).
 install_gh_stub() {
   local bin="${TT_TMP}/bin"
   mkdir -p "$bin"
@@ -29,8 +35,15 @@ install_gh_stub() {
 #!/usr/bin/env bash
 if [ "${1:-}" = "api" ]; then
   case "$2" in
+    *git/ref/tags/*)
+      # Single-ref existence probe (ring_tag_exists). Unset GH_EXISTING_TAGS means
+      # "don't model existence" → every ref resolves.
+      [ -z "${GH_EXISTING_TAGS:-}" ] && exit 0
+      tag="${2##*/git/ref/tags/}"
+      printf '%s\n' "$GH_EXISTING_TAGS" | grep -qxF "$tag" && exit 0
+      exit 1 ;;
     *matching-refs/tags/*)
-      [ -n "${GH_RELEASE_REFS:-}" ] && printf '%s\n' "${GH_RELEASE_REFS}"
+      [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
       exit 0 ;;
     *contents*)
       if [ -n "${GH_CONTENT_B64:-}" ]; then
@@ -44,6 +57,18 @@ exit 0
 STUB
   chmod +x "$bin/gh"
   PATH="${bin}:${PATH}"; export PATH
+}
+
+# Channel tags for an agent at major <M> across every ring tier — the caller-contract
+# tags a deployed stub can legitimately pin. Emitted as matching-refs `refs/tags/…`.
+channel_refs() {  # <agent> <M> [extra refs...]
+  local agent="$1" m="$2"; shift 2
+  printf 'refs/tags/%s/v%s-stable\n' "$agent" "$m"
+  printf 'refs/tags/%s/v%s-next\n'   "$agent" "$m"
+  printf 'refs/tags/%s/v%s-ring0\n'  "$agent" "$m"
+  printf 'refs/tags/%s/v%s-ring1\n'  "$agent" "$m"
+  if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; fi
+  return 0
 }
 
 stub_pinning() {  # <ref> → base64 of a minimal auto-rebase stub pinning the reusable at <ref>
@@ -72,19 +97,20 @@ selfhost_stub() {  # <base> → base64 of a meta-repo SELF-HOST stub using a loc
   base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
 }
 
-@test "emits @<agent>/v<M>-<tier> when the reusable has a release" {
-  export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.3.1
-refs/tags/auto-rebase/v1.0.0"
+@test "emits @<agent>/v<M>-<tier> when the reusable has a channel major" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2 refs/tags/auto-rebase/v2.3.1)"; export GH_MATCHING_REFS
   install_gh_stub   # no GH_CONTENT_B64 → missing stub → deploy plans a (re)pin
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
-  # markets is a stable-tier repo → v2 major line → @auto-rebase/v2-stable
+  # markets is a stable-tier repo → v2 channel line → @auto-rebase/v2-stable
   echo "$output" | grep -qF '@auto-rebase/v2-stable'
   echo "$output" | grep -qE 'Would open PR for markets .* auto-rebase.yml'
 }
 
-@test "emits the bare @<agent>/<tier> form when the reusable has no release" {
-  unset GH_RELEASE_REFS   # matching-refs empty → no major
+@test "emits the bare @<agent>/<tier> form when the reusable has no channel tag" {
+  # Release tags exist but NO channel tag → no channel major → bare form. Proves the
+  # major comes from channel tags, not the release semver (#870).
+  export GH_MATCHING_REFS="refs/tags/auto-rebase/v2.3.1"
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
@@ -93,7 +119,7 @@ refs/tags/auto-rebase/v1.0.0"
 }
 
 @test "drift check treats a tier-correct v<M>-tier stub as compliant (no PR)" {
-  export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.0.0"
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
   GH_CONTENT_B64="$(stub_pinning auto-rebase/v2-ring1)"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
@@ -102,10 +128,10 @@ refs/tags/auto-rebase/v1.0.0"
   ! echo "$output" | grep -q 'Would open PR'
 }
 
-@test "drift check flags a BARE-tier stub as drift when the agent has a release (#861)" {
-  export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.0.0"
-  # markets (stable tier) still pins the bare @auto-rebase/stable; with a v2 release
-  # the bare form is drift → deploy re-pins to the tier v-form.
+@test "drift check flags a BARE-tier stub as drift when the agent has a channel major (#861)" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
+  # markets (stable tier) still pins the bare @auto-rebase/stable; with a v2 channel
+  # major the bare form is drift → deploy re-pins to the tier v-form.
   GH_CONTENT_B64="$(stub_pinning auto-rebase/stable)"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
@@ -115,8 +141,8 @@ refs/tags/auto-rebase/v1.0.0"
   echo "$output" | grep -qE 'Would open PR for markets .* auto-rebase.yml'
 }
 
-@test "drift check keeps a BARE-tier stub compliant when the agent has NO release (#861)" {
-  unset GH_RELEASE_REFS   # no release → no current major → bare tier stays compliant
+@test "drift check keeps a BARE-tier stub compliant when the agent has NO channel major (#861)" {
+  unset GH_MATCHING_REFS   # no channel tag → no current major → bare tier stays compliant
   GH_CONTENT_B64="$(stub_pinning auto-rebase/stable)"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
@@ -126,7 +152,7 @@ refs/tags/auto-rebase/v1.0.0"
 }
 
 @test "drift check still flags a WRONG-tier v<M>-tier stub" {
-  export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.0.0"
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
   # v2-ring0 on TalkTerm (a ring1 repo) is the wrong tier → drift.
   GH_CONTENT_B64="$(stub_pinning auto-rebase/v2-ring0)"; export GH_CONTENT_B64
   install_gh_stub
@@ -144,20 +170,20 @@ refs/tags/auto-rebase/v1.0.0"
 # skips them and --retire-bare stays blocked.
 
 @test "re-pins a meta-repo's channel-pinned CONSUMER stub to the tier v<M>-form" {
-  export GH_RELEASE_REFS="refs/tags/dev-lead/v3.2.0"
+  GH_MATCHING_REFS="$(channel_refs dev-lead 3)"; export GH_MATCHING_REFS
   # .github's dev-lead stub is a consumer still on the bare tier channel.
   GH_CONTENT_B64="$(devlead_stub_pinning dev-lead/ring0)"; export GH_CONTENT_B64
   install_gh_stub
   # --force so the bare-tier migration grace does not mark it already-compliant.
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo .github --workflow dev-lead.yml
   [ "$status" -eq 0 ]
-  # .github is a ring0 repo → v3 major line → @dev-lead/v3-ring0
+  # .github is a ring0 repo → v3 channel line → @dev-lead/v3-ring0
   echo "$output" | grep -qF '@dev-lead/v3-ring0'
   echo "$output" | grep -qE 'Would open PR for \.github .* dev-lead.yml'
 }
 
 @test "leaves a meta-repo's local ./ SELF-HOST stub exempt (never re-pins it)" {
-  export GH_RELEASE_REFS="refs/tags/agent-shield/v2.0.0"
+  GH_MATCHING_REFS="$(channel_refs agent-shield 2)"; export GH_MATCHING_REFS
   # .github HOSTS agent-shield's reusable — its stub uses a local ./ ref.
   GH_CONTENT_B64="$(selfhost_stub agent-shield)"; export GH_CONTENT_B64
   install_gh_stub
@@ -166,4 +192,35 @@ refs/tags/auto-rebase/v1.0.0"
   echo "$output" | grep -qF '.github/agent-shield.yml (exempt)'
   ! echo "$output" | grep -qi 'Would open PR'
   ! echo "$output" | grep -qF '@agent-shield/v'
+}
+
+# ── #870: derive the CHANNEL major, never the higher RELEASE major ──────────────
+# dev-lead ships internal releases (dev-lead/v14.0.0) but its caller-contract channel
+# tags are dev-lead/v1-<tier>. The driver must pin the channel major (v1), because
+# @dev-lead/v14-<tier> has no tag and fails to resolve — the live bmad regression.
+
+@test "#870: pins the channel major v1, not the release major v14, for a dev-lead consumer" {
+  # matching-refs carries a HIGH release tag AND the low v1 channel tags.
+  GH_MATCHING_REFS="$(channel_refs dev-lead 1 refs/tags/dev-lead/v14.0.0)"; export GH_MATCHING_REFS
+  # bmad-bgreat-suite is a ring1 repo — the exact live-broken consumer.
+  install_gh_stub   # missing stub → deploy plans a fresh pin
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '@dev-lead/v1-ring1'
+  ! echo "$output" | grep -qF '@dev-lead/v14'
+  echo "$output" | grep -qE 'Would open PR for bmad-bgreat-suite .* dev-lead.yml'
+}
+
+@test "#870: refuses a computed channel ref that has no tag (assert-exists)" {
+  # Only v1-stable exists as a channel tag (channel major still resolves to 1), but
+  # the ring1 tier tag v1-ring1 was never cut. The driver must NOT deploy the
+  # non-resolving @dev-lead/v1-ring1 pin.
+  export GH_MATCHING_REFS="refs/tags/dev-lead/v14.0.0
+refs/tags/dev-lead/v1-stable"
+  export GH_EXISTING_TAGS="dev-lead/v1-stable"   # v1-ring1 absent
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi 'does not resolve'
+  ! echo "$output" | grep -qi 'Would open PR'
 }

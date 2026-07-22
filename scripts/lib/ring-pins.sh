@@ -158,6 +158,54 @@ ring_host_current_major() {
   return 0
 }
 
+# ring_highest_channel_major <token>... -> the highest major M among CHANNEL tokens
+# of the form `<M>-<tier>` (tier = stable|next|ring<N>), or empty if none. A release
+# semver token like `14.0.0` is NOT a channel token and is ignored. Pure; always 0.
+#
+# This is the CALLER-CONTRACT major, deliberately distinct from ring_highest_major's
+# release major (#870): dev-lead ships releases `dev-lead/v14.0.0` but its channel
+# contract is `dev-lead/v1-<tier>`, so a pin must track the channel major (v1). A
+# `<base>/v<release>-<tier>` ref has no tag and fails to resolve — the #870 breakage.
+ring_highest_channel_major() {
+  local tok major best=""
+  for tok in "$@"; do
+    [[ "$tok" =~ ^([0-9]+)-(stable|next|ring[0-9]+)$ ]] || continue
+    major="${BASH_REMATCH[1]}"
+    if [ -z "$best" ] || [ "$major" -gt "$best" ]; then
+      best="$major"
+    fi
+  done
+  [ -n "$best" ] && printf '%s' "$best"
+  return 0
+}
+
+# ring_host_current_channel_major <host-repo> <channel-base> -> the highest major M
+# for which a CHANNEL tag `<base>/v<M>-<tier>` exists on the host, or empty if the
+# agent has no channel tag (so callers fall back to the bare-tier form). This is the
+# ref a consumer stub must pin — NOT the release major (#870). gh-backed: reads
+# matching-refs for `<base>/v` and feeds the `<M>-<tier>` tokens (release semver
+# tokens are ignored) to ring_highest_channel_major. Requires GH_TOKEN.
+ring_host_current_channel_major() {
+  local host="$1" base="$2" refs
+  refs="$(gh api "repos/${host}/git/matching-refs/tags/${base}/v" \
+            --jq '.[]?.ref' 2>/dev/null \
+          | sed -n "s#^refs/tags/${base}/v##p")" || {
+    echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
+    return 0
+  }
+  # shellcheck disable=SC2086
+  ring_highest_channel_major $refs
+  return 0
+}
+
+# ring_tag_exists <host-repo> <ref> -> 0 iff refs/tags/<ref> resolves on <host>.
+# The assert-exists guard: a computed channel ref is validated to exist before a
+# stub is pinned to it, so the deploy never opens a PR carrying a non-resolving
+# `@<base>/v<M>-<tier>` pin (#870). gh-backed. Requires GH_TOKEN.
+ring_tag_exists() {
+  gh api "repos/$1/git/ref/tags/$2" >/dev/null 2>&1
+}
+
 # ring_repin_uses <channel-base> <newref> -> rewrite a workflow stub read on stdin
 # so its reusable `uses:` ref (and any matching `agent_ref:`) points at <newref>.
 # Only lines referencing THIS agent's reusable are touched; the trailing comment

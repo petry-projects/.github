@@ -306,14 +306,17 @@ is_already_compliant() {
     # the bare `<base>/<tier>` OR the major-scoped `<base>/v<M>-<tier>` form (#657
     # F5) — post-migration the templates pin the v-form, so both must enter here.
     if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(v[0-9]+-)?(stable|next|ring[0-9]+)$ ]]; then
-      # Major-scoped channels (#657 F5, #861): the bare-tier grace is now
-      # major-AWARE. A bare `<base>/<tier>` stub stays compliant only while the
-      # agent has NO release (no current major line) — the pre-release fleet has
-      # nothing to major-scope to yet. Once the agent has a release, a bare stub is
-      # drift and must migrate to the tier's `v<M>-<tier>` form.
+      # Major-scoped channels (#657 F5, #861, #870): the bare-tier grace is now
+      # major-AWARE, keyed on the CHANNEL major (the highest `<base>/v<M>-<tier>`
+      # channel tag that exists) — NOT the release major. A bare `<base>/<tier>`
+      # stub stays compliant only while the agent has NO channel tag (nothing to
+      # major-scope onto yet). Once a channel tag exists, a bare stub is drift and
+      # must migrate to the tier's `v<M>-<tier>` form. Using the channel major (not
+      # the release major) is what keeps dev-lead — release v14, channel v1 — pinned
+      # to the tag that actually resolves (@dev-lead/v1-<tier>, not @dev-lead/v14-…).
       local host major
       host="$(cut -d/ -f1-2 <<< "$prefix")"
-      major="$(ring_host_current_major "$host" "$base")"
+      major="$(ring_host_current_channel_major "$host" "$base")"
       if [[ -z "$major" ]]; then
         local ref
         while IFS= read -r ref; do
@@ -361,15 +364,18 @@ reusable_host_of() {
 
 # emit_ref_for <template> <repo> -> the channel ref a (re)deployed stub in <repo>
 # should pin (#657 F5). For a ring-managed reusable it is the repo's tier channel,
-# major-scoped `v<M>-<tier>` when the agent has a release, else the bare `<tier>`
-# form. Empty for a non-ring template (deployed verbatim). Requires GH_TOKEN.
+# major-scoped `v<M>-<tier>` when the agent has a CHANNEL tag, else the bare `<tier>`
+# form. The major is the CHANNEL major (highest existing `<base>/v<M>-<tier>` tag),
+# NOT the release major — so dev-lead (release v14, channel v1) pins the resolving
+# `@dev-lead/v1-<tier>`, never the tagless `@dev-lead/v14-<tier>` (#870). Empty for
+# a non-ring template (deployed verbatim). Requires GH_TOKEN.
 emit_ref_for() {
   local template="$1" repo="$2" base host major
   base="$(reusable_base_of "$template")"
   [[ -z "$base" ]] && return 0
   ring_is_ring_reusable "$base" || return 0
   host="$(reusable_host_of "$template")"
-  major="$(ring_host_current_major "$host" "$base")"
+  major="$(ring_host_current_channel_major "$host" "$base")"
   ring_canonical_ref "$base" "$repo" "$major"
   return 0
 }
@@ -457,6 +463,18 @@ deploy_repo() {
       continue
     fi
     emit="$(emit_ref_for "$template" "$repo")"
+    # assert-exists (#870): never pin a stub to a channel ref that has no tag. A
+    # computed `v<M>-<tier>` (or bare tier) that does not resolve on the host would
+    # break the caller's workflow on the next run, so refuse it here rather than
+    # open a PR carrying a non-resolving pin.
+    if [[ -n "$emit" ]]; then
+      local emit_host
+      emit_host="$(reusable_host_of "$template")"
+      if ! ring_tag_exists "$emit_host" "$emit"; then
+        err "$repo/$workflow — computed channel ref @${emit} does not resolve to a tag on ${emit_host}; refusing to deploy a non-resolving pin"
+        continue
+      fi
+    fi
     deploy_template="$repin_source"
     if [[ -n "$emit" ]] && [[ "$DRY_RUN" != "true" ]]; then
       base="$(reusable_base_of "$template")"
