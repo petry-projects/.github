@@ -357,6 +357,28 @@ open for that workflow. Deployment never edits a caller's `uses:`/`agent_ref`
 pins by hand — a release is rolled out by moving the channel tag (see
 [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
 
+**Deploy identity (least-privilege).** The scheduled driver
+([`standards-deploy.yml`](workflows/standards-deploy.yml)) writes stub content and
+opens PRs **across the fleet**, so it must run under a cross-repo write identity —
+`contents:write` + `pull_requests:write` on the target repos, and nothing more. It
+uses `GH_PAT_DON_PETRY` (falling back to the legacy `GH_PAT_WORKFLOWS`), the same
+identity `dev-lead.yml` / `pr-auto-review.yml` / `initiative-driver.yml` already
+author cross-repo PRs with. It **must not** use `ORG_SCORECARD_TOKEN`: that is the
+**audit** identity (a fine-grained PAT with **Contents: Read-only**), so its
+content PUTs 422 and every deploy fails with an opaque `put-failed`
+([#864](https://github.com/petry-projects/.github/issues/864)). The deploy identity
+is also deliberately **not `donpetry-bot`** (it acts as `don-petry`): the PRs it
+opens are authored by a distinct code-owner, so `donpetry-bot` can approve them via
+the pr-review agent and they land through native auto-merge with **no `--admin`**. A
+GitHub App carrying only those two scopes — non-author-blocked and not
+`donpetry-bot` — is an acceptable substitute.
+
+The deploy primitive also **preflights write access per repo** before touching any
+branch and **never issues a sha-less content PUT against an existing file**: a
+token-scope gap surfaces as a single `no-write-access` finding, and a genuine HTTP
+error is reported with its status (e.g. `put-failed:… (HTTP 422)`) instead of being
+swallowed.
+
 #### Self-managing meta-repos: `SKIP_REPOS` + `SKIP_OVERRIDES`
 
 `deploy-standard-workflows.sh` exempts a small set of **self-managing meta-repos**
