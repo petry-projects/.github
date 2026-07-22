@@ -44,5 +44,5 @@ permissions: {}
 
 jobs:
   initiative-planner:
-    uses: petry-projects/.github/.github/workflows/initiative-planner-reusable.yml@initiative-planner/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    uses: petry-projects/.github/.github/workflows/initiative-planner-reusable.yml@initiative-planner/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
