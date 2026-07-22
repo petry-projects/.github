@@ -91,6 +91,56 @@ defense-in-depth: the producer side (dev-lead resolving the threads it fixes) is
 still the preferred fix; this gate just stops forgotten resolutions from
 stalling otherwise-mergeable PRs.
 
+## The catch-up sweep — `sweep.sh` + `lib/sweep.sh`
+
+The event-driven reusable workflow reviews a PR when its triggering event
+(CI green, review submitted, …) fires. A dropped or missed event — or a PR that
+went green while no event was in flight — can leave a mergeable PR un-reviewed.
+`sweep.sh` is a periodically-run **catch-up sweep**: it re-scans open PRs and
+dispatches the review agent for the ones the event path missed.
+
+`sweep.sh` is thin gh I/O glue; every decision lives in the pure, unit-tested
+cores it sources — `lib/ready-check.sh` (per-PR readiness) and `lib/sweep.sh`
+(candidate selection, `test/workflows/pr-auto-review/sweep.bats`).
+
+### `lib/sweep.sh`
+
+Pure, side-effect-free helpers. Source the file, then call:
+
+| Function | Input | Returns |
+|----------|-------|---------|
+| `pr_auto_review_sweep_valid_search` | a search payload on stdin | `0` if it is a valid JSON array (incl. empty `[]`); non-zero + stderr otherwise |
+| `pr_auto_review_sweep_extract` | a search payload (JSON array of PR objects) on stdin | prints a compact `[{number,updatedAt}]`; **non-zero** (not an abort) on a malformed / non-array payload |
+| `pr_auto_review_sweep_page_full COUNT PER_PAGE` | — | `0` if `COUNT >= PER_PAGE` (more pages may exist), `1` otherwise |
+| `pr_auto_review_sweep_merge_pages` | one-or-more candidate arrays concatenated on stdin | prints one array, deduped by `.number` |
+| `pr_auto_review_sweep_order` | a candidate array on stdin | prints it sorted oldest-first by `updatedAt`, ties by `number` asc |
+| `pr_auto_review_sweep_plan MAX_PER_RUN` | an ordered `[{number,ready}]` array on stdin | prints the PR numbers to dispatch — ready-only, capped at **MAX dispatched** |
+
+### Robustness properties (issue #872)
+
+The sweep is hardened against four failure modes; each maps to a pure helper so
+the behaviour is unit-tested without a live gh:
+
+1. **Cap on the number _dispatched_, not considered.** Readiness is evaluated for
+   every candidate *before* the per-run cap is applied
+   (`pr_auto_review_sweep_plan` counts only ready PRs), so a run of older
+   non-ready PRs can never consume all slots and starve newer ready ones.
+2. **Full pagination.** The labeled-PR search is paged while
+   `pr_auto_review_sweep_page_full` reports a full page; pages are combined with
+   `pr_auto_review_sweep_merge_pages`, so PRs beyond page 1 are swept rather than
+   dropped at the 100-item cliff.
+3. **A failed search surfaces, never no-ops.** A non-zero gh exit *or* a payload
+   `pr_auto_review_sweep_valid_search` rejects (empty string, error object,
+   malformed JSON) aborts the run with an error, instead of being read as an
+   empty candidate set / "nothing to do".
+4. **A malformed payload is guarded.** `pr_auto_review_sweep_extract` catches a
+   jq parse failure and returns non-zero rather than letting an unguarded jq
+   error abort the whole sweep under `set -euo pipefail`.
+
+Plus deterministic **oldest-first ordering** (`pr_auto_review_sweep_order`): when
+more PRs are ready than one run's cap allows, the longest-waiting ready PR drains
+first, so no ready PR is perpetually starved across runs.
+
 ### Context name matching
 
 Rulesets store the bare context (e.g. a job name `Lint`, or a third-party status
