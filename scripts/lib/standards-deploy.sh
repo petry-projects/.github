@@ -84,11 +84,20 @@ sd_deploy_files_via_pr() {
 
   # 2. Preflight write check. The driver must run under a contents/PR-write
   #    identity; an audit/read-only token silently produces per-file 422s deep in
-  #    step 4 (petry-projects/.github#864). Probe the repo permission set once, up
+  #    step 5 (petry-projects/.github#864). Probe the repo permission set once, up
   #    front, so a token-scope gap surfaces as one clear finding, not opaque
-  #    per-file put-failures.
-  local can_push
-  can_push=$(gh api "repos/${repo}" --jq '.permissions.push // false' 2>/dev/null || echo "false")
+  #    per-file put-failures. The probe's OWN errors (a transient/auth/404) are
+  #    surfaced distinctly — they must NOT be misreported as "no write access".
+  #    Repo-level push permission implies PR-create for a collaborator identity.
+  local can_push perm_err perm_rc
+  perm_err=$(mktemp)
+  can_push=$(gh api "repos/${repo}" --jq '.permissions.push // false' 2>"$perm_err") && perm_rc=0 || perm_rc=$?
+  if [ "$perm_rc" -ne 0 ]; then
+    local perm_msg; perm_msg=$(tr '\n' ' ' < "$perm_err"); rm -f "$perm_err"
+    echo "FAILED perm-probe-failed:${perm_msg}"
+    return 1
+  fi
+  rm -f "$perm_err"
   if [ "$can_push" != "true" ]; then
     echo "FAILED no-write-access"
     return 1

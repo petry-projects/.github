@@ -358,7 +358,7 @@ pins by hand — a release is rolled out by moving the channel tag (see
 [Reusable workflow versioning](#reusable-workflow-versioning--the-stable-channel)).
 
 **Deploy identity (least-privilege).** The scheduled driver
-([`standards-deploy.yml`](workflows/standards-deploy.yml)) writes stub content and
+([`standards-deploy.yml`](../.github/workflows/standards-deploy.yml)) writes stub content and
 opens PRs **across the fleet**, so it must run under a cross-repo write identity —
 `contents:write` + `pull_requests:write` on the target repos, and nothing more. It
 uses `GH_PAT_DON_PETRY` (falling back to the legacy `GH_PAT_WORKFLOWS`), the same

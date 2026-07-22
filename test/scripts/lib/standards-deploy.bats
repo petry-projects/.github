@@ -65,6 +65,10 @@ case "$sub" in
         # repos/<repo>: the default-branch lookup AND the preflight write probe
         # (--jq .permissions.push) both land here — differentiate on the jq arg.
         if printf '%s' "$args" | grep -q 'permissions.push'; then
+          if [ -n "${GH_PERM_RC:-}" ] && [ "${GH_PERM_RC}" != "0" ]; then
+            printf '%s\n' "${GH_PERM_ERR:-gh: Not Found (HTTP 404)}" >&2
+            exit "${GH_PERM_RC}"
+          fi
           printf '%s' "${GH_CAN_PUSH:-true}"
         else
           printf '%s' "${GH_DEFAULT_BRANCH:-main}"
@@ -256,6 +260,21 @@ deploy() {
   ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
 }
 
+# Preflight: an ERROR on the probe itself (transient / auth / 404) is surfaced
+# distinctly with its HTTP status — NOT misreported as "no-write-access". No
+# branch or PUT is attempted.
+@test "preflight probe error is surfaced distinctly, not as no-write-access" {
+  GH_PERM_RC="1"; export GH_PERM_RC
+  GH_PERM_ERR='gh: Resource not accessible by integration (HTTP 403)'; export GH_PERM_ERR
+  run deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAILED\ perm-probe-failed:* ]]
+  [[ "$output" == *"HTTP 403"* ]]
+  [[ "$output" != *"no-write-access"* ]]
+  ! grep -q 'git/refs --method POST' "$GH_CALLS"
+  ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
+}
+
 # Regression guard for the reported bug: when the stub file already exists on the
 # branch, the update PUT must ALWAYS carry its blob sha — a sha-less PUT against
 # an existing file is a guaranteed 422.
@@ -267,7 +286,8 @@ deploy() {
   put_lines=$(grep 'contents/.* --method PUT' "$GH_CALLS")
   [ -n "$put_lines" ]
   while IFS= read -r line; do
-    printf '%s' "$line" | grep -q -- '--raw-field sha=deadbeefsha'
+    printf '%s' "$line" | grep -q -- '--raw-field sha=deadbeefsha' \
+      || { echo "PUT without sha: $line"; return 1; }
   done <<< "$put_lines"
 }
 
