@@ -119,7 +119,9 @@ STUB
     bash "$DRIVER"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'already compliant'
-  echo "$output" | grep -vq 'Would open PR'
+  # True absence check: fail if any line plans a PR. `grep -vq` was wrong — it
+  # succeeds whenever *any* line doesn't match, so it can't prove absence.
+  ! echo "$output" | grep -q 'Would open PR'
 }
 
 @test "fleet sweep iterates every repo from gh repo list" {
