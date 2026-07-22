@@ -140,16 +140,24 @@ ring_highest_major() {
   return 0
 }
 
+# _ring_fetch_version_tokens <host-repo> <channel-base> -> strips the
+# `refs/tags/<base>/v` prefix from each matching-ref, one token per line.
+# Returns 0 (with tokens, or empty stdout if no refs match) on success; returns
+# 1 if the gh call itself fails. Callers decide the warning and fallback.
+_ring_fetch_version_tokens() {
+  local out
+  out="$(gh api "repos/$1/git/matching-refs/tags/$2/v" \
+           --jq '.[]?.ref' 2>/dev/null)" || return 1
+  sed -n "s#^refs/tags/$2/v##p" <<< "$out"
+}
+
 # ring_host_current_major <host-repo> <channel-base> -> the current major line for
 # an agent, derived from its release tags `<base>/vX.Y.Z` on the host repo, or
 # empty if the agent has no release (so callers fall back to the bare-tier form).
-# gh-backed: reads matching-refs for `<base>/v` and feeds the semver tokens to
-# ring_highest_major. Requires GH_TOKEN in the environment.
+# gh-backed. Requires GH_TOKEN. Fails open (returns 0) on probe error.
 ring_host_current_major() {
   local host="$1" base="$2" refs
-  refs="$(gh api "repos/${host}/git/matching-refs/tags/${base}/v" \
-            --jq '.[]?.ref' 2>/dev/null \
-          | sed -n "s#^refs/tags/${base}/v##p")" || {
+  refs="$(_ring_fetch_version_tokens "$host" "$base")" || {
     echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
     return 0
   }
@@ -182,16 +190,14 @@ ring_highest_channel_major() {
 # ring_host_current_channel_major <host-repo> <channel-base> -> the highest major M
 # for which a CHANNEL tag `<base>/v<M>-<tier>` exists on the host, or empty if the
 # agent has no channel tag (so callers fall back to the bare-tier form). This is the
-# ref a consumer stub must pin — NOT the release major (#870). gh-backed: reads
-# matching-refs for `<base>/v` and feeds the `<M>-<tier>` tokens (release semver
-# tokens are ignored) to ring_highest_channel_major. Requires GH_TOKEN.
+# ref a consumer stub must pin — NOT the release major (#870). gh-backed. Requires
+# GH_TOKEN. Fails closed (returns 1) on probe error so callers cannot silently fall
+# back to bare-tier pins during an API outage.
 ring_host_current_channel_major() {
   local host="$1" base="$2" refs
-  refs="$(gh api "repos/${host}/git/matching-refs/tags/${base}/v" \
-            --jq '.[]?.ref' 2>/dev/null \
-          | sed -n "s#^refs/tags/${base}/v##p")" || {
+  refs="$(_ring_fetch_version_tokens "$host" "$base")" || {
     echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
-    return 0
+    return 1
   }
   # shellcheck disable=SC2086
   ring_highest_channel_major $refs
@@ -202,8 +208,23 @@ ring_host_current_channel_major() {
 # The assert-exists guard: a computed channel ref is validated to exist before a
 # stub is pinned to it, so the deploy never opens a PR carrying a non-resolving
 # `@<base>/v<M>-<tier>` pin (#870). gh-backed. Requires GH_TOKEN.
+# Emits a warning when the gh failure is NOT a 404 (auth, rate-limit, network).
+# Caches results in a process-global associative array to avoid duplicate calls.
 ring_tag_exists() {
-  gh api "repos/$1/git/ref/tags/$2" >/dev/null 2>&1
+  # Self-initializing cache: declare -g creates a global even when called inside a
+  # function; the 2>/dev/null silences the no-op when already declared correctly.
+  declare -g -A _RING_TAG_EXISTS_CACHE 2>/dev/null || true
+  local cache_key="$1/$2"
+  if [[ "${_RING_TAG_EXISTS_CACHE[$cache_key]+isset}" ]]; then
+    return "${_RING_TAG_EXISTS_CACHE[$cache_key]}"
+  fi
+  local out status
+  out="$(gh api "repos/$1/git/ref/tags/$2" 2>&1)"; status=$?
+  if [ "$status" -ne 0 ] && ! grep -qi 'not found\|404' <<< "$out"; then
+    echo "Warning: tag-existence lookup failed for $1/$2 (not a 404): ${out}" >&2
+  fi
+  _RING_TAG_EXISTS_CACHE[$cache_key]="$status"
+  return "$status"
 }
 
 # ring_repin_uses <channel-base> <newref> -> rewrite a workflow stub read on stdin

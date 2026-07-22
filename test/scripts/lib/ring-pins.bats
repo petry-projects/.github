@@ -192,6 +192,7 @@ if [ "${1:-}" = "api" ]; then
     *git/ref/tags/*)
       tag="${2##*/git/ref/tags/}"
       printf '%s\n' "${GH_EXISTING_TAGS:-}" | grep -qxF "$tag" && exit 0
+      printf 'Not Found\n' >&2
       exit 1 ;;
     *matching-refs/tags/*)
       [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"

@@ -41,6 +41,7 @@ if [ "${1:-}" = "api" ]; then
       [ -z "${GH_EXISTING_TAGS:-}" ] && exit 0
       tag="${2##*/git/ref/tags/}"
       printf '%s\n' "$GH_EXISTING_TAGS" | grep -qxF "$tag" && exit 0
+      printf 'Not Found\n' >&2
       exit 1 ;;
     *matching-refs/tags/*)
       [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
@@ -220,7 +221,7 @@ refs/tags/dev-lead/v1-stable"
   export GH_EXISTING_TAGS="dev-lead/v1-stable"   # v1-ring1 absent
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow dev-lead.yml
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   echo "$output" | grep -qi 'does not resolve'
   ! echo "$output" | grep -qi 'Would open PR'
 }

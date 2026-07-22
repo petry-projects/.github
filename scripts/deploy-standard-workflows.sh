@@ -316,7 +316,7 @@ is_already_compliant() {
       # to the tag that actually resolves (@dev-lead/v1-<tier>, not @dev-lead/v14-…).
       local host major
       host="$(cut -d/ -f1-2 <<< "$prefix")"
-      major="$(ring_host_current_channel_major "$host" "$base")"
+      major="$(ring_host_current_channel_major "$host" "$base")" || return 1
       if [[ -z "$major" ]]; then
         local ref
         while IFS= read -r ref; do
@@ -375,7 +375,9 @@ emit_ref_for() {
   [[ -z "$base" ]] && return 0
   ring_is_ring_reusable "$base" || return 0
   host="$(reusable_host_of "$template")"
-  major="$(ring_host_current_channel_major "$host" "$base")"
+  if ! major="$(ring_host_current_channel_major "$host" "$base")"; then
+    return 1
+  fi
   ring_canonical_ref "$base" "$repo" "$major"
   return 0
 }
@@ -462,7 +464,11 @@ deploy_repo() {
       skip "$repo/$target_path already compliant"
       continue
     fi
-    emit="$(emit_ref_for "$template" "$repo")"
+    if ! emit="$(emit_ref_for "$template" "$repo")"; then
+      err "$repo/$workflow — channel-major probe failed; skipping"
+      _OVERALL_FAILED=1
+      continue
+    fi
     # assert-exists (#870): never pin a stub to a channel ref that has no tag. A
     # computed `v<M>-<tier>` (or bare tier) that does not resolve on the host would
     # break the caller's workflow on the next run, so refuse it here rather than
@@ -472,6 +478,7 @@ deploy_repo() {
       emit_host="$(reusable_host_of "$template")"
       if ! ring_tag_exists "$emit_host" "$emit"; then
         err "$repo/$workflow — computed channel ref @${emit} does not resolve to a tag on ${emit_host}; refusing to deploy a non-resolving pin"
+        _OVERALL_FAILED=1
         continue
       fi
     fi
@@ -551,11 +558,16 @@ main() {
 
   log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
 
+  _OVERALL_FAILED=0
   local repo
   for repo in "${REPOS[@]}"; do
     deploy_repo "$repo"
   done
 
+  if [[ "$_OVERALL_FAILED" -ne 0 ]]; then
+    err "Completed with errors — one or more workflows were refused or failed; see above"
+    exit 1
+  fi
   log "Done."
 }
 
