@@ -7,9 +7,10 @@
 # default branch directly and NEVER merges or uses --admin. Instead it:
 #
 #   1. checks for an already-open PR on the sync branch (idempotent skip),
-#   2. creates (or reuses) a sync branch off the repo's default branch,
-#   3. PUTs the verbatim file content onto that branch via the Contents API,
-#   4. opens a labeled pull request.
+#   2. preflights that the token can write the repo (clear finding on a scope gap),
+#   3. creates (or reuses) a sync branch off the repo's default branch,
+#   4. PUTs the verbatim file content onto that branch via the Contents API,
+#   5. opens a labeled pull request.
 #
 # Why a PR and not a direct push: a direct Contents-API push to the default
 # branch is rejected (HTTP 409) on repos whose ruleset enforces required status
@@ -81,7 +82,28 @@ sd_deploy_files_via_pr() {
     return 0
   fi
 
-  # 2. Resolve the default branch and its tip SHA (branch point).
+  # 2. Preflight write check. The driver must run under a contents/PR-write
+  #    identity; an audit/read-only token silently produces per-file 422s deep in
+  #    step 5 (petry-projects/.github#864). Probe the repo permission set once, up
+  #    front, so a token-scope gap surfaces as one clear finding, not opaque
+  #    per-file put-failures. The probe's OWN errors (a transient/auth/404) are
+  #    surfaced distinctly — they must NOT be misreported as "no write access".
+  #    Repo-level push permission implies PR-create for a collaborator identity.
+  local can_push perm_err perm_rc
+  perm_err=$(mktemp)
+  can_push=$(gh api "repos/${repo}" --jq '.permissions.push // false' 2>"$perm_err") && perm_rc=0 || perm_rc=$?
+  if [ "$perm_rc" -ne 0 ]; then
+    local perm_msg; perm_msg=$(tr '\n' ' ' < "$perm_err"); rm -f "$perm_err"
+    echo "FAILED perm-probe-failed:${perm_msg}"
+    return 1
+  fi
+  rm -f "$perm_err"
+  if [ "$can_push" != "true" ]; then
+    echo "FAILED no-write-access"
+    return 1
+  fi
+
+  # 3. Resolve the default branch and its tip SHA (branch point).
   local default_branch base_sha
   default_branch=$(gh api "repos/${repo}" --jq '.default_branch' 2>/dev/null || echo "main")
   base_sha=$(gh api "repos/${repo}/git/ref/heads/${default_branch}" \
@@ -91,7 +113,7 @@ sd_deploy_files_via_pr() {
     return 1
   fi
 
-  # 3. Create the sync branch; reuse it if a prior run already created it.
+  # 4. Create the sync branch; reuse it if a prior run already created it.
   if ! gh api "repos/${repo}/git/refs" --method POST \
         --raw-field "ref=refs/heads/${branch}" \
         --raw-field "sha=${base_sha}" --silent 2>/dev/null; then
@@ -101,14 +123,39 @@ sd_deploy_files_via_pr() {
     fi
   fi
 
-  # 4. PUT each file verbatim onto the branch. The blob SHA is looked up per file
+  # 5. PUT each file verbatim onto the branch. The blob SHA is looked up per file
   #    on the branch so both create (absent → empty SHA) and update (drifted stub)
-  #    work, whether the branch is fresh or reused.
-  local path local_file branch_sha encoded j
+  #    work, whether the branch is fresh or reused. Errors are NOT swallowed: a
+  #    read failure that yields an empty SHA would make the subsequent PUT omit
+  #    `sha` and 422 against an existing file — the exact opaque failure in #864.
+  local path local_file branch_sha encoded j err_file get_rc get_msg put_msg
   for (( i = 1; i < $#; i += 2 )); do
     j=$(( i + 1 )); path="${!i}"; local_file="${!j}"
+
+    # Resolve the file's blob SHA on the branch, capturing stderr and exit code.
+    err_file=$(mktemp)
     branch_sha=$(gh api "repos/${repo}/contents/${path}?ref=${branch}" \
-      --jq '.sha // ""' 2>/dev/null || true)
+      --jq '.sha // ""' 2>"$err_file") && get_rc=0 || get_rc=$?
+    if [ "$get_rc" -eq 0 ]; then
+      # GET succeeded → the file EXISTS on the branch, so its SHA must resolve.
+      # A blank SHA here means we cannot update it safely; a sha-less PUT would
+      # 422. Fail loudly rather than mask it.
+      if [ -z "$branch_sha" ]; then
+        rm -f "$err_file"
+        echo "FAILED sha-unresolved:${path}"
+        return 1
+      fi
+    else
+      get_msg=$(tr '\n' ' ' < "$err_file"); rm -f "$err_file"
+      if printf '%s' "$get_msg" | grep -q 'HTTP 404'; then
+        branch_sha=""   # file absent on the branch → create path, no SHA
+      else
+        echo "FAILED contents-get-failed:${get_msg}"
+        return 1
+      fi
+    fi
+    rm -f "$err_file"
+
     encoded=$(base64 -w 0 "$local_file" 2>/dev/null || base64 -b 0 "$local_file")
 
     local put_args=(--method PUT
@@ -117,13 +164,16 @@ sd_deploy_files_via_pr() {
       --raw-field "branch=${branch}")
     [ -n "$branch_sha" ] && put_args+=(--raw-field "sha=${branch_sha}")
 
-    if ! gh api "repos/${repo}/contents/${path}" "${put_args[@]}" --silent 2>/dev/null; then
-      echo "FAILED put-failed"
+    err_file=$(mktemp)
+    if ! gh api "repos/${repo}/contents/${path}" "${put_args[@]}" --silent 2>"$err_file"; then
+      put_msg=$(tr '\n' ' ' < "$err_file"); rm -f "$err_file"
+      echo "FAILED put-failed:${put_msg}"
       return 1
     fi
+    rm -f "$err_file"
   done
 
-  # 5. Ensure the label exists, then open the PR. `gh pr create --label` fails
+  # 6. Ensure the label exists, then open the PR. `gh pr create --label` fails
   #    outright if the label is absent, and consumer repos do not carry the
   #    standards-sync label by default. Create-if-missing (no --force, so an
   #    existing curated label is never clobbered); ignore the "already exists"

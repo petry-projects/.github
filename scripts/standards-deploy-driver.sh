@@ -22,7 +22,10 @@
 # Overridable for tests:
 #   DEPLOY_SCRIPT    Path to the deploy script (default: sibling in this dir).
 #
-# Requires GH_TOKEN with repo scope for cross-repo branch + PR creation.
+# Requires GH_TOKEN to be a cross-repo WRITE identity — contents:write +
+# pull_requests:write on the target repos (e.g. GH_PAT_DON_PETRY / the legacy
+# GH_PAT_WORKFLOWS). The audit token (ORG_SCORECARD_TOKEN) is read-only for
+# Contents and cannot deploy stubs — see petry-projects/.github#864.
 
 set -euo pipefail
 

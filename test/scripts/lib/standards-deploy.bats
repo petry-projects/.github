@@ -39,9 +39,40 @@ case "$sub" in
         else
           exit "${GH_REF_EXISTS_RC:-0}"
         fi ;;
-      *contents*"?"ref=*)  printf '%s' "${GH_FILE_SHA:-}" ;;
-      *contents*)          exit "${GH_PUT_RC:-0}" ;;
-      repos/*)             printf '%s' "${GH_DEFAULT_BRANCH:-main}" ;;
+      *contents*"?"ref=*)
+        # contents GET used to resolve a file's blob sha on the branch.
+        #   GH_GET_RC!=0            -> the GET errors (prints GH_GET_ERR to stderr)
+        #   GH_FILE_SHA unset       -> file absent on the branch (404 create path)
+        #   GH_FILE_SHA set (maybe
+        #     empty)                -> file present; echo the (maybe empty) sha
+        if [ "${GH_GET_RC:-0}" -ne 0 ]; then
+          printf '%s\n' "${GH_GET_ERR:-gh: Something went wrong (HTTP 500)}" >&2
+          exit "${GH_GET_RC}"
+        fi
+        if [ -z "${GH_FILE_SHA+x}" ]; then
+          printf '%s\n' 'gh: Not Found (HTTP 404)' >&2
+          exit 1
+        fi
+        printf '%s' "${GH_FILE_SHA}" ;;
+      *contents*)
+        # contents PUT. On failure surface an HTTP-status-bearing stderr message.
+        if [ "${GH_PUT_RC:-0}" -ne 0 ]; then
+          printf '%s\n' "${GH_PUT_ERR:-gh: sha was not supplied (HTTP 422)}" >&2
+          exit "${GH_PUT_RC}"
+        fi
+        exit 0 ;;
+      repos/*)
+        # repos/<repo>: the default-branch lookup AND the preflight write probe
+        # (--jq .permissions.push) both land here — differentiate on the jq arg.
+        if printf '%s' "$args" | grep -q 'permissions.push'; then
+          if [ -n "${GH_PERM_RC:-}" ] && [ "${GH_PERM_RC}" != "0" ]; then
+            printf '%s\n' "${GH_PERM_ERR:-gh: Not Found (HTTP 404)}" >&2
+            exit "${GH_PERM_RC}"
+          fi
+          printf '%s' "${GH_CAN_PUSH:-true}"
+        else
+          printf '%s' "${GH_DEFAULT_BRANCH:-main}"
+        fi ;;
     esac
     ;;
 esac
@@ -190,11 +221,13 @@ deploy() {
   [ "$output" = "FAILED no-branch" ]
 }
 
-@test "fails when the PUT is rejected" {
+@test "fails when the PUT is rejected and surfaces the real HTTP status" {
   GH_PUT_RC="1"; export GH_PUT_RC
+  GH_PUT_ERR='gh: "sha" wasn'\''t supplied. (HTTP 422)'; export GH_PUT_ERR
   run deploy
   [ "$status" -ne 0 ]
-  [ "$output" = "FAILED put-failed" ]
+  [[ "$output" == FAILED\ put-failed:* ]]
+  [[ "$output" == *"HTTP 422"* ]]
 }
 
 @test "fails when the PR cannot be created" {
@@ -209,4 +242,73 @@ deploy() {
     "${TT_TMP}/does-not-exist.yml" "standards-sync/x" "standards-sync" "t" "b"
   [ "$status" -ne 0 ]
   [ "$output" = "FAILED missing-local-file" ]
+}
+
+# ---------------------------------------------------------------------------
+# Fix 2 (petry-projects/.github#864): preflight write check + real error
+# surfacing + never a sha-less PUT on an existing file.
+# ---------------------------------------------------------------------------
+
+# Preflight: a token without contents/PR write is reported as a clear finding,
+# not an opaque per-file put-failed. No branch or PUT is attempted.
+@test "fails loudly when the token lacks write access (preflight probe)" {
+  GH_CAN_PUSH="false"; export GH_CAN_PUSH
+  run deploy
+  [ "$status" -ne 0 ]
+  [ "$output" = "FAILED no-write-access" ]
+  ! grep -q 'git/refs --method POST' "$GH_CALLS"
+  ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
+}
+
+# Preflight: an ERROR on the probe itself (transient / auth / 404) is surfaced
+# distinctly with its HTTP status — NOT misreported as "no-write-access". No
+# branch or PUT is attempted.
+@test "preflight probe error is surfaced distinctly, not as no-write-access" {
+  GH_PERM_RC="1"; export GH_PERM_RC
+  GH_PERM_ERR='gh: Resource not accessible by integration (HTTP 403)'; export GH_PERM_ERR
+  run deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAILED\ perm-probe-failed:* ]]
+  [[ "$output" == *"HTTP 403"* ]]
+  [[ "$output" != *"no-write-access"* ]]
+  ! grep -q 'git/refs --method POST' "$GH_CALLS"
+  ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
+}
+
+# Regression guard for the reported bug: when the stub file already exists on the
+# branch, the update PUT must ALWAYS carry its blob sha — a sha-less PUT against
+# an existing file is a guaranteed 422.
+@test "existing-file update always supplies a sha in the PUT" {
+  GH_FILE_SHA="deadbeefsha"; export GH_FILE_SHA
+  run deploy
+  [ "$status" -eq 0 ]
+  local put_lines
+  put_lines=$(grep 'contents/.* --method PUT' "$GH_CALLS")
+  [ -n "$put_lines" ]
+  while IFS= read -r line; do
+    printf '%s' "$line" | grep -q -- '--raw-field sha=deadbeefsha' \
+      || { echo "PUT without sha: $line"; return 1; }
+  done <<< "$put_lines"
+}
+
+# The contents GET must not swallow errors: a non-404 failure (e.g. a token-scope
+# 403) is surfaced with its HTTP status, and no PUT is attempted.
+@test "fails loudly when the contents GET errors with a non-404 status" {
+  GH_GET_RC="1"; export GH_GET_RC
+  GH_GET_ERR='gh: Resource not accessible by integration (HTTP 403)'; export GH_GET_ERR
+  run deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAILED\ contents-get-failed:* ]]
+  [[ "$output" == *"HTTP 403"* ]]
+  ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
+}
+
+# The file exists on the branch (GET 200) but its sha cannot be resolved: fail
+# loudly rather than issue a sha-less PUT that is guaranteed to 422.
+@test "fails loudly when an existing file's sha cannot be resolved" {
+  GH_FILE_SHA=""; export GH_FILE_SHA   # present (GET 200) but empty sha
+  run deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAILED\ sha-unresolved:* ]]
+  ! grep -q 'contents/.* --method PUT' "$GH_CALLS"
 }
