@@ -1563,23 +1563,28 @@ check_centralized_workflow_stubs() {
     decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
     [ -z "$decoded" ] && continue
 
-    # Compliant if a non-comment `uses:` line pins the reusable at the canonical
-    # channel or — transitionally, during the #482 migration — an accepted legacy
-    # @vN ref. stub_pin_acceptable anchors to start-of-line so a `# uses: …`
-    # comment never satisfies the check. For RING reusables, also accept the
-    # major-scoped `<name>/v<M>-<tier>` form (major-scoped-channels epic #657 F3)
-    # for any major M whose tier matches the repo — backward-compatible with the
-    # bare-tier pins the fleet still carries; the wrong tier stays drift.
-    if stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy" \
-      || { [ "$is_ring" = 1 ] && ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; then
+    # Compliance rule (major-scoped-channels epic #657 F5, #861):
+    #   RING reusables MUST pin the major-scoped `<name>/v<M>-<tier>` form — any
+    #     major M whose tier matches the repo (ring_major_form_acceptable). A bare
+    #     `<name>/<tier>` pin is now drift: the fleet has migrated onto the v-form,
+    #     so the bare grace (stub_pin_acceptable) no longer applies to the rings.
+    #   Non-RING reusables (fixed-pin entries) keep the exact/legacy match via
+    #     stub_pin_acceptable.
+    # Both helpers anchor to start-of-line so a `# uses: …` comment never counts;
+    # a v-form pinned to the WRONG tier stays drift.
+    if { [ "$is_ring" = 1 ] && ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; } \
+      || { [ "$is_ring" != 1 ] && stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; }; then
       continue
     fi
 
-    # Determine why it's non-compliant for a more actionable message.
-    local esc_reusable why
+    # Determine why it's non-compliant for a more actionable message. For RING
+    # reusables the expected pin is the major-scoped v-form `<name>/v<M>-<tier>`
+    # (major-agnostic on tier, #657 F5); non-ring keeps the fixed canonical ref.
+    local esc_reusable why expected_pin="$canonical"
     esc_reusable=$(escape_ere "$reusable")
+    [ "$is_ring" = 1 ] && expected_pin="${chan}/v<M>-$(ring_tier_for_repo "$repo")"
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
-      why="references the reusable but is not pinned to \`@${canonical}\` (org standard)"
+      why="references the reusable but is not pinned to the major-scoped channel \`@${expected_pin}\` (org standard — a bare \`@${canonical}\` tier pin is drift)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
     else
@@ -1587,7 +1592,7 @@ check_centralized_workflow_stubs() {
     fi
 
     add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
-      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${canonical}\`." \
+      "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${expected_pin}\`." \
       "standards/ci-standards.md#centralization-tiers"
   done
 }
@@ -1627,16 +1632,21 @@ check_dev_lead_stub() {
   #    channel `next` and per-ring channels `ring0`, `ring1`, … A frozen `@vX.Y.Z`
   #    or `@<sha>` is NOT a channel and is intentionally rejected — callers pin the
   #    moving channel so rollout/rollback is a single central tag move.
-  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+  #    Major-scoped channels (#657 F5, #861): the channel MUST carry the `v<M>-`
+  #    major prefix — a bare `dev-lead/stable` is now drift; only `dev-lead/v<M>-<tier>`
+  #    (any major) is accepted, mirroring the RING reusables above.
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/v[0-9]+-(stable|next|ring[0-9]+)([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
-      "The \`dev-lead.yml\` caller stub must pin a \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "The \`dev-lead.yml\` caller stub must pin a major-scoped \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v<M>-<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\` (a bare \`dev-lead/<channel>\` tier pin is drift). Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
   # 2) agent_ref must be threaded through to pin the same channel inside the
   #    reusable's own script/prompt checkout (prevents split-brain on promotion).
-  #    Same channel set as the uses: pin above; should match the uses: channel.
-  uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p')
+  #    Same major-scoped channel form as the uses: pin above; must match the uses:
+  #    channel exactly — including its major, so a `v3-stable` uses pin with a
+  #    `v2-stable` agent_ref is caught.
+  uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(v[0-9]+-(stable|next|ring[0-9]+))([[:space:]]|$).*#\1#p')
   if [ -n "$uses_channel" ]; then
     if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$uses_channel([[:space:]]|$)"; then
       add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
@@ -1644,9 +1654,9 @@ check_dev_lead_stub() {
         "standards/ci-standards.md#dev-lead-agent"
     fi
   else
-    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/v[0-9]+-(stable|next|ring[0-9]+)([[:space:]]|$)"; then
       add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
-        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/v<M>-<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same major-scoped channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
   fi
