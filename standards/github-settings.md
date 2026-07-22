@@ -260,6 +260,20 @@ the merge occurs — the automation only handles the final merge step after huma
 See [GitHub's auto-merge documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)
 for more details.
 
+##### `standards-sync` PRs — clearing the reviewer deadlock without `--admin`
+
+`standards-sync` / dev-lead remediation PRs cannot satisfy `pr-quality`
+unaided: with CODEOWNERS = `* @petry-projects/org-leads` = `{don-petry,
+donpetry-bot}`, an author=one-lead / last-pusher=other-lead PR disqualifies
+**both** code-owners (author can't self-approve; the last pusher's approval is
+voided by `require_last_push_approval`), so historically only an `--admin` bypass
+merged them. [`scripts/automerge-standards-sync.sh`](../scripts/automerge-standards-sync.sh)
+resolves this **through** the ruleset: it approves as the code-owner that is
+neither the author nor the last pusher (a legitimate code-owner + last-push +
+not-own-PR approval), then enables **native auto-merge** so GitHub merges on
+required-checks-green — no `--admin`, no human click, required-check gates
+unchanged. See the [Ruleset Remediation Runbook §6](ruleset-remediation-runbook.md#6-merging-standards-sync-prs-through-protection-no---admin).
+
 #### Bypass Actors
 
 See [Bypass Actors — Required on Every Ruleset Targeting `main`](#bypass-actors--required-on-every-ruleset-targeting-main) above.
