@@ -16,6 +16,7 @@ setup() {
   REPO_ROOT="$(cd -- "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   SCRIPT="${REPO_ROOT}/scripts/deploy-standard-workflows.sh"
   MARKER='# NOSONAR(githubactions:S7635) first-party trusted reusable'
+  source "$SCRIPT" >/dev/null 2>&1
 }
 
 teardown() { rm -rf "$TT_TMP"; }
@@ -53,30 +54,28 @@ b64() { base64 -w 0 <<<"$1" 2>/dev/null || base64 -b 0 <<<"$1"; }
 # ── template_requires_s7635_marker ──────────────────────────────────────────────
 
 @test "template_requires_s7635_marker: true for a template whose secrets: inherit line carries the marker" {
-  run bash -c 'source "$1" >/dev/null 2>&1; template_requires_s7635_marker "$2"' \
-    _ "$SCRIPT" "${REPO_ROOT}/standards/workflows/auto-rebase.yml"
+  run template_requires_s7635_marker "${REPO_ROOT}/standards/workflows/auto-rebase.yml"
   [ "$status" -eq 0 ]
 }
 
 @test "template_requires_s7635_marker: false for a template with no secrets: inherit line" {
   # add-to-project.yml passes secrets explicitly (no `secrets: inherit`), so it
   # neither trips S7635 nor requires the marker.
-  run bash -c 'source "$1" >/dev/null 2>&1; template_requires_s7635_marker "$2"' \
-    _ "$SCRIPT" "${REPO_ROOT}/standards/workflows/add-to-project.yml"
+  run template_requires_s7635_marker "${REPO_ROOT}/standards/workflows/add-to-project.yml"
   [ "$status" -ne 0 ]
 }
 
 @test "template_requires_s7635_marker: false for a bare secrets: inherit line lacking the marker" {
   local tpl="${TT_TMP}/bare.yml"
   printf 'jobs:\n  x:\n    uses: petry-projects/.github/.github/workflows/x-reusable.yml@x/stable\n    secrets: inherit\n' > "$tpl"
-  run bash -c 'source "$1" >/dev/null 2>&1; template_requires_s7635_marker "$2"' _ "$SCRIPT" "$tpl"
+  run template_requires_s7635_marker "$tpl"
   [ "$status" -ne 0 ]
 }
 
 @test "template_requires_s7635_marker: not fooled by a commented prose mention of secrets: inherit" {
   local tpl="${TT_TMP}/prose.yml"
   printf 'jobs:\n  x:\n    # callers pass secrets: inherit  # NOSONAR(githubactions:S7635) prose\n    uses: petry-projects/.github/.github/workflows/x-reusable.yml@x/stable\n' > "$tpl"
-  run bash -c 'source "$1" >/dev/null 2>&1; template_requires_s7635_marker "$2"' _ "$SCRIPT" "$tpl"
+  run template_requires_s7635_marker "$tpl"
   [ "$status" -ne 0 ]
 }
 
@@ -87,7 +86,7 @@ b64() { base64 -w 0 <<<"$1" 2>/dev/null || base64 -b 0 <<<"$1"; }
   auto-rebase:
     uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@auto-rebase/v2-next
     secrets: inherit"
-  run bash -c 'source "$1" >/dev/null 2>&1; inject_s7635_marker' _ "$SCRIPT" <<<"$body"
+  run bash -c '. "$SCRIPT" >/dev/null 2>&1 && inject_s7635_marker' <<<"$body"
   [ "$status" -eq 0 ]
   grep -qF "secrets: inherit  ${MARKER}" <<<"$output"
   # indentation preserved
@@ -99,7 +98,7 @@ b64() { base64 -w 0 <<<"$1" 2>/dev/null || base64 -b 0 <<<"$1"; }
   auto-rebase:
     uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@auto-rebase/v2-next
     secrets: inherit  ${MARKER}"
-  run bash -c 'source "$1" >/dev/null 2>&1; inject_s7635_marker' _ "$SCRIPT" <<<"$body"
+  run bash -c '. "$SCRIPT" >/dev/null 2>&1 && inject_s7635_marker' <<<"$body"
   [ "$status" -eq 0 ]
   [ "$output" = "$body" ]
   # exactly one marker — no double injection
@@ -114,7 +113,7 @@ b64() { base64 -w 0 <<<"$1" 2>/dev/null || base64 -b 0 <<<"$1"; }
     uses: petry-projects/.github/.github/workflows/feature-ideation-reusable.yml@feature-ideation/v1-stable
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
-  run bash -c 'source "$1" >/dev/null 2>&1; inject_s7635_marker' _ "$SCRIPT" <<<"$body"
+  run bash -c '. "$SCRIPT" >/dev/null 2>&1 && inject_s7635_marker' <<<"$body"
   [ "$status" -eq 0 ]
   [ "$output" = "$body" ]
 }
@@ -127,15 +126,15 @@ b64() { base64 -w 0 <<<"$1" 2>/dev/null || base64 -b 0 <<<"$1"; }
     uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@auto-rebase/v1-next
     secrets: inherit"
   run bash -c '
-    source "$1" >/dev/null 2>&1
-    ring_repin_uses auto-rebase auto-rebase/v2-next <<<"$2" | inject_s7635_marker
-  ' _ "$SCRIPT" "$body"
+    . "$SCRIPT" >/dev/null 2>&1
+    ring_repin_uses auto-rebase auto-rebase/v2-next <<<"$1" | inject_s7635_marker
+  ' _ "$body"
   [ "$status" -eq 0 ]
   grep -qF '@auto-rebase/v2-next' <<<"$output"
   grep -qF "secrets: inherit  ${MARKER}" <<<"$output"
   # second pass is a fixpoint — no churn
   local pass2
-  pass2="$(bash -c 'source "$1" >/dev/null 2>&1; inject_s7635_marker' _ "$SCRIPT" <<<"$output")"
+  pass2="$(bash -c '. "$SCRIPT" >/dev/null 2>&1; inject_s7635_marker' <<<"$output")"
   [ "$pass2" = "$output" ]
 }
 
@@ -159,12 +158,12 @@ refs/tags/auto-rebase/v2-ring1"
   # Source the driver and capture the deployed file instead of opening a PR.
   # --force so the bare/aligned-tier compliance short-circuit does not skip it.
   run env GH_TOKEN=x CAPTURE="${TT_TMP}/deployed.yml" bash -c '
-    source "$1" >/dev/null 2>&1
+    . "$SCRIPT" >/dev/null 2>&1
     sd_deploy_files_via_pr() { shift 5; cp "$2" "$CAPTURE"; echo "OPENED file://pr"; }
     FORCE=true
     WORKFLOWS=(auto-rebase.yml)
     deploy_repo ".github-private"
-  ' _ "$SCRIPT"
+  '
   [ "$status" -eq 0 ]
   [ -f "${TT_TMP}/deployed.yml" ]
 

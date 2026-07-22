@@ -165,8 +165,7 @@ readonly _S7635_SECRETS_INHERIT_RE='^[[:space:]]*secrets:[[:space:]]+inherit([[:
 # `secrets: inherit` line bearing the S7635 marker — i.e. every deployed stub of
 # it MUST keep the marker (dropping it re-flags S7635 in the consumer's scan).
 template_requires_s7635_marker() {
-  grep -E "$_S7635_SECRETS_INHERIT_RE" "$1" 2>/dev/null \
-    | grep -qF 'NOSONAR(githubactions:S7635)'
+  grep -E "^[[:space:]]*secrets:[[:space:]]+inherit.*NOSONAR\(githubactions:S7635\)" "$1" 2>/dev/null >/dev/null
 }
 
 # inject_s7635_marker -> copy a stub body from stdin to stdout, appending the
@@ -175,7 +174,7 @@ template_requires_s7635_marker() {
 # real `secrets: inherit` line, pass through unchanged. Idempotent. Pure (sed only).
 # The `|` delimiter avoids clashing with the `#` in the marker comment.
 inject_s7635_marker() {
-  sed -E "s|^([[:space:]]*)secrets:[[:space:]]+inherit[[:space:]]*\$|\1secrets: inherit  ${S7635_SECRETS_INHERIT_MARKER}|"
+  sed -E "s|^([[:space:]]*)secrets:[[:space:]]+inherit([[:space:]]*)$|\1secrets: inherit  ${S7635_SECRETS_INHERIT_MARKER}|"
   return 0
 }
 
