@@ -179,6 +179,12 @@ inject_s7635_marker() {
   return 0
 }
 
+# stub_has_s7635_marker -> 0 if the stub content on stdin carries the
+# `# NOSONAR(githubactions:S7635)` marker on a real `secrets: inherit` line.
+stub_has_s7635_marker() {
+  grep -qE '^[[:space:]]*secrets:[[:space:]]+inherit[[:space:]].*NOSONAR\(githubactions:S7635\)'
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -313,7 +319,7 @@ fetch_existing() {
 # the shared ring model accepts for THIS repo (its tier channel + the transitional
 # legacy grace) — so the sweep never reverts an intentional ring/next pin. Non-ring
 # templates (e.g. add-to-project, not in RING_REUSABLES) keep the exact-match rule.
-is_already_compliant() {
+is_pin_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
   expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
@@ -366,6 +372,25 @@ is_already_compliant() {
   fi
 
   grep -qF "$expected_uses" <<< "$existing_content" && return 0 || return 1
+}
+
+# is_already_compliant <existing_content> <template> <repo> -> 0 if the deployed
+# stub needs no re-deploy. A stub is compliant only when it is BOTH pin-compliant
+# (is_pin_compliant) AND — when its template carries a real `secrets: inherit` line
+# WITH the S7635 marker — still carries that marker. A pin-correct stub that dropped
+# the marker is DRIFT (#877): #875/#876 restored the marker in the templates but not
+# the driver, so a re-sweep skipped already-pinned consumers whose stubs merged
+# marker-less during #857. Flagging the missing marker as drift re-deploys and
+# restores it. Kept targeted (pin + marker presence), NOT a byte-compare, to avoid
+# churn on cosmetic diffs.
+is_already_compliant() {
+  local existing_content="$1" template="$2" repo="$3"
+  is_pin_compliant "$existing_content" "$template" "$repo" || return 1
+  if template_requires_s7635_marker "$template" \
+     && ! stub_has_s7635_marker <<< "$existing_content"; then
+    return 1
+  fi
+  return 0
 }
 
 # reusable_uses_of <template> -> the template's first reusable `uses:` value
@@ -525,7 +550,9 @@ deploy_repo() {
     # marker-drift yet never restored → a non-converging loop. Inject the marker
     # onto the repinned body's `secrets: inherit` line so the sweep converges in
     # one pass. `repin_source != template` is exactly the non-dry-run repin path.
-    if [[ "$repin_source" != "$template" ]] && template_requires_s7635_marker "$template"; then
+    if [[ "$repin_source" != "$template" ]] && [[ "$DRY_RUN" != "true" ]] \
+       && template_requires_s7635_marker "$template" \
+       && ! stub_has_s7635_marker < "$repin_source"; then
       injected="$(mktemp)"; _TMPFILES+=("$injected")
       inject_s7635_marker < "$deploy_template" > "$injected"
       deploy_template="$injected"

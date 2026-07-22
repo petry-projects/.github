@@ -73,6 +73,17 @@ channel_refs() {  # <agent> <M> [extra refs...]
 }
 
 stub_pinning() {  # <ref> → base64 of a minimal auto-rebase stub pinning the reusable at <ref>
+  # Carries the S7635 marker on `secrets: inherit` — the shape a converged consumer
+  # holds after #875/#876, so pin-drift fixtures are not falsely tripped by the
+  # marker-drift check (#877).
+  local body="jobs:
+  auto-rebase:
+    uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@$1
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
+stub_pinning_no_marker() {  # <ref> → base64 of the SAME stub but marker-less (#857 shape)
   local body="jobs:
   auto-rebase:
     uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@$1
@@ -87,6 +98,16 @@ devlead_stub_pinning() {  # <ref> → base64 of a .github dev-lead CONSUMER stub
     with:
       agent_ref: $1
     secrets: inherit"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
+devlead_stub_pinning_with_marker() {  # <ref> → base64 of the same stub but WITH the S7635 marker (#878 post-fix shape)
+  local body="jobs:
+  dev-lead:
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@$1
+    with:
+      agent_ref: $1
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable"
   base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
 }
 
@@ -162,6 +183,35 @@ selfhost_stub() {  # <base> → base64 of a meta-repo SELF-HOST stub using a loc
   echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
 }
 
+# ── #877: a pin-correct stub that DROPPED the S7635 marker is drift ─────────────
+# #875/#876 restored the `# NOSONAR(githubactions:S7635)` marker in the templates
+# but did NOT touch the driver, so a re-sweep skipped already-pinned consumers
+# whose stubs merged marker-less during #857 (broodminder-export, bmad-bgreat-suite,
+# …) — the restored marker never reached them. A pin-correct stub MISSING the marker
+# is now drift so the sweep re-deploys and restores it.
+
+@test "#877: flags a tier-correct stub that DROPPED the S7635 marker as drift" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
+  # Pin is tier-correct for TalkTerm (ring1) but the `secrets: inherit` line lost the
+  # marker → drift → re-deploy to restore it.
+  GH_CONTENT_B64="$(stub_pinning_no_marker auto-rebase/v2-ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'already compliant'
+  echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
+}
+
+@test "#877: keeps a tier-correct stub that CARRIES the S7635 marker compliant (no churn)" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
+  GH_CONTENT_B64="$(stub_pinning auto-rebase/v2-ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  ! echo "$output" | grep -q 'Would open PR'
+}
+
 # ── meta-repo consumer stubs (#704) ────────────────────────────────────────────
 # The meta-repos (.github / .github-private) are exempt from blanket stub
 # deployment because they self-host most reusables via local `./` refs. But they
@@ -224,4 +274,37 @@ refs/tags/dev-lead/v1-stable"
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi 'does not resolve'
   ! echo "$output" | grep -qi 'Would open PR'
+}
+
+# ── #878: marker injection for meta-repo consumer stubs prevents infinite churn ──
+# When the driver re-pins a meta-repo consumer stub using repin_source=existing_content
+# and that existing content lacks the S7635 marker, the deployed stub would be
+# marker-less and is_already_compliant would flag it as drift again on the next sweep
+# — an infinite redeployment loop. The fix (non-dry-run path) injects the marker into
+# repin_source before computing deploy_template, so the PR's content is immediately
+# compliant. The dry-run tests below verify the trigger condition (marker-absent →
+# drift) and the post-fix compliant shape (marker-present → no churn).
+
+@test "#878: meta-repo consumer stub at correct v-form but missing S7635 marker is drift" {
+  GH_MATCHING_REFS="$(channel_refs dev-lead 3)"; export GH_MATCHING_REFS
+  # .github (ring0) is at the correct @dev-lead/v3-ring0 pin but the S7635 marker
+  # is absent — the shape a PR opened without the fix would produce. Must be drift.
+  GH_CONTENT_B64="$(devlead_stub_pinning dev-lead/v3-ring0)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo .github --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'already compliant'
+  echo "$output" | grep -qE 'Would open PR for \.github .* dev-lead.yml'
+}
+
+@test "#878: meta-repo consumer stub with S7635 marker at correct v-form is compliant (no churn after fix)" {
+  GH_MATCHING_REFS="$(channel_refs dev-lead 3)"; export GH_MATCHING_REFS
+  # .github (ring0) stub has the correct @dev-lead/v3-ring0 pin AND the S7635 marker
+  # — the shape the fix injects on re-deploy. Must be compliant on the next sweep.
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v3-ring0)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo .github --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  ! echo "$output" | grep -q 'Would open PR'
 }
