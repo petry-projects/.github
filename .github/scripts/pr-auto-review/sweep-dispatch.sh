@@ -19,7 +19,9 @@
 #
 # Back-pressure (donpetry-bot token/capacity, acceptance criterion): at most
 # MAX_PER_RUN PRs are dispatched per run so a 10-PR burst drains at a throttled
-# rate over a few cycles instead of firing every dispatch at once.
+# rate over a few cycles instead of firing every dispatch at once. The cap is
+# applied at the dispatch stage so non-ready older PRs cannot consume all slots
+# and starve newer ready PRs.
 #
 # Idempotent: dispatching an already-approved / already-merged PR is a no-op on
 # the review-agent side. Honours DRY_RUN=1 (logs intended dispatches, mutates
@@ -28,6 +30,7 @@
 # Env:
 #   GH_TOKEN         classic PAT with repo scope — API reads + dispatch (required)
 #   SEARCH_OWNER     org to scan for open PRs           (default: petry-projects)
+#   SEARCH_LIMIT     gh search prs --limit cap          (default: 1000)
 #   SWEEP_LABEL      PR label to sweep                  (default: standards-sync)
 #   MAX_PER_RUN      max PRs to dispatch per run        (default: 8)
 #   DISPATCH_REPO    repository_dispatch target repo    (default: petry-projects/.github-private)
@@ -41,6 +44,7 @@ _dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${_dir}/lib/sweep.sh"
 
 SEARCH_OWNER="${SEARCH_OWNER:-petry-projects}"
+SEARCH_LIMIT="${SEARCH_LIMIT:-1000}"
 SWEEP_LABEL="${SWEEP_LABEL:-standards-sync}"
 MAX_PER_RUN="${MAX_PER_RUN:-8}"
 DISPATCH_REPO="${DISPATCH_REPO:-petry-projects/.github-private}"
@@ -52,22 +56,30 @@ DRY_RUN="${DRY_RUN:-0}"
 # Oldest-first (created asc) so back-pressure drains fairly: each capped run
 # takes the oldest waiting PRs, and a merged PR leaves the set so the next-oldest
 # advances next cycle — no PR is starved by newer arrivals under best-match order.
-PR_LIST=$(gh search prs \
+# SEARCH_LIMIT defaults to 1000 (the GitHub Search API per-query maximum); raise
+# it with pagination if the org ever exceeds that.
+if ! PR_LIST=$(gh search prs \
   --owner "$SEARCH_OWNER" \
   --label "$SWEEP_LABEL" \
   --state open \
   --sort created \
   --order asc \
-  --limit 100 \
-  --json url,isDraft 2>/dev/null || true)
-if [ -z "${PR_LIST}" ]; then
+  --limit "$SEARCH_LIMIT" \
+  --json url,isDraft); then
+  echo "::error::gh search prs failed — sweep aborted (check token permissions and rate limits)"
+  exit 1
+fi
+if [ -z "${PR_LIST:-}" ]; then
   PR_LIST="[]"
 fi
 
-# Selection + back-pressure (pure, unit-tested): drops drafts, caps at MAX_PER_RUN.
-mapfile -t CANDIDATES < <(printf '%s' "$PR_LIST" | pr_auto_review_sweep_candidates "$MAX_PER_RUN")
+# Selection (pure, unit-tested): drops drafts. Back-pressure cap is at dispatch stage.
+mapfile -t CANDIDATES < <(printf '%s' "$PR_LIST" | pr_auto_review_sweep_candidates)
 
-total_open=$(printf '%s' "$PR_LIST" | jq 'if type == "array" then length else 0 end')
+if ! total_open=$(printf '%s' "$PR_LIST" | jq 'if type == "array" then length else 0 end' 2>/dev/null); then
+  echo "::error::PR_LIST was not valid JSON — aborting sweep"
+  exit 1
+fi
 [ "$DRY_RUN" = "1" ] && dry_note=" (DRY_RUN)" || dry_note=""
 echo "Sweep: ${total_open} open '${SWEEP_LABEL}' PR(s) in ${SEARCH_OWNER}; evaluating ${#CANDIDATES[@]} this run (MAX_PER_RUN=${MAX_PER_RUN})${dry_note}."
 
@@ -118,22 +130,29 @@ evaluate_pr() {
 }
 
 dispatched=0
+dispatch_failures=0
 for pr_url in "${CANDIDATES[@]}"; do
   [ -z "$pr_url" ] && continue
+  [ "$dispatched" -ge "$MAX_PER_RUN" ] && break
   echo "::group::${pr_url}"
   if decision=$(evaluate_pr "$pr_url"); then
     if [ "$DRY_RUN" = "1" ]; then
       echo "[dry-run] would dispatch review agent for ${pr_url} (decision=${decision})"
+      dispatched=$((dispatched + 1))
     else
-      gh api \
+      if gh api \
         --method POST \
         --header "Accept: application/vnd.github+json" \
         "/repos/${DISPATCH_REPO}/dispatches" \
         --field event_type=pr-review-mention \
-        --field "client_payload[pr_url]=${pr_url}"
-      echo "::notice::Sweep dispatched auto-review for ${pr_url}"
+        --field "client_payload[pr_url]=${pr_url}"; then
+        echo "::notice::Sweep dispatched auto-review for ${pr_url}"
+        dispatched=$((dispatched + 1))
+      else
+        echo "::error::Dispatch failed for ${pr_url}"
+        dispatch_failures=$((dispatch_failures + 1))
+      fi
     fi
-    dispatched=$((dispatched + 1))
   else
     echo "Not ready (decision=${decision}) — skipping ${pr_url}"
   fi
@@ -141,3 +160,7 @@ for pr_url in "${CANDIDATES[@]}"; do
 done
 
 echo "Sweep complete — dispatched ${dispatched} of ${#CANDIDATES[@]} evaluated PR(s)."
+if [ "$dispatch_failures" -gt 0 ]; then
+  echo "::warning::${dispatch_failures} dispatch failure(s) this run."
+  exit 1
+fi
