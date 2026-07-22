@@ -42,4 +42,4 @@ declare -a args=()
 
 echo "[driver] standards-deploy sweep — repo=${TARGET_REPO:-<all>} workflow=${TARGET_WORKFLOW:-<all>} dry_run=${DRY_RUN}"
 
-exec bash "$DEPLOY_SCRIPT" ${args[@]+"${args[@]}"}
+exec bash "$DEPLOY_SCRIPT" "${args[@]}"
