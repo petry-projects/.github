@@ -732,12 +732,18 @@ first time it is **added** to a SonarCloud-gated repo. (The legacy per-file
 also works and is accepted during transition, but the inline marker is canonical.)
 
 Caller-stub templates that use `secrets: inherit` and therefore carry the S7635
-marker: `initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`.
-**Pending:** `dev-lead.yml`, `auto-rebase.yml`, `dependabot-automerge.yml`, and
-`pr-review-mention.yml` also use `secrets: inherit` but do not yet carry the
-marker; because they are already deployed fleet-wide (so re-syncing them fans out
-broadly) the marker is being added to them under a separate rollout — until then a
-**new** adoption of one of those four needs the legacy per-file S7635 exemption.
+marker: `initiative-planner.yml`, `idea-triage.yml`, `idea-enhancer.yml`,
+`persona-mention.yml`, `dev-lead.yml`, `auto-rebase.yml`,
+`dependabot-automerge.yml`. Every template with a `secrets: inherit` line now
+carries the marker; the
+[`s7635-secrets-inherit.bats`](https://github.com/petry-projects/.github/blob/main/test/scripts/standards-templates/s7635-secrets-inherit.bats)
+template guard fails CI if any such line drops it (mirrors the S7637 v-form pin
+guard).
+
+Stubs that pass secrets **explicitly** (least privilege — no `secrets: inherit`
+line, e.g. `add-to-project.yml`, `pr-review-mention.yml`) never trip S7635 and
+carry **no** marker. Do not add one: the marker suppresses S7635 on a
+`secrets: inherit` line, and there is none to suppress.
 
 ### 4. Secret Scanning (`ci.yml` — gitleaks job)
 
