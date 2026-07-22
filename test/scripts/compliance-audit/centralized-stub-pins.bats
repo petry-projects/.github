@@ -7,6 +7,13 @@
 # @vN ref — so the audit neither flags nor reverts a stub mid-migration. A SHA
 # pin, a commented-out line, or the wrong reusable must NOT satisfy the check.
 #
+# #657 F5 (#861): the RING acceptance in check_centralized_workflow_stubs now
+# REQUIRES the major-scoped v<M>-<tier> form — a bare <agent>/<tier> pin on a
+# stable-tier repo is drift, and only a tier-correct v<M>-<tier> (any major) is
+# accepted. The pure helpers stub_pin_acceptable (bare) / ring_major_form_acceptable
+# (v-form) are unchanged and still unit-tested below; the integration section at
+# the end exercises the whole-check decision through a mocked gh_api.
+#
 # The script is sourced in an isolated subshell (its `main` is guarded, so
 # sourcing only defines functions) and the real helper is exercised directly.
 
@@ -150,16 +157,55 @@ maj_accept() {
   [ "$status" -ne 0 ]
 }
 
-@test "transition: bare <tier> stays clean while v-form is added (#657 F3)" {
-  # The two acceptance paths together: a stable-tier repo is clean whether it
-  # pins the bare tier (legacy) OR the v-form of its tier, but a v-form on the
-  # wrong tier is drift. Mirrors the issue's audit acceptance cases.
-  accept "    uses: $R@agent-shield/stable" "$C" "$L"          # bare → clean
+# ---------------------------------------------------------------------------
+# #657 F5 (#861) — integration: check_centralized_workflow_stubs now REQUIRES the
+# v<M>-<tier> form for RING reusables. A bare <agent>/<tier> pin on a stable-tier
+# repo is drift (FLAGGED); a tier-correct v<M>-<tier> (any major) is accepted; a
+# wrong-tier v-form is still drift. These exercise the whole check by sourcing the
+# script and mocking gh_api so the pin decision surfaces as a FINDING, not just a
+# pure-helper return.
+# ---------------------------------------------------------------------------
+stub_check() {  # <workflow-yaml> — run the check for a stable-tier repo (markets)
+  FIXTURE_B64=$(printf '%s' "$1" | base64 | tr -d '\n'); export FIXTURE_B64
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    ORG=petry-projects
+    gh_api() {
+      case "$1" in
+        */contents/.github/workflows) printf "agent-shield.yml\n" ;;
+        */contents/.github/workflows/agent-shield.yml) printf "%s" "$FIXTURE_B64" ;;
+      esac
+    }
+    add_finding() { printf "FLAGGED:%s\n" "$3"; }
+    check_centralized_workflow_stubs markets
+  ' _ "$SCRIPT"
+}
+
+@test "F5 integration: a bare <agent>/<tier> RING pin is FLAGGED on a stable repo (#861)" {
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/stable
+    secrets: inherit"
   [ "$status" -eq 0 ]
-  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-stable" "markets"  # v-form → clean
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml'
+}
+
+@test "F5 integration: a tier-correct v<M>-<tier> RING pin is accepted (no finding) (#861)" {
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v3-stable
+    secrets: inherit"
   [ "$status" -eq 0 ]
-  maj_accept "agent-shield-reusable" "    uses: $R@agent-shield/v1-ring0" "markets"   # wrong tier → drift
-  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "F5 integration: a wrong-tier v<M> RING pin is FLAGGED (#861)" {
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v3-ring0
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml'
 }
 
 # ---------------------------------------------------------------------------

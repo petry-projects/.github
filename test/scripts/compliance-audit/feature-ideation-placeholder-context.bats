@@ -82,6 +82,56 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# repo-template exemption (#856). repo-template is the seed for new repos: its
+# feature-ideation.yml correctly KEEPS the TODO:/Example: placeholder
+# project_context (new repos customise it on adoption). Flagging it would be a
+# permanent false positive, so the audit exempts repo-template from the
+# feature-ideation-placeholder-context finding — while every non-template repo on
+# the same placeholder is still flagged. feature_ideation_should_flag_placeholder
+# is the pure decision the audit acts on (placeholder AND not exempt).
+# ---------------------------------------------------------------------------
+
+# feature_ideation_placeholder_exempt returns 0 for repos exempt from the
+# placeholder finding, non-zero otherwise.
+is_exempt() {
+  run bash -c 'source "$1" >/dev/null 2>&1; feature_ideation_placeholder_exempt "$2"' \
+    _ "$SCRIPT" "$1"
+}
+
+# feature_ideation_should_flag_placeholder <repo> <decoded> — the audit's actual
+# decision: fire the finding only when the context is a placeholder AND the repo
+# is not exempt.
+should_flag() {
+  run bash -c 'source "$1" >/dev/null 2>&1; feature_ideation_should_flag_placeholder "$2" "$3"' \
+    _ "$SCRIPT" "$1" "$2"
+}
+
+@test "repo-template is exempt from the placeholder finding" {
+  is_exempt "repo-template"
+  [ "$status" -eq 0 ]
+}
+
+@test "a normal repo is NOT exempt from the placeholder finding" {
+  is_exempt "some-normal-repo"
+  [ "$status" -ne 0 ]
+}
+
+@test "repo-template on the seed placeholder does NOT get flagged" {
+  should_flag "repo-template" "$PLACEHOLDER_STUB"
+  [ "$status" -ne 0 ]
+}
+
+@test "a non-template repo on the SAME placeholder still gets flagged" {
+  should_flag "some-normal-repo" "$PLACEHOLDER_STUB"
+  [ "$status" -eq 0 ]
+}
+
+@test "repo-template with a customised context is still not flagged" {
+  should_flag "repo-template" "$CUSTOMISED_STUB"
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # REQUIRED_WORKFLOWS now includes all three promoted workflows (org-wide).
 # ---------------------------------------------------------------------------
 

@@ -81,6 +81,32 @@ declare -A SKIP_OVERRIDES=(
   ["pr-auto-review.yml"]=".github-private"
 )
 
+# Required workflows a SKIP_REPO satisfies by SELF-MANAGING the file in its own
+# tree (present verbatim / re-pinned in place as a channel consumer), rather than
+# by opting into the blanket sweep via SKIP_OVERRIDES. Keyed by repo; value is a
+# space-separated list of workflow filenames.
+#
+# #856 codifies why this declaration exists. The compliance audit requires every
+# universal-required workflow (#844) on EVERY repo — including the SKIP_REPOS the
+# sweep otherwise exempts. So for each SKIP_REPO, every workflow that is both
+# universal-required AND deployable must be reconciled EITHER by a SKIP_OVERRIDES
+# opt-in (sweep deploys it) OR by a SKIP_SELF_MANAGED entry here (the repo hosts
+# it itself). A required+deployable workflow with neither is drift: the sweep
+# skips it and the audit flags it required-but-missing forever — the exact gap
+# #847 hit ad-hoc for .github-private / pr-auto-review. reconcile_skip_repo_required_workflows
+# (bats-covered) fails if any such gap exists, keeping audit and deploy config in
+# lockstep.
+#
+#   .github         self-hosts the full standard fleet (this repo is the source of
+#                   truth; its callers use local ./ refs), so it self-manages ALL
+#                   required+deployable workflows.
+#   .github-private self-manages its fleet except pr-auto-review.yml, which it now
+#                   receives via the SKIP_OVERRIDES opt-in above (#847).
+declare -A SKIP_SELF_MANAGED=(
+  [".github"]="dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml pr-auto-review.yml initiative-driver.yml"
+  [".github-private"]="dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml initiative-driver.yml"
+)
+
 # Workflows deployable from standards/workflows/<name>.
 # Excludes only ci.yml and sonarcloud.yml (tech-stack-specific — set up manually).
 # Most deploy verbatim (thin caller stubs, identical fleet-wide). feature-ideation
@@ -132,19 +158,24 @@ TARGET_WORKFLOW=""
 TARGET_REPO=""
 FORCE=false
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --dry-run)   DRY_RUN=true; shift ;;
-    --force)     FORCE=true;   shift ;;
-    --workflow)  TARGET_WORKFLOW="$2"; shift 2 ;;
-    --repo)      TARGET_REPO="$2";     shift 2 ;;
-    -h|--help)
-      sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
-  esac
-done
+# parse_args populates the DRY_RUN/TARGET_*/FORCE globals from the CLI. Called by
+# main() (not at top level) so sourcing the script for tests defines functions
+# without treating the sourcing harness's args as deploy options.
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)   DRY_RUN=true; shift ;;
+      --force)     FORCE=true;   shift ;;
+      --workflow)  TARGET_WORKFLOW="$2"; shift 2 ;;
+      --repo)      TARGET_REPO="$2";     shift 2 ;;
+      -h|--help)
+        sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+      *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -180,6 +211,55 @@ repo_opts_into() {
     [[ "$repo" == "$r" ]] && return 0
   done
   return 1
+}
+
+# True if <name.yml> is one of the workflows the sweep is responsible for
+# deploying (DEPLOYABLE_WORKFLOWS). ci.yml / sonarcloud.yml are required org-wide
+# but set up manually per tech stack, so the sweep never owns them.
+is_deployable_workflow() {
+  local w="$1" d
+  for d in "${DEPLOYABLE_WORKFLOWS[@]}"; do
+    [[ "$w" == "$d" ]] && return 0
+  done
+  return 1
+}
+
+# True if a SKIP_REPO satisfies <workflow> by self-managing it (declared in
+# SKIP_SELF_MANAGED) rather than via a SKIP_OVERRIDES opt-in.
+skip_repo_self_manages() {
+  local repo="$1" workflow="$2"
+  local managed="${SKIP_SELF_MANAGED[$repo]:-}"
+  [[ -z "$managed" ]] && return 1
+
+  local -a arr
+  read -r -a arr <<< "$managed"
+  local m
+  for m in "${arr[@]}"; do
+    [[ "$workflow" == "$m" ]] && return 0
+  done
+  return 1
+}
+
+# reconcile_skip_repo_required_workflows <required_wf...> — consistency guard
+# (#856). Given the audit's REQUIRED_WORKFLOWS, print one line ("<repo> <wf>") per
+# UNRECONCILED pair: a workflow that is both universal-required AND deployable,
+# targeted at a SKIP_REPO, with NO reconciliation path — neither a SKIP_OVERRIDES
+# opt-in nor a SKIP_SELF_MANAGED declaration. Returns 0 (no output) when the
+# deploy config fully accounts for every required+deployable workflow on every
+# SKIP_REPO; non-zero (listing the gaps) otherwise. Pure — no I/O beyond stdout.
+reconcile_skip_repo_required_workflows() {
+  local -a required=("$@")
+  local gaps=0 repo wf
+  for repo in "${SKIP_REPOS[@]}"; do
+    for wf in "${required[@]}"; do
+      is_deployable_workflow "$wf" || continue
+      repo_opts_into "$repo" "$wf" && continue
+      skip_repo_self_manages "$repo" "$wf" && continue
+      echo "$repo $wf"
+      gaps=$((gaps + 1))
+    done
+  done
+  [[ "$gaps" -eq 0 ]]
 }
 
 # Fetch a file from the repo API in one call; outputs "sha<TAB>decoded-content".
@@ -222,16 +302,27 @@ is_already_compliant() {
   if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then
     base="${BASH_REMATCH[1]}"
     # Only treat it as ring-managed if the reusable is on the ring model AND the
-    # template pins a channel tag (not a frozen @vX / SHA).
-    if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(stable|next|ring[0-9]+)$ ]]; then
-      local ref
-      while IFS= read -r ref; do
-        [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
-      done < <(ring_accepted_refs "$base" "$repo")
-      # Transition to major-scoped channels (#657 F5): a stub already pinned to the
-      # repo's tier-correct `v<M>-<tier>` form (any major) is compliant too, so the
-      # sweep accepts both the bare and the v-form during migration. A WRONG-tier
-      # v-form is not accepted here and stays drift.
+    # template pins a channel tag (not a frozen @vX / SHA). The template ref may be
+    # the bare `<base>/<tier>` OR the major-scoped `<base>/v<M>-<tier>` form (#657
+    # F5) — post-migration the templates pin the v-form, so both must enter here.
+    if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(v[0-9]+-)?(stable|next|ring[0-9]+)$ ]]; then
+      # Major-scoped channels (#657 F5, #861): the bare-tier grace is now
+      # major-AWARE. A bare `<base>/<tier>` stub stays compliant only while the
+      # agent has NO release (no current major line) — the pre-release fleet has
+      # nothing to major-scope to yet. Once the agent has a release, a bare stub is
+      # drift and must migrate to the tier's `v<M>-<tier>` form.
+      local host major
+      host="$(cut -d/ -f1-2 <<< "$prefix")"
+      major="$(ring_host_current_major "$host" "$base")"
+      if [[ -z "$major" ]]; then
+        local ref
+        while IFS= read -r ref; do
+          [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
+        done < <(ring_accepted_refs "$base" "$repo")
+      fi
+      # A stub already pinned to the repo's tier-correct `v<M>-<tier>` form (any
+      # major) is compliant regardless of release state. A WRONG-tier v-form — or a
+      # bare stub once the agent has a release — is not accepted here and stays drift.
       local existing_ref
       existing_ref=$(grep -oE "@${base}/[^[:space:]\"']+" <<< "$existing_content" | head -1)
       existing_ref="${existing_ref#@}"
@@ -419,28 +510,39 @@ deploy_repo() {
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
-[[ "$DRY_RUN" == "true" ]] && log "DRY RUN — no PRs will be opened"
+main() {
+  parse_args "$@"
 
-# Resolve target repos using pagination (handles orgs with >100 repos).
-declare -a REPOS
-if [[ -n "$TARGET_REPO" ]]; then
-  REPOS=("$TARGET_REPO")
-else
-  mapfile -t REPOS < <(gh repo list "$ORG" --limit 500 --no-archived --json name -q '.[].name')
+  [[ "$DRY_RUN" == "true" ]] && log "DRY RUN — no PRs will be opened"
+
+  # Resolve target repos using pagination (handles orgs with >100 repos).
+  declare -a REPOS
+  if [[ -n "$TARGET_REPO" ]]; then
+    REPOS=("$TARGET_REPO")
+  else
+    mapfile -t REPOS < <(gh repo list "$ORG" --limit 500 --no-archived --json name -q '.[].name')
+  fi
+
+  # Resolve target workflows
+  declare -a WORKFLOWS
+  if [[ -n "$TARGET_WORKFLOW" ]]; then
+    WORKFLOWS=("$TARGET_WORKFLOW")
+  else
+    WORKFLOWS=("${DEPLOYABLE_WORKFLOWS[@]}")
+  fi
+
+  log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
+
+  local repo
+  for repo in "${REPOS[@]}"; do
+    deploy_repo "$repo"
+  done
+
+  log "Done."
+}
+
+# Run main only when executed directly, not when sourced (e.g. by bats tests
+# that exercise individual helper functions like reconcile_skip_repo_required_workflows).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
 fi
-
-# Resolve target workflows
-declare -a WORKFLOWS
-if [[ -n "$TARGET_WORKFLOW" ]]; then
-  WORKFLOWS=("$TARGET_WORKFLOW")
-else
-  WORKFLOWS=("${DEPLOYABLE_WORKFLOWS[@]}")
-fi
-
-log "Deploying ${#WORKFLOWS[@]} workflow(s) to ${#REPOS[@]} repo(s)"
-
-for repo in "${REPOS[@]}"; do
-  deploy_repo "$repo"
-done
-
-log "Done."

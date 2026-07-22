@@ -7,7 +7,7 @@
 #   • This file is a THIN CALLER STUB. All enhancement-dispatch logic (including
 #     the Ideas-category / non-bot guard) lives in the reusable above.
 #   • You MUST NOT change: the `uses:` ref — it is pinned to the
-#     `idea-enhancer/stable` channel, a moving tag advanced centrally. Never
+#     `idea-enhancer/v1-stable` channel, a moving tag advanced centrally. Never
 #     repoint it to `@main`, a SHA, or a frozen `@vX`. Do not change the trigger
 #     events or the `secrets:` block.
 #   • You MAY change: the cron schedule if the weekly cadence doesn't suit.
@@ -45,5 +45,5 @@ permissions: {}
 
 jobs:
   idea-enhancer:
-    uses: petry-projects/.github/.github/workflows/idea-enhancer-reusable.yml@idea-enhancer/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    uses: petry-projects/.github/.github/workflows/idea-enhancer-reusable.yml@idea-enhancer/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable

@@ -8,6 +8,11 @@
 #
 # The helpers below mirror the extraction and matching logic in the script so
 # the check can be exercised without needing live gh API calls.
+#
+# #657 F5 (#861): the dev-lead stub must now pin the major-scoped v-form
+# `dev-lead/v<M>-<tier>` — a bare `dev-lead/<tier>` pin is drift. So the mirror
+# helpers extract the FULL `v<M>-<tier>` channel, return empty for a bare pin,
+# and match agent_ref against the full v-form channel.
 
 bats_require_minimum_version 1.5.0
 
@@ -15,8 +20,9 @@ bats_require_minimum_version 1.5.0
 # Pure helpers that mirror the script's logic
 #
 # _extract_uses_channel: pulls the channel name out of the uses: pin line.
-#   Returns the channel string (e.g. "stable", "ring0") on stdout, or empty
-#   string when no matching pin is found.
+#   Returns the full v-form channel string (e.g. "v3-stable", "v1-ring0") on
+#   stdout, or empty string when no matching v-form pin is found (a bare
+#   `dev-lead/stable` pin yields empty — it is drift under F5).
 #
 # _agent_ref_matches_channel: returns 0 when agent_ref pins exactly $channel.
 # ---------------------------------------------------------------------------
@@ -24,7 +30,7 @@ bats_require_minimum_version 1.5.0
 _extract_uses_channel() {
   local decoded="$1"
   printf '%s\n' "$decoded" | \
-    sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p'
+    sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(v[0-9]+-(stable|next|ring[0-9]+))([[:space:]]|$).*#\1#p'
 }
 
 _agent_ref_matches_channel() {
@@ -36,36 +42,42 @@ _agent_ref_matches_channel() {
 # Channel extraction from uses: pin
 # ---------------------------------------------------------------------------
 
-@test "extracts 'stable' from a stable pin" {
+@test "extracts 'v3-stable' from a v-form stable pin" {
+  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v3-stable"
+  run _extract_uses_channel "$decoded"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v3-stable" ]
+}
+
+@test "extracts 'v2-next' from a v-form next pin" {
+  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v2-next"
+  run _extract_uses_channel "$decoded"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v2-next" ]
+}
+
+@test "extracts 'v1-ring0' from a v-form ring0 pin" {
+  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v1-ring0"
+  run _extract_uses_channel "$decoded"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v1-ring0" ]
+}
+
+@test "extracts 'v4-ring1' from a v-form ring1 pin" {
+  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v4-ring1"
+  run _extract_uses_channel "$decoded"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v4-ring1" ]
+}
+
+@test "extraction returns empty for a bare (non-v-form) pin — it is drift under F5" {
   decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable"
   run _extract_uses_channel "$decoded"
-  [ "$status" -eq 0 ]
-  [ "$output" = "stable" ]
-}
-
-@test "extracts 'next' from a next pin" {
-  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/next"
-  run _extract_uses_channel "$decoded"
-  [ "$status" -eq 0 ]
-  [ "$output" = "next" ]
-}
-
-@test "extracts 'ring0' from a ring0 pin" {
-  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0"
-  run _extract_uses_channel "$decoded"
-  [ "$status" -eq 0 ]
-  [ "$output" = "ring0" ]
-}
-
-@test "extracts 'ring1' from a ring1 pin" {
-  decoded="    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring1"
-  run _extract_uses_channel "$decoded"
-  [ "$status" -eq 0 ]
-  [ "$output" = "ring1" ]
+  [ "$output" = "" ]
 }
 
 @test "extraction ignores a commented-out uses line" {
-  decoded="    # uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/stable"
+  decoded="    # uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v3-stable"
   run _extract_uses_channel "$decoded"
   [ "$output" = "" ]
 }
@@ -86,49 +98,50 @@ _agent_ref_matches_channel() {
 # agent_ref channel matching — happy path (no split-brain)
 # ---------------------------------------------------------------------------
 
-@test "agent_ref stable matches channel stable" {
-  decoded="      agent_ref: dev-lead/stable"
-  run _agent_ref_matches_channel "$decoded" "stable"
+@test "agent_ref v3-stable matches channel v3-stable" {
+  decoded="      agent_ref: dev-lead/v3-stable"
+  run _agent_ref_matches_channel "$decoded" "v3-stable"
   [ "$status" -eq 0 ]
 }
 
-@test "agent_ref next matches channel next" {
-  decoded="      agent_ref: dev-lead/next"
-  run _agent_ref_matches_channel "$decoded" "next"
+@test "agent_ref v2-next matches channel v2-next" {
+  decoded="      agent_ref: dev-lead/v2-next"
+  run _agent_ref_matches_channel "$decoded" "v2-next"
   [ "$status" -eq 0 ]
 }
 
-@test "agent_ref ring0 matches channel ring0" {
-  decoded="      agent_ref: dev-lead/ring0"
-  run _agent_ref_matches_channel "$decoded" "ring0"
+@test "agent_ref v1-ring0 matches channel v1-ring0" {
+  decoded="      agent_ref: dev-lead/v1-ring0"
+  run _agent_ref_matches_channel "$decoded" "v1-ring0"
   [ "$status" -eq 0 ]
 }
 
 # ---------------------------------------------------------------------------
-# Split-brain detection — uses: and agent_ref on different channels
+# Split-brain detection — uses: and agent_ref on different channels. Under F5
+# this includes a major mismatch on the same tier (v3-stable vs v2-stable).
 # ---------------------------------------------------------------------------
 
-@test "agent_ref stable does NOT match channel ring0 (split-brain)" {
+@test "agent_ref v3-stable does NOT match channel v3-ring0 (split-brain)" {
+  decoded="      agent_ref: dev-lead/v3-stable"
+  run _agent_ref_matches_channel "$decoded" "v3-ring0"
+  [ "$status" -ne 0 ]
+}
+
+@test "agent_ref v2-next does NOT match channel v2-stable (split-brain)" {
+  decoded="      agent_ref: dev-lead/v2-next"
+  run _agent_ref_matches_channel "$decoded" "v2-stable"
+  [ "$status" -ne 0 ]
+}
+
+@test "agent_ref v3-stable does NOT match channel v2-stable (major split-brain)" {
+  decoded="      agent_ref: dev-lead/v3-stable"
+  run _agent_ref_matches_channel "$decoded" "v2-stable"
+  [ "$status" -ne 0 ]
+}
+
+@test "agent_ref bare dev-lead/stable does NOT match a v-form channel" {
   decoded="      agent_ref: dev-lead/stable"
-  run _agent_ref_matches_channel "$decoded" "ring0"
-  [ "$status" -ne 0 ]
-}
-
-@test "agent_ref next does NOT match channel stable (split-brain)" {
-  decoded="      agent_ref: dev-lead/next"
-  run _agent_ref_matches_channel "$decoded" "stable"
-  [ "$status" -ne 0 ]
-}
-
-@test "agent_ref ring0 does NOT match channel ring1 (split-brain)" {
-  decoded="      agent_ref: dev-lead/ring0"
-  run _agent_ref_matches_channel "$decoded" "ring1"
-  [ "$status" -ne 0 ]
-}
-
-@test "agent_ref ring1 does NOT match channel ring0 (split-brain)" {
-  decoded="      agent_ref: dev-lead/ring1"
-  run _agent_ref_matches_channel "$decoded" "ring0"
+  run _agent_ref_matches_channel "$decoded" "v3-stable"
   [ "$status" -ne 0 ]
 }
 
@@ -143,28 +156,28 @@ on:
     branches: [main]
 jobs:
   dev-lead:
-    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v1-ring0
     with:
-      agent_ref: dev-lead/ring0
+      agent_ref: dev-lead/v1-ring0
     secrets: inherit
 EOF
 )
   run _extract_uses_channel "$decoded"
   [ "$status" -eq 0 ]
-  [ "$output" = "ring0" ]
+  [ "$output" = "v1-ring0" ]
 }
 
 @test "matching agent_ref in a full stub passes when channels agree" {
   decoded=$(cat <<'EOF'
 jobs:
   dev-lead:
-    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v1-ring0
     with:
-      agent_ref: dev-lead/ring0
+      agent_ref: dev-lead/v1-ring0
 EOF
 )
   channel=$(_extract_uses_channel "$decoded")
-  [ "$channel" = "ring0" ]
+  [ "$channel" = "v1-ring0" ]
   run _agent_ref_matches_channel "$decoded" "$channel"
   [ "$status" -eq 0 ]
 }
@@ -173,13 +186,13 @@ EOF
   decoded=$(cat <<'EOF'
 jobs:
   dev-lead:
-    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/ring0
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v1-ring0
     with:
-      agent_ref: dev-lead/stable
+      agent_ref: dev-lead/v1-stable
 EOF
 )
   channel=$(_extract_uses_channel "$decoded")
-  [ "$channel" = "ring0" ]
+  [ "$channel" = "v1-ring0" ]
   run _agent_ref_matches_channel "$decoded" "$channel"
   [ "$status" -ne 0 ]
 }

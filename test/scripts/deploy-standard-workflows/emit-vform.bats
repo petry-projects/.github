@@ -102,6 +102,29 @@ refs/tags/auto-rebase/v1.0.0"
   ! echo "$output" | grep -q 'Would open PR'
 }
 
+@test "drift check flags a BARE-tier stub as drift when the agent has a release (#861)" {
+  export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.0.0"
+  # markets (stable tier) still pins the bare @auto-rebase/stable; with a v2 release
+  # the bare form is drift → deploy re-pins to the tier v-form.
+  GH_CONTENT_B64="$(stub_pinning auto-rebase/stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'already compliant'
+  echo "$output" | grep -qF '@auto-rebase/v2-stable'
+  echo "$output" | grep -qE 'Would open PR for markets .* auto-rebase.yml'
+}
+
+@test "drift check keeps a BARE-tier stub compliant when the agent has NO release (#861)" {
+  unset GH_RELEASE_REFS   # no release → no current major → bare tier stays compliant
+  GH_CONTENT_B64="$(stub_pinning auto-rebase/stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  ! echo "$output" | grep -q 'Would open PR'
+}
+
 @test "drift check still flags a WRONG-tier v<M>-tier stub" {
   export GH_RELEASE_REFS="refs/tags/auto-rebase/v2.0.0"
   # v2-ring0 on TalkTerm (a ring1 repo) is the wrong tier → drift.

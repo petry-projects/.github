@@ -8,7 +8,7 @@
 #     reusable workflow above.
 #   • You MAY change: the workflow name(s) in `workflow_run.workflows` to match
 #     your repository's CI workflow name(s).
-#   • You MUST NOT change: the `@pr-auto-review/stable` channel in the `uses:`
+#   • You MUST NOT change: the `@pr-auto-review/v1-stable` channel in the `uses:`
 #     line — this reusable is on the org-wide moving-channel model (rollout and
 #     rollback are a single central tag move; a frozen `@vN`/`@<sha>` pin is
 #     rejected by the compliance audit). Nor the trigger event types or the
@@ -50,7 +50,7 @@ jobs:
       pull-requests: read
       checks: read
       actions: read
-    uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@pr-auto-review/stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@pr-auto-review/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets:
       # Canonical-first fallback (.github-private#1326). The reusable resolves this
       # secret BY NAME, so only the VALUE changes — the passed key stays named

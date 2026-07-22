@@ -25,8 +25,8 @@ CHAIN='${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}'
   [ "$output" = 'GH_PAT_WORKFLOWS' ]
 }
 
-@test "stub: keeps the @pr-auto-review/stable channel pin in the uses: line" {
+@test "stub: keeps the @pr-auto-review/v1-stable channel pin in the uses: line" {
   run yq -r '.jobs.pr-auto-review.uses' "$STUB"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'@pr-auto-review/stable'* ]]
+  [[ "$output" == *'@pr-auto-review/v1-stable'* ]]
 }
