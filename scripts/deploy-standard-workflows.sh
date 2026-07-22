@@ -150,6 +150,35 @@ is_body_preserving_workflow() {
   return 1
 }
 
+# The canonical inline S7635 suppression a first-party caller stub carries on its
+# `secrets: inherit` line. Dropping it re-triggers SonarCloud rule
+# `githubactions:S7635` ("only pass required secrets") in the consumer's scan. See
+# standards/ci-standards.md and test/scripts/standards-templates/s7635-secrets-inherit.bats.
+readonly S7635_SECRETS_INHERIT_MARKER='# NOSONAR(githubactions:S7635) first-party trusted reusable'
+
+# A real `secrets: inherit` YAML line (indented key), used to tell an actual
+# statement from a `# … secrets: inherit …` prose mention. Mirrors the template
+# guard's matcher in s7635-secrets-inherit.bats.
+readonly _S7635_SECRETS_INHERIT_RE='^[[:space:]]*secrets:[[:space:]]+inherit([[:space:]]|$)'
+
+# template_requires_s7635_marker <template> -> 0 iff the template carries a real
+# `secrets: inherit` line bearing the S7635 marker — i.e. every deployed stub of
+# it MUST keep the marker (dropping it re-flags S7635 in the consumer's scan).
+template_requires_s7635_marker() {
+  grep -E "$_S7635_SECRETS_INHERIT_RE" "$1" 2>/dev/null \
+    | grep -qF 'NOSONAR(githubactions:S7635)'
+}
+
+# inject_s7635_marker -> copy a stub body from stdin to stdout, appending the
+# canonical S7635 marker to any real `secrets: inherit` line that lacks it. A line
+# already carrying a trailing comment (the marker or otherwise), and a body with no
+# real `secrets: inherit` line, pass through unchanged. Idempotent. Pure (sed only).
+# The `|` delimiter avoids clashing with the `#` in the marker comment.
+inject_s7635_marker() {
+  sed -E "s|^([[:space:]]*)secrets:[[:space:]]+inherit[[:space:]]*\$|\1secrets: inherit  ${S7635_SECRETS_INHERIT_MARKER}|"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -406,7 +435,7 @@ deploy_repo() {
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
   local -a paths=() templates=() names=() emits=() modes=()
-  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode injected
   for workflow in "${WORKFLOWS[@]}"; do
     base=""; repin_source=""; emit=""; deploy_template=""; mode=""
     template="$STANDARDS_DIR/$workflow"
@@ -488,6 +517,18 @@ deploy_repo() {
       deploy_template="$(mktemp)"
       ring_repin_uses "$base" "$emit" < "$repin_source" > "$deploy_template"
       _TMPFILES+=("$deploy_template")
+    fi
+    # #879 (defense-in-depth): on the in-place repin path (repin_source is the
+    # repo's OWN body, not the template — a BODY_PRESERVING workflow or a meta-repo
+    # channel-consumer) ring_repin_uses rewrites only uses:/agent_ref. A repinned
+    # body missing the S7635 marker its template mandates would be flagged as
+    # marker-drift yet never restored → a non-converging loop. Inject the marker
+    # onto the repinned body's `secrets: inherit` line so the sweep converges in
+    # one pass. `repin_source != template` is exactly the non-dry-run repin path.
+    if [[ "$repin_source" != "$template" ]] && template_requires_s7635_marker "$template"; then
+      injected="$(mktemp)"; _TMPFILES+=("$injected")
+      inject_s7635_marker < "$deploy_template" > "$injected"
+      deploy_template="$injected"
     fi
     paths+=("$target_path"); templates+=("$deploy_template"); names+=("$workflow"); emits+=("$emit"); modes+=("$mode")
   done
