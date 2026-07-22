@@ -7,8 +7,8 @@
 #                            never overwrite an existing tuned body from the template.
 #
 # All runs are --dry-run (no mutating gh calls), single --repo/--workflow for
-# determinism. A fake `gh` returns the reusable's release tags (major derivation)
-# and, when set, the target repo's existing stub content.
+# determinism. A fake `gh` returns the reusable's CHANNEL tags (caller-contract
+# major derivation — #870) and, when set, the target repo's existing stub content.
 
 setup() {
   TT_TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
@@ -19,8 +19,9 @@ setup() {
 teardown() { rm -rf "$TT_TMP"; }
 
 # Fake gh:
-#   GH_RELEASE_REFS  newline-separated `refs/tags/<agent>/vX.Y.Z` for matching-refs
-#                    (unset/empty → no release → bare-tier form).
+#   GH_MATCHING_REFS newline-separated `refs/tags/<agent>/…` for matching-refs. The
+#                    major is derived from the CHANNEL tags (`<agent>/v<M>-<tier>`),
+#                    not the release semver (#870); no channel tag → bare-tier form.
 #   GH_CONTENT_B64   base64 of the existing stub (unset → contents 404 = absent).
 install_gh_stub() {
   local bin="${TT_TMP}/bin"
@@ -30,7 +31,7 @@ install_gh_stub() {
 if [ "${1:-}" = "api" ]; then
   case "$2" in
     *matching-refs/tags/*)
-      [ -n "${GH_RELEASE_REFS:-}" ] && printf '%s\n' "${GH_RELEASE_REFS}"
+      [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
       exit 0 ;;
     *contents*)
       if [ -n "${GH_CONTENT_B64:-}" ]; then
@@ -62,7 +63,10 @@ fi_stub_pinning() {  # <ref>
 # ── feature-ideation: SEED-IF-ABSENT ───────────────────────────────────────────
 
 @test "feature-ideation: a repo WITHOUT the stub gets a fresh seed from the template" {
-  export GH_RELEASE_REFS="refs/tags/feature-ideation/v1.0.0"
+  export GH_MATCHING_REFS="refs/tags/feature-ideation/v1-stable
+refs/tags/feature-ideation/v1-next
+refs/tags/feature-ideation/v1-ring0
+refs/tags/feature-ideation/v1-ring1"
   install_gh_stub   # no GH_CONTENT_B64 → 404 → stub absent
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow feature-ideation.yml
   [ "$status" -eq 0 ]
@@ -77,7 +81,10 @@ fi_stub_pinning() {  # <ref>
 # ── feature-ideation: RE-PIN-IN-PLACE (no clobber of project_context) ───────────
 
 @test "feature-ideation: a repo WITH a tuned stub is re-pinned in place, body preserved" {
-  export GH_RELEASE_REFS="refs/tags/feature-ideation/v1.0.0"
+  export GH_MATCHING_REFS="refs/tags/feature-ideation/v1-stable
+refs/tags/feature-ideation/v1-next
+refs/tags/feature-ideation/v1-ring0
+refs/tags/feature-ideation/v1-ring1"
   # Existing tuned stub, still on the bare-tier channel. --force so the bare-tier
   # migration grace does not short-circuit it as already-compliant.
   GH_CONTENT_B64="$(fi_stub_pinning feature-ideation/stable)"; export GH_CONTENT_B64
@@ -93,7 +100,10 @@ fi_stub_pinning() {  # <ref>
 
 @test "feature-ideation: an already-compliant tuned stub is left untouched (no PR)" {
   # A stub already at the tier-correct v-form is compliant → no re-pin, no clobber.
-  export GH_RELEASE_REFS="refs/tags/feature-ideation/v1.0.0"
+  export GH_MATCHING_REFS="refs/tags/feature-ideation/v1-stable
+refs/tags/feature-ideation/v1-next
+refs/tags/feature-ideation/v1-ring0
+refs/tags/feature-ideation/v1-ring1"
   GH_CONTENT_B64="$(fi_stub_pinning feature-ideation/v1-stable)"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow feature-ideation.yml
@@ -131,7 +141,10 @@ fi_stub_pinning() {  # <ref>
 # ── pr-auto-review: ring add, re-pinned to the repo's tier ──────────────────────
 
 @test "pr-auto-review: deploys pinned to the repo's ring tier" {
-  export GH_RELEASE_REFS="refs/tags/pr-auto-review/v2.1.0"
+  export GH_MATCHING_REFS="refs/tags/pr-auto-review/v2-stable
+refs/tags/pr-auto-review/v2-next
+refs/tags/pr-auto-review/v2-ring0
+refs/tags/pr-auto-review/v2-ring1"
   install_gh_stub   # 404 → stub absent → seed + re-pin from template
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow pr-auto-review.yml
   [ "$status" -eq 0 ]
