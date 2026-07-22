@@ -73,6 +73,17 @@ channel_refs() {  # <agent> <M> [extra refs...]
 }
 
 stub_pinning() {  # <ref> → base64 of a minimal auto-rebase stub pinning the reusable at <ref>
+  # Carries the S7635 marker on `secrets: inherit` — the shape a converged consumer
+  # holds after #875/#876, so pin-drift fixtures are not falsely tripped by the
+  # marker-drift check (#877).
+  local body="jobs:
+  auto-rebase:
+    uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@$1
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable"
+  base64 -w 0 <<<"$body" 2>/dev/null || base64 -b 0 <<<"$body"
+}
+
+stub_pinning_no_marker() {  # <ref> → base64 of the SAME stub but marker-less (#857 shape)
   local body="jobs:
   auto-rebase:
     uses: petry-projects/.github/.github/workflows/auto-rebase-reusable.yml@$1
@@ -160,6 +171,35 @@ selfhost_stub() {  # <base> → base64 of a meta-repo SELF-HOST stub using a loc
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
+}
+
+# ── #877: a pin-correct stub that DROPPED the S7635 marker is drift ─────────────
+# #875/#876 restored the `# NOSONAR(githubactions:S7635)` marker in the templates
+# but did NOT touch the driver, so a re-sweep skipped already-pinned consumers
+# whose stubs merged marker-less during #857 (broodminder-export, bmad-bgreat-suite,
+# …) — the restored marker never reached them. A pin-correct stub MISSING the marker
+# is now drift so the sweep re-deploys and restores it.
+
+@test "#877: flags a tier-correct stub that DROPPED the S7635 marker as drift" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
+  # Pin is tier-correct for TalkTerm (ring1) but the `secrets: inherit` line lost the
+  # marker → drift → re-deploy to restore it.
+  GH_CONTENT_B64="$(stub_pinning_no_marker auto-rebase/v2-ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q 'already compliant'
+  echo "$output" | grep -qE 'Would open PR for TalkTerm .* auto-rebase.yml'
+}
+
+@test "#877: keeps a tier-correct stub that CARRIES the S7635 marker compliant (no churn)" {
+  GH_MATCHING_REFS="$(channel_refs auto-rebase 2)"; export GH_MATCHING_REFS
+  GH_CONTENT_B64="$(stub_pinning auto-rebase/v2-ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow auto-rebase.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  ! echo "$output" | grep -q 'Would open PR'
 }
 
 # ── meta-repo consumer stubs (#704) ────────────────────────────────────────────

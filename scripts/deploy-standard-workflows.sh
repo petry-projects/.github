@@ -275,6 +275,41 @@ fetch_existing() {
   printf '%s\t%s' "$sha" "$decoded"
 }
 
+# template_requires_s7635_marker <template> -> 0 if the template carries a REAL
+# `secrets: inherit` YAML line (indented key, not a `#`-comment/prose mention). Such
+# stubs hand the reusable every org secret and must carry the inline
+# `# NOSONAR(githubactions:S7635)` marker, else SonarCloud re-flags any consumer that
+# copied the marker-less stub (#875/#876). Anchors `secrets:` to start-of-line-after-
+# indent — mirrors the s7635-secrets-inherit.bats template guard.
+template_requires_s7635_marker() {
+  grep -qE '^[[:space:]]*secrets:[[:space:]]+inherit([[:space:]]|$)' "$1"
+}
+
+# stub_has_s7635_marker — 0 if the stub content on stdin carries the
+# `# NOSONAR(githubactions:S7635)` marker on a real `secrets: inherit` line.
+stub_has_s7635_marker() {
+  grep -qE '^[[:space:]]*secrets:[[:space:]]+inherit[[:space:]].*NOSONAR\(githubactions:S7635\)'
+}
+
+# is_already_compliant <existing_content> <template> <repo> -> 0 if the deployed
+# stub needs no re-deploy. A stub is compliant only when it is BOTH pin-compliant
+# (is_pin_compliant, below) AND — when its template carries a real `secrets: inherit`
+# line — still carries the S7635 NOSONAR marker on that line. A pin-correct stub that
+# dropped the marker is DRIFT (#877): #875/#876 restored the marker in the templates
+# but not the driver, so a re-sweep skipped already-pinned consumers (broodminder-
+# export, bmad-bgreat-suite, …) whose stubs merged marker-less during #857. Flagging
+# the missing marker as drift re-deploys and restores it. Kept targeted (pin + marker
+# presence), NOT a byte-compare, to avoid churn on cosmetic diffs.
+is_already_compliant() {
+  local existing_content="$1" template="$2" repo="$3"
+  is_pin_compliant "$existing_content" "$template" "$repo" || return 1
+  if template_requires_s7635_marker "$template" \
+     && ! stub_has_s7635_marker <<< "$existing_content"; then
+    return 1
+  fi
+  return 0
+}
+
 # True if the existing decoded content already has the canonical uses: reference
 # for this workflow (extracted from the template itself, so it tracks version bumps).
 #
@@ -284,7 +319,7 @@ fetch_existing() {
 # the shared ring model accepts for THIS repo (its tier channel + the transitional
 # legacy grace) — so the sweep never reverts an intentional ring/next pin. Non-ring
 # templates (e.g. add-to-project, not in RING_REUSABLES) keep the exact-match rule.
-is_already_compliant() {
+is_pin_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
   expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
