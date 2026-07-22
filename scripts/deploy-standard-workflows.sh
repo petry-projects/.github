@@ -302,16 +302,27 @@ is_already_compliant() {
   if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then
     base="${BASH_REMATCH[1]}"
     # Only treat it as ring-managed if the reusable is on the ring model AND the
-    # template pins a channel tag (not a frozen @vX / SHA).
-    if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(stable|next|ring[0-9]+)$ ]]; then
-      local ref
-      while IFS= read -r ref; do
-        [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
-      done < <(ring_accepted_refs "$base" "$repo")
-      # Transition to major-scoped channels (#657 F5): a stub already pinned to the
-      # repo's tier-correct `v<M>-<tier>` form (any major) is compliant too, so the
-      # sweep accepts both the bare and the v-form during migration. A WRONG-tier
-      # v-form is not accepted here and stays drift.
+    # template pins a channel tag (not a frozen @vX / SHA). The template ref may be
+    # the bare `<base>/<tier>` OR the major-scoped `<base>/v<M>-<tier>` form (#657
+    # F5) — post-migration the templates pin the v-form, so both must enter here.
+    if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(v[0-9]+-)?(stable|next|ring[0-9]+)$ ]]; then
+      # Major-scoped channels (#657 F5, #861): the bare-tier grace is now
+      # major-AWARE. A bare `<base>/<tier>` stub stays compliant only while the
+      # agent has NO release (no current major line) — the pre-release fleet has
+      # nothing to major-scope to yet. Once the agent has a release, a bare stub is
+      # drift and must migrate to the tier's `v<M>-<tier>` form.
+      local host major
+      host="$(cut -d/ -f1-2 <<< "$prefix")"
+      major="$(ring_host_current_major "$host" "$base")"
+      if [[ -z "$major" ]]; then
+        local ref
+        while IFS= read -r ref; do
+          [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
+        done < <(ring_accepted_refs "$base" "$repo")
+      fi
+      # A stub already pinned to the repo's tier-correct `v<M>-<tier>` form (any
+      # major) is compliant regardless of release state. A WRONG-tier v-form — or a
+      # bare stub once the agent has a release — is not accepted here and stays drift.
       local existing_ref
       existing_ref=$(grep -oE "@${base}/[^[:space:]\"']+" <<< "$existing_content" | head -1)
       existing_ref="${existing_ref#@}"
