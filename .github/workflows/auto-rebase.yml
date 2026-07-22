@@ -41,4 +41,4 @@ jobs:
       contents: write      # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
       pull-requests: write # post comments on PRs
     uses: ./.github/workflows/auto-rebase-reusable.yml  # local ref — always current
-    secrets: inherit
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
