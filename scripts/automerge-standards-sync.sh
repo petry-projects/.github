@@ -92,7 +92,7 @@ fi
 
 # in_list <needle> <comma-separated-haystack>
 in_list() {
-  local needle="$1" hay="$2" item
+  local needle="$1" hay="$2" item _items
   IFS=',' read -ra _items <<< "$hay"
   for item in "${_items[@]}"; do
     item="${item#"${item%%[![:space:]]*}"}"; item="${item%"${item##*[![:space:]]}"}"
@@ -104,7 +104,7 @@ in_list() {
 # resolve_approver <author> <last_pusher> — echo the code-owner that is neither
 # the author nor the last pusher, or empty when none exists (the deadlock).
 resolve_approver() {
-  local author="$1" last="$2" item
+  local author="$1" last="$2" item _members
   IFS=',' read -ra _members <<< "$ORG_LEADS_MEMBERS"
   for item in "${_members[@]}"; do
     item="${item#"${item%%[![:space:]]*}"}"; item="${item%"${item##*[![:space:]]}"}"
@@ -175,6 +175,21 @@ process_pr() {
     echo "  [dry-run] ${url} — would approve as '${approver}' (distinct code-owner) and enable native auto-merge (squash); admin=none"
     echo "AUDIT pr=${url} approver=${approver} merge=native-auto-merge admin=none dry_run=true"
     return 0
+  fi
+
+  # Verify APPROVER_TOKEN actually authenticates as the resolved approver, so the
+  # audit line and the review body attribute the approval to the real identity
+  # (a token/login mismatch from misconfiguration or rotation must not silently
+  # post a misattributed code-owner approval).
+  local token_login
+  token_login=$(GH_TOKEN="$APPROVER_TOKEN" gh api user --jq '.login' 2>/dev/null || true)
+  if [ -z "$token_login" ]; then
+    echo "::error::${url} — APPROVER_TOKEN did not authenticate (gh api user failed); refusing to post an unattributable approval" >&2
+    return 1
+  fi
+  if [ "$token_login" != "$approver" ]; then
+    echo "::error::${url} — APPROVER_TOKEN authenticates as '${token_login}', not the resolved approver '${approver}'; refusing to post a misattributed approval" >&2
+    return 1
   fi
 
   echo "  [approve] ${url} — approving as '${approver}' (distinct code-owner: neither author nor last pusher)"

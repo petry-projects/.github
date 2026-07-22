@@ -32,6 +32,7 @@ case "$1 ${2:-}" in
   "pr list")  printf '%s' "${GH_PR_LIST_JSON:-[]}" ; exit 0 ;;
   "pr review") exit 0 ;;
   "pr merge")  exit 0 ;;
+  "api user") printf '%s' "${GH_API_USER_LOGIN:-donpetry-bot}" ; exit 0 ;;
   "auth status") exit 0 ;;
 esac
 exit 0
@@ -121,6 +122,8 @@ run_single() {  # extra args passed through
 @test "never emits an --admin bypass on the happy path" {
   GH_PR_VIEW_JSON="$(pr_json donpetry-bot standards-sync/2026-07-21 donpetry-bot "standards-sync")"
   export GH_PR_VIEW_JSON
+  # here don-petry is the free code-owner, so the approver token authenticates as don-petry
+  GH_API_USER_LOGIN=don-petry; export GH_API_USER_LOGIN
   run_single
   [ "$status" -eq 0 ]
   ! grep -q -- '--admin' "$GH_CALLS"
@@ -136,6 +139,22 @@ run_single() {  # extra args passed through
   run_single
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi 'deadlock'
+  ! grep -q 'pr review' "$GH_CALLS"
+  ! grep -q 'pr merge' "$GH_CALLS"
+  ! grep -q -- '--admin' "$GH_CALLS"
+}
+
+# ── Approver-token identity is verified before any approval is posted ─────────
+
+@test "refuses to approve when APPROVER_TOKEN authenticates as a different login" {
+  # Resolved approver is donpetry-bot, but the token authenticates as someone else
+  # (misconfiguration / rotation) → refuse rather than post a misattributed approval.
+  GH_PR_VIEW_JSON="$(pr_json don-petry standards-sync/2026-07-21 don-petry "standards-sync")"
+  export GH_PR_VIEW_JSON
+  GH_API_USER_LOGIN=someone-else; export GH_API_USER_LOGIN
+  run_single
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'misattributed'
   ! grep -q 'pr review' "$GH_CALLS"
   ! grep -q 'pr merge' "$GH_CALLS"
   ! grep -q -- '--admin' "$GH_CALLS"
