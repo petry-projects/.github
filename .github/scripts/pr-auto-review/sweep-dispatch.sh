@@ -104,7 +104,10 @@ evaluate_pr() {
   if [ -z "${required_json}" ]; then required_json="[]"; fi
 
   # shellcheck disable=SC2016  # $owner/$repo/$number are GraphQL variable refs, not shell vars
-  local gql='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated}}}}}'
+  local gql='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)'
+  # shellcheck disable=SC2016
+  gql+='{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated'
+  gql+=' comments(first:100){nodes{author{__typename}}}}}}}}'
   threads_json=$(gh api graphql \
     -f "query=$gql" \
     -f owner="${repo%%/*}" \
