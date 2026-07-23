@@ -9,6 +9,7 @@
 #   - test/scripts/sync-gitignore-baseline/**
 #   - test/scripts/compliance-remediate/**
 #   - tests/test_seed_repo_template_gitignore.bats
+#   - tests/test_seed_repo_template_workflows.bats
 #
 # Gates (all must pass before merge):
 #   1. shellcheck — static analysis of the lib + sync + seed + remediate scripts
@@ -28,6 +29,7 @@ on:
       - 'test/scripts/sync-gitignore-baseline/**'
       - 'test/scripts/compliance-remediate/**'
       - 'tests/test_seed_repo_template_gitignore.bats'
+      - 'tests/test_seed_repo_template_workflows.bats'
       - '.github/workflows/gitignore-baseline-tests.yml'
   push:
     branches:
@@ -41,6 +43,7 @@ on:
       - 'test/scripts/sync-gitignore-baseline/**'
       - 'test/scripts/compliance-remediate/**'
       - 'tests/test_seed_repo_template_gitignore.bats'
+      - 'tests/test_seed_repo_template_workflows.bats'
       - '.github/workflows/gitignore-baseline-tests.yml'
 
 permissions:
@@ -82,4 +85,5 @@ jobs:
             test/scripts/lib/gitignore-baseline.bats \
             test/scripts/sync-gitignore-baseline/ \
             test/scripts/compliance-remediate/ \
-            tests/test_seed_repo_template_gitignore.bats
+            tests/test_seed_repo_template_gitignore.bats \
+            tests/test_seed_repo_template_workflows.bats
