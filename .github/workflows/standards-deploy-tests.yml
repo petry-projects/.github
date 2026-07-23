@@ -67,19 +67,26 @@ jobs:
         # Retry the apt update+install: a single transient mirror/CDN blip
         # (5xx, hash mismatch, DNS hiccup) would otherwise red the whole job and
         # skew the fleet failure-rate metric. Three attempts with backoff; the
-        # step fails only if every attempt fails.
+        # step fails only if every attempt fails. The final attempt uses -q
+        # instead of -qq so apt output is visible in CI logs when all retries fail.
         run: |
           set -euo pipefail
+          installed=0
           for attempt in 1 2 3; do
-            if sudo apt-get update -qq \
+            apt_flags=(-qq)
+            [ "${attempt}" -eq 3 ] && apt_flags=(-q)
+            if sudo apt-get update "${apt_flags[@]}" \
               && sudo apt-get install -y --no-install-recommends bats shellcheck jq; then
-              exit 0
+              installed=1
+              break
             fi
             echo "apt install attempt ${attempt} failed" >&2
             [ "${attempt}" -lt 3 ] && sleep $((attempt * 5))
           done
-          echo "apt install failed after 3 attempts" >&2
-          exit 1
+          if [ "${installed}" -ne 1 ]; then
+            echo "apt install failed after 3 attempts" >&2
+            exit 1
+          fi
 
       - name: shellcheck
         run: |
