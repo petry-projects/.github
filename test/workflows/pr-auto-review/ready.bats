@@ -116,6 +116,23 @@ REQUIRED='["Lint"]'
   [ "$output" = "dispatched" ]
 }
 
+# REQ: required-only gate ignores cancelled dev-lead orchestration checks and non-required failing checks, dispatching when all REQUIRED contexts are green
+# #884 fleet-convergence repro (the exact "main blocker" fact pattern): a
+# standards-sync PR whose REQUIRED contexts are all green, carrying BOTH
+# concurrency-churn cancelled dev-lead orchestration checks
+# (`dev-lead / dispatch` + `dev-lead / ci-relay`) AND a non-required failing
+# advisory (mirroring ContentTwin `Test` / google-app-scripts `autofix`). The
+# required-only gate must ignore all three non-required contexts and dispatch —
+# so the pr-auto-review path never reads CANCELLED (or a non-required FAILURE) as
+# a merge-readiness blocker.
+@test "ready: #884 convergence — required green + cancelled dev-lead pair + non-required failure → dispatched" {
+  run pr_auto_review_ready "OPEN" "false" \
+    '[{"name":"CI / Lint","bucket":"pass"},{"name":"dev-lead / dispatch","bucket":"cancel"},{"name":"dev-lead / ci-relay","bucket":"cancel"},{"name":"Test","bucket":"fail"}]' \
+    "$REQUIRED" "" "" "0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "dispatched" ]
+}
+
 # ── criterion #3: review decision ────────────────────────────────────────────
 
 @test "not ready: CHANGES_REQUESTED → skip-changes-requested" {
