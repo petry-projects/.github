@@ -116,6 +116,7 @@ REQUIRED='["Lint"]'
   [ "$output" = "dispatched" ]
 }
 
+# REQ: required-only gate ignores cancelled dev-lead orchestration checks and non-required failing checks, dispatching when all REQUIRED contexts are green
 # #884 fleet-convergence repro (the exact "main blocker" fact pattern): a
 # standards-sync PR whose REQUIRED contexts are all green, carrying BOTH
 # concurrency-churn cancelled dev-lead orchestration checks
