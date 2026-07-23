@@ -64,10 +64,22 @@ jobs:
           fetch-depth: 1
 
       - name: Install bats, shellcheck, and jq
+        # Retry the apt update+install: a single transient mirror/CDN blip
+        # (5xx, hash mismatch, DNS hiccup) would otherwise red the whole job and
+        # skew the fleet failure-rate metric. Three attempts with backoff; the
+        # step fails only if every attempt fails.
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bats shellcheck jq
+          for attempt in 1 2 3; do
+            if sudo apt-get update -qq \
+              && sudo apt-get install -y --no-install-recommends bats shellcheck jq; then
+              exit 0
+            fi
+            echo "apt install attempt ${attempt} failed" >&2
+            [ "${attempt}" -lt 3 ] && sleep $((attempt * 5))
+          done
+          echo "apt install failed after 3 attempts" >&2
+          exit 1
 
       - name: shellcheck
         run: |
