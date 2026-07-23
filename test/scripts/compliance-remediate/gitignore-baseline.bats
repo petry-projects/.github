@@ -54,7 +54,16 @@ case "$sub" in
         else
           exit "${GH_REF_EXISTS_RC:-0}"
         fi ;;
-      *contents/.gitignore"?"ref=*)  printf '%s' "${GH_FILE_SHA:-}" ;;
+      *contents/.gitignore"?"ref=*)
+        # Branch-sha lookup. A real 200 always carries a sha; an absent file is a
+        # 404. The shared lib (#865) treats GET-success-with-blank-sha as a hard
+        # error (sha-unresolved), so the absent case MUST 404 (→ create path),
+        # not print empty and exit 0.
+        if [ -n "${GH_FILE_SHA:-}" ]; then
+          printf '%s' "$GH_FILE_SHA"
+        else
+          printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1
+        fi ;;
       *contents/.gitignore)
         # PUT of the upserted file onto the sync branch.
         if printf '%s' "$args" | grep -q -- '--method PUT'; then
@@ -72,7 +81,17 @@ case "$sub" in
           printf 'gh: Not Found (HTTP 404)\n' >&2
           exit 1   # 404 — .gitignore absent
         fi ;;
-      repos/*)                       printf '%s' "${GH_DEFAULT_BRANCH:-main}" ;;
+      repos/*)
+        # The repo endpoint serves BOTH the default-branch lookup and the
+        # preflight write probe (--jq .permissions.push, added to the shared
+        # sd_deploy_files_via_pr lib in #865). Differentiate on the jq arg so the
+        # write probe returns a boolean, not the default-branch string, else the
+        # preflight reads "main" != "true" and fails as no-write-access.
+        if printf '%s' "$args" | grep -q 'permissions.push'; then
+          printf '%s' "${GH_CAN_PUSH:-true}"
+        else
+          printf '%s' "${GH_DEFAULT_BRANCH:-main}"
+        fi ;;
     esac
     ;;
 esac
