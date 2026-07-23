@@ -47,7 +47,22 @@ _usage() {
 # the check to them (mirrors test/scripts/standards-templates/vform-pins.bats).
 # Exits non-zero listing every offending pin so the re-seed fails loud.
 _assert_vform_pins() {
-  local file="$1" bad
+  local file="$1" bad unmarked
+  # Fail-closed (#887 / qodo): the marker-based check below only inspects lines
+  # carrying the '# NOSONAR(githubactions:S7637) first-party channel ref' marker.
+  # If a deployable template has a first-party reusable `uses:` line but that line
+  # LOST the marker, the pin check would see zero lines and pass — emitting an
+  # unvalidated (possibly bare) pin. So first refuse any first-party reusable
+  # `uses:` line that lacks the marker: the guard cannot validate what it can't
+  # see, and must fail closed rather than emit unvalidated. (Local `./` self-host
+  # refs and third-party actions are not '<...>-reusable.yml@' and are exempt.)
+  unmarked="$(grep -E '^[[:space:]]*uses:[[:space:]]*petry-projects/[^[:space:]]*-reusable\.yml@' "$file" 2>/dev/null \
+    | grep -vE 'S7637\) first-party channel ref' || true)"
+  if [ -n "$unmarked" ]; then
+    echo "::error::refusing to emit '${file#"${STANDARDS_DIR}"/}': first-party reusable uses: line(s) missing the '# NOSONAR(githubactions:S7637) first-party channel ref' marker — cannot validate the channel pin (fail-closed):" >&2
+    printf '%s\n' "$unmarked" | sed 's/^/  /' >&2
+    exit 3
+  fi
   bad="$(grep -E 'S7637\) first-party channel ref' "$file" 2>/dev/null \
     | sed -E 's/.*-reusable\.yml@([^[:space:]]+).*/\1/' \
     | grep -vE '^[a-z0-9-]+/v[0-9]+-(stable|next|ring[0-9]+)$' || true)"

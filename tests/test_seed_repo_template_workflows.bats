@@ -91,6 +91,22 @@ RESEEDED_STUBS="dev-lead.yml auto-rebase.yml dependabot-automerge.yml"
   echo "$output" | grep -qi 'bare'
 }
 
+@test "--emit-workflow fails CLOSED when a first-party reusable uses: line lost its S7637 marker" {
+  # Fixture: a template whose dev-lead uses: line keeps a valid v-form pin but
+  # DROPPED the S7637 marker. The marker-based pin check would then inspect zero
+  # lines and pass (fail-open, #887/qodo). The guard must refuse instead.
+  local fixture="${BATS_TEST_TMPDIR}/fixture-nomarker"
+  mkdir -p "${fixture}/standards/workflows" "${fixture}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/lib/gitignore-baseline.sh" "${fixture}/scripts/lib/"
+  sed -E '/uses:.*-reusable\.yml@/ s/[[:space:]]*# NOSONAR\(githubactions:S7637\).*$//' \
+    "${WF_DIR}/dev-lead.yml" > "${fixture}/standards/workflows/dev-lead.yml"
+  # Sanity: the pin itself is still valid v-form (only the marker was removed).
+  grep -qE 'uses:.*@dev-lead/v[0-9]+-stable[[:space:]]*$' "${fixture}/standards/workflows/dev-lead.yml"
+  run env STANDARDS_DIR="$fixture" bash "$SEED" --emit-workflow dev-lead.yml
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'marker'
+}
+
 @test "usage is shown when --emit-workflow is given no name" {
   run bash "$SEED" --emit-workflow
   [ "$status" -ne 0 ]
