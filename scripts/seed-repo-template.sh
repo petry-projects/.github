@@ -47,7 +47,7 @@ _usage() {
 # the check to them (mirrors test/scripts/standards-templates/vform-pins.bats).
 # Exits non-zero listing every offending pin so the re-seed fails loud.
 _assert_vform_pins() {
-  local file="$1" bad unmarked
+  local file="$1" bad unmarked agentref_bad
   # Fail-closed (#887 / qodo): the marker-based check below only inspects lines
   # carrying the '# NOSONAR(githubactions:S7637) first-party channel ref' marker.
   # If a deployable template has a first-party reusable `uses:` line but that line
@@ -69,6 +69,18 @@ _assert_vform_pins() {
   if [ -n "$bad" ]; then
     echo "::error::refusing to emit '${file#"${STANDARDS_DIR}"/}': bare channel pin(s) — must be major-scoped <agent>/v<M>-<tier>:" >&2
     printf '%s\n' "$bad" | sed 's/^/  /' >&2
+    exit 3
+  fi
+  # Same fail-closed guard for `with: agent_ref:` (CodeRabbit): dev-lead.yml /
+  # add-to-project.yml thread the SAME channel into the reusable via agent_ref, so
+  # a partial edit could drop it to a bare tier while the marked `uses:` pin stays
+  # valid. Templates without an agent_ref match nothing here and pass unaffected.
+  agentref_bad="$(grep -E '^[[:space:]]*agent_ref:[[:space:]]' "$file" 2>/dev/null \
+    | sed -E 's/.*agent_ref:[[:space:]]*([^[:space:]#]+).*/\1/' \
+    | grep -vE '^[a-z0-9-]+/v[0-9]+-(stable|next|ring[0-9]+)$' || true)"
+  if [ -n "$agentref_bad" ]; then
+    echo "::error::refusing to emit '${file#"${STANDARDS_DIR}"/}': agent_ref value(s) not major-scoped <agent>/v<M>-<tier>:" >&2
+    printf '%s\n' "$agentref_bad" | sed 's/^/  /' >&2
     exit 3
   fi
 }

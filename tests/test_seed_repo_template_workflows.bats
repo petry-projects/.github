@@ -79,6 +79,26 @@ RESEEDED_STUBS="dev-lead.yml auto-rebase.yml dependabot-automerge.yml"
   echo "$output" | grep -qi 'unknown workflow'
 }
 
+@test "--emit-workflow rejects path-traversal, dotfile, and empty names before any FS access" {
+  # The name guard (case '*/*|.*|"') blocks directory traversal and dotfiles up
+  # front, so --emit-workflow can never read outside standards/workflows/.
+  run emit '../etc/passwd'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'invalid workflow'
+
+  run emit 'foo/bar.yml'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'invalid workflow'
+
+  run emit '.hidden.yml'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'invalid workflow'
+
+  run emit ''
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'invalid workflow'
+}
+
 @test "--emit-workflow refuses a template carrying a bare <agent>/<tier> pin" {
   # Fixture: a standards dir whose dev-lead template regressed to the bare pin.
   local fixture="${BATS_TEST_TMPDIR}/fixture"
@@ -105,6 +125,22 @@ RESEEDED_STUBS="dev-lead.yml auto-rebase.yml dependabot-automerge.yml"
   run env STANDARDS_DIR="$fixture" bash "$SEED" --emit-workflow dev-lead.yml
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi 'marker'
+}
+
+@test "--emit-workflow fails CLOSED when agent_ref regressed to a bare tier (valid uses: pin)" {
+  # Fixture: dev-lead template keeps a valid v-form `uses:` pin + its S7637 marker
+  # but its `with: agent_ref:` dropped to the bare tier. The uses-pin check alone
+  # would pass; the agent_ref guard (CodeRabbit) must refuse instead.
+  local fixture="${BATS_TEST_TMPDIR}/fixture-agentref"
+  mkdir -p "${fixture}/standards/workflows" "${fixture}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/lib/gitignore-baseline.sh" "${fixture}/scripts/lib/"
+  sed -E 's#^([[:space:]]*agent_ref:[[:space:]]*)dev-lead/v[0-9]+-stable#\1dev-lead/stable#' \
+    "${WF_DIR}/dev-lead.yml" > "${fixture}/standards/workflows/dev-lead.yml"
+  # Sanity: the uses: pin is untouched (still valid v-form + S7637 marker).
+  grep -qE 'uses:.*@dev-lead/v[0-9]+-stable.*S7637' "${fixture}/standards/workflows/dev-lead.yml"
+  run env STANDARDS_DIR="$fixture" bash "$SEED" --emit-workflow dev-lead.yml
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi 'agent_ref'
 }
 
 @test "usage is shown when --emit-workflow is given no name" {
