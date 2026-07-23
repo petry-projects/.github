@@ -200,10 +200,26 @@ resp() {
   [ "$output" = "1" ]
 }
 
+@test "blocking count: thread with bot first comment and human reply → 1 (not purely advisory-bot)" {
+  # A thread opened by a bot but with a human follow-up must block.
+  # This pins the requirement that comments(first:100) is used in the GQL query
+  # rather than comments(first:1) — a first:1 query would only see the Bot
+  # comment and incorrectly classify the thread as advisory-bot-only.
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[{
+    "isResolved":false,"isOutdated":false,
+    "comments":{"nodes":[
+      {"author":{"__typename":"Bot"}},
+      {"author":{"__typename":"User"}}
+    ]}
+  }]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
 @test "blocking count: the #892 scenario — multiple advisory bot threads (gemini + codeant) → 0" {
   # Scenario: CI green, CHANGES_REQUESTED from advisory bots (gemini-code-assist,
-  # codeant-ai), all 13 threads unresolved and not outdated. Without the fix,
-  # the gate counts 13 blocking threads and stalls dispatch even though every
+  # codeant-ai), all 5 threads unresolved and not outdated. Without the fix,
+  # the gate counts 5 blocking threads and stalls dispatch even though every
   # thread is advisory-bot feedback with no machine findings.
   run pr_auto_review_blocking_thread_count <<<"$(resp '[
     {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
