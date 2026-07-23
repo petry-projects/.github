@@ -96,9 +96,10 @@ pr_auto_review_checks_ready() {
 
 # pr_auto_review_blocking_thread_count
 #   Reads a review-threads GraphQL response on stdin — the payload of
-#   `reviewThreads(first:100){nodes{isResolved isOutdated}}` under
+#   `reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{__typename}}}}}` under
 #   .data.repository.pullRequest — and prints the count of threads that should
-#   BLOCK auto-dispatch: those that are unresolved AND not outdated.
+#   BLOCK auto-dispatch: those that are unresolved AND not outdated AND not
+#   posted exclusively by advisory bots.
 #
 #   Why isOutdated (issue #806): dev-lead's fix-review cycle often addresses an
 #   advisory finding in a follow-up commit but never marks the thread resolved,
@@ -110,15 +111,29 @@ pr_auto_review_checks_ready() {
 #   unresolved-but-outdated thread as non-blocking clears the stall without the
 #   producer having to resolve the thread first.
 #
+#   Why advisory-bot exclusion (issue #892): threads whose comments are all
+#   from advisory bots (author.__typename == "Bot") represent automated
+#   nitpick feedback, not human review requests. When CI is green and the only
+#   unresolved threads are advisory-bot posts, the PR should still be eligible
+#   for dispatch — otherwise the gate stalls on a human to resolve bot threads
+#   that dev-lead's fix-review correctly returns no-changes for (empty machine
+#   findings). A thread is advisory-bot-only when comments.nodes is non-empty
+#   and every author in that set has __typename == "Bot".
+#
 #   Fail-safe: only an explicit isOutdated == true makes a thread non-blocking;
 #   a null / absent isOutdated on an unresolved thread still blocks, so a thread
-#   whose staleness we cannot confirm is never silently dropped. A GraphQL error
-#   body (no data / null nodes) yields 0.
+#   whose staleness we cannot confirm is never silently dropped. Similarly, a
+#   thread with absent or empty comments (cannot confirm all-bot) still blocks.
+#   A GraphQL error body (no data / null nodes) yields 0.
 pr_auto_review_blocking_thread_count() {
   jq -r '
+    def is_advisory_bot_thread:
+      (.comments?.nodes? // []) as $c
+      | ($c | length) > 0 and ([$c[] | .author?.__typename? == "Bot"] | all);
+
     [
       (.data.repository.pullRequest.reviewThreads.nodes[]? |
-      select((.isResolved == false) and (.isOutdated != true)))?
+      select((.isResolved == false) and (.isOutdated != true) and (is_advisory_bot_thread | not)))?
     ] | length
   '
 }

@@ -150,3 +150,68 @@ resp() {
   [ "$status" -eq 0 ]
   [ "$output" = "0" ]
 }
+
+# ── issue #892: advisory-bot-only threads are non-blocking ───────────────────
+# A thread whose comments are exclusively from bots (author.__typename == "Bot")
+# is advisory feedback, not a human review request. It should not block
+# dispatch — otherwise the gate stalls on a human to resolve bot threads that
+# dev-lead fix-review correctly returns no-changes for (empty machine findings).
+
+@test "blocking count: unresolved thread with all-bot comments → 0 (advisory bot, non-blocking)" {
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[{
+    "isResolved":false,"isOutdated":false,
+    "comments":{"nodes":[{"author":{"__typename":"Bot"}}]}
+  }]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "blocking count: unresolved thread with User comment → 1 (human thread, still blocks)" {
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[{
+    "isResolved":false,"isOutdated":false,
+    "comments":{"nodes":[{"author":{"__typename":"User"}}]}
+  }]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "blocking count: absent comments field → 1 (fail-safe: cannot confirm bot-only, still blocks)" {
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[{"isResolved":false,"isOutdated":false}]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "blocking count: empty comments nodes → 1 (fail-safe: no authors to confirm bot-only)" {
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[{
+    "isResolved":false,"isOutdated":false,
+    "comments":{"nodes":[]}
+  }]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "blocking count: mixed bot and human threads — only human thread blocks" {
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"User"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}}
+  ]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "blocking count: the #892 scenario — multiple advisory bot threads (gemini + codeant) → 0" {
+  # Scenario: CI green, CHANGES_REQUESTED from advisory bots (gemini-code-assist,
+  # codeant-ai), all 13 threads unresolved and not outdated. Without the fix,
+  # the gate counts 13 blocking threads and stalls dispatch even though every
+  # thread is advisory-bot feedback with no machine findings.
+  run pr_auto_review_blocking_thread_count <<<"$(resp '[
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}},
+    {"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"__typename":"Bot"}}]}}
+  ]')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
