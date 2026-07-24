@@ -28,11 +28,11 @@ load 'helpers/setup'
   local current=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
-    if [[ "$line" == *'\\' ]]; then
+    if [[ "$line" == *\\ ]]; then
       current+="${line%\\} "
     else
       current+="$line"
-      if [[ "$current" == *curl* ]] && ! [[ "$current" =~ ^[[:space:]]*'#' ]] && ! [[ "$current" =~ ^[[:space:]]*-?[[:space:]]*(name|uses|with): ]]; then
+      if [[ "$current" == *curl* ]] && ! [[ "$current" =~ ^[[:space:]]*# ]] && ! [[ "$current" =~ ^[[:space:]]*-?[[:space:]]*(name|uses|with): ]]; then
         curls+=("$current")
       fi
       current=""
@@ -43,7 +43,7 @@ load 'helpers/setup'
   [ "${#curls[@]}" -ge 1 ]
   for cmd in "${curls[@]}"; do
     # A finite retry budget (not unbounded) so a truly-down mirror still fails fast.
-    [[ "$cmd" =~ --retry[[:space:]=] ]]
+    [[ "$cmd" =~ --retry[[:space:]=][1-9] ]]
     # Retry on connection refused, which curl otherwise treats as non-transient.
     [[ "$cmd" == *"--retry-connrefused"* ]]
     # Retry on transient HTTP 5xx too, not just connection-level errors.

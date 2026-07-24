@@ -59,7 +59,9 @@ jobs:
           # Bounded retries so a transient GitHub Releases 5xx / connection blip
           # retries instead of failing the job (guards the fleet failure-rate
           # metric — see test/workflows/ci/install-resilience.bats, issue #894).
-          curl -sSfL --retry 3 --retry-delay 2 --retry-connrefused --retry-all-errors \
+          curl -sSfL --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 60 \
+            --retry 3 --retry-delay 2 --retry-connrefused --retry-all-errors \
             -o actionlint.tar.gz \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA}  actionlint.tar.gz" | sha256sum -c -
