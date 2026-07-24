@@ -96,7 +96,7 @@ pr_auto_review_checks_ready() {
 
 # pr_auto_review_blocking_thread_count
 #   Reads a review-threads GraphQL response on stdin — the payload of
-#   `reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{__typename}}}}}` under
+#   `reviewThreads(first:100){nodes{isResolved isOutdated comments(first:100){nodes{author{__typename}}}}}` under
 #   .data.repository.pullRequest — and prints the count of threads that should
 #   BLOCK auto-dispatch: those that are unresolved AND not outdated AND not
 #   posted exclusively by advisory bots.
