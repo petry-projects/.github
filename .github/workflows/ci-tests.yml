@@ -43,7 +43,7 @@ jobs:
             if sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bats; then
               exit 0
             fi
-            if [ $attempt -lt 3 ]; then
+            if [ "$attempt" -lt 3 ]; then
               echo "Apt install failed, retrying in 5 seconds..." >&2
               sleep 5
             fi
