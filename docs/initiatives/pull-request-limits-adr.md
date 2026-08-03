@@ -83,7 +83,7 @@ on GitHub's side. Stories 2 and 3 must be planned on that basis.
 | **dev-lead** | Yes | `dev-lead/*` branches | Largest single source in the baseline (§5). One PR per assigned issue. |
 | **Claude / agentic PRs** | Yes | `claude/*` branches | Code-agent PRs; a distinct source the planner did not separately name but the baseline surfaced. |
 | **initiative-driver / initiative-planner** | Yes (intermittent) | initiative branches | None open at measurement time, but a known burst source when an epic is fanned out. |
-| **auto-rebase fan-out** | **No** | n/a | Important correction: [auto-rebase-reusable.yml](../../.github/workflows/auto-rebase-reusable.yml) **updates the branches of existing PRs** — it does not open new ones. It is a **CI-load amplifier**, not a PR source. A count limit on open PRs will not throttle it directly; the relevant lever for it is its `eligibility` input (already `review-ready`). |
+| **auto-rebase fan-out** | **No** | n/a | Important correction: [auto-rebase-reusable.yml](../../.github/workflows/auto-rebase-reusable.yml) **updates the branches of existing PRs** — it does not open new ones. It is a **CI-load amplifier**, not a PR source. A count limit on open PRs will not throttle it directly; the relevant lever for it is its `eligibility` input (default: `all` — every behind PR). |
 
 ---
 
