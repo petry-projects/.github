@@ -20,17 +20,23 @@ load 'helpers/setup'
 # happen to appear in a neighbouring step.
 step_block_with() {
   local marker="$1"
-  local block="" out=""
+  local block="" out="" line=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
-    if [[ "$line" =~ ^\ \ \ \ \ \ -\  ]]; then
-      [[ "$block" == *"$marker"* ]] && out="$block"
+    if [[ "$line" == "      - "* ]]; then
+      if [[ "$block" == "      - "* ]]; then
+        [[ "$block" == *"$marker"* ]] && out="$block"
+      fi
       block="$line"$'\n'
     else
-      block+="$line"$'\n'
+      if [[ -n "$block" ]]; then
+        block+="$line"$'\n'
+      fi
     fi
   done < "$TT_WORKFLOW"
-  [[ "$block" == *"$marker"* ]] && out="$block"
+  if [[ "$block" == "      - "* ]]; then
+    [[ "$block" == *"$marker"* ]] && out="$block"
+  fi
   printf '%s' "$out"
 }
 
@@ -79,7 +85,10 @@ step_block_with() {
   local block
   block="$(step_block_with 'pip install')"
   [ -n "$block" ]
-  [[ "$block" =~ --retries[[:space:]=][1-9] ]]
+  local pip_cmd
+  pip_cmd="$(printf '%s' "$block" | grep -E '^[[:space:]]+pip install' | head -1)"
+  [ -n "$pip_cmd" ]
+  [[ "$pip_cmd" =~ --retries[[:space:]=][1-9] ]]
 }
 
 @test "install: the AgentShield npx fetch retries transient registry errors" {
@@ -89,9 +98,9 @@ step_block_with() {
   # error retries while a genuine high-severity finding still fails on the first
   # run instead of being retried three times.
   local block
-  block="$(step_block_with 'npx ')"
+  block="$(step_block_with 'ecc-agentshield')"
   [ -n "$block" ]
-  [[ "$block" == *"npm_config_fetch_retries"* ]]
+  [[ "$block" =~ npm_config_fetch_retries:[[:space:]]*\'?[1-9] ]]
 }
 
 @test "install: the gitleaks release download retries on transient failure" {
