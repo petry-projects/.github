@@ -20,7 +20,7 @@ REUSABLE="${TT_REPO_ROOT}/.github/workflows/auto-rebase-reusable.yml"
 
 @test "conflict-sentinel: every eligible behind PR is attempted via update-branch" {
   # The DIRTY PR must actually be attempted — the update-branch call is present.
-  run grep -F 'pulls/$PR_NUMBER/update-branch' "$REUSABLE"
+  run grep -E 'pulls/\$\{?PR_NUMBER\}?/update-branch' "$REUSABLE"
   [ "$status" -eq 0 ]
 }
 
