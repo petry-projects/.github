@@ -2222,7 +2222,8 @@ ensure_required_labels() {
   done
 }
 
-# Create all required labels (idempotent — uses --force to update if present)
+create_issue_for_finding() {
+  local repo="$1" category="$2" check="$3" severity="$4" detail="$5" standard_ref="$6"
 
   local title="Compliance: ${check}"
   # Normalize title for search

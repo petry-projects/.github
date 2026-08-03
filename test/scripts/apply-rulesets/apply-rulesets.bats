@@ -101,7 +101,7 @@ DEP_AUDIT_WF="$SCRIPT_DIR/.github/workflows/dependency-audit.yml"
 
 @test "dependency-audit.yml: carries no inline 'detect' job (would publish bare 'Detect ecosystems')" {
   run grep -Eq '^  detect:[[:space:]]*$' "$DEP_AUDIT_WF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # ── apply behavior: create / update / dry-run ─────────────────────────────────
