@@ -1032,21 +1032,17 @@ On each run the workflow:
    job in `claude-code-reusable.yml` to automatically resolve the conflict.
    If Claude cannot resolve it, it posts a clear failure comment with manual instructions.
 
-**Eligibility (fan-out restriction):** Updating *every* behind PR generates a large
-volume of redundant branch-update CI runs, most re-staled before review. The reusable
-therefore gates updates on a tunable `eligibility` input:
+**Eligibility:** Which behind PRs to update is selectable via a tunable
+`eligibility` input:
 
 | `eligibility` | Updates a behind PR when… |
 |---------------|---------------------------|
-| `review-ready` (default) | the PR is **non-draft** AND (it has a **current `APPROVED` review** OR carries the `ready_label`, default `auto-rebase:ready`) |
-| `all` | always — restores the original unrestricted fan-out |
+| `all` (default) | always — every behind PR, including drafts |
 
-Approval is determined from the **actual review states** (latest decision review per
-reviewer wins; a later `CHANGES_REQUESTED`/`DISMISSED` cancels an earlier `APPROVED`),
-**not** `reviewDecision`, which is `null` on repos without required reviews. The
-predicate lives in `.github/scripts/auto-rebase/lib/eligibility.sh` and is unit-tested
-via bats; new modes (e.g. a future "front-of-queue N") can be added there and selected
-through the `eligibility` input with no change to the workflow file.
+The predicate lives in `.github/scripts/auto-rebase/lib/eligibility.sh` and is
+unit-tested via bats; new modes (e.g. a future "front-of-queue N") can be added
+there and selected through the `eligibility` input with no change to the
+workflow file.
 
 **Secrets:** `GH_PAT_WORKFLOWS` is optional but **required for `claude-rebase` to be triggered** —
 comments posted with `GITHUB_TOKEN` do not fire `issue_comment` workflow runs (GitHub limitation).

@@ -13,28 +13,17 @@ workflow version. Set `tooling_ref` only to test a branch end-to-end.
 
 ## `lib/eligibility.sh`
 
-Pure, side-effect-free predicates. Source the file, then call:
+Pure, side-effect-free predicate. Source the file, then call:
 
 | Function | Input | Returns |
 |----------|-------|---------|
-| `auto_rebase_has_current_approval` | PR reviews JSON array on stdin (`GET /repos/{repo}/pulls/{n}/reviews`, oldest-first) | `0` if the PR has a current APPROVED review, else `1` |
-| `auto_rebase_has_ready_label LABEL` | PR labels JSON array on stdin | `0` if a label named `LABEL` is present, else `1` |
-| `auto_rebase_pr_eligible MODE IS_DRAFT IS_APPROVED HAS_LABEL` | mode + three `true`/`false` strings | `0` eligible, `1` not eligible, `2` unknown mode |
-
-### Approval semantics
-
-`auto_rebase_has_current_approval` inspects the **actual review states**, not
-`reviewDecision` (which is `null` on repos without required reviews). The most
-recent *decision* review per reviewer wins — a later `CHANGES_REQUESTED` or
-`DISMISSED` cancels an earlier `APPROVED`, while `COMMENTED`/`PENDING` reviews
-do not change a reviewer's stance.
+| `auto_rebase_pr_eligible MODE` | mode string | `0` eligible, `2` unknown mode |
 
 ### Eligibility modes (the tunable `eligibility` workflow input)
 
 | Mode | Meaning |
 |------|---------|
-| `review-ready` (default) | non-draft **AND** (current approval **OR** carries the ready label) |
-| `all` | every behind PR, including drafts — restores the original unrestricted fan-out |
+| `all` (default) | every behind PR, including drafts |
 
 New modes (e.g. a future "front-of-queue N") can be added here and selected by
 callers via the `eligibility` input with no change to the workflow file.
