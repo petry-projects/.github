@@ -4,22 +4,28 @@
 #
 # Unlike eligibility.bats / comments.bats (which unit-test the pure library
 # helpers), this drives the reusable workflow's actual "Update behind
-# non-Dependabot PRs" run-block end to end against a stubbed `gh`. The stub
-# models the approval-survival semantics under this org's default ruleset
-# configuration (dismiss_stale_reviews_on_push: false, require_last_push_approval: false):
+# non-Dependabot PRs" run-block end to end against a stubbed `gh`.
 #
-#   - update-branch with update_method=merge preserves the existing commits
-#     (no SHA rewrite) → under this org's ruleset, an existing APPROVED review
-#     survives and the PR stays mergeable.
-#   - update-branch with update_method=rebase rewrites SHAs → GitHub dismisses
-#     the approval (review decision drops back to REVIEW_REQUIRED).
+# Approval survives in this org because of the fleet-wide pr-quality ruleset
+# relax (dismiss_stale_reviews_on_push: false, require_last_push_approval: false)
+# applied across all repos — not because of any empirically confirmed inherent
+# merge-vs-rebase GitHub behavior. (The AC2 spike in .github-private#1437 was
+# intended to verify this live but resolved architecturally without that test.)
+#
+# The stub models approve-or-dismiss semantics to make the assertions non-vacuous:
+#   - update-branch with update_method=merge → the existing APPROVED review
+#     survives and the PR stays mergeable (modeled under the relaxed ruleset).
+#   - update-branch with update_method=rebase → the approval is dismissed
+#     (REVIEW_REQUIRED), used only for the control test.
 #
 # This test proves the #929 scenario (behind + conflict-free + non-draft
 # + APPROVED → updated + still APPROVED/mergeable) and confirms the workflow
-# uses merge method. The "still-approved" assertion is non-vacuous: a regression
-# to rebase would flip the modeled approval and fail this suite. However, this
-# test cannot detect a future reversion to a strict ruleset (require_last_push_approval: true)
-# — that would require a live integration check against the real ruleset config.
+# requests merge method. The "still-approved" assertion is non-vacuous: a
+# regression to rebase would flip the modeled approval and fail this suite.
+# Note: this test cannot detect a future reversion of the pr-quality ruleset
+# to strict settings (require_last_push_approval: true,
+# dismiss_stale_reviews_on_push: true) — that would need a live integration
+# check against the real ruleset config, not a stub.
 
 load 'helpers/setup'
 
@@ -138,7 +144,8 @@ _run_workflow() {
   [[ "$output" == *"Branch updated"* ]]
   # It updated with the approval-preserving method, never rebase.
   grep -qx "merge" "${STATE_DIR}/update-methods.log"
-  ! grep -qx "rebase" "${STATE_DIR}/update-methods.log"
+  run grep -qx "rebase" "${STATE_DIR}/update-methods.log"
+  [ "$status" -eq 1 ]
 }
 
 @test "approval-survival: the PR ends up-to-date after the update" {
