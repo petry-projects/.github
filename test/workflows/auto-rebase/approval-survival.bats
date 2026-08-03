@@ -5,20 +5,21 @@
 # Unlike eligibility.bats / comments.bats (which unit-test the pure library
 # helpers), this drives the reusable workflow's actual "Update behind
 # non-Dependabot PRs" run-block end to end against a stubbed `gh`. The stub
-# models the observable GitHub behavior this org relies on under its default
-# ruleset:
+# models the approval-survival semantics under this org's default ruleset
+# configuration (dismiss_stale_reviews_on_push: false, require_last_push_approval: false):
 #
 #   - update-branch with update_method=merge preserves the existing commits
-#     (no SHA rewrite) → an existing APPROVED review survives and the PR stays
-#     mergeable.
+#     (no SHA rewrite) → under this org's ruleset, an existing APPROVED review
+#     survives and the PR stays mergeable.
 #   - update-branch with update_method=rebase rewrites SHAs → GitHub dismisses
 #     the approval (review decision drops back to REVIEW_REQUIRED).
 #
-# So this test both proves the #929 scenario (behind + conflict-free + non-draft
-# + APPROVED → updated + still APPROVED/mergeable) AND is non-vacuous: the final
-# "still-approved" assertion only holds because the workflow uses merge. A
-# regression to rebase (the invariant guarded by merge-method.bats) would flip
-# the modeled approval and fail this suite too.
+# This test proves the #929 scenario (behind + conflict-free + non-draft
+# + APPROVED → updated + still APPROVED/mergeable) and confirms the workflow
+# uses merge method. The "still-approved" assertion is non-vacuous: a regression
+# to rebase would flip the modeled approval and fail this suite. However, this
+# test cannot detect a future reversion to a strict ruleset (require_last_push_approval: true)
+# — that would require a live integration check against the real ruleset config.
 
 load 'helpers/setup'
 
