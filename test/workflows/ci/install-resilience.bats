@@ -13,6 +13,27 @@
 
 load 'helpers/setup'
 
+# Emit the `run:` step block whose text contains the given marker substring.
+# Steps in ci.yml start at a 6-space "- " (the `steps:` child indent); every
+# deeper-indented line belongs to that step. Isolating a step lets each test
+# assert resilience on the one fetch it cares about without matching flags that
+# happen to appear in a neighbouring step.
+step_block_with() {
+  local marker="$1"
+  local block="" out=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ ^\ \ \ \ \ \ -\  ]]; then
+      [[ "$block" == *"$marker"* ]] && out="$block"
+      block="$line"$'\n'
+    else
+      block+="$line"$'\n'
+    fi
+  done < "$TT_WORKFLOW"
+  [[ "$block" == *"$marker"* ]] && out="$block"
+  printf '%s' "$out"
+}
+
 @test "install: the ci workflow exists" {
   [ -f "$TT_WORKFLOW" ]
 }
@@ -49,4 +70,38 @@ load 'helpers/setup'
     # Retry on transient HTTP 5xx too, not just connection-level errors.
     [[ "$cmd" == *"--retry-all-errors"* ]]
   done
+}
+
+@test "install: the yamllint pip install carries a bounded retry budget" {
+  # pip fetches wheels from PyPI/the configured index; a transient index blip
+  # would otherwise red the Lint job. An explicit --retries pins the budget so a
+  # future edit can't drop resilience and reintroduce a bare install.
+  local block
+  block="$(step_block_with 'pip install')"
+  [ -n "$block" ]
+  [[ "$block" =~ --retries[[:space:]=][1-9] ]]
+}
+
+@test "install: the AgentShield npx fetch retries transient registry errors" {
+  # `npx ecc-agentshield` downloads the package from the npm registry before
+  # scanning; npm's default of 2 fetch retries is thin. Bump it via npm's native
+  # fetch-retries config (env var, NOT a shell loop) so a transient registry
+  # error retries while a genuine high-severity finding still fails on the first
+  # run instead of being retried three times.
+  local block
+  block="$(step_block_with 'npx ')"
+  [ -n "$block" ]
+  [[ "$block" == *"npm_config_fetch_retries"* ]]
+}
+
+@test "install: the gitleaks release download retries on transient failure" {
+  # `gh release download` pulls gitleaks from GitHub Releases (which redirects to
+  # objects.githubusercontent.com) and has no native retry — the exact failure
+  # mode #894 fixed for the actionlint curl. Wrap it in a bounded retry loop with
+  # backoff so a transient blip retries instead of reding the Secret scan job.
+  local block
+  block="$(step_block_with 'gh release download')"
+  [ -n "$block" ]
+  [[ "$block" == *"for attempt in"* ]]
+  [[ "$block" == *"sleep"* ]]
 }
