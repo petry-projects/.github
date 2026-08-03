@@ -101,6 +101,7 @@ step_block_with() {
   block="$(step_block_with 'ecc-agentshield')"
   [ -n "$block" ]
   [[ "$block" =~ npm_config_fetch_retries:[[:space:]]*\'?[1-9] ]]
+  [[ "$block" =~ npm_config_fetch_timeout:[[:space:]]*\'?[1-9] ]]
 }
 
 @test "install: the gitleaks release download retries on transient failure" {
@@ -113,4 +114,5 @@ step_block_with() {
   [ -n "$block" ]
   [[ "$block" == *"for attempt in"* ]]
   [[ "$block" == *"sleep"* ]]
+  [[ "$block" == *"timeout"* ]]
 }
