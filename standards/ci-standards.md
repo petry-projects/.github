@@ -453,7 +453,7 @@ thin caller stubs deployed by `deploy-standard-workflows.sh`.
 > [§9 Feature Ideation](#9-feature-ideation-feature-ideationyml--bmad-method-repos).
 
 In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#8-feature-ideation-feature-ideationyml--bmad-method-repos)
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
