@@ -19,7 +19,7 @@ Pure, side-effect-free helpers. Source the file, then call:
 |----------|-------|---------|
 | `pr_auto_review_required_contexts` | branch-rules JSON on stdin (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) | prints a compact JSON array of required status-check context names (`[]` if none / non-array) |
 | `pr_auto_review_checks_ready REQUIRED_JSON SELF_NAME` | checks JSON on stdin (`gh pr checks --json bucket,name`) | prints a one-line reason; `0` ready, `1` not ready |
-| `pr_auto_review_blocking_thread_count` | review-threads JSON on stdin (`reviewThreads(first:100){nodes{isResolved isOutdated}}`) | prints the count of **blocking** threads — unresolved AND not outdated |
+| `pr_auto_review_blocking_thread_count` | review-threads JSON on stdin (`reviewThreads(first:100){nodes{isResolved isOutdated comments(first:100){nodes{author{__typename}}}}}`) | prints the count of **blocking** threads — unresolved AND not outdated AND not posted exclusively by advisory bots |
 | `pr_auto_review_ready STATE IS_DRAFT CHECKS_JSON REQUIRED_JSON SELF_NAME REVIEW_DECISION BLOCKING_THREAD_COUNT` | the PR facts the workflow gathers (all as arguments — no stdin) | prints the **decision class** on stdout; `0` ready, `1` not ready |
 
 ## `lib/sweep.sh`

@@ -113,7 +113,7 @@ jobs:
       # `contents:` permission is needed from callers.
       - name: Checkout ready-check tooling
         if: steps.pr.outputs.skip != 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: petry-projects/.github
           ref: ${{ github.job_workflow_sha }}
@@ -211,7 +211,10 @@ jobs:
           # silently reporting 0 blocking threads and dispatching. The pure
           # function only has to tolerate a well-formed-but-empty payload.
           # shellcheck disable=SC2016  # $owner/$repo/$number are GraphQL variable refs, not shell vars
-          _GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated}}}}}'
+          _GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)'
+          # shellcheck disable=SC2016
+          _GQL+='{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated'
+          _GQL+=' comments(first:100){nodes{author{__typename}}}}}}}}'
           THREADS_JSON=$(gh api graphql \
             -f "query=$_GQL" \
             -f owner="${REPO%%/*}" \
