@@ -21,5 +21,5 @@ REUSABLE="${TT_REPO_ROOT}/.github/workflows/auto-rebase-reusable.yml"
 
 @test "merge-method: update-branch is never called with the rebase method" {
   run grep -E 'update_method[=:][[:space:]]*rebase' "$REUSABLE"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

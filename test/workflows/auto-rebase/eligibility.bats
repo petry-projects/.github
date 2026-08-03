@@ -29,9 +29,9 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-@test "pr_eligible: the removed review-ready mode is rejected as unknown (exit 2)" {
+@test "pr_eligible: the deprecated review-ready mode is treated as 'all' (exit 0)" {
   run auto_rebase_pr_eligible review-ready
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 0 ]
 }
 
 # ── dead review-ready/approval plumbing is gone ──────────────────────────────

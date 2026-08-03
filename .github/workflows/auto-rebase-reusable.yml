@@ -52,6 +52,15 @@ on:
         required: false
         default: 'all'
         type: string
+      ready_label:
+        description: |
+          Deprecated — this input is accepted but silently ignored so callers
+          that were passing it (when eligibility: review-ready was supported)
+          continue to dispatch without a GitHub Actions validation error.
+          Remove it from your caller when convenient.
+        required: false
+        default: ''
+        type: string
       tooling_ref:
         description: |
           Ref of petry-projects/.github to source the auto-rebase scripts from.

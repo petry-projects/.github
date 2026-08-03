@@ -23,6 +23,12 @@ auto_rebase_pr_eligible() {
     all)
       return 0
       ;;
+    review-ready)
+      # Deprecated alias: review-ready was removed in issue #927; treat as `all`
+      # so existing callers continue to work without breaking.
+      echo "auto_rebase_pr_eligible: 'review-ready' is deprecated and will be removed; use 'all' instead" >&2
+      return 0
+      ;;
     *)
       echo "auto_rebase_pr_eligible: unknown eligibility mode '$mode'" >&2
       return 2
