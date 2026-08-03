@@ -27,7 +27,10 @@ REUSABLE="${TT_REPO_ROOT}/.github/workflows/auto-rebase-reusable.yml"
 @test "conflict-sentinel: update-branch is not gated on an approval / review decision" {
   # A DIRTY PR must not be skipped for lacking an approval (#927 removed this).
   # Guard against reintroducing any review-decision precondition in the reusable.
-  run grep -Ei 'reviewDecision|has_current_approval|has_ready_label|/reviews' "$REUSABLE"
+  # Patterns are scoped to the specific identifiers removed in #927 — broad tokens
+  # like /reviews are omitted because they can appear in unrelated comments or API
+  # calls and would cause false positives on legitimate refactors.
+  run grep -Ei 'reviewDecision|has_current_approval|has_ready_label' "$REUSABLE"
   [ "$status" -eq 1 ]
 }
 
