@@ -11,15 +11,13 @@
 # Solution: after every push to main (typically a merged PR), this workflow:
 #   1. Finds all open non-Dependabot PRs from the same repo (no fork PRs)
 #   2. Keeps only the PRs eligible under the `eligibility` input (default
-#      `review-ready`: non-draft AND (current APPROVED review OR a ready label))
+#      `all`: every behind PR, including drafts)
 #   3. Updates the remaining behind PRs using the merge method (not rebase)
 #
-# Why the eligibility gate (issue #465): updating *every* behind PR fans out
-# 170-220 redundant branch-update CI runs/day, most re-staled before review.
-# Restricting to review-ready PRs cuts that waste for free. The predicate lives
-# in .github/scripts/auto-rebase/lib/eligibility.sh (unit-tested via bats) and
-# is selectable via the `eligibility` input so a future "front-of-queue N"
-# variant needs no change to this file.
+# The eligibility predicate lives in
+# .github/scripts/auto-rebase/lib/eligibility.sh (unit-tested via bats) and is
+# selectable via the `eligibility` input so a future "front-of-queue N" variant
+# needs no change to this file.
 #
 # Skips Dependabot PRs — those are handled by dependabot-rebase-reusable.yml.
 # Skips fork PRs — update-branch requires push access to the head branch.
@@ -48,19 +46,11 @@ on:
       eligibility:
         description: |
           Which behind PRs to update:
-            review-ready (default) — non-draft AND (current APPROVED review OR
-              the `ready_label`). Restricts fan-out to review-ready PRs.
-            all — every behind PR, including drafts. Escape hatch that restores
-              the original unrestricted fan-out.
+            all (default) — every behind PR, including drafts.
           New modes can be added to lib/eligibility.sh and selected here without
           changing this workflow.
         required: false
-        default: 'review-ready'
-        type: string
-      ready_label:
-        description: 'Label that opts a non-draft PR into auto-rebase even without an approval.'
-        required: false
-        default: 'auto-rebase:ready'
+        default: 'all'
         type: string
       tooling_ref:
         description: |
@@ -111,7 +101,6 @@ jobs:
           HAS_PAT: ${{ (secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS) != '' }}
           REPO: ${{ github.repository }}
           ELIGIBILITY: ${{ inputs.eligibility }}
-          READY_LABEL: ${{ inputs.ready_label }}
         run: |
           # shellcheck source=/dev/null
           . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/eligibility.sh
@@ -128,63 +117,18 @@ jobs:
           fi
 
           while IFS=' ' read -r PR_NUMBER HEAD_REF; do
-            # Fetch PR metadata once: base branch, draft state, labels.
-            PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
-            BASE_BRANCH=$(jq -r '.base.ref' <<< "$PR_JSON")
-            IS_DRAFT=$(jq -r '.draft' <<< "$PR_JSON")
+            BASE_BRANCH=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.base.ref')
 
-            # Eligibility gate (issue #465): only update review-ready PRs.
-            # Approval is read from the actual review states, not reviewDecision
-            # (which is null on repos without required reviews).
-            if auto_rebase_has_ready_label "$READY_LABEL" <<< "$(jq -c '.labels' <<< "$PR_JSON")"; then
-              HAS_LABEL=true
-            else
-              HAS_LABEL=false
-            fi
-            if gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" | jq -s 'add | .' | auto_rebase_has_current_approval; then
-              IS_APPROVED=true
-            else
-              IS_APPROVED=false
-            fi
-
+            # Eligibility gate: which behind PRs to update, selectable via the
+            # `eligibility` input (default `all` — every behind PR).
             ELIG=0
-            auto_rebase_pr_eligible "$ELIGIBILITY" "$IS_DRAFT" "$IS_APPROVED" "$HAS_LABEL" || ELIG=$?
+            auto_rebase_pr_eligible "$ELIGIBILITY" || ELIG=$?
             if [[ "$ELIG" -eq 2 ]]; then
               echo "::error::Unknown eligibility mode '$ELIGIBILITY'"
               exit 1
             fi
             if [[ "$ELIG" -ne 0 ]]; then
-              echo "PR #$PR_NUMBER ($HEAD_REF) not eligible under '$ELIGIBILITY' (draft=$IS_DRAFT approved=$IS_APPROVED label=$HAS_LABEL) — skipping"
-
-              # Escalate silently-rotting PRs (issue #711): a skipped PR that is
-              # already CONFLICTING will never be updated by auto-rebase and cannot
-              # be approved while red (pr-review skips red PRs) — a deadlock that
-              # rots the PR for weeks with no signal. Surface it exactly once so a
-              # human can act. mergeable_state comes free from PR_JSON (no extra
-              # API call); it may be "unknown" until GitHub computes it, in which
-              # case a later run catches it. Idempotent via the stuck sentinel.
-              MERGE_STATE=$(jq -r '.mergeable_state // "unknown"' <<< "$PR_JSON")
-              if [[ "$MERGE_STATE" == "dirty" ]]; then
-                STUCK_SENTINEL="<!-- auto-rebase-stuck -->"
-                STUCK_POSTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-                  --json comments --jq "[.comments[] | select(.body | contains(\"$STUCK_SENTINEL\"))] | length" 2>/dev/null || echo "-1")
-                if [[ "$STUCK_POSTED" -eq 0 ]]; then
-                  echo "  Conflicting + not review-ready — posting one-time manual-attention notice"
-                  STUCK_BODY="$STUCK_SENTINEL"
-                  STUCK_BODY+=$'\n'"**Auto-rebase is skipping this PR.** It has merge conflicts with \`$BASE_BRANCH\`"
-                  STUCK_BODY+=" but is not review-ready (draft=$IS_DRAFT, approved=$IS_APPROVED,"
-                  STUCK_BODY+=" \`$READY_LABEL\`=$HAS_LABEL), so auto-rebase will not update it — and it cannot be"
-                  STUCK_BODY+=" approved while red. Left alone it will not progress."
-                  STUCK_BODY+=$'\n\n'"To unblock, do one of:"
-                  STUCK_BODY+=$'\n'"- add the \`$READY_LABEL\` label (opts it into auto-rebase without an approval), or"
-                  STUCK_BODY+=$'\n'"- get it approved, or"
-                  STUCK_BODY+=$'\n'"- resolve manually:"
-                  STUCK_BODY+=$'\n'"\`\`\`"$'\n'"git fetch origin"$'\n'"git merge origin/$BASE_BRANCH"$'\n'"# resolve conflicts, then:"$'\n'"git add . && git commit && git push"$'\n'"\`\`\`"
-                  # Best-effort: a comment-side failure (e.g. the 2500-comment cap)
-                  # must not abort the step or starve other PRs — logged and swallowed.
-                  auto_rebase_post_comment_best_effort "$PR_NUMBER" "$REPO" "$STUCK_BODY"
-                fi
-              fi
+              echo "PR #$PR_NUMBER ($HEAD_REF) not eligible under '$ELIGIBILITY' — skipping"
               continue
             fi
 
