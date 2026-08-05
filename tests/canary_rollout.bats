@@ -3738,3 +3738,27 @@ YML
   grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
   grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
 }
+
+# ── workflow timeout headroom (#939) ─────────────────────────────────────────
+# Fleet Monitor flagged canary-rollout.yml as DEGRADED (50% failure): the
+# scheduled fleet sweep's p50 was 877s and p95 988s against a 15-min (900s)
+# job timeout, so the tail of every sweep was being killed at the ceiling. The
+# owner-wide run-history reads grow with the fleet, so the bound must sit well
+# above the observed p95 (~16.5 min). This guard fails loud if the canary job's
+# timeout-minutes is dropped back below that headroom floor.
+WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
+
+@test "canary-rollout.yml: canary job declares a timeout-minutes" {
+  run grep -E '^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+' "$WORKFLOW"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rollout.yml: canary job timeout-minutes keeps headroom over the observed p95 (#939)" {
+  # Observed p95 was 988s (~16.5 min); require >= 20 min so the fleet sweep's
+  # tail is not killed at the ceiling (the old 15-min bound must not return).
+  local mins
+  mins="$(grep -E '^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+' "$WORKFLOW" \
+    | head -n1 | grep -oE '[0-9]+')"
+  [ -n "$mins" ]
+  [ "$mins" -ge 20 ]
+}
