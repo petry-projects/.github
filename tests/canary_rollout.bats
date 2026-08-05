@@ -3749,16 +3749,32 @@ YML
 WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
 
 @test "canary-rollout.yml: canary job declares a timeout-minutes" {
-  run grep -E '^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+' "$WORKFLOW"
-  [ "$status" -eq 0 ]
+  local minutes
+  minutes="$(awk '
+    /^  canary:[[:space:]]*$/ { in_canary=1; next }
+    in_canary && /^  [^[:space:]]/ { in_canary=0 }
+    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+/ {
+      match($0, /[0-9]+/)
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+  ' "$WORKFLOW")"
+  [ -n "$minutes" ]
 }
 
 @test "canary-rollout.yml: canary job timeout-minutes keeps headroom over the observed p95 (#939)" {
   # Observed p95 was 988s (~16.5 min); require >= 20 min so the fleet sweep's
   # tail is not killed at the ceiling (the old 15-min bound must not return).
-  local mins
-  mins="$(grep -E '^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+' "$WORKFLOW" \
-    | head -n1 | grep -oE '[0-9]+')"
-  [ -n "$mins" ]
-  [ "$mins" -ge 20 ]
+  local minutes
+  minutes="$(awk '
+    /^  canary:[[:space:]]*$/ { in_canary=1; next }
+    in_canary && /^  [^[:space:]]/ { in_canary=0 }
+    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+/ {
+      match($0, /[0-9]+/)
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+  ' "$WORKFLOW")"
+  [ -n "$minutes" ]
+  [ "$minutes" -ge 20 ]
 }
