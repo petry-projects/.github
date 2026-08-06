@@ -452,6 +452,11 @@ thin caller stubs deployed by `deploy-standard-workflows.sh`.
 > for any repo whose stub is still on the seed placeholder. See
 > [§9 Feature Ideation](#9-feature-ideation-feature-ideationyml--bmad-method-repos).
 
+In addition, BMAD Method-enabled repositories MUST also include the conditional
+[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
+documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
+for the template.
+
 ### 1. CI Pipeline (`ci.yml`)
 
 The primary build-and-test workflow. Structure varies by tech stack but must include:
