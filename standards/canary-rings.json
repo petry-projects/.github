@@ -207,7 +207,15 @@
         "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
         "baseline_window_days": 14,
         "baseline_spike_cap_multiple": 3,
-        "benign_failure_classes": [],
+        "benign_failure_classes": [
+          {
+            "id": "runner-action-resolution-outage",
+            "workflow": "Auto-rebase non-Dependabot PRs",
+            "step": "Set up job",
+            "reason": "#943 \u2014 the run failed at 'Set up job' with 'Failed to resolve action download info: Error: Service Unavailable' while the runner was fetching action metadata from GitHub's backend, retried twice with backoff, then gave up \u2014 entirely before checkout or any candidate reusable step ran. Confirmed environmental: the SAME candidate/failure evaluated for the next->ring0 transition (differs=0 there) was independently auto-triaged PRE_EXISTING, and 14+ surrounding runs on the same candidate all succeeded. version_independent: true because the mechanism (GitHub Actions action-distribution backend outage) is provable from the 'Service Unavailable' message itself and cannot be produced by anything the candidate's own workflow YAML contains \u2014 distinct from a generic 'Set up job' signature that could also mask a candidate breaking the reusable's own YAML (see add-to-project's non-version_independent class for that case).",
+            "version_independent": true
+          }
+        ],
         "control": {
           "allow_pre_existing": false
         },
