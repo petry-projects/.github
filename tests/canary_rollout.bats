@@ -2220,6 +2220,40 @@ GITEOF
   [ "$status" -eq 0 ]
 }
 
+# ── canary-rings.json: auto-rebase infra-outage benign class (#943) ──────────────
+
+@test "canary-rings.json: auto-rebase gate carries a 'Set up job' infra-outage benign class (#943)" {
+  run jq -e '.agents["auto-rebase"].gate.benign_failure_classes | type == "array" and length >= 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["auto-rebase"].gate.benign_failure_classes[]
+             | select(.id=="runner-action-resolution-outage")
+             | has("id") and has("reason") and has("step") and has("workflow")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "canary-rings.json: auto-rebase runner-action-resolution-outage class matches a 'Set up job' failure of its caller workflow (#943)" {
+  wf_re="$(jq -r '.agents["auto-rebase"].gate.benign_failure_classes[]
+                  | select(.id=="runner-action-resolution-outage") | .workflow' "$RINGS")"
+  step_re="$(jq -r '.agents["auto-rebase"].gate.benign_failure_classes[]
+                    | select(.id=="runner-action-resolution-outage") | .step' "$RINGS")"
+  [ "$(benign_match 'Auto-rebase non-Dependabot PRs' 'Set up job' "$wf_re" "$step_re")" = "yes" ]
+  # a normal step failure inside the reusable is NOT swept up by this class
+  [ "$(benign_match 'Auto-rebase non-Dependabot PRs' 'Rebase PR' "$wf_re" "$step_re")" = "no" ]
+  # and it does not leak onto an unrelated workflow
+  [ "$(benign_match 'Dev-Lead Agent' 'Set up job' "$wf_re" "$step_re")" = "no" ]
+}
+
+@test "canary-rings.json: auto-rebase runner-action-resolution-outage IS version_independent — unlike add-to-project's 'Set up job' class (#943)" {
+  # The failure is a GitHub Actions action-distribution backend outage provable from the
+  # 'Service Unavailable' message; it cannot be produced by anything in the reusable's
+  # own YAML, so the class stays active even at differs=1 (contrast: add-to-project's
+  # reusable-setup-restricted-secrets, which is NOT version_independent).
+  run jq -e '.agents["auto-rebase"].gate.benign_failure_classes[]
+             | select(.id=="runner-action-resolution-outage")
+             | .version_independent == true' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 # ── SUSPECT triage: suspect_failure_classes (#668 increment 2, #675) ─────────────
 # A *possibly-candidate-caused* failure class (dev-lead exit-124 workload timeouts) gets
 # the full REGRESSION verdict at differs=1 today, forcing ad-hoc human diagnosis each time.
