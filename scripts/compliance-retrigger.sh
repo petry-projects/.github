@@ -86,6 +86,42 @@ info()  { echo "[info]  $*"; }
 warn()  { echo "[warn]  $*" >&2; }
 error() { echo "[error] $*" >&2; }
 
+# Number of attempts for the org-wide search/issues calls, and the linear-backoff
+# base (seconds) between them. A single transient search failure (rate limit / 5xx)
+# used to abort the whole run and fail the hourly scheduled workflow — the ~11%
+# failure rate Fleet Monitor flagged (#948). Retrying absorbs those transient
+# blips while a genuine, persistent outage still surfaces after the budget is
+# exhausted. Both overridable via env so tests can run with zero delay.
+GH_SEARCH_ATTEMPTS="${GH_SEARCH_ATTEMPTS:-3}"
+GH_API_RETRY_BASE_DELAY="${GH_API_RETRY_BASE_DELAY:-2}"
+if ! [[ "$GH_SEARCH_ATTEMPTS" =~ ^[0-9]+$ ]] || [ "$GH_SEARCH_ATTEMPTS" -lt 1 ]; then
+  error "GH_SEARCH_ATTEMPTS must be an integer >= 1 (got: '${GH_SEARCH_ATTEMPTS}')"
+  exit 1
+fi
+if ! [[ "$GH_API_RETRY_BASE_DELAY" =~ ^[0-9]+$ ]]; then
+  error "GH_API_RETRY_BASE_DELAY must be a non-negative integer (got: '${GH_API_RETRY_BASE_DELAY}')"
+  exit 1
+fi
+
+# gh_api_search <query...> — run a (paginated) `gh api` search, capturing combined
+# stdout+stderr into the global GH_API_SEARCH_OUT and retrying transient failures
+# with linear backoff. Returns the last attempt's exit code. Kept separate from a
+# --jq wrapper because callers here need the raw response body to detect
+# error-JSON pages returned with a zero exit code.
+gh_api_search() {
+  local attempt rc=0
+  GH_API_SEARCH_OUT=""
+  for ((attempt=1; attempt<=GH_SEARCH_ATTEMPTS; attempt++)); do
+    GH_API_SEARCH_OUT=$(gh api "$@" 2>&1) && rc=0 || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    if [ "$attempt" -lt "$GH_SEARCH_ATTEMPTS" ]; then
+      warn "search/issues API call failed (exit $rc), attempt ${attempt}/${GH_SEARCH_ATTEMPTS} — retrying in $((attempt * GH_API_RETRY_BASE_DELAY))s"
+      sleep "$((attempt * GH_API_RETRY_BASE_DELAY))"
+    fi
+  done
+  return "$rc"
+}
+
 # has_open_pr / cycle_label live in lib/dev-lead-retrigger.sh as
 # dl_dev_lead_active() and dl_cycle_trigger_label(), shared with the weekly
 # compliance audit so both stay in sync with dev-lead's branch-naming
@@ -121,12 +157,13 @@ retrigger_stale_issues() {
   # walks all result pages: with the throttle, a single repo's large backlog would
   # otherwise fill the first 100 results and starve every other repo for the run.
   local raw rc
-  raw=$(gh api --paginate \
+  gh_api_search --paginate \
     "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${TRIGGER_LABEL}+state:open+is:issue&sort=created&order=asc&per_page=100" \
-    2>&1) && rc=0 || rc=$?
+    && rc=0 || rc=$?
+  raw="$GH_API_SEARCH_OUT"
 
   if [ "$rc" -ne 0 ]; then
-    error "search/issues API call failed (exit $rc). Response:"
+    error "search/issues API call failed (exit $rc) after ${GH_SEARCH_ATTEMPTS} attempts. Response:"
     echo "$raw" | head -5 >&2
     error "Cannot retrigger issues; aborting. Check GH_TOKEN scope — token must be able to read issues across all repos in org ${ORG}."
     return 1
@@ -215,20 +252,23 @@ retrigger_stale_issues() {
   # issue both recovers the lost event and acts as a lazy per-issue migration.
   if [ -n "${LEGACY_TRIGGER_LABEL:-}" ] && [ "$LEGACY_TRIGGER_LABEL" != "$TRIGGER_LABEL" ]; then
     info "Sweeping pre-migration '$LEGACY_TRIGGER_LABEL'-labeled issues..."
-    local legacy_issues legacy_rc
+    local legacy_raw legacy_issues legacy_rc
     # Exclude issues that already carry TRIGGER_LABEL — they were handled above.
     # is:issue is required (HTTP 422 otherwise); oldest-first matches the primary
     # sweep; --paginate walks all result pages so issues beyond the first 100 are
     # included.
-    legacy_issues=$(gh api --paginate \
+    gh_api_search --paginate \
       "search/issues?q=org:${ORG}+label:${AUDIT_LABEL}+label:${LEGACY_TRIGGER_LABEL}+-label:${TRIGGER_LABEL}+state:open+is:issue&sort=created&order=asc&per_page=100" \
-      --jq '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}' \
-      2>&1) && legacy_rc=0 || legacy_rc=$?
+      && legacy_rc=0 || legacy_rc=$?
+    legacy_raw="$GH_API_SEARCH_OUT"
     if [ "$legacy_rc" -ne 0 ]; then
-      warn "Legacy label sweep search failed (exit $legacy_rc) — pre-migration issues not swept this run"
+      warn "Legacy label sweep search failed (exit $legacy_rc after ${GH_SEARCH_ATTEMPTS} attempts) — pre-migration issues not swept this run"
+    elif echo "$legacy_raw" | jq -se 'any(.[]; has("message") and (.items | not))' >/dev/null 2>&1; then
+      warn "Legacy label sweep search returned an error response — pre-migration issues not swept this run"
     else
+      legacy_issues=$(echo "$legacy_raw" | jq -c '.items[] | {number: .number, repo: (.repository_url | split("/") | last), created_at: .created_at, title: .title}')
       local legacy_total
-      legacy_total=$(echo "$legacy_issues" | jq -s 'length')
+      legacy_total=$(echo "$legacy_raw" | jq -rs '.[0].total_count // 0')
       info "Legacy sweep found ${legacy_total} matching issues"
       while IFS= read -r issue_json; do
         [ -z "$issue_json" ] && continue
