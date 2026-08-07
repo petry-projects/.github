@@ -42,14 +42,51 @@ teardown() {
   [ "$output" -ge 2 ]
 }
 
+@test "legacy sweep recovers when its search/issues call fails transiently" {
+  # Primary sweep succeeds; legacy sweep's first attempt fails transiently.
+  # TRIGGER_LABEL != LEGACY_TRIGGER_LABEL so both sweeps run.
+  GH_TOKEN=fake \
+    ORG=petry-projects \
+    DRY_RUN=true \
+    TRIGGER_LABEL=dev-lead \
+    LEGACY_TRIGGER_LABEL=claude \
+    GH_SEARCH_ATTEMPTS=3 \
+    GH_STUB_SEARCH_FAIL_START=2 \
+    GH_STUB_SEARCH_FAIL_TIMES=1 \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -eq 0 ]
+  # Primary: 1 call; legacy: 2 calls (1 fail + 1 success) = 3 total.
+  run grep -c "search/issues" "$GH_STUB_LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 3 ]
+}
+
+@test "zero-exit error JSON from search endpoint fails the run" {
+  # gh api exits 0 but returns an error object — the script must detect it
+  # and fail rather than treating the run as successful.
+  GH_TOKEN=fake \
+    ORG=petry-projects \
+    DRY_RUN=true \
+    GH_STUB_SEARCH_ZERO_EXIT_ERROR_TIMES=1 \
+    run bash "$TT_SCRIPT"
+
+  [ "$status" -ne 0 ]
+}
+
 @test "still fails when every search/issues attempt fails" {
   # A persistent outage (more failures than the retry budget) must still surface
   # as a non-zero exit — we must not silently swallow a real outage.
   GH_TOKEN=fake \
     ORG=petry-projects \
     DRY_RUN=true \
+    GH_SEARCH_ATTEMPTS=2 \
     GH_STUB_SEARCH_FAIL_TIMES=99 \
     run bash "$TT_SCRIPT"
 
   [ "$status" -ne 0 ]
+  # The stub was hit exactly GH_SEARCH_ATTEMPTS=2 times before giving up.
+  run grep -c "search/issues" "$GH_STUB_LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 2 ]
 }
