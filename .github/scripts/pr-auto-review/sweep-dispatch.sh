@@ -32,6 +32,8 @@
 #   MAX_PER_RUN      max PRs to dispatch per run        (default: 8)
 #   DISPATCH_REPO    repository_dispatch target repo    (default: petry-projects/.github-private)
 #   DRY_RUN          "1" → log intended dispatches only
+#   DISPATCH_RETRIES     attempts per dispatch before giving up (default: 3)
+#   DISPATCH_RETRY_SLEEP seconds between dispatch retries       (default: 5)
 set -euo pipefail
 
 _dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +47,8 @@ SWEEP_LABEL="${SWEEP_LABEL:-standards-sync}"
 MAX_PER_RUN="${MAX_PER_RUN:-8}"
 DISPATCH_REPO="${DISPATCH_REPO:-petry-projects/.github-private}"
 DRY_RUN="${DRY_RUN:-0}"
+DISPATCH_RETRIES="${DISPATCH_RETRIES:-3}"
+DISPATCH_RETRY_SLEEP="${DISPATCH_RETRY_SLEEP:-5}"
 
 # ── Enumerate open, non-draft PRs carrying the sweep label, org-wide ──────────
 # `gh search prs` spans every repo the token can see in one call, so the sweep
@@ -86,7 +90,16 @@ evaluate_pr() {
   local checks required_json rules_json threads_json blocking_thread_count
   repo=$(printf '%s' "$pr_url" | sed 's|https://github.com/||; s|/pull/.*||')
 
-  pr_meta=$(gh pr view "$pr_url" --json state,isDraft,number,reviewDecision,baseRefName)
+  # Fact-gathering is best-effort per PR: a transient API failure on one PR must
+  # not dispatch on garbage nor (via a downstream jq error) abort the sweep. On a
+  # hard fetch failure emit the skip-error class and skip this PR — the sweep is
+  # idempotent and re-runs every cycle, so it is retried next time (#947).
+  if ! pr_meta=$(gh pr view "$pr_url" --json state,isDraft,number,reviewDecision,baseRefName 2>/dev/null) \
+     || [ -z "$pr_meta" ]; then
+    echo "::warning::could not fetch PR metadata for ${pr_url} — skipping this cycle" >&2
+    echo "skip-error"
+    return 1
+  fi
   state=$(printf '%s' "$pr_meta" | jq -r '.state')
   is_draft=$(printf '%s' "$pr_meta" | jq -r '.isDraft')
   pr_number=$(printf '%s' "$pr_meta" | jq -r '.number')
@@ -108,11 +121,16 @@ evaluate_pr() {
   # shellcheck disable=SC2016
   gql+='{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated'
   gql+=' comments(first:100){nodes{author{__typename}}}}}}}}'
-  threads_json=$(gh api graphql \
+  if ! threads_json=$(gh api graphql \
     -f "query=$gql" \
     -f owner="${repo%%/*}" \
     -f repo="${repo##*/}" \
-    -F number="${pr_number}")
+    -F number="${pr_number}" 2>/dev/null) \
+     || [ -z "$threads_json" ]; then
+    echo "::warning::could not fetch review threads for ${pr_url} — skipping this cycle" >&2
+    echo "skip-error"
+    return 1
+  fi
   blocking_thread_count=$(printf '%s' "$threads_json" | pr_auto_review_blocking_thread_count)
 
   pr_auto_review_ready \
@@ -120,27 +138,60 @@ evaluate_pr() {
     "" "$review_decision" "$blocking_thread_count"
 }
 
+# dispatch_review PR_URL
+#   Fire the repository_dispatch that wakes the review agent for PR_URL, with
+#   bounded retries on transient API failures (secondary rate limits / 5xx /
+#   network blips). Returns 0 once a dispatch succeeds, non-zero if every attempt
+#   failed. Never aborts the caller: the failing `gh api` is tested in an `if`,
+#   so `set -e` stays suppressed and a persistent failure is handled by the loop
+#   rather than killing the whole sweep (#947).
+dispatch_review() {
+  local pr_url="$1" attempt=1
+  while [ "$attempt" -le "$DISPATCH_RETRIES" ]; do
+    if gh api \
+        --method POST \
+        --header "Accept: application/vnd.github+json" \
+        "/repos/${DISPATCH_REPO}/dispatches" \
+        --field event_type=pr-review-mention \
+        --field "client_payload[pr_url]=${pr_url}"; then
+      return 0
+    fi
+    echo "::warning::dispatch attempt ${attempt}/${DISPATCH_RETRIES} failed for ${pr_url}" >&2
+    attempt=$((attempt + 1))
+    if [ "$attempt" -le "$DISPATCH_RETRIES" ]; then
+      sleep "$DISPATCH_RETRY_SLEEP"
+    fi
+  done
+  return 1
+}
+
 dispatched=0
+failed=0
 for pr_url in "${CANDIDATES[@]}"; do
   [ -z "$pr_url" ] && continue
   echo "::group::${pr_url}"
   if decision=$(evaluate_pr "$pr_url"); then
     if [ "$DRY_RUN" = "1" ]; then
       echo "[dry-run] would dispatch review agent for ${pr_url} (decision=${decision})"
-    else
-      gh api \
-        --method POST \
-        --header "Accept: application/vnd.github+json" \
-        "/repos/${DISPATCH_REPO}/dispatches" \
-        --field event_type=pr-review-mention \
-        --field "client_payload[pr_url]=${pr_url}"
+      dispatched=$((dispatched + 1))
+    elif dispatch_review "$pr_url"; then
       echo "::notice::Sweep dispatched auto-review for ${pr_url}"
+      dispatched=$((dispatched + 1))
+    else
+      # Transient, exhausted retries: log and carry on. The sweep is idempotent
+      # and re-runs every cycle, so this PR is picked up again next time — one
+      # flaky dispatch must never fail the run or strand the rest (#947).
+      echo "::warning::Sweep failed to dispatch ${pr_url} after ${DISPATCH_RETRIES} attempt(s) — will retry next cycle"
+      failed=$((failed + 1))
     fi
-    dispatched=$((dispatched + 1))
   else
     echo "Not ready (decision=${decision}) — skipping ${pr_url}"
   fi
   echo "::endgroup::"
 done
 
-echo "Sweep complete — dispatched ${dispatched} of ${#CANDIDATES[@]} evaluated PR(s)."
+if [ "$failed" -gt 0 ]; then
+  echo "Sweep complete — dispatched ${dispatched} of ${#CANDIDATES[@]} evaluated PR(s), ${failed} dispatch(es) failed (will retry next cycle)."
+else
+  echo "Sweep complete — dispatched ${dispatched} of ${#CANDIDATES[@]} evaluated PR(s)."
+fi
