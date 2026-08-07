@@ -36,7 +36,11 @@ jobs:
       - name: Lint YAML
         if: always()
         run: |
-          pip install --quiet --require-hashes --only-binary :all: -r scripts/ci-yamllint-requirements.txt
+          # Bounded retries + a per-attempt timeout so a transient PyPI/index
+          # blip retries instead of reding the Lint job (guards the fleet
+          # failure-rate metric — see test/workflows/ci/install-resilience.bats,
+          # issue #935).
+          pip install --quiet --retries 3 --timeout 30 --require-hashes --only-binary :all: -r scripts/ci-yamllint-requirements.txt
           yamllint -c <(cat <<'YAMLLINTRC'
           extends: default
           rules:
@@ -107,6 +111,17 @@ jobs:
           node-version: '20'
 
       - name: Run AgentShield
+        # npm's default of 2 fetch retries is thin for the npx package download.
+        # Bump it via npm's native fetch-retries config so a transient npm-registry
+        # blip retries instead of reding the job (guards the fleet failure-rate
+        # metric — see test/workflows/ci/install-resilience.bats, issue #935).
+        # An env var (not a shell loop) so a genuine high-severity finding still
+        # fails on the first run instead of being retried.
+        env:
+          npm_config_fetch_retries: '3'
+          npm_config_fetch_retry_mintimeout: '2000'
+          npm_config_fetch_retry_maxtimeout: '30000'
+          npm_config_fetch_timeout: '60000'
         run: |
           npx --ignore-scripts ecc-agentshield@1.4.0 scan --path . --format json --min-severity high
 
@@ -125,7 +140,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_linux_x64.tar.gz' --output /tmp/gitleaks.tar.gz
+          set -euo pipefail
+          # `gh release download` pulls from GitHub Releases (redirects to
+          # objects.githubusercontent.com) and has no native retry — the same
+          # transient-blip failure mode #894 fixed for the actionlint curl. Wrap
+          # in a bounded retry loop with backoff so a transient error retries
+          # instead of reding the Secret scan job (guards the fleet failure-rate
+          # metric — see test/workflows/ci/install-resilience.bats, issue #935).
+          downloaded=0
+          for attempt in 1 2 3; do
+            if timeout 30 gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_linux_x64.tar.gz' --output /tmp/gitleaks.tar.gz --clobber; then
+              downloaded=1
+              break
+            fi
+            echo "gitleaks download attempt ${attempt} failed" >&2
+            [ "${attempt}" -lt 3 ] && sleep $((attempt * 5))
+          done
+          if [ "${downloaded}" -ne 1 ]; then
+            echo "gitleaks download failed after 3 attempts" >&2
+            exit 1
+          fi
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
