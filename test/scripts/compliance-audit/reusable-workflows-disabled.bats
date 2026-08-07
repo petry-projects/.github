@@ -192,3 +192,8 @@ _should_flag_naming() {
   run _should_flag_naming "my-repo" "deploy-reusable.yaml"
   [ "$status" -eq 0 ]
 }
+
+@test "naming: -reusable.yaml is flagged (.yml suffix is the only exempt form)" {
+  run _should_flag_naming "my-repo" "deploy-reusable.yaml"
+  [ "$status" -eq 0 ]
+}
