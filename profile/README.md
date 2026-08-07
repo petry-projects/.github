@@ -93,19 +93,6 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
 
 ---
 
-## Reporting & Dashboards
-
-Scheduled reports and dashboards post as issues or run summaries for org maintainers:
-
-- **[Compliance audit & improvement](https://github.com/petry-projects/.github/blob/main/.github/workflows/compliance-audit-and-improvement.yml)**
-  — Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues.
-- **[Daily org status](https://github.com/petry-projects/.github/blob/main/.github/workflows/daily-org-status.yml)**
-  — Daily "Org Status" digest posted as an issue for maintainers.
-- **[OpenSSF Scorecard](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml)**
-  — Weekly security-posture review across public repos; findings tracked as issues.
-
----
-
 ## Contributing
 
 1. Fork the relevant repository and create a branch off `main`.
