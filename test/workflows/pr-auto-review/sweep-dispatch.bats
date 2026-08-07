@@ -123,11 +123,13 @@ run_sweep() { run bash "${TT_SCRIPTS_DIR}/sweep-dispatch.sh"; }
   export STUB_VIEW_FAIL_URL="https://github.com/petry-projects/repo-a/pull/1"
   run_sweep
   [ "$status" -eq 0 ]
-  # repo-a could not be evaluated → skipped, never dispatched.
-  ! echo "$output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1'
+  local sweep_output="$output"
   # repo-c still dispatches.
-  echo "$output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
-  echo "$output" | grep -q 'dispatched 1 of 2'
+  echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
+  echo "$sweep_output" | grep -q 'dispatched 1 of 2'
+  # repo-a could not be evaluated → skipped, never dispatched.
+  run grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1' <<< "$sweep_output"
+  [ "$status" -eq 1 ]
 }
 
 # ── bounded retry: a dispatch that fails once then succeeds is retried ─────────
@@ -138,8 +140,10 @@ run_sweep() { run bash "${TT_SCRIPTS_DIR}/sweep-dispatch.sh"; }
   export STUB_PR_LIST='[{"url":"https://github.com/petry-projects/repo-a/pull/1","isDraft":false}]'
   run_sweep
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1'
-  echo "$output" | grep -q 'dispatched 1 of 1'
+  local sweep_output="$output"
+  echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1'
+  echo "$sweep_output" | grep -q 'dispatched 1 of 1'
   # No persistent-failure warning — the retry recovered it.
-  ! echo "$output" | grep -q 'failed to dispatch'
+  run grep -q 'failed to dispatch' <<< "$sweep_output"
+  [ "$status" -eq 1 ]
 }
