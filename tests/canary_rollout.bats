@@ -2243,14 +2243,14 @@ GITEOF
   [ "$(benign_match 'Dev-Lead Agent' 'Set up job' "$wf_re" "$step_re")" = "no" ]
 }
 
-@test "canary-rings.json: auto-rebase runner-action-resolution-outage IS version_independent — unlike add-to-project's 'Set up job' class (#943)" {
-  # The failure is a GitHub Actions action-distribution backend outage provable from the
-  # 'Service Unavailable' message; it cannot be produced by anything in the reusable's
-  # own YAML, so the class stays active even at differs=1 (contrast: add-to-project's
-  # reusable-setup-restricted-secrets, which is NOT version_independent).
+@test "canary-rings.json: auto-rebase runner-action-resolution-outage 'Set up job' class is NOT version_independent (can't mask a differs=1 regression) (#943)" {
+  # The matcher (_run_signature) only sees failed step NAMES, never log content, so a bare
+  # 'Set up job' signature could equally arise from a candidate breaking the reusable's own
+  # YAML — same reasoning as add-to-project's reusable-setup-restricted-secrets class. The
+  # class must stay inert at differs=1 (excludes only when byte-identical).
   run jq -e '.agents["auto-rebase"].gate.benign_failure_classes[]
              | select(.id=="runner-action-resolution-outage")
-             | .version_independent == true' "$RINGS"
+             | .version_independent != true' "$RINGS"
   [ "$status" -eq 0 ]
 }
 
