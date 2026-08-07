@@ -121,7 +121,7 @@ jobs:
           npm_config_fetch_retries: '3'
           npm_config_fetch_retry_mintimeout: '2000'
           npm_config_fetch_retry_maxtimeout: '30000'
-          npm_config_fetch_timeout: '60'
+          npm_config_fetch_timeout: '60000'
         run: |
           npx --ignore-scripts ecc-agentshield@1.4.0 scan --path . --format json --min-severity high
 
