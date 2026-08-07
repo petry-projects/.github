@@ -131,6 +131,14 @@ evaluate_pr() {
     echo "skip-error"
     return 1
   fi
+  # Guard: gh api graphql exits 0 but returns null repository/pullRequest when
+  # the PR is deleted or the repo is renamed; pr_auto_review_blocking_thread_count
+  # safely yields 0 for null nodes, which would silently pass the readiness gate.
+  if ! printf '%s' "$threads_json" | jq -e '.data.repository.pullRequest != null' >/dev/null 2>&1; then
+    echo "::warning::GraphQL returned null PR data for ${pr_url} — skipping this cycle" >&2
+    echo "skip-error"
+    return 1
+  fi
   blocking_thread_count=$(printf '%s' "$threads_json" | pr_auto_review_blocking_thread_count)
 
   pr_auto_review_ready \

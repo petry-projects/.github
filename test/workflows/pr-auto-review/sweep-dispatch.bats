@@ -46,7 +46,11 @@ case "$*" in
     exit 1  # 404 → no required contexts configured → required_json=[]
     ;;
   *graphql*)
-    printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+    if [ -n "${STUB_GRAPHQL_NULL_REPO:-}" ] && [[ "$*" == *"repo=${STUB_GRAPHQL_NULL_REPO}"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":null}}}'
+    else
+      printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+    fi
     ;;
   *dispatches*)
     if [ -n "${STUB_DISPATCH_FAIL_URL:-}" ] && [[ "$*" == *"$STUB_DISPATCH_FAIL_URL"* ]]; then
@@ -145,5 +149,24 @@ run_sweep() { run bash "${TT_SCRIPTS_DIR}/sweep-dispatch.sh"; }
   echo "$sweep_output" | grep -q 'dispatched 1 of 1'
   # No persistent-failure warning — the retry recovered it.
   run grep -q 'failed to dispatch' <<< "$sweep_output"
+  [ "$status" -eq 1 ]
+}
+
+# ── fault isolation: null GraphQL PR data must not silently pass the gate ──────
+
+@test "sweep: a GraphQL response with null pullRequest data skips that PR" {
+  # gh api graphql exits 0 but returns null pullRequest when a PR is deleted or
+  # the repo is renamed; the null-path guard must treat this as a fetch failure
+  # and skip the PR rather than letting pr_auto_review_blocking_thread_count
+  # return 0 and silently pass the readiness gate.
+  export STUB_GRAPHQL_NULL_REPO="repo-a"
+  run_sweep
+  [ "$status" -eq 0 ]
+  local sweep_output="$output"
+  # repo-c is still reached and dispatched — null data on repo-a must not abort.
+  echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
+  echo "$sweep_output" | grep -q 'dispatched 1 of 2'
+  # repo-a had null PR data → warning + skip, never dispatched.
+  run grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1' <<< "$sweep_output"
   [ "$status" -eq 1 ]
 }
