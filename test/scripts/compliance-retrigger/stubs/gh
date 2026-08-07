@@ -10,6 +10,13 @@
 #   GH_STUB_WORKFLOW_STATE — state string returned for dev-lead.yml queries
 #                            (default: "disabled_manually")
 #   GH_STUB_EXIT       — exit code for unmatched calls (default: 0)
+#   GH_STUB_SEARCH_FAIL_TIMES — number of initial search/issues calls that should
+#                            fail (exit 1, emit an error body) before succeeding.
+#                            Simulates transient API errors (rate limit / 5xx) so
+#                            tests can exercise the retry path. Uses a counter file
+#                            to persist the fail count across stub invocations.
+#   GH_STUB_SEARCH_FAIL_FILE — path to the counter file for the above
+#                            (default: "<dir of GH_STUB_LOG>/search_fail.count").
 
 set -euo pipefail
 
@@ -37,6 +44,17 @@ for arg in "$@"; do
       exit 0
       ;;
     *"search/issues"*)
+      fail_times="${GH_STUB_SEARCH_FAIL_TIMES:-0}"
+      if [ "$fail_times" -gt 0 ]; then
+        counter="${GH_STUB_SEARCH_FAIL_FILE:-${GH_STUB_LOG%/*}/search_fail.count}"
+        n=0
+        [ -f "$counter" ] && n="$(cat "$counter")"
+        if [ "$n" -lt "$fail_times" ]; then
+          printf '%s\n' "$((n + 1))" >"$counter"
+          printf '{"message":"API rate limit exceeded","documentation_url":"https://docs.github.com/rest"}\n'
+          exit 1
+        fi
+      fi
       printf '{"total_count":0,"items":[]}\n'
       exit 0
       ;;
