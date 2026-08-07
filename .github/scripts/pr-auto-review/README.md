@@ -151,3 +151,22 @@ so a misconfigured cap can never turn into an unbounded dispatch burst.
 
 Manual `workflow_dispatch` runs default to **dry-run** (log intended dispatches,
 fire nothing); scheduled runs are live.
+
+### Per-PR fault isolation (issue #947)
+
+The sweep runs under `set -euo pipefail` on a 15-min schedule, so a single
+transient GitHub API error must not abort the whole run. Two guards keep one
+flaky PR from failing the scheduled workflow (and stranding the rest):
+
+- **Fact-gathering** — if `gh pr view` or the review-threads GraphQL query fails
+  (or returns empty) for a candidate, `evaluate_pr` emits the `skip-error` class
+  and that PR is skipped this cycle instead of being dispatched on incomplete
+  facts.
+- **Dispatch** — the `repository_dispatch` POST is retried up to
+  `DISPATCH_RETRIES` times (default 3, `DISPATCH_RETRY_SLEEP`s apart) on
+  transient failure. If every attempt fails the PR is logged with a
+  `::warning::` and the sweep continues; the run still exits `0`.
+
+Both cases are safe because the sweep is idempotent and re-runs every cycle — a
+PR skipped or un-dispatched this run is picked up next time, so a transient error
+is a deferral, not a lost dispatch or a failed workflow.
