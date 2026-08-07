@@ -457,11 +457,6 @@ In addition, BMAD Method-enabled repositories MUST also include the conditional
 documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
 for the template.
 
-In addition, BMAD Method-enabled repositories MUST also include the conditional
-[Feature Ideation workflow](#9-feature-ideation-feature-ideationyml--bmad-method-repos)
-documented below — see [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml)
-for the template.
-
 ### 1. CI Pipeline (`ci.yml`)
 
 The primary build-and-test workflow. Structure varies by tech stack but must include:
@@ -914,41 +909,6 @@ jobs:
           fetch-depth: 0
       - name: Run Claude Code
         if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          additional_permissions: |
-            actions: read
-            checks: read
-          # claude_args.--allowedTools replaces the action defaults — keep this
-          # list broad enough to cover interactive workflows (rebases, conflict
-          # resolution, gh CLI usage). Narrowing it has caused regressions.
-          claude_args: |
-            --allowedTools "Bash(git:*),Bash(gh:*),Bash(grep:*),Bash(find:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(test:*),Edit,Write,Read,Grep,Glob,LS,MultiEdit,WebFetch,WebSearch,Task,TodoWrite,BashOutput,KillBash"
-
-  # Automation mode: issue-triggered work — implement, open PR, review, and notify
-  claude-issue:
-    if: >-
-      github.event_name == 'issues' && github.event.action == 'labeled' &&
-        github.event.label.name == 'claude'
-    concurrency:
-      group: claude-issue-${{ github.event.issue.number }}
-      cancel-in-progress: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
-      id-token: write
-      pull-requests: write
-      issues: write
-      actions: read
-      checks: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-      - name: Run Claude Code
         uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

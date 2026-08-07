@@ -53,12 +53,6 @@ each merge to `main` leaves remaining Dependabot PRs behind and they stall
 indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
 not when a branch merely falls behind.
 
-The `dependabot-rebase.yml` is required for all repos using the `code-quality`
-ruleset (which enforces `require_branches_to_be_up_to_date: true`). Without it,
-each merge to `main` leaves remaining Dependabot PRs behind and they stall
-indefinitely — Dependabot only rebases on its weekly schedule or on merge conflicts,
-not when a branch merely falls behind.
-
 ## Dependabot Templates
 
 Use the template matching your repository type.

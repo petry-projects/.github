@@ -159,4 +159,36 @@ _should_flag_naming() {
   [[ "$wf" != *-reusable.yml && "$repo/$wf" != ".github-private/pr-review.yml" ]]
 }
 
-# =============================================================
+# ===========================================================================
+# Naming suffix check — pure reusables must carry -reusable.yml
+# ===========================================================================
+
+@test "naming: file with -reusable.yml suffix is NOT flagged" {
+  run _should_flag_naming "my-repo" "deploy-reusable.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "naming: file without -reusable.yml suffix IS flagged" {
+  run _should_flag_naming "my-repo" "deploy.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "naming: .github-private/pr-review.yml is grandfathered (NOT flagged)" {
+  run _should_flag_naming ".github-private" "pr-review.yml"
+  [ "$status" -eq 1 ]
+}
+
+@test "naming: pr-review.yml in a different repo IS flagged" {
+  run _should_flag_naming "other-repo" "pr-review.yml"
+  [ "$status" -eq 0 ]
+}
+
+@test "naming: .yaml extension without -reusable suffix IS flagged" {
+  run _should_flag_naming "my-repo" "deploy.yaml"
+  [ "$status" -eq 0 ]
+}
+
+@test "naming: -reusable.yaml is flagged (.yml suffix is the only exempt form)" {
+  run _should_flag_naming "my-repo" "deploy-reusable.yaml"
+  [ "$status" -eq 0 ]
+}

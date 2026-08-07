@@ -3753,7 +3753,7 @@ WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
   minutes="$(awk '
     /^  canary:[[:space:]]*$/ { in_canary=1; next }
     in_canary && /^  [^[:space:]]/ { in_canary=0 }
-    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+/ {
+    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+[[:space:]]*(#.*)?$/ {
       match($0, /[0-9]+/)
       print substr($0, RSTART, RLENGTH)
       exit
@@ -3769,7 +3769,7 @@ WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
   minutes="$(awk '
     /^  canary:[[:space:]]*$/ { in_canary=1; next }
     in_canary && /^  [^[:space:]]/ { in_canary=0 }
-    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+/ {
+    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+[[:space:]]*(#.*)?$/ {
       match($0, /[0-9]+/)
       print substr($0, RSTART, RLENGTH)
       exit
