@@ -108,7 +108,12 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The scheduled fleet sweep's runtime grows with the fleet (the gate reads
+    # run-history owner-wide across every tier repo). Observed p50 877s / p95 988s
+    # sat right at the old 15-min (900s) ceiling, so the tail of each sweep was
+    # being killed at the timeout (#939). 30 min keeps durable headroom over p95
+    # while still bounding a genuine hang.
+    timeout-minutes: 30
     steps:
       # Mint a scoped GitHub App installation token (Contents/Deployments:write,
       # Actions/Metadata:read). owner-wide so the gate can read run history across all
