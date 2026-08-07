@@ -1167,20 +1167,7 @@
         "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
         "baseline_window_days": 14,
         "baseline_spike_cap_multiple": 3,
-        "benign_failure_classes": [
-          {
-            "id": "dependabot-context-dispatch",
-            "workflow": "Dev-Lead Agent",
-            "step": "[Dd]ependabot",
-            "reason": "#864 \u2014 a Dev-Lead run dispatched in a Dependabot context cannot read repo secrets; version-independent benign failure, not a candidate regression."
-          },
-          {
-            "id": "fix-review-git-push-permission",
-            "workflow": "Dev-Lead Agent",
-            "step": "[Pp]ush",
-            "reason": "fix-review git push denied by branch protection / missing write scope; version-independent benign failure, not a candidate regression."
-          }
-        ],
+        "benign_failure_classes": [],
         "control": {
           "allow_pre_existing": false
         },
