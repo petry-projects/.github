@@ -495,9 +495,3 @@ fi
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
   main "$@"
 fi
-}
-
-# Run main only when executed directly, not when sourced (e.g. by the bats suite).
-if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
-  main "$@"
-fi
