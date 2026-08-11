@@ -133,6 +133,8 @@ MOCK
   [[ "$output" == *"ruleset-drift-pr-quality-dismiss_stale_reviews_on_push"* ]]
   [[ "$output" == *"dismiss_stale_reviews_on_push"* ]]
   [[ "$output" == *"error"* ]]
+  [[ "$output" == *'expected `true`'* ]]
+  [[ "$output" == *'actual `false`'* ]]
 }
 
 # ---------------------------------------------------------------------------
