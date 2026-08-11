@@ -126,6 +126,17 @@ MOCK
   [[ "$output" == *"ruleset-drift-pr-quality-require_code_owner_review"* ]]
 }
 
+@test "disabled dismiss_stale_reviews_on_push → finding naming expected/actual" {
+  drifted="$(echo "$PRQ_PARAMS" | jq -c '.dismiss_stale_reviews_on_push=false')"
+  run _run_contents "$drifted" "$CQ_PARAMS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ruleset-drift-pr-quality-dismiss_stale_reviews_on_push"* ]]
+  [[ "$output" == *"dismiss_stale_reviews_on_push"* ]]
+  [[ "$output" == *"error"* ]]
+  [[ "$output" == *'expected `true`'* ]]
+  [[ "$output" == *'actual `false`'* ]]
+}
+
 # ---------------------------------------------------------------------------
 # allowed_merge_methods widened beyond squash-only → drift
 # ---------------------------------------------------------------------------
