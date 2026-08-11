@@ -50,6 +50,16 @@ DRY_RUN="${DRY_RUN:-0}"
 DISPATCH_RETRIES="${DISPATCH_RETRIES:-3}"
 DISPATCH_RETRY_SLEEP="${DISPATCH_RETRY_SLEEP:-5}"
 
+# Validate retry configuration before candidate processing.
+if ! [[ "${DISPATCH_RETRIES}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::error::DISPATCH_RETRIES must be a positive integer, got: '${DISPATCH_RETRIES}'" >&2
+  exit 1
+fi
+if ! [[ "${DISPATCH_RETRY_SLEEP}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "::error::DISPATCH_RETRY_SLEEP must be a non-negative number, got: '${DISPATCH_RETRY_SLEEP}'" >&2
+  exit 1
+fi
+
 # ── Enumerate open, non-draft PRs carrying the sweep label, org-wide ──────────
 # `gh search prs` spans every repo the token can see in one call, so the sweep
 # runs centrally without an App token or a per-repo installation walk.
@@ -139,6 +149,20 @@ evaluate_pr() {
     echo "skip-error"
     return 1
   fi
+  # Reject partial responses: an errors field alongside data signals that the
+  # reviewThreads result is incomplete — counting zero blocking threads from an
+  # incomplete list would silently pass the readiness gate.
+  if printf '%s' "$threads_json" | jq -e '(.errors // []) | length > 0' >/dev/null 2>&1; then
+    echo "::warning::GraphQL returned errors for ${pr_url} — skipping this cycle" >&2
+    echo "skip-error"
+    return 1
+  fi
+  # Null reviewThreads or nodes means the thread list cannot be trusted.
+  if ! printf '%s' "$threads_json" | jq -e '.data.repository.pullRequest.reviewThreads.nodes != null' >/dev/null 2>&1; then
+    echo "::warning::GraphQL returned null reviewThreads for ${pr_url} — skipping this cycle" >&2
+    echo "skip-error"
+    return 1
+  fi
   blocking_thread_count=$(printf '%s' "$threads_json" | pr_auto_review_blocking_thread_count)
 
   pr_auto_review_ready \
@@ -155,13 +179,17 @@ evaluate_pr() {
 #   rather than killing the whole sweep (#947).
 dispatch_review() {
   local pr_url="$1" attempt=1
+  # Stable within this retry loop: all retries send the same id so the consumer
+  # can deduplicate ambiguous double-fires (accepted POST + network error).
+  local dispatch_id="${RANDOM}${RANDOM}"
   while [ "$attempt" -le "$DISPATCH_RETRIES" ]; do
     if gh api \
         --method POST \
         --header "Accept: application/vnd.github+json" \
         "/repos/${DISPATCH_REPO}/dispatches" \
         --field event_type=pr-review-mention \
-        --field "client_payload[pr_url]=${pr_url}"; then
+        --field "client_payload[pr_url]=${pr_url}" \
+        --field "client_payload[dispatch_id]=${dispatch_id}"; then
       return 0
     fi
     echo "::warning::dispatch attempt ${attempt}/${DISPATCH_RETRIES} failed for ${pr_url}" >&2

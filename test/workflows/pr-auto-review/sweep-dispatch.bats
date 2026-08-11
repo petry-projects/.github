@@ -48,6 +48,10 @@ case "$*" in
   *graphql*)
     if [ -n "${STUB_GRAPHQL_NULL_REPO:-}" ] && [[ "$*" == *"repo=${STUB_GRAPHQL_NULL_REPO}"* ]]; then
       printf '{"data":{"repository":{"pullRequest":null}}}'
+    elif [ -n "${STUB_GRAPHQL_ERRORS_REPO:-}" ] && [[ "$*" == *"repo=${STUB_GRAPHQL_ERRORS_REPO}"* ]]; then
+      printf '{"errors":[{"message":"Could not resolve ReviewThreads"}],"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+    elif [ -n "${STUB_GRAPHQL_NULL_THREADS_REPO:-}" ] && [[ "$*" == *"repo=${STUB_GRAPHQL_NULL_THREADS_REPO}"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":{"reviewThreads":null}}}}'
     else
       printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
     fi
@@ -167,6 +171,42 @@ run_sweep() { run bash "${TT_SCRIPTS_DIR}/sweep-dispatch.sh"; }
   echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
   echo "$sweep_output" | grep -q 'dispatched 1 of 2'
   # repo-a had null PR data → warning + skip, never dispatched.
+  run grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1' <<< "$sweep_output"
+  [ "$status" -eq 1 ]
+}
+
+# ── fault isolation: GraphQL errors array must skip that PR ──────────────────
+
+@test "sweep: a GraphQL response with an errors array skips that PR" {
+  # gh api graphql can return an errors array alongside non-null data (partial
+  # failure, e.g. reviewThreads could not be resolved). The guard must treat
+  # this as incomplete data and skip rather than counting zero blocking threads.
+  export STUB_GRAPHQL_ERRORS_REPO="repo-a"
+  run_sweep
+  [ "$status" -eq 0 ]
+  local sweep_output="$output"
+  # repo-c is still reached and dispatched — errors on repo-a must not abort.
+  echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
+  echo "$sweep_output" | grep -q 'dispatched 1 of 2'
+  # repo-a had GraphQL errors → warning + skip, never dispatched.
+  run grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1' <<< "$sweep_output"
+  [ "$status" -eq 1 ]
+}
+
+# ── fault isolation: null reviewThreads must skip that PR ────────────────────
+
+@test "sweep: a GraphQL response with null reviewThreads skips that PR" {
+  # gh api graphql can return null reviewThreads when the thread list cannot be
+  # fetched. The guard must skip rather than letting the blocking count default
+  # to zero and silently pass the readiness gate.
+  export STUB_GRAPHQL_NULL_THREADS_REPO="repo-a"
+  run_sweep
+  [ "$status" -eq 0 ]
+  local sweep_output="$output"
+  # repo-c is still reached and dispatched — null threads on repo-a must not abort.
+  echo "$sweep_output" | grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-c/pull/3'
+  echo "$sweep_output" | grep -q 'dispatched 1 of 2'
+  # repo-a had null reviewThreads → warning + skip, never dispatched.
   run grep -q 'dispatched auto-review for https://github.com/petry-projects/repo-a/pull/1' <<< "$sweep_output"
   [ "$status" -eq 1 ]
 }
