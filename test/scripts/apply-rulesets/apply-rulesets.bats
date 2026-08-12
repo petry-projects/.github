@@ -70,6 +70,17 @@ EOF
   [ "$output" = "true" ]
 }
 
+@test "pr-quality.json: dismisses stale reviews on push (dismiss_stale_reviews_on_push == true)" {
+  # Anti-divergence guard (#958): the pr-quality ruleset dismisses existing approvals
+  # when a new commit is pushed, so a stale review cannot carry a substantive push to
+  # merge (github-settings.md#pr-quality). Flipping this to false is exactly the drift
+  # the compliance audit's check_ruleset_contents() flags. Lock the codified source of
+  # truth so it can never silently regress to false.
+  run jq -r '.rules[]? | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push' "$RULESETS_DIR/pr-quality.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
 @test "pr-quality.json: omits 'automatic_copilot_code_review_enabled' (Free-plan API rejects it)" {
   # GitHub's rulesets API 422s ("Unexpected parameter") on this pull_request
   # parameter for Free-plan orgs, which blocks apply-rulesets from creating or
