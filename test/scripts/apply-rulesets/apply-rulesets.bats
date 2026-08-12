@@ -12,14 +12,22 @@ setup() {
 }
 teardown() { [ -n "${STUB_BIN:-}" ] && rm -rf "$STUB_BIN"; return 0; }
 
-# gh stub: records writes (POST/PUT) to $CALLS; returns $RULESETS_LIST for the
-# rulesets LIST (default [] → create path); returns $REPO_LIST for `repo list`.
+# gh stub: records writes (POST/PUT) to $CALLS (args line then --input body);
+# returns $RULESETS_LIST for the rulesets LIST (default [] → create path);
+# returns $REPO_LIST for `repo list`.
 _stub_gh() {
   cat > "$STUB_BIN/gh" <<EOF
 #!/usr/bin/env bash
 args="\$*"
 case "\$args" in
-  *"--method POST"*|*"--method PUT"*) echo "\$args" >> "$CALLS"; echo '{}' ;;
+  *"--method POST"*|*"--method PUT"*)
+    echo "\$args" >> "$CALLS"
+    prev=""
+    for arg in "\$@"; do
+      [ "\$prev" = "--input" ] && { cat "\$arg" >> "$CALLS"; break; }
+      prev="\$arg"
+    done
+    echo '{}' ;;
   *"repo list"*) printf '%s' "\${REPO_LIST:-}" ;;
   *"rulesets"*)  printf '%s' "\${RULESETS_LIST:-[]}" ;;
   *) echo '{}' ;;
@@ -153,6 +161,17 @@ DEP_AUDIT_WF="$SCRIPT_DIR/.github/workflows/dependency-audit.yml"
   [ "$status" -eq 0 ]
   [ ! -f "$CALLS" ]
   [[ "$output" == *"dry-run"* ]]
+}
+
+@test "apply --repo: pr-quality POST payload includes dismiss_stale_reviews_on_push=true" {
+  # Verifies that apply-rulesets.sh actually sends dismiss_stale_reviews_on_push in
+  # the request body — not just that the field exists in the checked-in JSON. If the
+  # script ever strips or transforms the payload before sending, this test catches it.
+  _stub_gh
+  export RULESETS_LIST='[]'
+  run bash "$APPLY" --repo petry-projects/acme pr-quality
+  [ "$status" -eq 0 ]
+  grep -q '"dismiss_stale_reviews_on_push": *true' "$CALLS"
 }
 
 # ── target resolution: bare name (back-compat) + name filter ──────────────────
