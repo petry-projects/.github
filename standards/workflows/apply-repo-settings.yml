@@ -50,6 +50,6 @@ jobs:
       contents: read
     uses: petry-projects/.github/.github/workflows/apply-repo-settings-reusable.yml@apply-repo-settings/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     with:
-      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
       checkout_ref: apply-repo-settings/v1-stable  # keep in lockstep with the uses: channel pin
     secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable

@@ -76,10 +76,11 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 @test "every with: key the canonical stub forwards is a declared reusable input" {
   [ -f "$STUB" ]
   local declared forwarded key
-  declared="$(yq '.on.workflow_call.inputs | keys | .[]' "$REUSABLE")"
-  forwarded="$(yq '.jobs[].with // {} | keys | .[]' "$STUB")"
+  declared="$(yq '(.on.workflow_call.inputs // {}) | keys | .[]?' "$REUSABLE")"
+  forwarded="$(yq '(.jobs[].with // {}) | keys | .[]?' "$STUB")"
   [ -n "$forwarded" ] || skip "stub forwards no inputs"
-  while IFS= read -r key; do
+  while IFS= read -r key || [ -n "$key" ]; do
+    key="${key%$'\r'}"
     [ -z "$key" ] && continue
     if ! grep -qxF "$key" <<<"$declared"; then
       echo "stub forwards undeclared input: $key (declared: $declared)"
