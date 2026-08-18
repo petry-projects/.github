@@ -58,11 +58,11 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 }
 
 @test "reusable runs BOTH apply-repo-settings.sh AND apply-rulesets.sh" {
-  # Settings alone never touch rulesets; the ruleset applier is the compliance fix.
-  run grep -q 'apply-repo-settings.sh' "$REUSABLE"
-  [ "$status" -eq 0 ]
-  run grep -q 'apply-rulesets.sh' "$REUSABLE"
-  [ "$status" -eq 0 ]
+  # Assert on the step run: blocks only, so comments in the file don't satisfy this.
+  local run_blocks
+  run_blocks="$(yq '[.jobs[].steps[].run // ""] | join("\n")' "$REUSABLE")"
+  echo "$run_blocks" | grep -qF 'bash scripts/apply-repo-settings.sh'
+  echo "$run_blocks" | grep -qF 'bash scripts/apply-rulesets.sh'
 }
 
 @test "reusable checks out petry-projects/.github at the checkout_ref input" {
@@ -132,4 +132,25 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 @test "registry entry declares next/ring0/ring1/stable rings" {
   run yq -oy '[.agents["apply-repo-settings"].rings[].channel] | sort | join(",")' "$REGISTRY"
   [ "$output" = "next,ring0,ring1,stable" ]
+}
+
+@test "registry entry has correct reusable path, ring order, and membership" {
+  run yq -oy '.agents["apply-repo-settings"].reusable' "$REGISTRY"
+  [ "$output" = ".github/workflows/apply-repo-settings-reusable.yml" ]
+  # Ring orders must be monotonically staged: next=0, ring0=1, ring1=2, stable=3
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "next") | .order' "$REGISTRY"
+  [ "$output" = "0" ]
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "ring0") | .order' "$REGISTRY"
+  [ "$output" = "1" ]
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "ring1") | .order' "$REGISTRY"
+  [ "$output" = "2" ]
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "stable") | .order' "$REGISTRY"
+  [ "$output" = "3" ]
+  # Membership anchors: host-private in next, host in ring0, wildcard in stable
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "next") | .members[0]' "$REGISTRY"
+  [ "$output" = "petry-projects/.github-private" ]
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "ring0") | .members[0]' "$REGISTRY"
+  [ "$output" = "petry-projects/.github" ]
+  run yq -oy '.agents["apply-repo-settings"].rings[] | select(.channel == "stable") | .members[0]' "$REGISTRY"
+  [ "$output" = "*" ]
 }
