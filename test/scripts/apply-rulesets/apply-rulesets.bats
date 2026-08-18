@@ -12,14 +12,22 @@ setup() {
 }
 teardown() { [ -n "${STUB_BIN:-}" ] && rm -rf "$STUB_BIN"; return 0; }
 
-# gh stub: records writes (POST/PUT) to $CALLS; returns $RULESETS_LIST for the
-# rulesets LIST (default [] → create path); returns $REPO_LIST for `repo list`.
+# gh stub: records writes (POST/PUT) to $CALLS (args line then --input body);
+# returns $RULESETS_LIST for the rulesets LIST (default [] → create path);
+# returns $REPO_LIST for `repo list`.
 _stub_gh() {
   cat > "$STUB_BIN/gh" <<EOF
 #!/usr/bin/env bash
 args="\$*"
 case "\$args" in
-  *"--method POST"*|*"--method PUT"*) echo "\$args" >> "$CALLS"; echo '{}' ;;
+  *"--method POST"*|*"--method PUT"*)
+    echo "\$args" >> "$CALLS"
+    prev=""
+    for arg in "\$@"; do
+      [ "\$prev" = "--input" ] && { cat "\$arg" >> "$CALLS"; break; }
+      prev="\$arg"
+    done
+    echo '{}' ;;
   *"repo list"*) printf '%s' "\${REPO_LIST:-}" ;;
   *"rulesets"*)  printf '%s' "\${RULESETS_LIST:-[]}" ;;
   *) echo '{}' ;;
@@ -66,6 +74,17 @@ EOF
   # the drift the compliance audit's check_ruleset_contents() flags. Lock the
   # codified source of truth so it can never silently regress to false.
   run jq -r '.rules[]? | select(.type=="pull_request") | .parameters.require_last_push_approval' "$RULESETS_DIR/pr-quality.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "pr-quality.json: dismisses stale reviews on push (dismiss_stale_reviews_on_push == true)" {
+  # Anti-divergence guard (#958): the pr-quality ruleset dismisses existing approvals
+  # when a new commit is pushed, so a stale review cannot carry a substantive push to
+  # merge (github-settings.md#pr-quality). Flipping this to false is exactly the drift
+  # the compliance audit's check_ruleset_contents() flags. Lock the codified source of
+  # truth so it can never silently regress to false.
+  run jq -r '.rules[]? | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push' "$RULESETS_DIR/pr-quality.json"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
@@ -142,6 +161,21 @@ DEP_AUDIT_WF="$SCRIPT_DIR/.github/workflows/dependency-audit.yml"
   [ "$status" -eq 0 ]
   [ ! -f "$CALLS" ]
   [[ "$output" == *"dry-run"* ]]
+}
+
+@test "apply --repo: pr-quality POST payload includes dismiss_stale_reviews_on_push=true" {
+  # Verifies that apply-rulesets.sh actually sends dismiss_stale_reviews_on_push in
+  # the request body — not just that the field exists in the checked-in JSON. If the
+  # script ever strips or transforms the payload before sending, this test catches it.
+  _stub_gh
+  export RULESETS_LIST='[]'
+  run bash "$APPLY" --repo petry-projects/acme pr-quality
+  [ "$status" -eq 0 ]
+  jq -e '
+    any(.rules[]?;
+      .type == "pull_request" and
+      .parameters.dismiss_stale_reviews_on_push == true)
+  ' < <(tail -n +2 "$CALLS") >/dev/null
 }
 
 # ── target resolution: bare name (back-compat) + name filter ──────────────────
