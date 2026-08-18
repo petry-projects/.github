@@ -12,7 +12,7 @@ weekly compliance audit (`check_ruleset_bypass_actors()` and
 > `administration:write`) that the CI `GITHUB_TOKEN` does not carry — so these
 > findings are detected and filed every week but never auto-applied. Run this
 > runbook with an admin token to close them.
-
+>
 > **Weekly self-heal (preferred first line).** The `Apply repo settings` workflow
 > (org reusable [`apply-repo-settings-reusable.yml`](../.github/workflows/apply-repo-settings-reusable.yml),
 > adopted per repo via [`standards/workflows/apply-repo-settings.yml`](workflows/apply-repo-settings.yml))

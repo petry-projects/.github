@@ -56,7 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${GH_PAT_DON_PETRY:-}" ]]; then
-            echo "::error title=Missing GH_PAT_DON_PETRY::The GH_PAT_DON_PETRY org secret is empty or out of scope for ${GITHUB_REPOSITORY}. It must be a CLASSIC PAT with repo scope whose owner has admin on this repo — fine-grained PATs and GITHUB_TOKEN are rejected by the check-suites/rulesets APIs. See standards/github-settings.md."
+            _msg="The GH_PAT_DON_PETRY org secret is empty or out of scope for ${GITHUB_REPOSITORY}."
+            _msg+=" It must be a CLASSIC PAT with repo scope whose owner has admin on this repo"
+            _msg+=" — fine-grained PATs and GITHUB_TOKEN are rejected by the check-suites/rulesets APIs."
+            _msg+=" See standards/github-settings.md."
+            echo "::error title=Missing GH_PAT_DON_PETRY::${_msg}"
             {
               echo "## Apply repo settings — preflight failed"
               echo ""
