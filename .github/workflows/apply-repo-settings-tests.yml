@@ -7,14 +7,24 @@ on:
   pull_request:
     paths:
       - 'scripts/apply-repo-settings.sh'
+      - 'scripts/apply-rulesets.sh'
       - 'test/scripts/apply-repo-settings/**'
       - '.github/workflows/apply-repo-settings-tests.yml'
+      - '.github/workflows/apply-repo-settings-reusable.yml'
+      - '.github/workflows/apply-repo-settings.yml'
+      - 'standards/workflows/apply-repo-settings.yml'
+      - 'standards/canary-rings.json'
   push:
     branches: [main]
     paths:
       - 'scripts/apply-repo-settings.sh'
+      - 'scripts/apply-rulesets.sh'
       - 'test/scripts/apply-repo-settings/**'
       - '.github/workflows/apply-repo-settings-tests.yml'
+      - '.github/workflows/apply-repo-settings-reusable.yml'
+      - '.github/workflows/apply-repo-settings.yml'
+      - 'standards/workflows/apply-repo-settings.yml'
+      - 'standards/canary-rings.json'
 
 permissions: {}
 

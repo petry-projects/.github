@@ -13,6 +13,17 @@ weekly compliance audit (`check_ruleset_bypass_actors()` and
 > findings are detected and filed every week but never auto-applied. Run this
 > runbook with an admin token to close them.
 
+> **Weekly self-heal (preferred first line).** The `Apply repo settings` workflow
+> (org reusable [`apply-repo-settings-reusable.yml`](../.github/workflows/apply-repo-settings-reusable.yml),
+> adopted per repo via [`standards/workflows/apply-repo-settings.yml`](workflows/apply-repo-settings.yml))
+> now runs `apply-rulesets.sh` on a **weekly cron**, converging `pr-quality` /
+> `code-quality` to the codified `standards/rulesets/*.json` — this is what fixes the
+> recurring `require_last_push_approval` drift (petry-projects/.github#984). It
+> authenticates with the classic admin PAT `GH_PAT_DON_PETRY`. To remediate now
+> without waiting for the cron, dispatch it: `gh workflow run "Apply repo settings"
+> --repo petry-projects/<repo>`. This runbook remains the path for **bypass-actor**
+> and **legacy-ruleset** findings, which `apply-rulesets.sh` does not cover.
+
 See [`github-settings.md` § Repository Rulesets](github-settings.md#repository-rulesets)
 for the policy this enforces:
 
