@@ -171,7 +171,11 @@ DEP_AUDIT_WF="$SCRIPT_DIR/.github/workflows/dependency-audit.yml"
   export RULESETS_LIST='[]'
   run bash "$APPLY" --repo petry-projects/acme pr-quality
   [ "$status" -eq 0 ]
-  grep -q '"dismiss_stale_reviews_on_push": *true' "$CALLS"
+  jq -e '
+    any(.rules[]?;
+      .type == "pull_request" and
+      .parameters.dismiss_stale_reviews_on_push == true)
+  ' < <(tail -n +2 "$CALLS") >/dev/null
 }
 
 # ── target resolution: bare name (back-compat) + name filter ──────────────────
