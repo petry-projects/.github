@@ -66,7 +66,7 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 }
 
 @test "reusable checks out petry-projects/.github at the checkout_ref input" {
-  run yq '[.jobs[].steps[] | select(.uses == "*checkout*") | .with.repository] | contains(["petry-projects/.github"])' "$REUSABLE"
+  run yq '[.jobs[].steps[] | select(.uses | contains("checkout")) | .with.repository] | contains(["petry-projects/.github"])' "$REUSABLE"
   [ "$output" = "true" ]
   run grep -q 'inputs.checkout_ref' "$REUSABLE"
   [ "$status" -eq 0 ]
