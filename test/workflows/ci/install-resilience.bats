@@ -120,7 +120,7 @@ step_block_with() {
   # (59 is GitHub's documented cap for setup-steps jobs and a sane fleet bound).
   local in_jobs=0
   local job_count=0
-  local current_job="" current_ok=0
+  local current_job="" current_ok=0 line=""
   finish_job() {
     if [[ -n "$current_job" ]]; then
       [ "$current_ok" -eq 1 ] || {

@@ -56,6 +56,8 @@ jobs:
             document-start: disable
             comments:
               min-spaces-from-content: 1
+            indentation:
+              spaces: 2
           YAMLLINTRC
           ) .github/workflows/ standards/workflows/ standards/dependabot/
 
