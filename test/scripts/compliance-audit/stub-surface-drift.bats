@@ -228,7 +228,7 @@ EOF
   # sanity: the workflows list really did change
   [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
   surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "pr-auto-review: a multi-name workflow_run.workflows list is NOT flagged" {
@@ -236,7 +236,7 @@ EOF
   # sanity: the workflows list really did change
   [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
   surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "pr-auto-review: dropping the check_suite: trigger is still flagged (rest of on: stays locked)" {
@@ -253,6 +253,20 @@ EOF
   deployed=$(printf '%s\n' "$PR_AUTO_REVIEW_CANONICAL" | sed '/^  workflow_run:$/,/^    types: \[completed\]$/d')
   # sanity: the workflow_run trigger key really was removed
   ! grep -q '^  workflow_run:$' <<< "$deployed"
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: workflows: null is flagged (not a valid list shape)" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/workflows: \[\"CI\"\]/workflows: null}"
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: workflows: CI (bare string) is flagged (not a valid list shape)" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/workflows: \[\"CI\"\]/workflows: CI}"
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
   surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
   [ "$status" -eq 0 ]
 }

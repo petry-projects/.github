@@ -1740,7 +1740,7 @@ stub_normalize_surface() {
     -e 's/[[:space:]]+#.*$//' \
     -e 's/^[[:space:]]*#.*$//' \
     -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
-    -e 's/^([[:space:]]*workflows:[[:space:]]*).*/\1WORKFLOWS/' \
+    -e 's/^([[:space:]]*workflows:[[:space:]]*)\[.*/\1WORKFLOWS/' \
     | grep -vE '^[[:space:]]*$' || true
 }
 
