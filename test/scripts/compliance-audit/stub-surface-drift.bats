@@ -114,6 +114,35 @@ jobs:
 EOF
 )
 
+PR_AUTO_REVIEW_CANONICAL=$(cat <<'EOF'
+name: PR Auto-Review — Ready Check
+
+on:
+  # TODO: replace "CI" with your repository's CI workflow name(s).
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  check_suite:
+    types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  pr-auto-review:
+    permissions:
+      pull-requests: read
+      checks: read
+      actions: read
+    uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@pr-auto-review/v1-stable  # NOSONAR
+    secrets:
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+EOF
+)
+
 # ---------------------------------------------------------------------------
 # AC2 — a stub that differs ONLY by its correct tier channel pin is clean on
 # every guarded surface (the pin lives outside on:/permissions/concurrency).
@@ -185,6 +214,61 @@ EOF
   [ "$deployed" != "$FEATURE_IDEATION_CANONICAL" ]
   surface_drift "$FEATURE_IDEATION_CANONICAL" "$deployed" "on"
   [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# pr-auto-review's per-repo workflow_run.workflows name is NOT trigger-surface
+# drift — the template header + TODO document it as an allowed customization
+# (a repo MUST name its own CI workflow), so the workflows list VALUE is
+# normalized. The rest of the on: surface stays verbatim-locked (#990).
+# ---------------------------------------------------------------------------
+
+@test "pr-auto-review: renaming the workflow_run.workflows value is NOT flagged" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/\[\"CI\"\]/[\"CI Pipeline\"]}"
+  # sanity: the workflows list really did change
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 1 ]
+}
+
+@test "pr-auto-review: a multi-name workflow_run.workflows list is NOT flagged" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/\[\"CI\"\]/[\"CI\", \"Lint\"]}"
+  # sanity: the workflows list really did change
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 1 ]
+}
+
+@test "pr-auto-review: dropping the check_suite: trigger is still flagged (rest of on: stays locked)" {
+  local deployed
+  deployed=$(printf '%s\n' "$PR_AUTO_REVIEW_CANONICAL" | sed '/^  check_suite:$/,/^    types: \[completed\]$/d')
+  # sanity: the trigger really was removed
+  ! grep -q '^  check_suite:$' <<< "$deployed"
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: removing the whole workflow_run: block is still flagged (trigger key not adjustable)" {
+  local deployed
+  deployed=$(printf '%s\n' "$PR_AUTO_REVIEW_CANONICAL" | sed '/^  workflow_run:$/,/^    types: \[completed\]$/d')
+  # sanity: the workflow_run trigger key really was removed
+  ! grep -q '^  workflow_run:$' <<< "$deployed"
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: workflows: null is flagged (not a valid list shape)" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/workflows: \[\"CI\"\]/workflows: null}"
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: workflows: CI (bare string) is flagged (not a valid list shape)" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/workflows: \[\"CI\"\]/workflows: CI}"
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
 }
 
 # ---------------------------------------------------------------------------

@@ -1725,14 +1725,22 @@ stub_extract_blocks() {
 
 # stub_normalize_surface — read a surface block on stdin and canonicalize it for
 # comparison: strip trailing ` #…` inline comments and whole-line comments, drop
-# blank lines, and collapse schedule cron VALUES to a placeholder (a repo MAY
-# retune the cron without it counting as trigger-surface drift — see
-# feature-ideation.yml's header). Pure: stdin -> stdout.
+# blank lines, and collapse two documented per-repo VALUES to placeholders:
+#   • schedule cron VALUES — a repo MAY retune the cron without it counting as
+#     trigger-surface drift (see feature-ideation.yml's header).
+#   • pr-auto-review's `workflow_run.workflows:` list VALUE — a repo MUST name
+#     its own CI workflow(s) here (see pr-auto-review.yml's header + TODO), so
+#     the list value is not repo-locked while the `workflow_run` trigger key and
+#     the rest of the `on:` surface stay verbatim-compared (#990).
+# `workflows:` is a key only under `workflow_run`, which appears in no other
+# guarded surface, so the collapse is safe to apply unconditionally. Pure:
+# stdin -> stdout.
 stub_normalize_surface() {
   tr -d '\r' | sed -E \
     -e 's/[[:space:]]+#.*$//' \
     -e 's/^[[:space:]]*#.*$//' \
     -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
+    -e 's/^([[:space:]]*workflows:[[:space:]]*)\[.*/\1WORKFLOWS/' \
     | grep -vE '^[[:space:]]*$' || true
 }
 
