@@ -1731,16 +1731,46 @@ stub_extract_blocks() {
 #   • pr-auto-review's `workflow_run.workflows:` list VALUE — a repo MUST name
 #     its own CI workflow(s) here (see pr-auto-review.yml's header + TODO), so
 #     the list value is not repo-locked while the `workflow_run` trigger key and
-#     the rest of the `on:` surface stay verbatim-compared (#990).
+#     the rest of the `on:` surface stay verbatim-compared (#990). Both YAML list
+#     forms are honored: the inline flow sequence `workflows: [ … ]` and the
+#     block sequence (`workflows:` followed by deeper-indented `- …` entries) both
+#     collapse to the same `workflows: WORKFLOWS` placeholder. Non-list shapes
+#     (`null`, a bare scalar, or an empty list with no entries) are left intact so
+#     they still count as drift.
 # `workflows:` is a key only under `workflow_run`, which appears in no other
 # guarded surface, so the collapse is safe to apply unconditionally. Pure:
 # stdin -> stdout.
 stub_normalize_surface() {
-  tr -d '\r' | sed -E \
-    -e 's/[[:space:]]+#.*$//' \
-    -e 's/^[[:space:]]*#.*$//' \
-    -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
-    -e 's/^([[:space:]]*workflows:[[:space:]]*)\[.*/\1WORKFLOWS/' \
+  tr -d '\r' \
+    | sed -E \
+        -e 's/[[:space:]]+#.*$//' \
+        -e 's/^[[:space:]]*#.*$//' \
+        -e 's/(- cron:[[:space:]]*).*/\1CRON/' \
+    | awk '
+        function flush() {
+          if (pending) { if (saw_item) printf "%sworkflows: WORKFLOWS\n", ind; else print saved; pending = 0 }
+        }
+        function indent(s,   n) { n = match(s, /[^ ]/); return n == 0 ? 0 : n - 1 }
+        {
+          if (pending) {
+            # collapse a block sequence: deeper-indented "- …" entries belong to
+            # the deferred workflows: line; anything else ends the block.
+            if ($0 !~ /^[[:space:]]*$/ && indent($0) > wfindent && $0 ~ /^[[:space:]]*-[[:space:]]+/) {
+              saw_item = 1; next
+            }
+            flush()
+          }
+          if ($0 ~ /^[[:space:]]*workflows:[[:space:]]*/) {
+            val = $0; sub(/^[[:space:]]*workflows:[[:space:]]*/, "", val)
+            wfindent = indent($0); ind = substr($0, 1, wfindent)
+            if (val ~ /^\[/) { printf "%sworkflows: WORKFLOWS\n", ind; next }
+            if (val == "")  { pending = 1; saw_item = 0; saved = $0; next }
+            print; next          # null / bare scalar — leave intact (drift)
+          }
+          print
+        }
+        END { flush() }
+      ' \
     | grep -vE '^[[:space:]]*$' || true
 }
 
