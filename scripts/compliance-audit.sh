@@ -1753,9 +1753,10 @@ stub_normalize_surface() {
         function indent(s,   n) { n = match(s, /[^ ]/); return n == 0 ? 0 : n - 1 }
         {
           if (pending) {
+            if ($0 ~ /^[[:space:]]*$/) { next }
             # collapse a block sequence: deeper-indented "- …" entries belong to
             # the deferred workflows: line; anything else ends the block.
-            if ($0 !~ /^[[:space:]]*$/ && indent($0) > wfindent && $0 ~ /^[[:space:]]*-[[:space:]]+/) {
+            if (indent($0) > wfindent && $0 ~ /^[[:space:]]*-[[:space:]]+/) {
               saw_item = 1; next
             }
             flush()
@@ -1763,7 +1764,7 @@ stub_normalize_surface() {
           if ($0 ~ /^[[:space:]]*workflows:[[:space:]]*/) {
             val = $0; sub(/^[[:space:]]*workflows:[[:space:]]*/, "", val)
             wfindent = indent($0); ind = substr($0, 1, wfindent)
-            if (val ~ /^\[/) { printf "%sworkflows: WORKFLOWS\n", ind; next }
+            if (val ~ /^\[/ && val !~ /^\[[[:space:]]*\]/) { printf "%sworkflows: WORKFLOWS\n", ind; next }
             if (val == "")  { pending = 1; saw_item = 0; saved = $0; next }
             print; next          # null / bare scalar — leave intact (drift)
           }

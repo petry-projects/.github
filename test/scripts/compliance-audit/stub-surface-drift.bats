@@ -260,6 +260,18 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+@test "pr-auto-review: block-sequence workflows with a blank line before the first entry is NOT flagged" {
+  # A blank line (or a stripped comment) between the workflows: key and the first
+  # block-sequence entry must not prematurely flush the pending block.
+  local deployed
+  deployed=$(printf '%s\n' "$PR_AUTO_REVIEW_CANONICAL" | sed -E 's/^(  workflow_run:)$/\1\n    workflows:\n\n      - "CI Pipeline"/; /^    workflows: \["CI"\]$/d')
+  # sanity: inline form gone; blank line present between key and entry
+  ! grep -q 'workflows: \["CI"\]' <<< "$deployed"
+  grep -q '^      - "CI Pipeline"$' <<< "$deployed"
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 1 ]
+}
+
 @test "pr-auto-review: an empty block-sequence workflows list (no entries) is flagged" {
   # workflows: with no list entries names nothing — not a valid customization.
   local deployed
@@ -283,6 +295,13 @@ EOF
   deployed=$(printf '%s\n' "$PR_AUTO_REVIEW_CANONICAL" | sed '/^  workflow_run:$/,/^    types: \[completed\]$/d')
   # sanity: the workflow_run trigger key really was removed
   ! grep -q '^  workflow_run:$' <<< "$deployed"
+  surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr-auto-review: workflows: [] (empty inline list) is flagged (not a valid list shape)" {
+  local deployed="${PR_AUTO_REVIEW_CANONICAL/workflows: \[\"CI\"\]/workflows: []}"
+  [ "$deployed" != "$PR_AUTO_REVIEW_CANONICAL" ]
   surface_drift "$PR_AUTO_REVIEW_CANONICAL" "$deployed" "on"
   [ "$status" -eq 0 ]
 }
