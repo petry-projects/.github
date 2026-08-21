@@ -230,10 +230,10 @@ per-agent-type breaker in §5.
   after the Claude-backed direct consumers.
 - **Telemetry:** the derived private ledger of §4 — there is no native surface to
   poll. The threshold is read from config (the config story), never hardcoded.
-- **Fail-safe direction:** the breaker is **fail-open on telemetry error** (a
+- **Fail-safe direction:** the breaker **fails to a 'closed' (allow) state on telemetry error** (a
   ledger read failure must not wedge the whole fleet), matching the fail-open
-  posture of the PR-Limits gate; but it is **fail-closed on a fresh 429 +
-  `retry-after`** (a hard, first-hand signal that the cap is already hit).
+  posture of the PR-Limits gate; but it **fails to an 'open' (block) state on a fresh 429 +
+  retry-after** (a hard, first-hand signal that the cap is already hit).
 
 The default 90% threshold, the 80% resume mark, and the exact priority order are
 **proposals pending sign-off.**
@@ -253,7 +253,7 @@ point of a decision record before the config/gate stories.
   §9 metrics/cap. Mirrors the PR-Limits split
   ([`standards/pr-limits.md`](../../standards/pr-limits.md) +
   `standards/pr-limits.json`).
-- A **source-side gate library** (`scripts/lib/…`) that reads the config and
+- A **source-side gate library** (`scripts/lib/agent-limit-gate.sh`) that reads the config and
   answers admission questions — the per-type concurrency/cooldown/daily-budget
   and failure-breaker checks that need only public inputs (run counts,
   timestamps, failure counters derivable from the GitHub API), analogous to
