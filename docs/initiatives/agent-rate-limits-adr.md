@@ -65,32 +65,39 @@ for action pinning must be looked up via the GitHub API — never guessed"*,
    runs-per-day. Therefore the per-agent-type controls are **source-side**, in the
    dispatch/engine layer, not a GitHub toggle — the same conclusion the
    PR-Limits ADR reached for open-PR caps.
-3. **The Claude platform exposes no rolling 5-hour "subscription budget %"
-   surface.** Verified first-hand (§4): the Messages API exposes **per-minute**
-   token-bucket limits via `anthropic-ratelimit-*` response headers and a
-   Rate Limits API for *configured* limits — but **no 5-hour window and no
-   subscription-budget percentage.** The 5-hour rolling window is a **Claude
-   Pro/Max subscription** concept (shared across Claude + Claude Code, surfaced
-   interactively via `/status`), with **no pollable programmatic surface.** The
-   org's agents authenticate with the subscription-backed
-   `CLAUDE_CODE_OAUTH_TOKEN` (verified in the workflow stubs, §3), so the budget
-   that matters is precisely the one with no native telemetry.
-4. **The token-budget breaker's telemetry must therefore be *derived*, not
-   *queried*** — and it can only be derived where the token accounting lives: the
-   private engine (`petry-projects/.github-private` `scripts/engine.sh`,
-   subscription-cap handling, [#206](https://github.com/petry-projects/.github/issues/206)).
-   Today that engine reacts **after** a rate-limit (exit-2 walks the model
-   fallback chain); a *proactive* breaker requires it to record per-run token
-   usage + rate-limit timestamps into private state. This splits enforcement
-   across a **public standard/gate** (this epic) and a **private companion
-   change** (§8).
-5. All numeric values in §6, the §7 default threshold, and the §9 cost cap are
+3. **Claude's *documented* API surfaces do not expose the rolling subscription
+   budget — but an undocumented OAuth endpoint does.** Verified first-hand (§4):
+   the Messages API exposes only **per-minute** token-bucket limits via
+   `anthropic-ratelimit-*` response headers, and the Rate Limits API returns
+   *configured* ceilings. Neither reports the subscription window, and both are
+   **API-key-scoped**, while the org's agents authenticate with the
+   subscription-backed `CLAUDE_CODE_OAUTH_TOKEN` (verified in the workflow stubs,
+   §3). That gap is closed by `GET https://api.anthropic.com/api/oauth/usage`
+   (§4.1) — the subscription-OAuth-scoped endpoint backing Claude Code's `/usage`
+   view. It was probed first-hand (HTTP 200, live window state, 2026-08-20) using
+   the same token class the fleet already holds, and returns **both** the 5-hour
+   and the 7-day windows with server-computed severity and exact reset timestamps.
+   It is **undocumented and unsupported**, which dictates the adapter boundary and
+   fail-safe below — not avoidance.
+4. **The breaker's telemetry is therefore *queried*, with a *derived* fallback.**
+   The §4.1 endpoint is the **source of record**. Because it is undocumented,
+   every read goes through a small adapter, and a **derived ledger** in the private
+   engine (`petry-projects/.github-private` `scripts/engine.sh`, subscription-cap
+   handling, [#206](https://github.com/petry-projects/.github/issues/206)) is
+   retained as the documented **degraded path** for when the endpoint is
+   unavailable or changes shape. An estimate is strictly worse than an
+   authoritative server-side percentage, so it is the fallback, never the primary.
+   Enforcement still splits across a **public standard/gate** (this epic) and a
+   **private companion change** (§8), because the credential and the poller live
+   private.
+5. **Not every limit is a fleet-stop.** The endpoint distinguishes account-wide
+   windows (`session`, `weekly_all`) from **per-model** windows (`weekly_scoped`).
+   Only account-wide windows are pause-worthy; a scoped exhaustion is handled by
+   the engine's existing model-fallback chain — swap models, do not stop the fleet.
+   The probe caught exactly this case: one model's weekly bucket at
+   100%/critical/active while the account-wide weekly window sat at 85%.
+6. All numeric values in §6, the §7 thresholds, and the §9 cost cap are
    **proposals pending human sign-off**, not final numbers.
-
-> If a reviewer knows of a GitHub per-workflow rate-limit feature, or a
-> programmatic Claude endpoint that returns remaining 5-hour subscription budget,
-> that those doc surfaces do not describe, that is the one gap this story could
-> not close from inside CI (§10). Re-open §2 with the citation if so.
 
 ---
 
@@ -130,28 +137,74 @@ read for a field that caps *rate over a window* or exposes a *5-hour budget*.
 | **GitHub Actions `concurrency`** | [Using concurrency](https://docs.github.com/en/actions/using-jobs/using-concurrency) | Controls **simultaneous execution only.** The key ensures "only one workflow or job with that key runs at any given time"; `cancel-in-progress` cancels the in-flight run (the #402 lever); `queue: max` allows up to 100 *pending* runs FIFO. **No per-hour/daily execution budget, no run-count-over-time limit, no cost/token telemetry.** |
 | **Claude Messages API rate limits** | [Rate limits](https://platform.claude.com/docs/en/api/rate-limits) | Two limit types: **monthly spend cap** and **per-minute** rate limits (RPM / ITPM / OTPM) via a **token-bucket** (continuously replenished, *not* fixed-window). Exposes `anthropic-ratelimit-{requests,tokens,input-tokens,output-tokens}-{limit,remaining,reset}` response headers (reset = RFC 3339) and `retry-after` on 429. **No 5-hour window; no rolling-budget-% surface.** |
 | **Claude Rate Limits API** | [Rate Limits API](https://platform.claude.com/docs/en/manage-claude/rate-limits-api) | Reads the org/workspace's *configured* limits programmatically. Returns configured ceilings, **not** live remaining budget for a 5-hour window. |
-| **Claude Pro/Max subscription usage** | [Using Claude Code with your Pro/Max plan](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan) | Confirms "usage limits … shared across Claude and Claude Code" and an **interactive** `/status` command that shows "remaining allocation." **No programmatic/CI-pollable endpoint** for the remaining subscription budget is documented. |
+| **Claude Pro/Max subscription usage** | [Using Claude Code with your Pro/Max plan](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan) | Confirms "usage limits … shared across Claude and Claude Code" and an **interactive** `/status` command that shows "remaining allocation." **No programmatic endpoint is *documented*** — but the interactive view is served by one (next row). |
+| **OAuth usage endpoint** (undocumented) | **Probed first-hand 2026-08-20 — HTTP 200, live window state.** No doc page exists; this is the surface behind Claude Code's `/usage` view. | **Reports the subscription windows directly** — 5-hour, 7-day, and per-model — scoped to the subscription OAuth token, with `percent`, server-computed `severity`, and exact `resets_at`. **This is the source of record (§4.1).** |
 
 **Conclusion (AC #4):** there is **no native GitHub surface** for per-workflow
-rate limiting, and **no native Claude surface** that exposes the rolling 5-hour
-*subscription* budget. The nearest real signals are:
+rate limiting — that half of §2.2 stands. For Claude, the *documented* surfaces do
+not report the subscription budget, but a **first-hand-verified undocumented
+endpoint does**, and it is the telemetry source of record.
 
-1. **`anthropic-ratelimit-*` response headers** — a genuine, first-hand token
-   signal, but **per-minute and API-key-scoped**, and the org's agents run on the
-   **subscription OAuth token**, whose 5-hour window these headers do not report.
-2. **The 429 + `retry-after` back-pressure** the engine already sees on cap
-   exhaustion (the reactive signal behind #206's exit-2 fallback).
+### 4.1 Telemetry source of record — the OAuth usage endpoint
 
-**Selected concrete alternative (the telemetry source of record):** because no
-vendor surface reports the 5-hour subscription budget, the breaker's telemetry is
-**derived source-side in the private engine.** `scripts/engine.sh` (which already
-handles the subscription cap, #206) records, per agentic run, the tokens consumed
-and the timestamp of any rate-limit/429, into a **private rolling-window ledger**
-keyed to the 5-hour window. The proactive breaker (§7) reads that ledger. This is
-the only place the accounting exists; it cannot be read from the public repo — the
-basis for the §8 boundary. Where an agent path uses an **API key** rather than the
-subscription token, the `anthropic-ratelimit-tokens-remaining` header is the
-authoritative live signal and the ledger should prefer it over estimation.
+```
+GET https://api.anthropic.com/api/oauth/usage
+  Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>
+  anthropic-beta: oauth-2025-04-20
+  User-Agent: claude-code/<version>
+```
+
+Probed first-hand on **2026-08-20: HTTP 200 with live window state.** This is the
+data behind Claude Code's `/usage` view. It resolves the exact gap the rows above
+identify: `anthropic-ratelimit-*` headers are per-minute and **API-key-scoped**,
+whereas this endpoint is **subscription-OAuth-scoped** — it authenticates with the
+same `CLAUDE_CODE_OAUTH_TOKEN` the fleet already holds and reports the windows
+that actually bind the fleet.
+
+Contract notes that follow-on stories must honour:
+
+- **The `User-Agent` is load-bearing, not cosmetic.** Without a
+  `claude-code/<version>` value the caller lands in an aggressively rate-limited
+  bucket and receives persistent 429s. Rate limiting is **per access token**, not
+  per account; polling at **≥180 s** is safe, so an hourly poller sits far inside
+  budget.
+- **Prefer the `limits[]` array over the flattened `five_hour` / `seven_day`
+  keys.** Each entry is `{ kind, group, percent, severity, resets_at, is_active }`
+  where `kind` ∈ `session` (5-hour), `weekly_all` (7-day), `weekly_scoped`
+  (per-model). The server-computed `severity` (`normal` / `warning` / `critical`)
+  gives the gate a graded signal instead of re-deriving one from a bare number.
+  Treat the flattened keys as the fallback for older response shapes.
+- **`resets_at` is authoritative.** All time-until-reset arithmetic derives from
+  this field — never a hardcoded weekday, cron expression, or timezone constant —
+  so behaviour self-corrects if the window ever shifts. (The probe returned
+  `2026-08-25T15:59:59Z` for the weekly window, i.e. Tuesday ~11:00
+  America/Chicago, matching the maintainer's understanding without being
+  configured anywhere.)
+- **`weekly_scoped` must never trip a fleet pause** (§2.5). Only `session` and
+  `weekly_all` are pause-worthy.
+- **Both breakers share one call.** The 5-hour breaker (Phase 5) and the 7-day
+  glide-path breaker (Phase 6) read `session` and `weekly_all` from the same
+  response, behind one adapter.
+
+**Degraded path (retained, demoted).** Because the endpoint is undocumented and
+unsupported, it can change shape or disappear. The fallback is the **derived
+ledger** in the private engine: `scripts/engine.sh` (which already handles the
+subscription cap, #206) records per-run token consumption and rate-limit
+timestamps into a private rolling-window ledger. The adapter prefers the endpoint
+and falls back to the ledger; the ledger is an estimate and is never the primary
+source. Where an agent path uses an **API key** rather than the subscription
+token, `anthropic-ratelimit-tokens-remaining` remains the authoritative live
+signal for that path.
+
+**Open verification (carried, not closed).** The probe used a short-lived OAuth
+access token from a local credential store; CI authenticates with the long-lived
+`claude setup-token` credential. Both are OAuth-issued and share the
+`sk-ant-oat01-` prefix, so acceptance is likely but **unproven**. It is verified by
+running the poller in **dry-run in CI against the existing secret** — *not* by
+minting a fresh setup-token, which risks invalidating the credential the fleet
+currently runs on. If the long-lived token is rejected, the fallback is a
+dedicated short-lived credential refreshed by the workflow, a materially larger
+change that should be re-scoped before implementation.
 
 ---
 
@@ -214,10 +267,27 @@ human sign-off** before the config story.
 The dimension the discussion specifically requested, distinct from the
 per-agent-type breaker in §5.
 
-- **Trigger:** pause **new agentic dispatch** when the rolling **5-hour Claude
-  subscription budget** reaches a **configurable threshold (default 90%)** of
-  consumed budget. The window is the subscription's own 5-hour rolling window
-  (§4), not a per-minute API bucket.
+- **Trigger (5-hour window, `session`):** pause **new agentic dispatch** when the
+  rolling **5-hour Claude subscription budget** reaches a **configurable threshold
+  (default 90%)** of consumed budget. The window is the subscription's own 5-hour
+  rolling window (§4.1), not a per-minute API bucket.
+- **Trigger (7-day window, `weekly_all`):** pause when the weekly budget crosses a
+  threshold that **tightens as the reset approaches**, reserving a configurable
+  share of the budget per remaining day:
+
+  ```
+  pause when  weekly_all.percent  >=  100 - (reserve_pct_per_day * days_until_reset)
+  ```
+
+  With `reserve_pct_per_day = 2` (proposal) that is 98% the day before reset, 96%
+  two days before, down to an 86% floor immediately after a reset. `days_until_reset`
+  derives from `resets_at` (§4.1) with partial days rounding **up**. The floor is the
+  "don't spend the whole week on day one" guard; the near-100% ceiling on reset day
+  is deliberate, since a budget minutes from refilling needs no protection. The two
+  triggers are orthogonal: the 5-hour breaker bounds a *burst*, the weekly breaker
+  bounds the *shape of the week*.
+- **Scope guard:** neither trigger fires on `weekly_scoped` (per-model)
+  exhaustion — see §2.5.
 - **State machine:** **open** at ≥ threshold → hold new dispatch; **half-open** as
   the rolling window drains back below a lower resume mark (hysteresis, e.g. 80%,
   to avoid flapping at the boundary) → admit a limited probe of dispatch;
@@ -228,15 +298,25 @@ per-agent-type breaker in §5.
   recovering budget is spent on the pipeline that clears the backlog first.
   initiative-driver dispatch (which *causes* Claude spend downstream) resumes
   after the Claude-backed direct consumers.
-- **Telemetry:** the derived private ledger of §4 — there is no native surface to
-  poll. The threshold is read from config (the config story), never hardcoded.
-- **Fail-safe direction:** the breaker **fails to a 'closed' (allow) state on telemetry error** (a
-  ledger read failure must not wedge the whole fleet), matching the fail-open
-  posture of the PR-Limits gate; but it **fails to an 'open' (block) state on a fresh 429 +
-  retry-after** (a hard, first-hand signal that the cap is already hit).
+- **Telemetry:** the OAuth usage endpoint of §4.1, read through the adapter, with
+  the derived private ledger as the documented fallback. Thresholds are read from
+  config (the config story), never hardcoded.
+- **Fail-safe direction:** stated as behaviour rather than open/closed vocabulary,
+  which inverts confusingly. On **telemetry error** — non-200, malformed body, or
+  a missing window entry — the breaker **allows dispatch and logs a warning.** An
+  outage of an undocumented third-party endpoint must never stop the fleet; that is
+  the failure mode this epic exists to prevent, and the engine's reactive exit-2
+  fallback (#206) remains the protection of last resort. On a **fresh 429 +
+  `retry-after`** the breaker **blocks** — a hard, first-hand signal that the cap
+  is already hit.
+- **Resume:** utilization is monotonic within a window, so a tripped breaker does
+  not un-trip on a percentage dip; the clean resume is the window reset given by
+  `resets_at`. Where a pause is actuated by a persisted switch, the actuator must
+  record that *automation* set it, so an automatic resume never clears a pause a
+  human set deliberately (see `.github-private#1525`).
 
-The default 90% threshold, the 80% resume mark, and the exact priority order are
-**proposals pending sign-off.**
+The default 90% threshold, the 80% resume mark, `reserve_pct_per_day = 2`, and the
+exact priority order are **proposals pending sign-off.**
 
 ---
 
@@ -253,7 +333,8 @@ point of a decision record before the config/gate stories.
   §9 metrics/cap. Mirrors the PR-Limits split
   ([`standards/pr-limits.md`](../../standards/pr-limits.md) +
   `standards/pr-limits.json`).
-- A **source-side gate library** (`scripts/lib/agent-limit-gate.sh`) that reads the config and
+- A **source-side gate library** (`scripts/lib/agent-rate-limit.sh` — the name
+  fixed by the Phase 3 story) that reads the config and
   answers admission questions — the per-type concurrency/cooldown/daily-budget
   and failure-breaker checks that need only public inputs (run counts,
   timestamps, failure counters derivable from the GitHub API), analogous to
@@ -265,10 +346,25 @@ point of a decision record before the config/gate stories.
 
 ### 8.2 Requires a **private** companion change (`petry-projects/.github-private`)
 
-- The **token-budget breaker's telemetry** (§4/§7): only `scripts/engine.sh`
-  sees per-run token usage and the subscription 429s (#206). The **5-hour rolling
-  ledger and the proactive breaker read** must be built there. The public gate
-  can encode the *threshold and policy*, but the *live budget number* is private.
+- The **token-budget breaker's telemetry** (§4.1/§7): the usage endpoint
+  authenticates with `CLAUDE_CODE_OAUTH_TOKEN`, which lives private, so the
+  **adapter and the poller** are built there — as is the fallback ledger, since only
+  `scripts/engine.sh` sees per-run token usage and the subscription 429s (#206).
+  The public gate encodes the *thresholds and policy*; the *live budget read* is
+  private.
+- **Actuating a fleet-wide pause needs a permission the fleet does not currently
+  have.** Writing an **org-level** Actions variable returns
+  `403 — must be an org admin or have the actions variables fine-grained
+  permission` for a classic token carrying `repo` / `workflow` / `read:org`,
+  **even when the caller is already an org admin** (verified 2026-08-20). It
+  requires `admin:org` (classic) or the fine-grained org **Variables: write**
+  permission. Repo-level variables are writable under plain `repo`. This is a
+  genuine new prerequisite, not an existing capability — the fallback is per-repo
+  variables at the cost of N writes and a slower fleet-wide stop.
+- The **pause switch itself already exists**: `AGENTS_PAUSED=true`, an Actions
+  *variable* (visible where secrets are not), delivered by
+  `.github-private#1525`. The breaker automates setting and clearing it; it does
+  not redesign it.
 - **dev-lead's per-issue lanes and the initiative-driver max-in-flight** already
   live in the private reusable/central driver (§3); the new concurrency-cap,
   cooldown, and failure-breaker wiring for those two attach there.
@@ -298,6 +394,10 @@ Pinned here so Phases 2–5 inherit them (proposals pending sign-off):
 - **Budget headroom:** the 5-hour subscription budget stays **below the §7
   threshold** in normal operation; when it trips, Claude-backed agents recover
   first and the backlog clears without manual intervention.
+- **Weekly headroom:** the 7-day budget never exhausts before its reset — the
+  glide path leaves usable Claude capacity for humans on every day of the week,
+  and a deliberate budget pause is never again diagnosed as a fleet outage
+  (`.github-private#1525`).
 - **Bounded fan-out:** initiative-driver never releases more than its daily
   dispatch budget, so a single epic cannot flood dev-lead (the §1 fan-out risk).
 
@@ -320,21 +420,32 @@ Pinned here so Phases 2–5 inherit them (proposals pending sign-off):
   decision. The Anthropic docs host redirected `docs.anthropic.com` →
   `platform.claude.com` and `support.anthropic.com` → `support.claude.com`; both
   redirects were followed and the canonical pages read.
-- **The 5-hour window's exact mechanics are not publicly documented** at a
-  programmatic level — the subscription support page confirms the *existence* of
-  shared usage limits and the interactive `/status` view, but no page exposes a
-  pollable "remaining 5-hour budget" API. §4's selected alternative (derive it in
-  the private engine) stands on that verified absence. If Anthropic later ships a
-  subscription-budget endpoint, §7's telemetry source should be revisited to
-  prefer it over the derived ledger.
+- **The telemetry source is undocumented, and that is the standing risk.** §4.1's
+  endpoint is real and verified, but it appears on no documentation page and
+  carries no compatibility guarantee; it can change shape or disappear without
+  notice. Upstream requests for a supported surface are open
+  ([anthropics/claude-code#44328](https://github.com/anthropics/claude-code/issues/44328),
+  [#32796](https://github.com/anthropics/claude-code/issues/32796)). This is why
+  every read is adapter-wrapped, why the derived ledger is retained as the degraded
+  path, and why telemetry failure allows rather than blocks (§7). **If Anthropic
+  ships a supported endpoint, §4.1 should migrate to it.**
+- **The CI credential class is unverified.** See §4.1's open-verification note:
+  the probe used a short-lived local OAuth token, not the long-lived
+  `claude setup-token` credential CI uses. Closed by a dry-run in CI, not by
+  minting a new token.
+- **The window's internal mechanics remain undocumented** — the endpoint reports
+  `percent` and `resets_at` but not how consumption maps to them, so the ADR
+  treats the reported percentage as opaque and authoritative rather than modelling
+  it.
 
 ---
 
 ## 11. Consequences
 
 - The follow-on stories are **build, not configure**: like PR-Limits, there is no
-  vendor toggle to flip — the work is a source-side gate, a private token ledger,
-  and thin, centrally-promoted wiring.
+  vendor toggle to flip — the work is a source-side gate, a private telemetry
+  adapter and poller over §4.1 (with the derived ledger as its fallback), and
+  thin, centrally-promoted wiring.
 - The §6/§7/§9 numbers are explicitly provisional; the config story starts from a
   human-signed set.
 - `cancel-in-progress` is recorded as an **anti-pattern** for throughput control
@@ -359,6 +470,17 @@ Pinned here so Phases 2–5 inherit them (proposals pending sign-off):
   - [Rate limits](https://platform.claude.com/docs/en/api/rate-limits)
   - [Rate Limits API](https://platform.claude.com/docs/en/manage-claude/rate-limits-api)
   - [Using Claude Code with your Pro/Max plan](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan)
+- **Telemetry source of record (§4.1):** `GET https://api.anthropic.com/api/oauth/usage`
+  — undocumented; probed first-hand 2026-08-20 (HTTP 200). Upstream requests for a
+  supported equivalent:
+  [anthropics/claude-code#44328](https://github.com/anthropics/claude-code/issues/44328),
+  [#32796](https://github.com/anthropics/claude-code/issues/32796).
+- Follow-on stories reading §4.1: [#641](https://github.com/petry-projects/.github/issues/641)
+  (Phase 5, 5-hour breaker) and [#994](https://github.com/petry-projects/.github/issues/994)
+  (Phase 6, 7-day glide-path breaker).
+- Cross-repo: `petry-projects/.github-private#1525` — `AGENTS_PAUSED` as a
+  first-class state (the switch §7 automates); `.github-private#1565` — the
+  adapter/poller companion.
 - Cross-repo: `petry-projects/.github-private` `scripts/engine.sh` — 5-hour subscription-cap handling ([#206](https://github.com/petry-projects/.github/issues/206)).
 - Baseline incidents: [#402](https://github.com/petry-projects/.github/issues/402), [#443](https://github.com/petry-projects/.github/issues/443), [#571](https://github.com/petry-projects/.github/issues/571).
 - External framing: OWASP Top 10 for Agentic Applications (2026), **ASI08 — Denial of Service & Resource Exhaustion**.
