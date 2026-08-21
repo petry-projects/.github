@@ -73,7 +73,7 @@ for action pinning must be looked up via the GitHub API — never guessed"*,
    Pro/Max subscription** concept (shared across Claude + Claude Code, surfaced
    interactively via `/status`), with **no pollable programmatic surface.** The
    org's agents authenticate with the subscription-backed
-   `CLAUDE_CODE_OAUTH_TOKEN` (verified in the workflow stubs, §4), so the budget
+   `CLAUDE_CODE_OAUTH_TOKEN` (verified in the workflow stubs, §3), so the budget
    that matters is precisely the one with no native telemetry.
 4. **The token-budget breaker's telemetry must therefore be *derived*, not
    *queried*** — and it can only be derived where the token accounting lives: the
