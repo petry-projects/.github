@@ -175,4 +175,8 @@ jobs:
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
       - name: Run gitleaks
-        run: gitleaks detect --source . --redact --verbose --exit-code 1
+        # --config .gitleaks.toml is required: without it gitleaks uses its
+        # default ruleset, whose generic-api-key rule false-positives on certain
+        # filenames and reds this job intermittently (issue #996). The repo ships
+        # .gitleaks.toml at root; see standards/push-protection.md Layer 3.
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
