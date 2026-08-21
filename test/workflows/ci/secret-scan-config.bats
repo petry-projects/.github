@@ -41,20 +41,23 @@ step_block_with() {
 }
 
 @test "secret-scan: the ci workflow exists" {
-  [ -f "$TT_WORKFLOW" ]
+  [[ -f "$TT_WORKFLOW" ]]
 }
 
 @test "secret-scan: gitleaks scan passes --config .gitleaks.toml" {
   # Without --config, gitleaks uses its default ruleset, whose generic-api-key
   # rule false-positives on certain filenames and reds the job intermittently.
-  local block
+  local block command
   block="$(step_block_with 'gitleaks detect')"
-  [ -n "$block" ]
-  [[ "$block" == *"--config .gitleaks.toml"* ]]
+  [[ -n "$block" ]]
+  # Extract the run: command from the step block
+  command="$(printf '%s\n' "$block" | sed -nE 's/^[[:space:]]*run:[[:space:]]*(.*)$/\1/p')"
+  [[ "$command" == gitleaks\ detect* ]]
+  [[ "$command" == *"--config .gitleaks.toml"* ]]
 }
 
 @test "secret-scan: the .gitleaks.toml config ships at repo root" {
   # The --config flag references a file that MUST exist at root, or the scan
   # fails with file-not-found (standards/push-protection.md#gitleakstoml-template).
-  [ -f "${TT_REPO_ROOT}/.gitleaks.toml" ]
+  [[ -f "${TT_REPO_ROOT}/.gitleaks.toml" ]]
 }
