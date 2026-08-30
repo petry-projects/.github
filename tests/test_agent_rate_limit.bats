@@ -438,3 +438,115 @@ stub_concurrent_runs() {
   run grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
   [ "$status" -eq 1 ]
 }
+
+# --------------------------------------------------------------------------
+# arl_is_dry_run — independent OR check (both DRY_RUN and DEV_LEAD_DRY_RUN)
+# --------------------------------------------------------------------------
+@test "DRY_RUN=false DEV_LEAD_DRY_RUN=true is treated as a dry run" {
+  # Previously DRY_RUN=false would shadow DEV_LEAD_DRY_RUN=true via :- expansion.
+  write_config "dev-lead" 3 5 50 3 30
+  write_state '{"dev-lead":{"last_run_epoch":0,"daily_count":0,"consecutive_failures":0,"breaker_opened_epoch":0}}'
+  stub_concurrent_runs 3
+  run bash -c "source '$LIB'; DRY_RUN=false DEV_LEAD_DRY_RUN=true arl_admission_gate dev-lead donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"DRY_RUN"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Negative elapsed time — future timestamps must fail open (degraded allow)
+# --------------------------------------------------------------------------
+@test "admission: a future last_run_epoch (negative elapsed) degrades to allow" {
+  write_config "dev-lead" 3 5 50 3 30
+  # now=1000, last_run=2000 -> elapsed=-1000 -> future timestamp -> allow
+  run bash -c "source '$LIB'; arl_admission_decision dev-lead 0 2000 0 1000"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"future"* ]]
+}
+
+@test "breaker: a future breaker_opened_epoch (negative elapsed) degrades to allow" {
+  write_config "dev-lead" 3 5 50 3 30
+  # failures=5 >= threshold=3, opened=200000 > now=100000 -> future -> allow
+  run bash -c "source '$LIB'; arl_breaker_decision dev-lead 5 200000 100000"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"future"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Daily window reset — expired daily_window_start resets the counter
+# --------------------------------------------------------------------------
+@test "gate: daily_count at budget is allowed when the 24h window has expired" {
+  write_config "dev-lead" 3 5 50 3 30
+  # daily_window_start=0 (86400s before now=86401) -> window expired -> count reset to 0
+  write_state '{"dev-lead":{"last_run_epoch":0,"daily_count":50,"daily_window_start":1,"consecutive_failures":0,"breaker_opened_epoch":0}}'
+  stub_concurrent_runs 0
+  run bash -c "source '$LIB'; SOURCE_NOW=86401 arl_admission_gate dev-lead donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "gate: daily_count at budget defers when the 24h window is still active" {
+  write_config "dev-lead" 3 5 50 3 30
+  # daily_window_start=86000, now=86401, elapsed=401 < 86400 -> window still active
+  write_state '{"dev-lead":{"last_run_epoch":0,"daily_count":50,"daily_window_start":86000,"consecutive_failures":0,"breaker_opened_epoch":0}}'
+  stub_concurrent_runs 0
+  run bash -c "source '$LIB'; SOURCE_NOW=86401 arl_admission_gate dev-lead donpetry-bot"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Half-open probe deduplication — probe_dispatched_epoch prevents double probe
+# --------------------------------------------------------------------------
+@test "breaker: half-open with a recent probe_dispatched_epoch defers" {
+  write_config "dev-lead" 3 5 50 3 30
+  # opened=100000, now=101800 (1800s elapsed == backoff -> half-open)
+  # probe_dispatched=101700 (100s ago, within 1800s window) -> defer
+  run bash -c "source '$LIB'; arl_breaker_decision dev-lead 5 100000 101800 101700"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decision=defer"* ]]
+  [[ "$output" == *"probe already dispatched"* ]]
+}
+
+@test "breaker: half-open with an expired probe_dispatched_epoch allows a new probe" {
+  write_config "dev-lead" 3 5 50 3 30
+  # opened=100000, now=103800 (3800s elapsed > 1800s backoff -> half-open)
+  # probe_dispatched=100001 (3799s ago, > 1800s window) -> allow new probe
+  run bash -c "source '$LIB'; arl_breaker_decision dev-lead 5 100000 103800 100001"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"half-open"* ]]
+}
+
+# --------------------------------------------------------------------------
+# arl_is_exempt_label and gate exempt-label path (AC #2)
+# --------------------------------------------------------------------------
+@test "arl_is_exempt_label is true for a configured exempt label" {
+  write_config "dev-lead" 3 5 50 3 30
+  run bash -c "source '$LIB'; arl_is_exempt_label 'security'"
+  [ "$status" -eq 0 ]
+}
+
+@test "arl_is_exempt_label is false for a non-exempt label" {
+  write_config "dev-lead" 3 5 50 3 30
+  run bash -c "source '$LIB'; arl_is_exempt_label 'enhancement'"
+  [ "$status" -eq 1 ]
+}
+
+@test "arl_is_exempt_label is true when one label in a csv list is exempt" {
+  write_config "dev-lead" 3 5 50 3 30
+  run bash -c "source '$LIB'; arl_is_exempt_label 'priority-high,security,bug'"
+  [ "$status" -eq 0 ]
+}
+
+@test "gate: a run with an exempt label is allowed even over every limit" {
+  write_config "dev-lead" 1 5 1 1 30
+  write_state '{"dev-lead":{"last_run_epoch":0,"daily_count":999,"consecutive_failures":99,"breaker_opened_epoch":0}}'
+  stub_concurrent_runs 50
+  run bash -c "source '$LIB'; arl_admission_gate dev-lead non-exempt-actor 'security'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"exempt"* ]]
+}

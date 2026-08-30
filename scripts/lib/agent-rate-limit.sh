@@ -93,13 +93,11 @@ arl_now() {
 
 # ---------------------------------------------------------------------------
 # arl_is_dry_run — 0 (true) when DRY_RUN or DEV_LEAD_DRY_RUN is "true".
+# Each variable is checked independently so DEV_LEAD_DRY_RUN=true is honoured
+# even when DRY_RUN is explicitly set to "false" (not merely unset).
 # ---------------------------------------------------------------------------
 arl_is_dry_run() {
-  local dry="${DRY_RUN:-${DEV_LEAD_DRY_RUN:-false}}"
-  if [ "$dry" = "true" ]; then
-    return 0
-  fi
-  return 1
+  [ "${DRY_RUN:-false}" = "true" ] || [ "${DEV_LEAD_DRY_RUN:-false}" = "true" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -128,6 +126,26 @@ arl_is_exempt_actor() {
   if jq -e --arg a "$actor" '(.exempt_actors // []) | index($a) != null' "$config" >/dev/null 2>&1; then
     return 0
   fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# arl_is_exempt_label <labels_csv> — 0 when any label in the comma-separated
+# <labels_csv> string appears in the config exempt_labels list. Callers pass the
+# labels attached to the triggering PR/issue (e.g. "security,priority-high").
+# A security label on a run must never be deferred by rate limits.
+# ---------------------------------------------------------------------------
+arl_is_exempt_label() {
+  local labels_csv="$1" config label
+  config="$(arl_config_path)"
+  local IFS=','
+  for label in $labels_csv; do
+    label="${label// /}"
+    [ -z "$label" ] && continue
+    if jq -e --arg l "$label" '(.exempt_labels // []) | index($l) != null' "$config" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -204,10 +222,13 @@ arl_admission_decision() {
 
   # 2. Cooldown — minimum quiet interval since the last run (kills dispatch
   #    races; ADR §5). Skipped when disabled (0) or when there is no last run.
+  #    A future last_run (elapsed < 0) is malformed state — fail open (allow).
   if [ "$decision" = "allow" ] && [ -n "$cooldown" ] && [ "$cooldown" -gt 0 ] && [ "$last_run" -gt 0 ]; then
     local elapsed=$(( now - last_run ))
     local window=$(( cooldown * 60 ))
-    if [ "$elapsed" -lt "$window" ]; then
+    if [ "$elapsed" -lt 0 ]; then
+      arl_log "warning: last_run_epoch is in the future — skipping cooldown check (degraded allow)"
+    elif [ "$elapsed" -lt "$window" ]; then
       decision="defer"
       reason="cooldown ${elapsed}s/${window}s since last run has not elapsed"
     fi
@@ -227,10 +248,15 @@ arl_admission_decision() {
 
 # ---------------------------------------------------------------------------
 # arl_breaker_decision <agent_type> <consecutive_failures> <opened_epoch>
-#                      <now_epoch>
+#                      <now_epoch> [probe_dispatched_epoch]
 #
 # PURE — the consecutive-failure circuit breaker (ADR §5). Reads the threshold
 # and backoff from config; computes state from injected counters/timestamps.
+# [probe_dispatched_epoch] (optional, default 0): epoch when a half-open probe
+# was last dispatched. If a probe was recently dispatched (within the backoff
+# window), subsequent callers defer instead of admitting a second simultaneous
+# probe. Callers are expected to record probe_dispatched_epoch in state after
+# a probe is granted.
 #
 # State machine:
 #   - failures < threshold           -> closed    -> allow
@@ -248,10 +274,11 @@ arl_admission_decision() {
 # ---------------------------------------------------------------------------
 arl_breaker_decision() {
   local agent_type="$1"
-  local failures opened now
+  local failures opened now probe_dispatched
   failures="$(arl_sanitize_int "${2:-}")"
   opened="$(arl_sanitize_int "${3:-}")"
   now="$(arl_sanitize_int "${4:-}")"
+  probe_dispatched="$(arl_sanitize_int "${5:-}")"
 
   local threshold backoff
   threshold="$(arl_breaker_threshold "$agent_type" consecutive_failure_threshold)"
@@ -287,12 +314,25 @@ arl_breaker_decision() {
 
   local elapsed=$(( now - opened ))
   local window=$(( backoff * 60 ))
+  if [ "$elapsed" -lt 0 ]; then
+    arl_log "breaker for '${agent_type}': warning: breaker_opened_epoch is in the future — failing open (degraded allow)"
+    printf 'decision=allow\n'
+    return 0
+  fi
   if [ "$elapsed" -lt "$window" ]; then
     arl_log "breaker for '${agent_type}': state=open (backoff ${elapsed}s/${window}s not elapsed)"
     printf 'decision=defer\n'
     return 1
   fi
 
+  # Half-open: allow one probe, but defer if a probe was already dispatched within
+  # the backoff window (reduces the race window for simultaneous callers; callers
+  # must record probe_dispatched_epoch in state after a probe is granted).
+  if [ "$probe_dispatched" -gt 0 ] && [ $(( now - probe_dispatched )) -lt "$window" ]; then
+    arl_log "breaker for '${agent_type}': state=half-open but probe already dispatched — deferring"
+    printf 'decision=defer\n'
+    return 1
+  fi
   arl_log "breaker for '${agent_type}': state=half-open (backoff ${elapsed}s/${window}s elapsed — allowing one probe)"
   printf 'decision=allow\n'
   return 0
@@ -386,27 +426,41 @@ arl_state_field() {
 # count on stdout. Fail-safe: a `gh` failure or empty payload logs and yields 0,
 # so a transient API error degrades to allow rather than wedging dispatch.
 #
-# The mapping from <agent_type> to a workflow filter is finalized by the Phase-4
-# wiring; here the enumeration is intentionally thin, and any read failure
-# degrades to 0 (allow).
+# NOTE: `gh run list` scopes to the current repository by default, so this
+# count cannot enforce org-wide concurrent limits on its own. Set
+# AGENT_RATE_LIMITS_ORG_REPOS to a comma-separated list of "owner/repo" values
+# to include additional repos in the tally (Phase-4 wiring responsibility).
 # ---------------------------------------------------------------------------
 arl_count_concurrent_runs() {
   local agent_type="$1"
-  local runs
-  runs="$(gh run list \
-    --workflow "$agent_type" \
-    --json status \
-    --limit 1000 \
-    2>/dev/null || true)"
+  local total=0 runs n
 
+  runs="$(gh run list --workflow "$agent_type" --json status --limit 1000 2>/dev/null || true)"
   if [ -z "$runs" ]; then
     arl_log "warning: run enumeration for '${agent_type}' returned no data (treating concurrency as 0)"
-    printf '0'
-    return 0
+  else
+    n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
+      <<<"$runs" 2>/dev/null || printf '0')"
+    total=$(( total + $(arl_sanitize_int "$n") ))
   fi
 
-  jq -r '[ .[]? | select((.status // "") == "in_progress" or (.status // "") == "queued") ] | length' \
-    <<<"$runs" 2>/dev/null || printf '0'
+  # Extend to additional repos for org-wide enforcement when configured.
+  if [ -n "${AGENT_RATE_LIMITS_ORG_REPOS:-}" ]; then
+    local repo
+    IFS=',' read -ra _arl_repos <<< "$AGENT_RATE_LIMITS_ORG_REPOS"
+    for repo in "${_arl_repos[@]}"; do
+      repo="${repo// /}"
+      [ -z "$repo" ] && continue
+      runs="$(gh run list --repo "$repo" --workflow "$agent_type" --json status --limit 1000 2>/dev/null || true)"
+      if [ -n "$runs" ]; then
+        n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
+          <<<"$runs" 2>/dev/null || printf '0')"
+        total=$(( total + $(arl_sanitize_int "$n") ))
+      fi
+    done
+  fi
+
+  printf '%s' "$total"
   return 0
 }
 
@@ -432,24 +486,25 @@ arl_finish() {
 }
 
 # ---------------------------------------------------------------------------
-# arl_admission_gate <agent_type> [actor] — the guard.
+# arl_admission_gate <agent_type> [actor] [labels_csv] — the guard.
 #
 # Decides whether <agent_type> may dispatch another run right now. [actor] is the
-# candidate triggering identity (e.g. an actor login); when it is on the config
-# exempt list the run is always allowed and never counted (ADR §8.1).
+# candidate triggering identity (e.g. an actor login); [labels_csv] is a
+# comma-separated list of labels on the triggering PR/issue (e.g. "security").
+# An exempt actor or an exempt label always allows and is never counted (ADR §8.1).
 #
 # Decision order:
-#   1. Missing/malformed config           -> allow (never block the fleet; AC #4)
-#   2. Exempt actor                        -> allow (never blocked, never counted)
-#   3. Open consecutive-failure breaker    -> defer (evaluated before admission)
-#   4. Admission (concurrency/cooldown/daily) -> allow or defer
+#   1. Missing/malformed config               -> allow (never block the fleet; AC #4)
+#   2. Exempt actor or exempt label            -> allow (never blocked, never counted)
+#   3. Open consecutive-failure breaker        -> defer (evaluated before admission)
+#   4. Admission (concurrency/cooldown/daily)  -> allow or defer
 #
 # Prints `decision=allow` / `decision=defer`; returns 0 on allow, 1 on defer, 2
 # on a usage error (no agent type given). DRY_RUN / DEV_LEAD_DRY_RUN prints the
 # computed decision then returns allow with no side effects.
 # ---------------------------------------------------------------------------
 arl_admission_gate() {
-  local agent_type="${1:-}" actor="${2:-}"
+  local agent_type="${1:-}" actor="${2:-}" labels="${3:-}"
   if [ -z "$agent_type" ]; then
     arl_log "error: arl_admission_gate requires an <agent_type> argument"
     return 2
@@ -465,9 +520,13 @@ arl_admission_gate() {
     return $?
   fi
 
-  # 2. Exempt actors are always allowed and never counted.
+  # 2. Exempt actors and exempt labels are always allowed and never counted.
   if [ -n "$actor" ] && arl_is_exempt_actor "$actor"; then
     arl_finish "$agent_type" "allow" "actor '${actor}' is exempt (not subject to the limits)"
+    return $?
+  fi
+  if [ -n "$labels" ] && arl_is_exempt_label "$labels"; then
+    arl_finish "$agent_type" "allow" "run carries an exempt label (not subject to the limits)"
     return $?
   fi
 
@@ -475,30 +534,44 @@ arl_admission_gate() {
   now="$(arl_now)"
   state="$(arl_load_state)"
 
-  local failures opened
+  local failures opened probe_dispatched
   failures="$(arl_state_field "$state" "$agent_type" consecutive_failures 0)"
   opened="$(arl_state_field "$state" "$agent_type" breaker_opened_epoch 0)"
+  probe_dispatched="$(arl_state_field "$state" "$agent_type" probe_dispatched_epoch 0)"
 
   # 3. Circuit breaker first — an open breaker defers regardless of admission.
   #    `|| true`: the decision is carried in the captured stdout, and a defer
   #    returns non-zero — neutralize it so a caller running under `set -e` is not
   #    aborted at this assignment before the decision is emitted.
   local breaker
-  breaker="$(arl_breaker_decision "$agent_type" "$failures" "$opened" "$now")" || true
+  breaker="$(arl_breaker_decision "$agent_type" "$failures" "$opened" "$now" "$probe_dispatched")" || true
   if [ "$breaker" != "decision=allow" ]; then
     arl_finish "$agent_type" "defer" "consecutive-failure breaker is open"
     return $?
   fi
 
   # 4. Admission — concurrency / cooldown / daily budget.
-  local concurrent last_run daily_count
+  local concurrent last_run daily_count daily_window_start
   concurrent="$(arl_count_concurrent_runs "$agent_type")"
   last_run="$(arl_state_field "$state" "$agent_type" last_run_epoch 0)"
   daily_count="$(arl_state_field "$state" "$agent_type" daily_count 0)"
+  daily_window_start="$(arl_state_field "$state" "$agent_type" daily_window_start 0)"
+  # Reset daily_count when the recorded window is more than 24 h old so
+  # yesterday's usage cannot block runs indefinitely. Callers are expected to
+  # persist daily_window_start alongside daily_count when recording a dispatch.
+  if [ "$daily_window_start" -gt 0 ] && [ $(( now - daily_window_start )) -ge 86400 ]; then
+    arl_log "daily window for '${agent_type}' expired ($(( now - daily_window_start ))s) — resetting daily_count"
+    daily_count=0
+  fi
 
   local admission
   # `|| true`: as above — a defer returns non-zero, so neutralize it and read the
   # decision from the captured stdout instead of the exit status.
+  # NOTE: this is an observe-then-act check; two concurrent callers on separate
+  # GitHub Actions runners can both observe capacity and both receive allow. Full
+  # atomic enforcement requires a distributed claim mechanism (e.g. a GitHub
+  # Deployment or Environments lock) — that belongs to Phase-4 wiring, not this
+  # guard-only library.
   admission="$(arl_admission_decision "$agent_type" "$concurrent" "$last_run" "$daily_count" "$now")" || true
   if [ "$admission" = "decision=allow" ]; then
     arl_finish "$agent_type" "allow" "under all limits with a clean breaker"
