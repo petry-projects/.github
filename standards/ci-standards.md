@@ -310,6 +310,7 @@ filename doesn't carry the `-reusable.yml` suffix (grandfathered exception:
 | [`initiative-driver.yml`](workflows/initiative-driver.yml) | 1 | Dispatches the central initiative-driver to release ready sub-issues of `initiative:auto` epics to dev-lead — **required org-wide** (#844) |
 | [`pr-review-mention.yml`](workflows/pr-review-mention.yml) | 1 | Trigger the pr-review agent when `@donpetry-bot` is mentioned or `donpetry-bot` is assigned as reviewer |
 | [`persona-mention.yml`](workflows/persona-mention.yml) | 1 | Route `@petry-projects/<role>` mentions to the addressed persona — one router for **all** personas ([persona-standards.md §4.1](persona-standards.md)) |
+| [`apply-repo-settings.yml`](workflows/apply-repo-settings.yml) | 1 | Weekly branch-policy compliance self-heal — applies standard repo settings + `pr-quality`/`code-quality` rulesets ([github-settings.md](github-settings.md), [ruleset-remediation-runbook.md](ruleset-remediation-runbook.md)). Requires org secret `GH_PAT_DON_PETRY`. |
 | [`copilot-setup-steps.yml`](workflows/copilot-setup-steps.yml) | 2 | Pre-install tools and dependencies for Copilot cloud agent sessions |
 
 **Adapt only when the template genuinely requires repo-specific content** (e.g., a
