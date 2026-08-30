@@ -34,8 +34,8 @@ throughput controls, **not** as bugs to fix in this story:
 The external framing is **OWASP ASI08 — Denial of Service & Resource
 Exhaustion** (OWASP Top 10 for Agentic Applications, 2026): an agent fleet with
 no self-imposed rate limit can exhaust a shared, finite resource — here the
-**rolling 5-hour Claude subscription budget** shared across every Claude-backed
-agent — and starve the very pipeline that would repair it (the self-hosting
+**fixed 5-hour Claude subscription budget** (§4.1) shared across every
+Claude-backed agent — and starve the very pipeline that would repair it (the self-hosting
 circular dependency already documented in
 [`docs/initiatives/agent-canary-rings-adr.md`](agent-canary-rings-adr.md)).
 
@@ -65,7 +65,7 @@ for action pinning must be looked up via the GitHub API — never guessed"*,
    runs-per-day. Therefore the per-agent-type controls are **source-side**, in the
    dispatch/engine layer, not a GitHub toggle — the same conclusion the
    PR-Limits ADR reached for open-PR caps.
-3. **Claude's *documented* API surfaces do not expose the rolling subscription
+3. **Claude's *documented* API surfaces do not expose the subscription
    budget — but an undocumented OAuth endpoint does.** Verified first-hand (§4):
    the Messages API exposes only **per-minute** token-bucket limits via
    `anthropic-ratelimit-*` response headers, and the Rate Limits API returns
@@ -174,6 +174,16 @@ Contract notes that follow-on stories must honour:
   (per-model). The server-computed `severity` (`normal` / `warning` / `critical`)
   gives the gate a graded signal instead of re-deriving one from a bare number.
   Treat the flattened keys as the fallback for older response shapes.
+- **These are FIXED windows, not sliding ones — this is the document's single
+  window model.** Each `limits[]` entry carries an authoritative `resets_at`: the
+  window opens on first use, accumulates until that instant, and empties at it.
+  Old usage does **not** age out continuously. Two consequences the rest of this
+  ADR depends on: (a) within one window `percent` is **monotonically
+  non-decreasing**, so it can never dip back below a threshold on its own; and
+  (b) the only event that lowers `percent` is the reset at `resets_at`. Wherever
+  a per-minute API bucket is meant instead (§4.2's `anthropic-ratelimit-*`
+  token-bucket, which *is* continuously replenished), it is named as such
+  explicitly. Do not describe the `session` or `weekly_all` windows as "rolling".
 - **`resets_at` is authoritative.** All time-until-reset arithmetic derives from
   this field — never a hardcoded weekday, cron expression, or timezone constant —
   so behaviour self-corrects if the window ever shifts. (The probe returned
@@ -192,7 +202,13 @@ ledger** in the private engine: `scripts/engine.sh` (which already handles the
 subscription cap, #206) records per-run token consumption and rate-limit
 timestamps into a private rolling-window ledger. The adapter prefers the endpoint
 and falls back to the ledger; the ledger is an estimate and is never the primary
-source. Where an agent path uses an **API key** rather than the subscription
+source. **Known modelling mismatch:** that ledger is a *sliding* window, while the
+real budget is a *fixed* one (§4.1). Because a sliding window ages out old usage,
+the ledger will **under-estimate** utilization late in a fixed window — i.e. it
+fails toward *allowing* dispatch, which is the correct direction for a fallback
+(cf. the fail-safe direction in §7) but means a ledger-only reading must never be
+treated as authoritative for tripping a breaker. Implementations should anchor the
+ledger to the last observed `resets_at` where one is available. Where an agent path uses an **API key** rather than the subscription
 token, `anthropic-ratelimit-tokens-remaining` remains the authoritative live
 signal for that path.
 
@@ -268,9 +284,10 @@ The dimension the discussion specifically requested, distinct from the
 per-agent-type breaker in §5.
 
 - **Trigger (5-hour window, `session`):** pause **new agentic dispatch** when the
-  rolling **5-hour Claude subscription budget** reaches a **configurable threshold
-  (default 90%)** of consumed budget. The window is the subscription's own 5-hour
-  rolling window (§4.1), not a per-minute API bucket.
+  **5-hour Claude subscription budget** reaches a **configurable threshold
+  (default 90%)** of consumed budget. The window is the subscription's own
+  **fixed** 5-hour session window (§4.1) — accumulating until `resets_at` — not a
+  continuously-replenished per-minute API bucket.
 - **Trigger (7-day window, `weekly_all`):** pause when the weekly budget crosses a
   threshold that **tightens as the reset approaches**, reserving a configurable
   share of the budget per remaining day:
@@ -288,10 +305,24 @@ per-agent-type breaker in §5.
   bounds the *shape of the week*.
 - **Scope guard:** neither trigger fires on `weekly_scoped` (per-model)
   exhaustion — see §2.5.
-- **State machine:** **open** at ≥ threshold → hold new dispatch; **half-open** as
-  the rolling window drains back below a lower resume mark (hysteresis, e.g. 80%,
-  to avoid flapping at the boundary) → admit a limited probe of dispatch;
-  **closed** once comfortably below.
+- **State machine — one rule, derived from the fixed-window model (§4.1).**
+  Because `percent` is monotonically non-decreasing inside a window, a utilization
+  *dip* cannot occur while the window is open. There is therefore **no dip-based
+  half-open state and no percentage resume mark** — such a mark would be
+  unreachable by construction. The two breakers close on different events:
+  - **5-hour (`session`):** **open** at `percent >= threshold` → hold new
+    dispatch; **closed** at the window reset given by `resets_at`. No intermediate
+    state.
+  - **7-day (`weekly_all`):** **open** while
+    `percent >= 100 - (reserve_pct_per_day * days_until_reset)`; **closed** as
+    soon as that inequality stops holding. This *can* happen before `resets_at` —
+    but never because utilization fell. The glide-path threshold is time-varying
+    and **rises** as `days_until_reset` shrinks, so the breaker re-evaluates on
+    every poll and may close because **the threshold moved past a static
+    `percent`**. It also closes at `resets_at`.
+
+  Re-arming is per-window: a breaker that closed at `resets_at` may trip again in
+  the next window under the same rule.
 - **Priority on recovery:** when the window drains and dispatch resumes,
   **Claude-backed agents are prioritized** (dev-lead, feature-ideation, and the
   Claude phase of compliance-audit) over lower-value/again-deferrable work, so the
@@ -309,14 +340,21 @@ per-agent-type breaker in §5.
   fallback (#206) remains the protection of last resort. On a **fresh 429 +
   `retry-after`** the breaker **blocks** — a hard, first-hand signal that the cap
   is already hit.
-- **Resume:** utilization is monotonic within a window, so a tripped breaker does
-  not un-trip on a percentage dip; the clean resume is the window reset given by
-  `resets_at`. Where a pause is actuated by a persisted switch, the actuator must
+- **Resume:** the resume triggers are exactly those in the state machine above —
+  `resets_at` for the 5-hour breaker; `resets_at` **or** a risen glide-path
+  threshold for the weekly breaker. A tripped breaker **never** un-trips on a
+  percentage dip, because within a fixed window no such dip exists (§4.1). This is
+  the document's only resume rule; §5's per-agent-type breaker and any follow-on
+  story (`#641`, `#994`) inherit it verbatim. Where a pause is actuated by a
+  persisted switch, the actuator must
   record that *automation* set it, so an automatic resume never clears a pause a
   human set deliberately (see `.github-private#1525`).
 
-The default 90% threshold, the 80% resume mark, `reserve_pct_per_day = 2`, and the
-exact priority order are **proposals pending sign-off.**
+The default 90% threshold, `reserve_pct_per_day = 2`, and the exact priority order
+are **proposals pending sign-off.** (The previously-proposed **80% resume mark was
+removed**, not merely re-tuned: under the fixed-window model it is unreachable —
+see the state machine above. Reinstating any percentage-based resume would require
+first establishing that the window is sliding, which §4.1's `resets_at` contradicts.)
 
 ---
 
