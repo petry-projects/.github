@@ -147,7 +147,7 @@ endpoint does**, and it is the telemetry source of record.
 
 ### 4.1 Telemetry source of record — the OAuth usage endpoint
 
-```
+```http
 GET https://api.anthropic.com/api/oauth/usage
   Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>
   anthropic-beta: oauth-2025-04-20
@@ -275,7 +275,7 @@ per-agent-type breaker in §5.
   threshold that **tightens as the reset approaches**, reserving a configurable
   share of the budget per remaining day:
 
-  ```
+  ```text
   pause when  weekly_all.percent  >=  100 - (reserve_pct_per_day * days_until_reset)
   ```
 
