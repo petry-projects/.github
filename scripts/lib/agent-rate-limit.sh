@@ -140,8 +140,9 @@ arl_is_exempt_actor() {
 arl_agent_threshold() {
   local agent_type="$1" key="$2" config value
   config="$(arl_config_path)"
+  value=""
   value="$(jq -er --arg t "$agent_type" --arg k "$key" \
-    '.agent_types[$t][$k] // empty' "$config" 2>/dev/null || printf '')"
+    '(.agent_types[$t][$k])? // empty' "$config" 2>/dev/null || printf '')"
   if [[ "$value" =~ ^[0-9]+$ ]]; then
     printf '%s' "$value"
   fi
@@ -154,8 +155,9 @@ arl_agent_threshold() {
 arl_breaker_threshold() {
   local agent_type="$1" key="$2" config value
   config="$(arl_config_path)"
+  value=""
   value="$(jq -er --arg t "$agent_type" --arg k "$key" \
-    '.agent_types[$t].circuit_breaker[$k] // empty' "$config" 2>/dev/null || printf '')"
+    '(.agent_types[$t].circuit_breaker[$k])? // empty' "$config" 2>/dev/null || printf '')"
   if [[ "$value" =~ ^[0-9]+$ ]]; then
     printf '%s' "$value"
   fi
@@ -370,8 +372,11 @@ arl_load_state() {
 # ---------------------------------------------------------------------------
 arl_state_field() {
   local state_json="$1" agent_type="$2" field="$3" fallback="${4:-0}" value
-  value="$(jq -er --arg t "$agent_type" --arg f "$field" \
-    '.[$t][$f] // empty' <<<"$state_json" 2>/dev/null || printf '')"
+  value=""
+  if [ -n "$state_json" ]; then
+    value="$(jq -er --arg t "$agent_type" --arg f "$field" \
+      '(.[$t][$f])? // empty' <<<"$state_json" 2>/dev/null || printf '')"
+  fi
   arl_sanitize_int "$value" "$fallback"
 }
 
@@ -400,7 +405,7 @@ arl_count_concurrent_runs() {
     return 0
   fi
 
-  jq -r '[ .[] | select((.status // "") == "in_progress" or (.status // "") == "queued") ] | length' \
+  jq -r '[ .[]? | select((.status // "") == "in_progress" or (.status // "") == "queued") ] | length' \
     <<<"$runs" 2>/dev/null || printf '0'
   return 0
 }

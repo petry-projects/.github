@@ -24,7 +24,7 @@ LIB="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh"
 GH_STUB_SRC="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/test/scripts/compliance-remediate/stubs/gh"
 
 setup() {
-  TMP="$(mktemp -d)"
+  TMP="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
   export TMP
 
   # Put the env-driven gh stub on PATH and log every invocation so we can assert
@@ -377,7 +377,8 @@ stub_concurrent_runs() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"defer"* ]]
   [[ "$output" == *"decision=allow"* ]]
-  ! grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
+  run grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "gate: DEV_LEAD_DRY_RUN is honored as an alias for DRY_RUN" {
@@ -434,5 +435,6 @@ stub_concurrent_runs() {
   stub_concurrent_runs 1
   run bash -c "source '$LIB'; arl_admission_gate dev-lead donpetry-bot"
   [ "$status" -eq 0 ]
-  ! grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
+  run grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
+  [ "$status" -eq 1 ]
 }
