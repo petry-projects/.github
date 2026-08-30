@@ -64,70 +64,49 @@ AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
 }
 
 @test "all required top-level keys exist" {
-  for key in status _note _schema_version agent_types org_wide exempt_actors exempt_labels; do
-    run jq -e "has(\"$key\")" "$CONFIG"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run jq -e '[has("status"), has("_note"), has("_schema_version"), has("agent_types"), has("org_wide"), has("exempt_actors"), has("exempt_labels")] | all' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "agent_types contains exactly the four ADR in-scope types" {
-  run jq -er '.agent_types | keys_unsorted | sort | join(",")' "$CONFIG"
+  run jq -er '(.agent_types // {}) | keys_unsorted | sort | join(",")' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "compliance-audit,dev-lead,feature-ideation,initiative-driver" ]
 }
 
 @test "each agent type carries all five ADR control dimensions" {
-  for agent in "${AGENT_TYPES[@]}"; do
-    for key in max_concurrent_runs max_runtime_minutes cooldown_minutes daily_run_budget circuit_breaker; do
-      run jq -e ".agent_types[\"$agent\"] | has(\"$key\")" "$CONFIG"
-      [ "$status" -eq 0 ]
-      [ "$output" = "true" ]
-    done
-  done
+  run jq -e '.agent_types | all(.[]; has("max_concurrent_runs") and has("max_runtime_minutes") and has("cooldown_minutes") and has("daily_run_budget") and has("circuit_breaker"))' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "per-agent concurrency, runtime and daily budget are positive integers" {
-  for agent in "${AGENT_TYPES[@]}"; do
-    for key in max_concurrent_runs max_runtime_minutes daily_run_budget; do
-      run jq -er ".agent_types[\"$agent\"].$key" "$CONFIG"
-      [ "$status" -eq 0 ]
-      [[ "$output" =~ ^[0-9]+$ ]]
-      [ "$output" -gt 0 ]
-    done
-  done
+  run jq -e '.agent_types | all(.[]; [.max_concurrent_runs, .max_runtime_minutes, .daily_run_budget] | all(type == "number" and . > 0 and . % 1 == 0))' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "per-agent cooldown is a non-negative integer (0 = n/a for weekly-cron agents)" {
   # Cooldown is 'n/a' for the weekly-cron agents (ADR §6) and is encoded as 0
   # rather than a faked positive value. It must still be a real non-negative int.
-  for agent in "${AGENT_TYPES[@]}"; do
-    run jq -er ".agent_types[\"$agent\"].cooldown_minutes" "$CONFIG"
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ ^[0-9]+$ ]]
-    [ "$output" -ge 0 ]
-  done
+  run jq -e '.agent_types | all(.[]; .cooldown_minutes | type == "number" and . >= 0 and . % 1 == 0)' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "each agent circuit breaker has a positive threshold and backoff" {
-  for agent in "${AGENT_TYPES[@]}"; do
-    for key in consecutive_failure_threshold backoff_minutes; do
-      run jq -er ".agent_types[\"$agent\"].circuit_breaker.$key" "$CONFIG"
-      [ "$status" -eq 0 ]
-      [[ "$output" =~ ^[0-9]+$ ]]
-      [ "$output" -gt 0 ]
-    done
-  done
+  run jq -e '.agent_types | all(.[]; .circuit_breaker | [.consecutive_failure_threshold, .backoff_minutes] | all(type == "number" and . > 0 and . % 1 == 0))' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "daily_run_budget is present as the per-agent cost bound (AC #7)" {
   # The epic's cost cap traces to this concrete key; assert it exists per agent
   # so the traceability the standard doc claims is real in the config.
-  for agent in "${AGENT_TYPES[@]}"; do
-    run jq -e ".agent_types[\"$agent\"] | has(\"daily_run_budget\")" "$CONFIG"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run jq -e '.agent_types | all(.[]; has("daily_run_budget"))' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "org_wide.token_budget block exists" {
@@ -151,17 +130,19 @@ AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
 }
 
 @test "claude_priority flag is boolean true (AC #2)" {
-  run jq -er '.org_wide.token_budget.claude_priority' "$CONFIG"
+  run jq -e '.org_wide.token_budget.claude_priority | type == "boolean" and .' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
 
 @test "the session (5h) and weekly_all (7d) windows are pause-worthy" {
-  for kind in session weekly_all; do
-    run jq -er ".org_wide.token_budget.limits.$kind.pause_worthy" "$CONFIG"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run jq -e '.org_wide.token_budget.limits | (.session.pause_worthy and .weekly_all.pause_worthy)' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+  # Guard: no window outside the named account-wide set may be pause-worthy
+  run jq -e '[.org_wide.token_budget.limits | to_entries[] | select(.key != "session" and .key != "weekly_all") | .value.pause_worthy] | all(. == false or . == null)' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "weekly_scoped (per-model) is NOT pause-worthy (ADR §2.5 / post-ADR #4)" {
@@ -211,6 +192,14 @@ AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
   run jq -er '.exempt_actors | length' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" -gt 0 ]
+}
+
+@test "exempt_actors contains exactly the same set as pr-limits (same-set contract)" {
+  run jq -e '
+    (.exempt_actors | contains(["dependabot[bot]", "OrganizationAdmin", "@petry-projects/org-leads", "dependabot-automerge-petry"])) and
+    (.exempt_actors | length == 4)' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }
 
 @test "dependabot[bot] is present in the exempt-actor list (reused from pr-limits)" {
