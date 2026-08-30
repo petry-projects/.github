@@ -69,10 +69,21 @@ for action pinning must be looked up via the GitHub API — never guessed"*,
    budget — but an undocumented OAuth endpoint does.** Verified first-hand (§4):
    the Messages API exposes only **per-minute** token-bucket limits via
    `anthropic-ratelimit-*` response headers, and the Rate Limits API returns
-   *configured* ceilings. Neither reports the subscription window, and both are
-   **API-key-scoped**, while the org's agents authenticate with the
-   subscription-backed `CLAUDE_CODE_OAUTH_TOKEN` (verified in the workflow stubs,
-   §3). That gap is closed by `GET https://api.anthropic.com/api/oauth/usage`
+   *configured* ceilings. Neither reports the subscription window. Two axes are
+   easy to conflate here, so state them separately:
+   - **Quota scope** — what the number describes. The Messages API headers
+     describe a **per-minute, per-API-key** token bucket; the Rate Limits API
+     describes **organization/workspace-level** *configured* ceilings. Neither
+     describes the **subscription usage window** the fleet actually shares.
+   - **Credential type** — what authenticates the read. The Messages API headers
+     come back on a normal API-key call; the Rate Limits API accepts an **Admin
+     API key or an OAuth token carrying `org:admin`**. Neither is satisfied by the
+     subscription-backed `CLAUDE_CODE_OAUTH_TOKEN` the org's agents actually
+     authenticate with (verified in the workflow stubs, §3).
+
+   So the documented surfaces are the wrong scope *and* the wrong credential; the
+   undocumented OAuth endpoint is the only one that is both subscription-scoped
+   and readable with the credential the fleet already holds. That gap is closed by `GET https://api.anthropic.com/api/oauth/usage`
    (§4.1) — the subscription-OAuth-scoped endpoint backing Claude Code's `/usage`
    view. It was probed first-hand (HTTP 200, live window state, 2026-08-20) using
    the same token class the fleet already holds, and returns **both** the 5-hour
@@ -202,13 +213,28 @@ ledger** in the private engine: `scripts/engine.sh` (which already handles the
 subscription cap, #206) records per-run token consumption and rate-limit
 timestamps into a private rolling-window ledger. The adapter prefers the endpoint
 and falls back to the ledger; the ledger is an estimate and is never the primary
-source. **Known modelling mismatch:** that ledger is a *sliding* window, while the
-real budget is a *fixed* one (§4.1). Because a sliding window ages out old usage,
-the ledger will **under-estimate** utilization late in a fixed window — i.e. it
-fails toward *allowing* dispatch, which is the correct direction for a fallback
-(cf. the fail-safe direction in §7) but means a ledger-only reading must never be
-treated as authoritative for tripping a breaker. Implementations should anchor the
-ledger to the last observed `resets_at` where one is available. Where an agent path uses an **API key** rather than the subscription
+source. **Known modelling mismatch, and its direction.** That ledger is a
+*sliding* window, while the real budget is a *fixed* one (§4.1). The ledger's
+**horizon and usage scope must be specified before its error direction can be
+relied on as a safety argument**, because the two plausible designs fail in
+opposite directions:
+
+- **Trailing same-duration horizon (the naive design): over-estimates.** At time
+  `t` a trailing 5-hour ledger covers `[t-5h, t]`, whereas the live fixed window
+  covers `[window_open, t]`. Since a fixed window is at most 5h long,
+  `window_open >= t-5h`, so the trailing span is a **superset**: it contains all
+  current-window usage *plus* residual usage from the previous window. It
+  therefore reads **high** before `resets_at`, not low. That fails toward
+  *blocking* dispatch — the opposite of §7's fail-safe direction, and a
+  conservative-but-wrong bias that could pause a fleet that still has budget.
+- **`resets_at`-anchored horizon (required): matches.** Anchoring accumulation to
+  the last observed `resets_at` and discarding everything before it makes the
+  ledger span the same interval as the real window, removing the bias.
+
+**Therefore the ledger MUST be `resets_at`-anchored**, not a naive trailing
+window, and must record which usage sources it counts. Where no `resets_at` has
+ever been observed, the ledger is explicitly an over-estimate and must be treated
+as advisory only — never as authoritative grounds for tripping a breaker. Where an agent path uses an **API key** rather than the subscription
 token, `anthropic-ratelimit-tokens-remaining` remains the authoritative live
 signal for that path.
 
