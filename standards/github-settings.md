@@ -435,13 +435,21 @@ no PATCH is needed and no finding is raised until the app is first seen in the r
 **Additional AI engines** (Gemini, Copilot) — if a repo activates an alternative `DEV_LEAD_ENGINE`:
 Verify that the corresponding app has `auto_trigger_checks: false` set if/when it first creates a check run.
 
-**Applying manually** (requires a classic PAT with `repo` scope — OAuth app tokens are rejected by this API endpoint):
+**Applying** — the fleet self-heals weekly via the **`Apply repo settings`** workflow
+(the org reusable `apply-repo-settings-reusable.yml`, adopted per repo through the thin
+caller stub `standards/workflows/apply-repo-settings.yml`). To apply on demand, dispatch it:
 
 ```bash
-GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh <repo-name>
-# or for all org repos:
-GH_TOKEN=<classic-pat> bash scripts/apply-repo-settings.sh --all
+# Dispatch the self-heal for one repo (add -f dry_run=true to preview):
+gh workflow run "Apply repo settings" --repo petry-projects/<repo-name>
 ```
+
+The workflow authenticates with the org secret **`GH_PAT_DON_PETRY`** (classic PAT, `repo`
+scope, owner has repo-admin). The check-suites/preferences and ruleset APIs are legacy and
+reject fine-grained PATs and `GITHUB_TOKEN` (403), which is why a classic admin PAT is
+required. Running the scripts by hand (`GH_TOKEN=<classic-admin-pat> bash
+scripts/apply-repo-settings.sh <repo-name>`) remains possible for break-glass, but the
+dispatched workflow is the standard path.
 
 ### Other Integrations
 
@@ -464,6 +472,7 @@ all repos automatically — no per-repo setup needed:
 | `APP_PRIVATE_KEY` | GitHub App private key for Dependabot auto-merge |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Authentication for Claude Code Action and dev-lead agent (default engine) |
 | `DON_PETRY_BOT_GH_PAT` | Classic PAT (repo scope) owned by donpetry-bot; required by `pr-review-mention-reusable.yml` to post review-mention comments as the bot identity |
+| `GH_PAT_DON_PETRY` | Classic PAT owned by donpetry-bot with **`repo` scope AND repo-admin on target repos**; used by the `Apply repo settings` self-heal (`apply-repo-settings-reusable.yml`) for the check-suites/preferences and ruleset admin APIs, which are legacy and **reject fine-grained PATs and `GITHUB_TOKEN` (403)**. Visibility must cover the whole fleet (including public repos) or the workflow preflight fails loud. Distinct from `DON_PETRY_BOT_GH_PAT` above (repo-scope only, no admin, review-mention identity) — do not conflate the two. |
 | `GH_PAT_WORKFLOWS` | Classic PAT with `repo` scope; required for cross-repo script access and dev-lead to push workflow files |
 | `GITLEAKS_LICENSE` | Gitleaks license key required for `secret-scan` job in organization repositories (see [ci-standards.md](ci-standards.md#4-secret-scanning-ciymll--gitleaks-job)) |
 | `SONAR_TOKEN` | SonarCloud analysis authentication |
