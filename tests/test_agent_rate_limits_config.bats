@@ -21,6 +21,7 @@
 bats_require_minimum_version 1.5.0
 
 CONFIG="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/standards/agent-rate-limits.json"
+PR_LIMITS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/standards/pr-limits.json"
 
 # The four in-scope agent types fixed by the ADR (§3).
 AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
@@ -194,10 +195,10 @@ AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
   [ "$output" -gt 0 ]
 }
 
-@test "exempt_actors contains exactly the same set as pr-limits (same-set contract)" {
-  run jq -e '
-    (.exempt_actors | contains(["dependabot[bot]", "OrganizationAdmin", "@petry-projects/org-leads", "dependabot-automerge-petry"])) and
-    (.exempt_actors | length == 4)' "$CONFIG"
+@test "exemption sets match pr-limits (same-set contract)" {
+  run jq -e --slurpfile pr_limits "$PR_LIMITS" '
+    (.exempt_actors | sort) == ($pr_limits[0].exempt_actors | sort) and
+    (.exempt_labels | sort) == ($pr_limits[0].exempt_labels | sort)' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
