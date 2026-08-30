@@ -1,0 +1,64 @@
+# Quality gate for the agent rate-limit shared config (the single source of
+# truth) and its validating bats contract test.
+#
+# Triggered on any PR that touches:
+#   - standards/agent-rate-limits.json
+#   - tests/test_agent_rate_limits_config.bats
+#   - .github/workflows/agent-rate-limits-tests.yml
+#
+# Gate: bats validates that standards/agent-rate-limits.json parses as JSON, all
+# required keys exist, each in-scope agent type carries positive-integer limits
+# and a circuit breaker, the org-wide token-budget block records the 5-hour
+# session threshold (default 90%) and the Claude-priority flag, only account-wide
+# windows are pause-worthy, and — per the post-ADR clarification — no percentage
+# resume mark exists and the subscription windows are never called "rolling".
+#
+# Context: ADR docs/initiatives/agent-rate-limits-adr.md (#637). #638 delivers the
+# data file; it is INERT (no workflow reads it yet) pending human sign-off. The
+# gate library is Phase 3; the wiring is Phases 4-5. Modeled on
+# .github/workflows/pr-limits-tests.yml.
+
+name: Agent Rate-Limits Tests
+
+on:
+  pull_request:
+    paths:
+      - 'standards/agent-rate-limits.json'
+      - 'tests/test_agent_rate_limits_config.bats'
+      - '.github/workflows/agent-rate-limits-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'standards/agent-rate-limits.json'
+      - 'tests/test_agent_rate_limits_config.bats'
+      - '.github/workflows/agent-rate-limits-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-rate-limits-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Validate config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          # Read-only test job — never pushes; don't leave the token in git config.
+          persist-credentials: false
+
+      - name: Install bats and jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats jq
+
+      - name: Run bats suite
+        run: bats --print-output-on-failure tests/test_agent_rate_limits_config.bats
