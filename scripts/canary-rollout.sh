@@ -1887,9 +1887,23 @@ cmd_sync_promotion_failures() {
     [ -n "$fa" ] && failed_map["$fa"]=1
   done < <(printf '%s\n' "$failed_agents")
   local -A promo_failures=()
+  local _pf_agent _pf_num _pf_state _pf_count
   while IFS=$'\t' read -r _pf_agent _pf_num _pf_state _pf_count; do
     [ -n "$_pf_agent" ] && promo_failures["$_pf_agent"]="${_pf_num}"$'\t'"${_pf_state}"$'\t'"${_pf_count}"
   done < <(printf '%s\n' "$issues_json" | jq -r '(sort_by(.number) // []) | .[]? | select(.body != null) | (try (.body | capture("<!-- canary-promo-fail:(?<agent>[^ ]+) -->")) catch null) as $c | select($c != null) | ([.body | match("canary-promo-fail-count:([0-9]+)") | .captures[0].string] | first // "0") as $count | "\($c.agent)\t\(.number)\t\(.state | ascii_upcase)\t\($count)"' 2>/dev/null)
+  # Parse the failure log once before the per-agent loop to avoid spawning awk on every iteration.
+  local -A fail_ring=() fail_cand=() fail_host=() fail_reason=()
+  if [ -n "${CANARY_PROMOTIONS_FAILED_LOG:-}" ] && [ -s "$CANARY_PROMOTIONS_FAILED_LOG" ]; then
+    local lf_agent lf_ring lf_cand lf_host lf_reason
+    while IFS=$'\t' read -r lf_agent lf_ring lf_cand lf_host lf_reason; do
+      if [ -n "$lf_agent" ]; then
+        fail_ring["$lf_agent"]="$lf_ring"
+        fail_cand["$lf_agent"]="$lf_cand"
+        fail_host["$lf_agent"]="$lf_host"
+        fail_reason["$lf_agent"]="$lf_reason"
+      fi
+    done < "$CANARY_PROMOTIONS_FAILED_LOG"
+  fi
   local agent
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
@@ -1904,11 +1918,13 @@ cmd_sync_promotion_failures() {
     [ "$istate" = "CLOSED" ] && prior=0
     local count; count="$(promotion_failure_next_count "$prior" "$outcome")"
     if [ "$outcome" = "failed" ]; then
-      local latest ring cand host reason escalate body title
-      latest="$(_promo_fail_latest "$agent")"
-      IFS=$'\t' read -r ring cand host reason <<< "$latest"
+      local ring cand host reason escalate body title
+      ring="${fail_ring["$agent"]:-?}"
+      cand="${fail_cand["$agent"]:-}"
+      host="${fail_host["$agent"]:-?}"
+      reason="${fail_reason["$agent"]:-tag write rejected}"
       escalate="$(promotion_failure_should_escalate "$count" "$threshold")"
-      body="$(_promo_fail_body "$agent" "$count" "$threshold" "${ring:-?}" "${cand:-}" "${host:-?}" "${reason:-tag write rejected}" "$escalate")"
+      body="$(_promo_fail_body "$agent" "$count" "$threshold" "$ring" "$cand" "$host" "$reason" "$escalate")"
       if [ "$escalate" = 1 ]; then
         title="Canary promotion FAILING: $agent (${count}× consecutive tag-write rejection)"
       else
@@ -2117,7 +2133,7 @@ _autocut_commit_signals() {
       local since_args=(); [ -n "$since" ] && since_args=(-f "since=$since")
       json="$(gh api --method GET "repos/$host/commits" -f path="$path" -f sha="$mainsha" "${since_args[@]}" -F per_page=100 -F page="$page" 2>/dev/null)" || return 1
       # Parse the page and extract found, count, and pre-boundary messages in a single jq invocation
-      local parsed found count pre
+      local parsed found count pre rest
       parsed="$(printf '%s\n' "$json" | jq -r --arg stop "$next_commit" '
         if type != "array" then error("not an array") else . end
         | (map(.sha)) as $shas
@@ -2125,7 +2141,7 @@ _autocut_commit_signals() {
         | (any(.[]?; .sha == $stop) // false) as $found
         | "\($found)\t\(length)\t\(if $idx == null then . else .[0:$idx] end | map(.commit.message // "") | @json)"
       ' 2>/dev/null)" || return 1
-      IFS=$'\t' read -r found count pre < <(printf '%s\n' "$parsed")
+      found="${parsed%%$'\t'*}"; rest="${parsed#*$'\t'}"; count="${rest%%$'\t'*}"; pre="${rest#*$'\t'}"
       acc="$(jq -cn --argjson a "$acc" --argjson b "$pre" '$a + $b' 2>/dev/null)" || return 1
       if [ "$found" = "true" ] || [ "${count:-0}" -lt 100 ]; then path_done=1; break; fi
       page=$((page + 1))
