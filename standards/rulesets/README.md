@@ -23,6 +23,7 @@ these rulesets are enforced.
 | [`pr-quality.json`](pr-quality.json) | `pr-quality` | `~DEFAULT_BRANCH` | 1 approval, code-owner review, thread resolution, dismiss-stale, squash-only merge |
 | [`code-quality.json`](code-quality.json) | `code-quality` | `~DEFAULT_BRANCH` | Required status checks (SonarCloud, CodeQL, agent-shield, dependency-audit) |
 | [`release-channel-tags.json`](release-channel-tags.json) | `release-channel-tags` | `refs/tags/**` | Blocks unauthorized **update/deletion** of any tag (protects moving channel pointers + version tags); creation stays free |
+| [`duplicate-decl-gate.json`](duplicate-decl-gate.json) | `duplicate-decl-gate` | `~DEFAULT_BRANCH` | Required status check `duplicate-decl-gate` — the #1485 corruption-class merge backstop. **Targeted** to the reusable-hosting meta-repos only (see below) |
 
 `pr-quality` / `code-quality` carry the two mandatory bypass actors —
 `OrganizationAdmin` and the `dependabot-automerge-petry` Integration app (id
@@ -46,18 +47,24 @@ GH_TOKEN=<admin-token> bash scripts/apply-rulesets.sh <repo> --dry-run
 
 - **Org standards → here.** All ruleset definitions are org standards owned by
   `.github`. `pr-quality` / `code-quality` are applied **fleet-wide** (the default
-  set); `release-channel-tags` is an org standard but **targeted** — applied only to
-  the reusable-hosting meta-repos (`.github`, `.github-private`), whose tags are all
-  release-management tags. It is applied by name, never swept fleet-wide:
+  set); `release-channel-tags` and `duplicate-decl-gate` are org standards but
+  **targeted** — applied only to the reusable-hosting meta-repos (`.github`,
+  `.github-private`). `release-channel-tags` protects those repos' release tags;
+  `duplicate-decl-gate` is the #1485 corruption-class merge backstop, required
+  only where the `duplicate-decl-gate.yml` workflow runs (a required status-check
+  context is a permanent merge block on any repo that does not *produce* it — see
+  below). Both are applied by name, never swept fleet-wide:
 
   ```bash
   GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github release-channel-tags
   GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github-private release-channel-tags
+  GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github duplicate-decl-gate
+  GH_TOKEN=<admin> bash scripts/apply-rulesets.sh --repo petry-projects/.github-private duplicate-decl-gate
   ```
 
 - **The default (no-name) set is the `FLEET_RULESETS` allowlist**, *not* every
-  `*.json` here — so adding a targeted ruleset like `release-channel-tags` never
-  leaks into `--all` / `--repo` fleet runs.
+  `*.json` here — so adding a targeted ruleset like `release-channel-tags` or
+  `duplicate-decl-gate` never leaks into `--all` / `--repo` fleet runs.
 
 ## Changing the required-check set
 
