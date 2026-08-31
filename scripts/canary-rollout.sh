@@ -2215,6 +2215,31 @@ _autocut_range_signals() {
   printf '%s\n' "$out"
 }
 
+# _autocut_range_signals <host> <base> <head> — the conventional-commit signals over ALL commits
+# between <base> and <head> (the compare range), echoing "<breaking 0|1> <feat 0|1>". Used as the
+# fallback signal source when the reusable-path-scoped scan finds no boundary (a SCRIPT-ONLY
+# change touches no reusable commit, #1019), so a script-only `feat`/`!`/`BREAKING CHANGE` still
+# bumps correctly. Detection is byte-identical to _autocut_commit_signals; only the commit source
+# differs (compare `.commits[]` — already correctly bounded, no boundary search). Returns non-zero
+# on any fetch/parse error so the caller stays fail-safe to patch (never auto-major on missing data).
+_autocut_range_signals() {
+  local host="$1" base="$2" head="$3" json out
+  { [ -z "$base" ] || [ -z "$head" ]; } && return 1
+  json="$(gh api "repos/$host/compare/$base...$head" 2>/dev/null)" || return 1
+  [ -z "$json" ] && return 1
+  out="$(jq -r '
+    if (.commits | type) != "array" then error("no commits array") else . end
+    | (.commits | map(.commit.message // "")) as $msgs
+    | {
+        b: any($msgs[]; test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
+        f: any($msgs[]; test("^feat(\\([^)]*\\))?:"))
+      }
+    | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
+  ' <<< "$json" 2>/dev/null)" || return 1
+  [ -z "$out" ] && return 1
+  printf '%s\n' "$out"
+}
+
 # _gh_file_content <repo> <path> <ref> — the decoded text of <path> at <ref> on <repo> via the
 # contents API (base64 → text). Non-zero on any fetch/decode error.
 _gh_file_content() {
@@ -2267,6 +2292,11 @@ _autocut_detect_bump() {
     # so the boundary scan finds nothing — rc=2): fall back to the compare-range commit messages
     # so a script-only feat/breaking still bumps correctly (#1019). A fetch error (rc=1) falls
     # through to the patch fail-safe instead, preserving watched-path scoping under API failures.
+    read -r breaking feat <<< "$sigs"
+  elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
+    # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
+    # so the boundary scan finds nothing — or the path-scoped fetch errored): fall back to the
+    # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
     read -r breaking feat <<< "$sigs"
   else
     echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
