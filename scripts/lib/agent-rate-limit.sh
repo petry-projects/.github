@@ -714,7 +714,12 @@ arl_token_transport_decision() {
           retry_deadline=$(( observed_at + retry_after ))
         fi
       fi
-      if [ "$retry_deadline" -gt 0 ] && [ "$now" -ge "$retry_deadline" ]; then
+      if [ "$retry_deadline" -eq 0 ]; then
+        arl_log "warning: token-budget 429 has no deadline anchor (no retry_until/observed_at) — treating as stale, allowing dispatch (degraded)"
+        printf 'allow'
+        return 0
+      fi
+      if [ "$now" -ge "$retry_deadline" ]; then
         arl_log "warning: token-budget 429 retry window expired (deadline=${retry_deadline}, now=${now}) — allowing dispatch (degraded)"
         printf 'allow'
         return 0
@@ -770,7 +775,7 @@ arl_token_budget_gate() {
 
   local now envelope transport body
   now="$(arl_now)"
-  envelope="$(arl_token_fetch_envelope)"
+  envelope="${2:-$(arl_token_fetch_envelope)}"
 
   # Shared transport-level fail-safe (429 / non-200) — one convention for both
   # breakers.
@@ -875,10 +880,19 @@ arl_token_glide_enabled() {
 arl_token_iso_to_epoch() {
   local iso="${1:-}" epoch
   [ -z "$iso" ] && return 0
-  epoch="$(date -d "$iso" +%s 2>/dev/null || printf '')"
-  if [[ "$epoch" =~ ^[0-9]+$ ]]; then
-    printf '%s' "$epoch"
+  # Require an explicit timezone offset (Z or ±HH:MM) so date -d does not
+  # silently interpret a timezone-less value as local time.
+  if [[ ! "$iso" =~ (Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+    return 0
   fi
+  epoch="$(date -d "$iso" +%s 2>/dev/null || printf '')"
+  [[ "$epoch" =~ ^[0-9]+$ ]] || return 0
+  # Round-trip: if date normalised an invalid calendar date (e.g. Feb 30 → Mar 2)
+  # the reconstructed YYYY-MM-DD will not match the input prefix — reject it.
+  local reconstructed_date
+  reconstructed_date="$(date -u -d "@$epoch" +%Y-%m-%d 2>/dev/null || printf '')"
+  [ "$reconstructed_date" = "${iso:0:10}" ] || return 0
+  printf '%s' "$epoch"
 }
 
 # ---------------------------------------------------------------------------
@@ -1016,7 +1030,7 @@ arl_token_weekly_glide_gate() {
 
   local now envelope transport body
   now="$(arl_now)"
-  envelope="$(arl_token_fetch_envelope)"
+  envelope="${1:-$(arl_token_fetch_envelope)}"
 
   # 4/5. Shared transport-level fail-safe (429 / non-200) — one convention.
   transport="$(arl_token_transport_decision "$envelope" "$now")"
@@ -1177,8 +1191,9 @@ arl_admission_gate() {
   #     defer returns non-zero — neutralize it so a `set -e` caller is not
   #     aborted before the decision is emitted.
   if [ "${AGENT_TOKEN_BUDGET_ENABLED:-false}" = "true" ]; then
-    local token_decision glide_decision
-    token_decision="$(arl_token_budget_gate session)" || true
+    local token_decision glide_decision shared_envelope
+    shared_envelope="$(arl_token_fetch_envelope)"
+    token_decision="$(arl_token_budget_gate session "$shared_envelope")" || true
     if [ "$token_decision" = "decision=defer" ]; then
       arl_log "token-budget escalation: $(arl_token_breaker_marker session) — add to tracking issue/PR body, remove when cleared"
       arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (5-hour Claude session window at/over threshold)"
@@ -1190,7 +1205,7 @@ arl_admission_gate() {
     #     window. Shares the same env arm; the config weekly_all.enabled flag keeps
     #     it inert until sign-off even when this env flag is on. `|| true`: the
     #     decision rides in captured stdout and a defer returns non-zero.
-    glide_decision="$(arl_token_weekly_glide_gate)" || true
+    glide_decision="$(arl_token_weekly_glide_gate "$shared_envelope")" || true
     if [ "$glide_decision" = "decision=defer" ]; then
       arl_log "token-budget escalation: $(arl_token_breaker_marker weekly_all) — add to tracking issue/PR body, remove when cleared"
       arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (7-day Claude weekly window over glide-path threshold)"

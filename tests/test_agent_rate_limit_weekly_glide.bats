@@ -241,6 +241,25 @@ iso_epoch() { date -d "$1" +%s; }
   [ -z "$output" ]
 }
 
+@test "arl_token_iso_to_epoch echoes empty for a timezone-less timestamp (rejects local-time ambiguity)" {
+  run bash -c "source '$LIB'; arl_token_iso_to_epoch '2026-09-08T15:00:00'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "arl_token_iso_to_epoch echoes empty for an invalid calendar date (e.g. Feb 30) that date -d would normalise" {
+  run bash -c "source '$LIB'; arl_token_iso_to_epoch '2026-02-30T00:00:00Z'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "arl_token_iso_to_epoch accepts a +HH:MM offset timestamp" {
+  local want; want="$(date -d '2026-09-08T17:00:00+02:00' +%s 2>/dev/null || printf '')"
+  [ -z "$want" ] && skip "date -d does not support +HH:MM on this platform"
+  run bash -c "source '$LIB'; arl_token_iso_to_epoch '2026-09-08T17:00:00+02:00'"
+  [ "$output" = "$want" ]
+}
+
 @test "arl_token_extract_resets_at reads the weekly_all limits[] entry" {
   body='{"limits":[{"kind":"weekly_all","percent":40,"resets_at":"2026-09-02T15:59:59Z"}]}'
   run bash -c "source '$LIB'; arl_token_extract_resets_at '$body' weekly_all"
@@ -389,9 +408,10 @@ iso_epoch() { date -d "$1" +%s; }
 # --------------------------------------------------------------------------
 # Fail-safe degradation (AC #5)
 # --------------------------------------------------------------------------
-@test "gate: a fresh 429 with retry-after BLOCKS (hard cap signal)" {
+@test "gate: a fresh 429 with a future deadline BLOCKS (hard cap signal)" {
   write_glide_config
-  write_telemetry '{"status":429,"retry_after":120}'
+  local future_deadline; future_deadline=$(( $(date +%s) + 300 ))
+  write_telemetry "{\"status\":429,\"retry_after\":120,\"retry_until\":${future_deadline}}"
   run bash -c "source '$LIB'; arl_token_weekly_glide_gate"
   [ "$status" -eq 1 ]
   [[ "$output" == *"decision=defer"* ]]
@@ -604,4 +624,25 @@ iso_epoch() { date -d "$1" +%s; }
   [ "$status" -eq 1 ]
   run grep -qE 'run cancel|pr create|pr edit|issue edit|label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
   [ "$status" -eq 1 ]
+}
+
+# --------------------------------------------------------------------------
+# Single telemetry fetch: admission gate must call arl_token_fetch_envelope
+# exactly once when both token-budget and weekly-glide breakers are armed.
+# --------------------------------------------------------------------------
+@test "admission gate: telemetry is fetched exactly once when both breakers are armed" {
+  write_glide_config
+  local reset_iso="2026-09-08T15:00:00Z" reset now
+  reset="$(iso_epoch "$reset_iso")"; now=$(( reset - 4 * 86400 ))
+  export SOURCE_NOW="$now"
+  local fetch_log="$TMP/fetch_calls.log"
+  # Use TELEMETRY_CMD that appends to a log on every invocation.
+  local telemetry_json; telemetry_json="$(envelope_weekly 10 "$reset_iso")"
+  export AGENT_TOKEN_BUDGET_TELEMETRY_CMD="printf '%s' '${telemetry_json}'; printf 'fetched\n' >>'${fetch_log}'"
+  export AGENT_RATE_LIMITS_STATE="$TMP/state.json"
+  printf '%s' '{"dev-lead":{"last_run_epoch":0,"daily_count":0,"consecutive_failures":0,"breaker_opened_epoch":0}}' >"$AGENT_RATE_LIMITS_STATE"
+  export GH_STUB_STDOUT='[{"status":"in_progress"}]'
+  run bash -c "source '$LIB'; AGENT_TOKEN_BUDGET_ENABLED=true arl_admission_gate dev-lead donpetry-bot"
+  local fetch_count; fetch_count="$(wc -l < "$fetch_log" 2>/dev/null || printf '0')"
+  [ "$fetch_count" -eq 1 ]
 }
