@@ -143,13 +143,38 @@ per-agent-type controls:
 - The adapter reads both the `session` and `weekly_all` windows from one
   envelope, so the Phase 6 weekly glide-path breaker
   ([#994](https://github.com/petry-projects/.github/issues/994)) extends it
-  rather than refactoring.
+  rather than refactoring. Both breakers share one transport-level fail-safe
+  (`arl_token_transport_decision`) so there is a single 429 / non-200 convention.
 - When the breaker trips, the pause is surfaced through the same human-clearable
   primitives as the rest of the library: `arl_token_breaker_marker <window>` (a
   deduped HTML marker) plus `arl_breaker_label` (`needs-human-review`). A human
   clears both to acknowledge the pause. `arl_token_priority_rank <agent_type>`
   encodes the Claude-priority-on-recovery order (Claude-backed agents ahead of
   `initiative-driver`) from the `claude_priority` flag.
+
+- `arl_token_weekly_glide_gate` orchestrates the **7-day glide-path** breaker on
+  the account-wide `weekly_all` window (Phase 6,
+  [#994](https://github.com/petry-projects/.github/issues/994)). Rather than a
+  static threshold it evaluates a **time-varying** one read entirely from config —
+  `clamp(ceiling_pct − reserve_pct_per_day × days_until_reset, floor_pct,
+  ceiling_pct)` — where `days_until_reset` derives from the telemetry payload's
+  authoritative `resets_at` (`arl_token_iso_to_epoch` +
+  `arl_token_days_until_reset`, partial days rounded **up**), never a hardcoded
+  weekday. The schedule is expressible purely from the `weekly_all` config keys
+  (`enabled`, `reserve_pct_per_day`, `floor_pct`, `ceiling_pct`); no number is
+  hardcoded. On a trip the reason is **machine-readable**
+  (`arl_token_glide_trip_reason` → `{window, observed_percent, threshold_pct,
+  days_until_reset, resets_at}`), surfaced through the same
+  `arl_token_breaker_marker weekly_all` / `arl_breaker_label` primitives.
+
+  **This breaker can close before `resets_at`** — but never because utilization
+  fell. Within a fixed window percent is monotonically non-decreasing; the
+  glide-path threshold **rises** as the reset approaches, so each poll
+  re-evaluates statelessly and the breaker may close because the *threshold moved
+  past a static percent*, not because usage dipped. This is the single most
+  misread part of the design: it is distinct from the `session` breaker's
+  "closes only at `resets_at`" rule, yet there is still no percentage resume mark
+  for either breaker.
 
 ### 4.2 Rollout — canary / dry-run first, then promotion (AC #5)
 
@@ -175,6 +200,15 @@ deliberately (ADR §7, `.github-private#1525`):
 4. **Promote.** Roll the flag out fleet-wide through the same channel once the
    canary is clean. Because the threshold is read from this config at run time,
    tuning it afterward is a config edit (§7.1), not a redeploy.
+
+**The weekly glide-path breaker carries a second, config-level arm.** In addition
+to the shared `AGENT_TOKEN_BUDGET_ENABLED` env flag, `arl_token_weekly_glide_gate`
+is gated by the `weekly_all.enabled` config flag (**off by default**). This lets
+the `session` breaker be enabled while the weekly glide stays inert, so the
+glide's own dry-run week — logging the decision it *would* have made against live
+telemetry for a full weekly window before it can defer anything (AC #7) — is a
+config toggle independent of the session breaker's rollout. With `enabled: false`
+the gate reads no telemetry and cannot change any decision.
 
 **Degraded / disabled-behind-flag mode (AC #6).** If the private telemetry
 companion is not yet wired (no seam configured) the breaker **allows with a

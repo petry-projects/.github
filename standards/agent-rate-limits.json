@@ -65,8 +65,11 @@
           "kind": "weekly_all",
           "window_days": 7,
           "pause_worthy": true,
+          "enabled": false,
           "reserve_pct_per_day": 2,
-          "_note": "PROPOSAL (ADR §7). Glide-path breaker: pause when percent >= 100 - (reserve_pct_per_day * days_until_reset). reserve_pct_per_day defaults to 2 (INERT, pending sign-off). The threshold RISES as the reset approaches, so the breaker can close before resets_at because the threshold moved — never because utilization fell. days_until_reset derives from the authoritative resets_at (ADR §4.1), not a hardcoded weekday."
+          "floor_pct": 86,
+          "ceiling_pct": 100,
+          "_note": "PROPOSAL (ADR §7; Phase 6 #994). Glide-path breaker: pause when percent >= clamp(ceiling_pct - (reserve_pct_per_day * days_until_reset), floor_pct, ceiling_pct). With reserve_pct_per_day=2, ceiling_pct=100, floor_pct=86 the schedule is 100% on reset day .. 86% just after a reset — the whole schedule is expressible from these keys, nothing is hardcoded. INERT: enabled=false keeps the breaker off (a maintainer arms it in config), independent of the AGENT_TOKEN_BUDGET_ENABLED integration flag. The threshold RISES as the reset approaches, so the breaker can close before resets_at because the threshold moved past a static (monotonic) percent — never because utilization fell; there is deliberately no percentage resume mark. days_until_reset derives from the authoritative resets_at (ADR §4.1) with partial days rounded UP, not a hardcoded weekday. floor_pct is the 'don't spend the whole week on day one' guard; ceiling_pct is the reset-day cap where the budget is minutes from refilling."
         },
         "weekly_scoped": {
           "kind": "weekly_scoped",
