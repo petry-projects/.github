@@ -464,6 +464,321 @@ arl_count_concurrent_runs() {
   return 0
 }
 
+# ===========================================================================
+# Org-wide token-budget circuit breaker (#641, Phase 5 of epic #636; ADR §7)
+# ---------------------------------------------------------------------------
+# The PROACTIVE pre-dispatch check the discussion asked for: pause new agentic
+# dispatch when the shared, FIXED 5-hour Claude subscription (`session`) window
+# is at/over the config-driven pause_threshold_pct (default 90%). Distinct from
+# the per-agent-type consecutive-failure breaker above.
+#
+# Telemetry source of record is the OAuth usage endpoint (ADR §4.1):
+#   GET https://api.anthropic.com/api/oauth/usage
+#     Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>
+#     anthropic-beta: oauth-2025-04-20
+#     User-Agent: claude-code/<version>   # load-bearing — omitting it => 429s
+# whose credentialed read lives PRIVATE (ADR §8.2). This public library holds
+# the thresholds/policy, the pure decision, and a small ADAPTER SEAM the private
+# poller plugs the live read into — so no unit test touches the network, and the
+# telemetry source can change without editing the gate. The seam speaks a
+# normalized envelope so the private side owns only the HTTP call:
+#   { "status": <http_status>, "retry_after": <int?>, "body": <raw upstream?> }
+# where <raw upstream> carries the ADR §4.1 `limits[]` array (preferred) and/or
+# the flattened `five_hour`/`seven_day` keys (fallback for older shapes).
+#
+# The adapter serves BOTH the `session` (5-hour) and `weekly_all` (7-day)
+# windows from one envelope so #994's glide-path breaker extends it rather than
+# refactoring (post-ADR clarification #5).
+#
+# Fail-safe direction (ADR §7): on telemetry error — non-200, malformed body, or
+# a missing window entry — the breaker ALLOWS dispatch and logs a warning; an
+# outage of an undocumented third-party endpoint must never stop the fleet. The
+# one exception: a fresh 429 with a positive retry-after BLOCKS, a hard
+# first-hand signal that the cap is already hit.
+#
+# Scope guard (ADR §2.5): only account-wide windows (`session`, `weekly_all`)
+# are pause-worthy; `weekly_scoped` (per-model) never trips a fleet pause.
+# ===========================================================================
+
+# Claude-backed agent types prioritized on budget recovery (ADR §7). On recovery
+# these clear the backlog first; initiative-driver (which only *causes* Claude
+# spend downstream) resumes after them.
+ARL_TOKEN_CLAUDE_AGENTS="dev-lead feature-ideation compliance-audit"
+
+# Stable HTML marker prefix for the deduped, human-clearable open-token-breaker
+# record (mirrors ARL_BREAKER_MARKER_PREFIX). The window is appended so one
+# tracking issue/PR can carry markers for distinct windows.
+ARL_TOKEN_BREAKER_MARKER_PREFIX="<!-- agent-token-budget-breaker open"
+
+# ---------------------------------------------------------------------------
+# arl_token_pause_threshold <window> — echo the numeric pause_threshold_pct for
+# <window> from org_wide.token_budget.limits, or empty when absent/non-integer.
+# Empty means "no configured threshold" and the caller degrades to allow (a
+# threshold must never be hardcoded — AC #5).
+# ---------------------------------------------------------------------------
+arl_token_pause_threshold() {
+  local window="$1" config value
+  config="$(arl_config_path)"
+  value="$(jq -er --arg w "$window" \
+    '(.org_wide.token_budget.limits[$w].pause_threshold_pct)? // empty' "$config" 2>/dev/null || printf '')"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$value"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_window_pause_worthy <window> — echo "true" when <window> is flagged
+# pause_worthy in config, else "false". A missing/false flag degrades to
+# "false" (never pause-worthy) — the scope guard defaults closed to a fleet
+# pause, not open.
+# ---------------------------------------------------------------------------
+arl_token_window_pause_worthy() {
+  local window="$1" config value
+  config="$(arl_config_path)"
+  value="$(jq -r --arg w "$window" \
+    '(.org_wide.token_budget.limits[$w].pause_worthy) // false' "$config" 2>/dev/null || printf 'false')"
+  case "$value" in
+    true) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_claude_priority — echo "true"/"false" for the claude_priority flag.
+# ---------------------------------------------------------------------------
+arl_token_claude_priority() {
+  local config value
+  config="$(arl_config_path)"
+  value="$(jq -r '(.org_wide.token_budget.claude_priority) // false' "$config" 2>/dev/null || printf 'false')"
+  case "$value" in
+    true) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_priority_rank <agent_type> — echo a recovery priority rank: 0 for
+# Claude-backed agents (prioritized on recovery), 1 for the rest, when
+# claude_priority is on. When the flag is off, every agent collapses to rank 0
+# (no prioritization). Lower rank == earlier on the recovering budget (AC #3).
+# ---------------------------------------------------------------------------
+arl_token_priority_rank() {
+  local agent_type="$1" a
+  if [ "$(arl_token_claude_priority)" != "true" ]; then
+    printf '0'
+    return 0
+  fi
+  for a in $ARL_TOKEN_CLAUDE_AGENTS; do
+    if [ "$a" = "$agent_type" ]; then
+      printf '0'
+      return 0
+    fi
+  done
+  printf '1'
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_fetch_envelope — echo the normalized telemetry envelope from the
+# adapter seam. The private poller plugs the live OAuth read into one of:
+#   $AGENT_TOKEN_BUDGET_TELEMETRY_CMD  — a command whose stdout is the envelope
+#   $AGENT_TOKEN_BUDGET_TELEMETRY_FILE — a file holding the envelope JSON
+# With neither configured, or on a malformed/empty payload, echoes
+# {"status":0} so the orchestrator fails safe (allow) — this is the documented
+# degraded / shipped-disabled mode (AC #6).
+# ---------------------------------------------------------------------------
+arl_token_fetch_envelope() {
+  local raw=""
+  if [ -n "${AGENT_TOKEN_BUDGET_TELEMETRY_CMD:-}" ]; then
+    raw="$(bash -c "$AGENT_TOKEN_BUDGET_TELEMETRY_CMD" 2>/dev/null || printf '')"
+  elif [ -n "${AGENT_TOKEN_BUDGET_TELEMETRY_FILE:-}" ] && [ -f "${AGENT_TOKEN_BUDGET_TELEMETRY_FILE}" ]; then
+    raw="$(cat "$AGENT_TOKEN_BUDGET_TELEMETRY_FILE" 2>/dev/null || printf '')"
+  fi
+  if [ -z "$raw" ] || ! jq -e . <<<"$raw" >/dev/null 2>&1; then
+    printf '{"status":0}'
+    return 0
+  fi
+  printf '%s' "$raw"
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_extract_percent <body_json> <window> — PURE. Echo the integer
+# percent for <window> from a telemetry body, preferring the ADR §4.1 `limits[]`
+# entry (matched on `kind`) and falling back to the flattened key
+# (session -> five_hour, weekly_all -> seven_day). A fractional percent is
+# floored (conservative: 89.9 does not trip a 90 threshold). Echoes empty when
+# the window is absent from both shapes (the caller degrades to allow).
+# ---------------------------------------------------------------------------
+arl_token_extract_percent() {
+  local body="$1" window="$2" flat value
+  case "$window" in
+    session) flat="five_hour" ;;
+    weekly_all) flat="seven_day" ;;
+    *) flat="" ;;
+  esac
+  value="$(jq -r --arg k "$window" --arg f "$flat" '
+    ( [ (.limits // [])[] | select(.kind == $k) | .percent ] | .[0] ) as $from_limits
+    | ( if $from_limits != null then $from_limits
+        elif ($f != "" and (.[$f].percent? != null)) then .[$f].percent
+        else null end )
+    | if . == null then empty else (. | floor) end
+  ' <<<"$body" 2>/dev/null || printf '')"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$value"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_window_active <body_json> <window> — PURE. Echo "false" only when
+# the <window> `limits[]` entry is explicitly is_active=false; otherwise "true"
+# (a window with no entry or no is_active field is treated as active/binding).
+# An inactive window is not binding and never defers.
+# ---------------------------------------------------------------------------
+arl_token_window_active() {
+  local body="$1" window="$2" value
+  value="$(jq -r --arg k "$window" '
+    ( [ (.limits // [])[] | select(.kind == $k) | .is_active ] | .[0] ) as $a
+    | if $a == null then true else $a end
+  ' <<<"$body" 2>/dev/null || printf 'true')"
+  case "$value" in
+    false) printf 'false' ;;
+    *) printf 'true' ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_budget_decision <percent> <threshold> <pause_worthy> — PURE core.
+# Defers when the window is pause-worthy and <percent> >= <threshold>; else
+# allows. A non-pause-worthy window, an unreadable threshold, or a malformed
+# percent all degrade to allow (fail-safe). Prints decision=allow/defer;
+# returns 0 on allow, 1 on defer.
+# ---------------------------------------------------------------------------
+arl_token_budget_decision() {
+  local percent threshold pause_worthy
+  percent="$(arl_sanitize_int "${1:-}")"
+  threshold="${2:-}"
+  pause_worthy="${3:-}"
+
+  if [ "$pause_worthy" != "true" ]; then
+    arl_log "token-budget: window is not pause-worthy — allowing (scope guard)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+  if ! [[ "$threshold" =~ ^[0-9]+$ ]] || [ "$threshold" -le 0 ]; then
+    arl_log "token-budget: no usable pause_threshold_pct — allowing (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  local decision="allow" reason="budget ${percent}% under ${threshold}% threshold"
+  if [ "$percent" -ge "$threshold" ]; then
+    decision="defer"
+    reason="budget ${percent}% at or over ${threshold}% threshold"
+  fi
+  arl_log "token-budget decision: ${decision} (${reason})"
+  printf 'decision=%s\n' "$decision"
+  [ "$decision" = "allow" ] && return 0
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_budget_gate [window] — orchestrate the token-budget breaker for
+# <window> (default: session). Reads the config threshold, consults the
+# telemetry adapter seam, and emits decision=allow/defer.
+#
+# Decision order:
+#   1. Window not pause-worthy (e.g. weekly_scoped) -> allow (scope guard)
+#   2. No configured threshold                       -> allow (degraded)
+#   3. Fresh 429 + retry-after                       -> defer (hard cap signal)
+#   4. Any other non-200 / unavailable telemetry     -> allow-with-warning
+#   5. Window explicitly inactive                    -> allow (not binding)
+#   6. Missing window entry in a 200 body            -> allow-with-warning
+#   7. percent >= threshold                          -> defer, else allow
+#
+# Returns 0 on allow, 1 on defer. Guard-only: reads telemetry, never mutates.
+# ---------------------------------------------------------------------------
+arl_token_budget_gate() {
+  local window="${1:-session}"
+
+  local pause_worthy threshold
+  pause_worthy="$(arl_token_window_pause_worthy "$window")"
+  if [ "$pause_worthy" != "true" ]; then
+    arl_log "token-budget: window '${window}' is not pause-worthy — allowing (scope guard)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+  threshold="$(arl_token_pause_threshold "$window")"
+  if [ -z "$threshold" ]; then
+    arl_log "token-budget: no configured pause_threshold_pct for '${window}' — allowing (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  local envelope status retry_after body
+  envelope="$(arl_token_fetch_envelope)"
+  status="$(arl_sanitize_int "$(jq -r '.status? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+
+  # Fresh 429 with a positive retry-after: the one telemetry response that
+  # blocks (ADR §7) — a hard, first-hand signal the cap is already hit.
+  if [ "$status" -eq 429 ]; then
+    retry_after="$(arl_sanitize_int "$(jq -r '.retry_after? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+    if [ "$retry_after" -gt 0 ]; then
+      arl_log "token-budget: fresh 429 with retry-after=${retry_after}s — deferring (hard cap signal)"
+      printf 'decision=defer\n'
+      return 1
+    fi
+  fi
+
+  # Any other non-200 fails safe: allow-with-warning.
+  if [ "$status" -ne 200 ]; then
+    arl_log "warning: token-budget telemetry unavailable (status=${status}) — allowing dispatch (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  body="$(jq -c '.body? // {}' <<<"$envelope" 2>/dev/null || printf '{}')"
+
+  if [ "$(arl_token_window_active "$body" "$window")" = "false" ]; then
+    arl_log "token-budget: window '${window}' is not active — allowing (not binding)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  local percent
+  percent="$(arl_token_extract_percent "$body" "$window")"
+  if [ -z "$percent" ]; then
+    arl_log "warning: token-budget telemetry has no '${window}' window entry — allowing dispatch (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  arl_token_budget_decision "$percent" "$threshold" "true"
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_breaker_marker <window> — echo the stable, deduped HTML marker
+# recording that the token-budget breaker is open for <window> (mirrors
+# arl_breaker_marker). A caller posts it once on the tracking issue/PR when the
+# breaker trips; a human clears it (alongside removing arl_breaker_label).
+# ---------------------------------------------------------------------------
+arl_token_breaker_marker() {
+  local window="$1"
+  printf '%s: %s -->' "$ARL_TOKEN_BREAKER_MARKER_PREFIX" "$window"
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_should_escalate <existing_body> <window> — 0 (true) when the
+# open-token-breaker marker for <window> is NOT already present in
+# <existing_body> (so the caller posts it); 1 (false) when present (dedup).
+# ---------------------------------------------------------------------------
+arl_token_should_escalate() {
+  local existing_body="$1" window="$2" marker
+  marker="$(arl_token_breaker_marker "$window")"
+  case "$existing_body" in
+    *"$marker"*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 # arl_finish <agent_type> <decision> <reason> — emit the result and set the
 # return code, applying the dry-run override. Internal helper for
@@ -528,6 +843,23 @@ arl_admission_gate() {
   if [ -n "$labels" ] && arl_is_exempt_label "$labels"; then
     arl_finish "$agent_type" "allow" "run carries an exempt label (not subject to the limits)"
     return $?
+  fi
+
+  # 2.5 Org-wide token-budget breaker (Phase 5, #641). INERT unless explicitly
+  #     enabled (canary/dry-run rollout, AC #5): when off it reads no telemetry
+  #     and does not affect the decision, keeping the provisional config inert
+  #     until human sign-off. When on and the shared 5-hour Claude `session`
+  #     window is at/over threshold, dispatch defers before any per-agent
+  #     admission check. `|| true`: the decision rides in captured stdout and a
+  #     defer returns non-zero — neutralize it so a `set -e` caller is not
+  #     aborted before the decision is emitted.
+  if [ "${AGENT_TOKEN_BUDGET_ENABLED:-false}" = "true" ]; then
+    local token_decision
+    token_decision="$(arl_token_budget_gate session)" || true
+    if [ "$token_decision" != "decision=allow" ]; then
+      arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (5-hour Claude session window at/over threshold)"
+      return $?
+    fi
   fi
 
   local now state
