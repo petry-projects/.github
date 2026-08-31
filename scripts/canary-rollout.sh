@@ -63,6 +63,17 @@ CANARY_RINGS="${CANARY_RINGS:-$DEFAULT_RINGS}"
 # falsely reports "fully rolled out" (#1049). Mirrors cut-release.sh's CROSS_REPO_TARGET.
 THIS_REPO="${GITHUB_REPOSITORY:-petry-projects/.github-private}"
 
+# CANARY_MAX_COMMIT_PAGES — pagination ceiling (100 commits/page) when autocut enumerates a
+# commit range for bump signals. A range that cannot be fully enumerated within this many pages
+# is treated as UNRESOLVABLE and fails safe to a major bump (#1023 defect 1b), never silently to
+# patch. 50 pages = 5000 commits — far beyond any real inter-cut range.
+CANARY_MAX_COMMIT_PAGES="${CANARY_MAX_COMMIT_PAGES:-50}"
+
+# CANARY_PROMOTION_FAILURE_ESCALATE_AFTER — how many CONSECUTIVE scheduled runs a tag write may
+# fail before its tracking issue escalates to needs-human + dev-lead (#1023 defect 2). Default 2
+# (~8h at the 4h cadence) so a single transient rejection self-heals but a stuck write escalates.
+CANARY_PROMOTION_FAILURE_ESCALATE_AFTER="${CANARY_PROMOTION_FAILURE_ESCALATE_AFTER:-2}"
+
 _jq()  { jq "$@" "$CANARY_RINGS"; }
 _agent_field() { _jq -r --arg a "$1" ".agents[\$a].$2"; }
 
@@ -1225,7 +1236,13 @@ cmd_promote() {
     return 0
   fi
   _gh_move_tag "$host" "$frontier_tag" "$cand" \
-    || { echo "::error::failed to move $frontier_tag -> ${cand:0:12} on $host" >&2; return 1; }
+    || { echo "::error::failed to move $frontier_tag -> ${cand:0:12} on $host" >&2
+         # Persist this FAILED tag write (#1023 defect 2). It is UNEXPECTED — a permission/API
+         # rejection on the WRITE — distinct from an expected gate-block, which returns above
+         # before ever reaching the move. sync-promotion-failures turns a repeatedly-failing
+         # write into a durable, escalating blocker issue instead of a scrolling log line.
+         _log_promotion_failure "$agent" "$frontier" "$cand" "$host" "tag write rejected ($frontier_tag on $host)"
+         return 1; }
   echo "promoted $frontier_tag -> ${cand:0:12}"
   # Expose the move for the workflow's GitHub Deployment (traceability, #502). The
   # deployment must be created on the repo that OWNS the moved commit: a cross-repo agent's
@@ -1242,6 +1259,17 @@ cmd_promote() {
   if [ -n "${CANARY_PROMOTIONS_LOG:-}" ]; then
     printf '%s\t%s\t%s\t%s\n' "$agent" "$frontier" "$cand" "$deploy_repo" >> "$CANARY_PROMOTIONS_LOG"
   fi
+}
+
+# _log_promotion_failure <agent> <ring> <cand> <host> <reason> — append a FAILED tag-write to the
+# SIBLING failure log (#1023 defect 2), the counterpart of the CANARY_PROMOTIONS_LOG success log.
+# Only genuine write failures land here (the caller is cmd_promote's post-move error path) — a
+# gate-blocked promotion returns before the move and is NEVER recorded, keeping the two concerns
+# distinct: an expected gate-block stays the canary-blocker issue's job; an unexpected tag-write
+# failure is what this log (and sync-promotion-failures) escalates. No-op when the log is unset.
+_log_promotion_failure() {
+  [ -n "${CANARY_PROMOTIONS_FAILED_LOG:-}" ] || return 0
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$CANARY_PROMOTIONS_FAILED_LOG"
 }
 
 # cmd_promote_all [--override] [--allow-pre-existing] [--dry-run] — the gated fleet
@@ -1773,6 +1801,147 @@ cmd_sync_issues() {
   return 0
 }
 
+# ── promotion tag-write failure escalation (durable trend + blocker, #1023 defect 2) ──
+# A gate-BLOCKED promotion is expected and already tracked (canary-blocker). A FAILED tag WRITE
+# (permission/API rejection on the move) is UNEXPECTED and, before #1023, left only a scrolling
+# run-log line — no durable artifact, no trend. This turns each run's failed writes (recorded in
+# CANARY_PROMOTIONS_FAILED_LOG by cmd_promote) into a per-agent tracking issue whose CONSECUTIVE-
+# failure streak escalates to needs-human + dev-lead at CANARY_PROMOTION_FAILURE_ESCALATE_AFTER
+# runs — and auto-closes the moment a write succeeds (agent in the CANARY_PROMOTIONS_LOG success
+# log). Best-effort GitHub writes; never aborts the run.
+
+# _promo_log_agents <tsv_file> — unique agent (column 1) values in a promotions log, one per line;
+# empty when the path is unset or the file is missing/empty.
+_promo_log_agents() {
+  local f="$1"
+  [ -n "$f" ] && [ -s "$f" ] || return 0
+  cut -f1 "$f" 2>/dev/null | awk 'NF && !seen[$0]++'
+}
+
+# _promo_fail_latest <agent> — the LAST failure-log line's "ring<TAB>cand<TAB>host<TAB>reason" for
+# <agent> (the most recent failure this run), empty if none.
+_promo_fail_latest() {
+  local agent="$1" f="${CANARY_PROMOTIONS_FAILED_LOG:-}"
+  [ -n "$f" ] && [ -s "$f" ] || return 0
+  awk -F'\t' -v a="$agent" '$1==a{ r=$2"\t"$3"\t"$4"\t"$5 } END{ if (r!="") print r }' "$f"
+}
+
+# _promo_fail_issue_find <agent> — "number<TAB>STATE<TAB>count" of the newest promotion-failure
+# tracking issue for <agent> (count parsed from its body marker, 0 if absent), empty if none.
+_promo_fail_issue_find() {
+  local agent="$1"; local marker="<!-- canary-promo-fail:$agent -->"
+  gh issue list --repo "$ISSUE_REPO" --label canary-promotion-failure --state all -L 100 \
+      --json number,state,body 2>/dev/null \
+    | jq -r --arg m "$marker" '
+        [ .[] | select((.body // "") | contains($m)) ] | sort_by(.number) | last
+        | if . == null then "" else
+            ([ (.body // "") | match("canary-promo-fail-count:([0-9]+)") | .captures[0].string ] | (first // "0")) as $c
+            | "\(.number)\t\(.state | ascii_upcase)\t\($c)"
+          end' 2>/dev/null || echo ""
+}
+
+# _promo_fail_body <agent> <count> <threshold> <ring> <cand> <host> <reason> <escalated:0|1>
+_promo_fail_body() {
+  local agent="$1" count="$2" threshold="$3" ring="$4" cand="$5" host="$6" reason="$7" escalated="$8" note
+  if [ "$escalated" = 1 ]; then
+    note="> ⛔ **ESCALATED (needs-human).** This tag write has failed on **$count consecutive** scheduled runs (threshold $threshold) — it is not self-healing. Unlike a gate block (expected, timer-cleared), a failing WRITE means the move itself is rejected: check the release-manager App's ruleset bypass + token scopes for \`$ring\` on \`$host\`, then re-run \`promote $agent\`. This issue auto-closes on the next successful promotion."
+  else
+    note="> ℹ️ **Tracking a failed tag write.** The promotion move for \`$agent\` was rejected this run (not a gate block — the gate would hold *before* the write). Consecutive failures: **$count** of $threshold before escalation to \`needs-human\`. Auto-closes on the next successful promotion."
+  fi
+  cat <<EOF
+<!-- canary-promo-fail:$agent -->
+<!-- canary-promo-fail-count:$count -->
+**Automated canary-rollout promotion-failure tracker.** A tag WRITE (not a gate decision) is failing for \`$agent\`. Filed + maintained by the Canary Rollout workflow; regenerated each run and **auto-closes** when a promotion succeeds — do not edit by hand.
+
+| field | value |
+|---|---|
+| agent | \`$agent\` |
+| ring | \`$ring\` |
+| candidate | \`${cand:0:12}\` |
+| host repo | \`$host\` |
+| consecutive failing runs | **$count** (escalates at $threshold) |
+| latest reason | ${reason:-tag write rejected} |
+
+$note
+---
+_Distinct from a gate-blocked promotion (tracked by \`canary-blocker\`): this is an unexpected write rejection, tracked so it escalates rather than scrolling past._
+EOF
+}
+
+# cmd_sync_promotion_failures [--dry-run] — reconcile this run's failed tag writes into durable,
+# escalating tracking issues (see section header). Reads CANARY_PROMOTIONS_FAILED_LOG (failures)
+# and CANARY_PROMOTIONS_LOG (successes); an agent present in neither was not attempted this run
+# and is left untouched. Reads ISSUE_REPO (default THIS_REPO).
+cmd_sync_promotion_failures() {
+  local dry=false; [ "${1:-}" = "--dry-run" ] && dry=true
+  local threshold="${CANARY_PROMOTION_FAILURE_ESCALATE_AFTER:-2}"
+  case "$threshold" in ''|*[!0-9]*) threshold=2 ;; esac
+  [ "$threshold" -lt 1 ] && threshold=1
+  echo "== canary-rollout sync-promotion-failures: repo=$ISSUE_REPO dry=$dry threshold=$threshold =="
+  local failed_agents ok_agents attempted
+  failed_agents="$(_promo_log_agents "${CANARY_PROMOTIONS_FAILED_LOG:-}")"
+  ok_agents="$(_promo_log_agents "${CANARY_PROMOTIONS_LOG:-}")"
+  attempted="$(printf '%s\n%s\n' "$failed_agents" "$ok_agents" | awk 'NF && !seen[$0]++')"
+  if [ -z "$attempted" ]; then
+    echo "  no promotion attempts recorded this run — nothing to reconcile."; return 0
+  fi
+  if [ "$dry" != true ]; then
+    gh label create canary-promotion-failure --repo "$ISSUE_REPO" --color b60205 --description "canary-rollout: a promotion tag WRITE is failing (not a gate block)" >/dev/null 2>&1 || true
+    gh label create dev-lead --repo "$ISSUE_REPO" --color 5319e7 --description "Route to the dev-lead agent for action" >/dev/null 2>&1 || true
+    gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
+  fi
+  local agent
+  while IFS= read -r agent; do
+    [ -z "$agent" ] && continue
+    local outcome="ok"
+    printf '%s\n' "$failed_agents" | grep -qxF "$agent" && outcome="failed"
+    local ns num istate prior
+    ns="$(_promo_fail_issue_find "$agent" || true)"
+    num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"
+    [ -z "$prior" ] && prior=0
+    local count; count="$(promotion_failure_next_count "$prior" "$outcome")"
+    if [ "$outcome" = "failed" ]; then
+      local latest ring cand host reason escalate body title
+      latest="$(_promo_fail_latest "$agent")"
+      IFS=$'\t' read -r ring cand host reason <<< "$latest"
+      escalate="$(promotion_failure_should_escalate "$count" "$threshold")"
+      body="$(_promo_fail_body "$agent" "$count" "$threshold" "${ring:-?}" "${cand:-}" "${host:-?}" "${reason:-tag write rejected}" "$escalate")"
+      if [ "$escalate" = 1 ]; then
+        title="Canary promotion FAILING: $agent (${count}× consecutive tag-write rejection)"
+      else
+        title="Canary promotion tag-write failed: $agent (${count}× consecutive)"
+      fi
+      if [ -z "$num" ]; then
+        if [ "$dry" = true ]; then echo "  [DRY] would OPEN promotion-failure issue for $agent (count=$count, escalate=$escalate)"; else
+          num="$(_gh_issue_create "$title" "$body" "canary-promotion-failure" || true)"
+          if [ -n "$num" ]; then
+            [ "$escalate" = 1 ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead --add-label needs-human >/dev/null 2>&1 || true
+            echo "  opened promotion-failure issue #$num for $agent (count=$count)"
+          else echo "::warning::could not open promotion-failure issue for $agent (Issues:write on the App?)"; fi
+        fi
+      else
+        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE promotion-failure issue #$num for $agent (count=$count, escalate=$escalate)"; else
+          [ "$istate" = "OPEN" ] || gh issue reopen "$num" --repo "$ISSUE_REPO" >/dev/null 2>&1 || true
+          gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
+            || echo "::warning::could not update promotion-failure issue #$num for $agent"
+          [ "$escalate" = 1 ] && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead --add-label needs-human >/dev/null 2>&1 || true
+          echo "  updated promotion-failure issue #$num for $agent (count=$count)"
+        fi
+      fi
+    else
+      # A successful write this run resets the streak → close any open tracking issue.
+      if [ -n "$num" ] && [ "$istate" = "OPEN" ]; then
+        if [ "$dry" = true ]; then echo "  [DRY] would CLOSE recovered promotion-failure issue #$num for $agent"; else
+          gh issue close "$num" --repo "$ISSUE_REPO" \
+            --comment "✅ Promotion succeeded — \`$agent\` tag write recovered. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
+          echo "  closed recovered promotion-failure issue #$num for $agent"
+        fi
+      fi
+    fi
+  done <<< "$attempted"
+  return 0
+}
+
 # ── autocut: cut a new candidate when a reusable changes on main (#1069) ────────
 # The FRONT END of the canary pipeline (the promoter's counterpart). At each scheduled
 # tick — gated by CANARY_AUTO_CUT — for each registered agent it compares the reusable
@@ -1891,28 +2060,84 @@ _autocut_bump_override() {
   case "$b" in major|minor|patch) echo "$b" ;; *) echo "" ;; esac
 }
 
-# _autocut_commit_signals <host> <reusable> <next_commit> <mainsha> — scan the commits that
-# TOUCH the reusable between the current `next` candidate (exclusive) and main HEAD, echoing
-# "<breaking 0|1> <feat 0|1>". breaking=1 iff any such commit is a conventional-commit `!`
-# (`type(scope)!:`) or carries a `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer; feat=1 iff any
-# such commit subject is `feat:`/`feat(scope):` (non-breaking). Returns non-zero on any
-# fetch/parse error so the caller can fail safe to patch (never auto-major on missing data).
+# _commit_date <host> <sha> — the committer (or author) date of <sha> on <host>, ISO-8601, empty
+# on any error. Used to bound the range enumeration with a `since` window (see below).
+_commit_date() {
+  gh api "repos/$1/commits/$2" --jq '.commit.committer.date // .commit.author.date // empty' 2>/dev/null || echo ""
+}
+
+# _watched_paths <agent> — the repo paths whose commits carry release-bump signals for this
+# agent, one per line, de-duplicated. ALWAYS includes the registry `reusable` path; extend it
+# with the optional `.agents[a].autocut.watched_paths[]` knob (e.g. a shared library the reusable
+# sources). Bump detection is scoped to commits touching THESE paths, so an unrelated commit
+# elsewhere in the range never moves the bump (#1023 defect 1a): the classic failure was a
+# `docs: feat!:` on an unrelated file forcing a spurious major that seeds a fresh `v<newMAJOR>-next`
+# (#657 F4) and strands consumers pinned to the old major.
+_watched_paths() {
+  local agent="$1"
+  { _agent_field "$agent" reusable
+    _jq -r --arg a "$agent" '.agents[$a]?.autocut?.watched_paths? // [] | .[]?'
+  } 2>/dev/null | awk 'NF && !seen[$0]++'
+}
+
+# _autocut_commit_signals <agent> <host> <next_commit> <mainsha> — scan the commits in
+# (next_commit, mainsha] that TOUCH one of the agent's watched paths, echoing "<breaking 0|1>
+# <feat 0|1>". breaking=1 iff any such commit is a conventional-commit `!` (`type(scope)!:`) or
+# carries a `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer; feat=1 iff any such commit subject is
+# `feat:`/`feat(scope):` (non-breaking).
+#
+# Two defects this closes (#1023 defect 1):
+#   • SCOPED — signals come only from `commits?path=<watched>` results (per watched path), so an
+#     unrelated `feat!`/`BREAKING CHANGE` elsewhere in the range is invisible to the bump.
+#   • ENUMERATED, not truncated — the range is PAGINATED (never a single capped response) and
+#     bounded by a `since=<next_commit date>` window, so a breaking change beyond the first
+#     page's cap is still seen. The boundary commit itself is EXCLUDED (its message predates the
+#     range).
+#
+# Return codes drive the caller's fail-safe DIRECTION:
+#   0  signals resolved            → echo "<b> <f>"
+#   1  fetch/parse error (no data) → caller keeps the PATCH fail-safe (never auto-major on a
+#                                    transient API failure; a real break can still be forced with
+#                                    the .agents[a].autocut.bump knob)
+#   3  range UNRESOLVABLE — could not be fully enumerated within CANARY_MAX_COMMIT_PAGES pages →
+#                                    caller FAILS SAFE TO MAJOR, loudly: an unenumerable range
+#                                    must not silently downgrade a breaking change to a patch
+#                                    (#1023 defect 1b), the more dangerous direction.
 _autocut_commit_signals() {
-  local host="$1" reusable="$2" next_commit="$3" mainsha="$4" json out
-  json="$(gh api "repos/$host/commits?path=$reusable&sha=$mainsha&per_page=100" 2>/dev/null)" || return 1
-  [ -z "$json" ] && return 1
-  out="$(jq -r --arg stop "$next_commit" '
-    if type != "array" then error("not an array") else . end
-    | (map(.sha)) as $shas
-    | ([ range(0; length) | select($shas[.] == $stop) ] | first) as $idx
-    | if $idx == null then error("boundary sha not found in page") else .[0:$idx] end
-    | map(.commit.message // "")
-    | {
-        b: any(.[]; test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
-        f: any(.[]; test("^feat(\\([^)]*\\))?:"))
-      }
+  local agent="$1" host="$2" next_commit="$3" mainsha="$4"
+  local since_date since_arg="" path page json pre acc="[]" truncated=0 path_done
+  since_date="$(_commit_date "$host" "$next_commit")"
+  [ -n "$since_date" ] && since_arg="&since=$since_date"
+  while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    page=1; path_done=0
+    while [ "$page" -le "$CANARY_MAX_COMMIT_PAGES" ]; do
+      json="$(gh api "repos/$host/commits?path=$path&sha=$mainsha&per_page=100&page=$page$since_arg" 2>/dev/null)" || return 1
+      jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
+      # Accumulate this page's pre-boundary commit messages (boundary sha EXCLUDED). `found` is
+      # 1 when the boundary appears in this page; `count` is the page length (a short page is the
+      # last page for this path — `since` already bounds it to the range, so no boundary is fine).
+      pre="$(jq -c --arg stop "$next_commit" '
+        (map(.sha)) as $shas
+        | ([ range(0; length) | select($shas[.] == $stop) ] | first) as $idx
+        | (if $idx == null then . else .[0:$idx] end | map(.commit.message // ""))
+      ' <<< "$json" 2>/dev/null)" || return 1
+      acc="$(jq -cn --argjson a "$acc" --argjson b "$pre" '$a + $b' 2>/dev/null)" || return 1
+      local found count
+      found="$(jq -r --arg stop "$next_commit" 'any(.[]?; .sha == $stop) // false' <<< "$json" 2>/dev/null)"
+      count="$(jq -r 'length' <<< "$json" 2>/dev/null)"
+      if [ "$found" = "true" ] || [ "${count:-0}" -lt 100 ]; then path_done=1; break; fi
+      page=$((page + 1))
+    done
+    [ "$path_done" -eq 1 ] || truncated=1
+  done <<< "$(_watched_paths "$agent")"
+  [ "$truncated" -eq 1 ] && return 3
+  local out
+  out="$(jq -r '
+    { b: any(.[]?; (. // "") | test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
+      f: any(.[]?; (. // "") | test("^feat(\\([^)]*\\))?:")) }
     | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
-  ' <<< "$json" 2>/dev/null)" || return 1
+  ' <<< "$acc" 2>/dev/null)" || return 1
   [ -z "$out" ] && return 1
   printf '%s\n' "$out"
 }
@@ -1966,9 +2191,11 @@ _autocut_iface_break() {
 # an autocut, echoed on stdout (a `::notice::` recording the level + driving signal goes to
 # stderr so it does not pollute the captured value). The `.agents[a].autocut.bump` knob wins as
 # an explicit override (even over a failed signal fetch); otherwise the level is DETECTED from
-# the commit signals and the workflow_call interface diff via decide_bump, failing safe to
-# patch on any signal-fetch error (never auto-major on missing data — a real breaking change
-# can still be forced with the knob).
+# the watched-path commit signals and the workflow_call interface diff via decide_bump. Fail-safe
+# DIRECTION depends on WHY signals are missing (#1023 defect 1): a transient fetch error fails
+# safe to PATCH (never auto-major on missing data — a real break can still be forced with the
+# knob), but an UNRESOLVABLE range (too long to enumerate) fails safe to MAJOR, loudly — an
+# unenumerable range must not silently downgrade a breaking change to a patch.
 _autocut_detect_bump() {
   local agent="$1" host="$2" reusable="$3" next_commit="$4" mainsha="$5"
   local override; override="$(_autocut_bump_override "$agent")"
@@ -1976,8 +2203,8 @@ _autocut_detect_bump() {
     echo "::notice::autocut $agent: bump=$override (registry override .agents[$agent].autocut.bump)" >&2
     echo "$override"; return 0
   fi
-  local breaking=0 feat=0 driver="" sigs iface
-  if sigs="$(_autocut_commit_signals "$host" "$reusable" "$next_commit" "$mainsha")"; then
+  local breaking=0 feat=0 driver="" sigs iface rc
+  if sigs="$(_autocut_commit_signals "$agent" "$host" "$next_commit" "$mainsha")"; then
     read -r breaking feat <<< "$sigs"
   elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
     # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
@@ -1985,10 +2212,20 @@ _autocut_detect_bump() {
     # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
     read -r breaking feat <<< "$sigs"
   else
-    echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
-    echo "patch"; return 0
+    rc=$?
+    if [ "$rc" -eq 3 ]; then
+      # Unresolvable range (#1023 defect 1b): the range could not be fully enumerated, so a
+      # breaking change may hide beyond the cap. FAIL SAFE TO MAJOR, loudly — never silently to
+      # patch, the more dangerous direction (a breaking change shipped as a patch breaks pinned
+      # consumers with no signal). A false major is at worst a spurious fresh v-line + this warning.
+      echo "::warning::autocut $agent: commit range ${next_commit:0:12}..${mainsha:0:12} on $host could not be fully enumerated within $CANARY_MAX_COMMIT_PAGES pages — cannot rule out a breaking change; failing safe to bump=major (not patch). Investigate the range." >&2
+      breaking=1; feat=0; driver="unresolvable commit range (fail-safe major)"
+    else
+      echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
+      echo "patch"; return 0
+    fi
   fi
-  [ "$breaking" = 1 ] && driver="conventional-commit breaking change"
+  [ "$breaking" = 1 ] && [ -z "$driver" ] && driver="conventional-commit breaking change"
   # An interface break escalates to major; a fetch error here is non-fatal (keep commit signals)
   # and never invents a major from missing data.
   if iface="$(_autocut_iface_break "$host" "$reusable" "$next_commit" "$mainsha")"; then
@@ -2382,9 +2619,10 @@ main() {
     rollback)     [ $# -ge 2 ] || { echo "usage: rollback <agent> <ring> --to <vX.Y.Z>" >&2; return 2; }; cmd_rollback "$@" ;;
     resolve)      [ $# -ge 2 ] || { echo "usage: resolve <agent> <channel>" >&2; return 2; }; resolve_members "$@" ;;
     sync-issues)  cmd_sync_issues "$@" ;;   # upsert blocker issues + dashboard for held promotions
+    sync-promotion-failures) cmd_sync_promotion_failures "$@" ;;  # escalate failing tag writes into durable issues (#1023)
     autocut)      cmd_autocut "$@" ;;       # cut a new candidate when a reusable changes on main (#1069)
     drift)        cmd_drift "$@" ;;         # report reusables present on a host but unregistered, + stale registry entries (#1082)
-    *) echo "::error::usage: canary-rollout.sh {autocut|drift|evaluate|evaluate-all|promote|promote-all|rollback|resolve|sync-issues} [args]" >&2; return 2 ;;
+    *) echo "::error::usage: canary-rollout.sh {autocut|drift|evaluate|evaluate-all|promote|promote-all|rollback|resolve|sync-issues|sync-promotion-failures} [args]" >&2; return 2 ;;
   esac
 }
 

@@ -115,6 +115,37 @@ decide_bump() {
   echo patch
 }
 
+# ── promotion tag-write failure streak (#1023 defect 2) ────────────────────────
+# A FAILED tag write (a permission/API rejection on the promote move) is UNEXPECTED — distinct
+# from an EXPECTED gate-block. The orchestrator persists each failure to a sibling log and, on
+# each scheduled tick, feeds the per-agent outcome through these pure cores to decide when a
+# repeatedly-failing write should escalate to a durable blocker issue. Kept side-effect-free so
+# the escalation threshold logic is unit-tested without touching GitHub.
+
+# promotion_failure_next_count <prior_count> <outcome:failed|ok> — the new CONSECUTIVE-failure
+# streak: a `failed` write increments the prior count by one; any other outcome (a successful
+# write, or no attempt resolved to `ok`) RESETS the streak to 0. A non-numeric prior is treated
+# as 0 (a fresh/garbled marker never blocks escalation from restarting cleanly).
+promotion_failure_next_count() {
+  local prior="$1" outcome="$2"
+  case "$prior" in ''|*[!0-9]*) prior=0 ;; esac
+  case "$outcome" in
+    failed) echo $((prior + 1)) ;;
+    *)      echo 0 ;;
+  esac
+}
+
+# promotion_failure_should_escalate <count> <threshold> — echo 1 iff the consecutive-failure
+# <count> has reached the escalation <threshold> (N consecutive failing runs), else 0. A
+# threshold below 1 is clamped to 1 (escalate on the first failure); non-numeric input → 0.
+promotion_failure_should_escalate() {
+  local count="$1" threshold="$2"
+  case "$count" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  case "$threshold" in ''|*[!0-9]*) echo 0; return 0 ;; esac
+  [ "$threshold" -lt 1 ] && threshold=1
+  if [ "$count" -ge "$threshold" ]; then echo 1; else echo 0; fi
+}
+
 # workflow_call_iface <yaml_text> — parse a reusable workflow's `on.workflow_call` block into
 # a normalized, sorted interface descriptor (one item per line), for a set-comparison diff:
 #   input <name> <required 0|1>

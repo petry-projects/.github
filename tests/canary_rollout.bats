@@ -109,6 +109,29 @@ setup() {
   [ "$(decide_bump 0 1 '')"   = "minor" ]
 }
 
+# ── promotion tag-write failure streak: pure escalation cores (#1023 defect 2) ───
+@test "promotion_failure_next_count: a failed write increments the streak" {
+  [ "$(promotion_failure_next_count 0 failed)" -eq 1 ]
+  [ "$(promotion_failure_next_count 2 failed)" -eq 3 ]
+}
+@test "promotion_failure_next_count: a successful write resets the streak to 0" {
+  [ "$(promotion_failure_next_count 5 ok)" -eq 0 ]
+}
+@test "promotion_failure_next_count: a non-numeric prior count is treated as 0" {
+  [ "$(promotion_failure_next_count '' failed)" -eq 1 ]
+  [ "$(promotion_failure_next_count 'x' failed)" -eq 1 ]
+}
+@test "promotion_failure_should_escalate: fires only at/after the threshold" {
+  [ "$(promotion_failure_should_escalate 1 2)" -eq 0 ]
+  [ "$(promotion_failure_should_escalate 2 2)" -eq 1 ]
+  [ "$(promotion_failure_should_escalate 3 2)" -eq 1 ]
+}
+@test "promotion_failure_should_escalate: a sub-1 threshold clamps to 1; bad input → 0" {
+  [ "$(promotion_failure_should_escalate 1 0)" -eq 1 ]
+  [ "$(promotion_failure_should_escalate 'x' 2)" -eq 0 ]
+  [ "$(promotion_failure_should_escalate 2 'y')" -eq 0 ]
+}
+
 # ── workflow_call_iface: parse an on.workflow_call interface into a descriptor ────
 # Pure YAML→descriptor transform: emits `input <name> <req 0|1>` and `secret <name>`
 # (sorted). Outputs are intentionally not emitted (they never drive a breaking verdict).
@@ -1344,6 +1367,31 @@ GITEOF
   [ ! -f "$MOVE_LOG" ]
 }
 
+# ── promote: a FAILED tag write is persisted, distinct from a gate-block (#1023 defect 2) ─
+@test "orchestrator: a failed promote tag-write is persisted to the failure log (agent/ring/cand/host/reason) (#1023)" {
+  _crossrepo_promote_stub 2 1 success   # auto-rebase ring1->stable PROMOTE
+  # Make the tag-write PATCH FAIL with a non-404 ruleset rejection (never a gate decision).
+  sed 's#\*"-X PATCH"\*"git/refs/tags/"\*).*#*"-X PATCH"*"git/refs/tags/"*) echo "gh: blocked by ruleset release-channel-tags (HTTP 422)" >\&2; exit 1 ;;#' \
+    "$STUB_BIN/gh" > "$STUB_BIN/gh.tmp" && mv "$STUB_BIN/gh.tmp" "$STUB_BIN/gh" && chmod +x "$STUB_BIN/gh"
+  local flog="$BATS_TEST_TMPDIR/promotions-failed.tsv"; : > "$flog"
+  run env CANARY_RINGS="$RINGS" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" promote auto-rebase
+  [ "$status" -ne 0 ]                                   # the failed write surfaces as a non-zero run
+  [[ "$output" == *"::error::failed to move"* ]]
+  # One failure-log line: agent, ring, candidate sha, owning host, and a reason (5 columns).
+  grep -qP "^auto-rebase\tstable\t[0-9a-f]+\tpetry-projects/\.github\t.+" "$flog"
+}
+
+@test "orchestrator: a gate-BLOCKED promotion writes NOTHING to the failure log (#1023)" {
+  # A REGRESSION-blocked frontier holds BEFORE the move — it is expected, tracked by canary-blocker,
+  # and must never be conflated with an (unexpected) tag-write failure.
+  _graduated_stub 3 2 failure 1                          # BLOCKED + REGRESSION
+  local flog="$BATS_TEST_TMPDIR/promotions-failed.tsv"; : > "$flog"
+  run env CANARY_RINGS="$RINGS" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" promote dev-lead
+  [ "$status" -eq 0 ]                                    # gate-block is not a run failure
+  [[ "$output" == *"BLOCKED"* ]]
+  [ ! -s "$flog" ]                                       # nothing persisted as a tag-write failure
+}
+
 # ── _gh_move_tag: surface the underlying API error, don't swallow it (#743) ─────
 # A promotion-due run was failing with only a generic caller-side "failed to move" because
 # BOTH gh api calls discarded stderr (`>/dev/null 2>&1`). The mover must now echo the real
@@ -1719,6 +1767,80 @@ GHEOF
   # The header must appear at the start of a line — not concatenated onto the prior content.
   grep -q '^# Canary Rollout' "$summ"
   ! grep -q 'prior.*# Canary Rollout' "$summ"
+}
+
+# ── orchestrator: sync-promotion-failures — escalate failing tag WRITES (#1023 defect 2) ─
+# A failed tag write (recorded in CANARY_PROMOTIONS_FAILED_LOG by promote) becomes a durable
+# per-agent tracking issue whose CONSECUTIVE-failure streak escalates to needs-human + dev-lead
+# at the threshold, and auto-closes when a write succeeds (agent in CANARY_PROMOTIONS_LOG).
+_promo_fail_sync_stub() {
+  local issue_list="${1:-[]}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  "issue list"*)   echo '$issue_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github/issues/900" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "orchestrator: sync-promotion-failures opens a tracking issue on the FIRST failure — not yet escalated (#1023)" {
+  _promo_fail_sync_stub '[]'
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened promotion-failure issue #900 for dev-lead (count=1)"* ]]
+  grep -q -- "--label canary-promotion-failure" "$ISSUE_LOG"
+  # count=1 < threshold(2): NOT escalated — no needs-human on the first failure.
+  ! grep -q -- "--add-label needs-human" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures escalates (needs-human + dev-lead) at the Nth consecutive failure (#1023)" {
+  # An existing tracking issue already at count=1; another failure this run → count=2 = threshold.
+  local existing='[{"number":901,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTION_FAILURE_ESCALATE_AFTER=2 CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated promotion-failure issue #901 for dev-lead (count=2)"* ]]
+  grep -q -- "issue edit 901 .*--add-label dev-lead --add-label needs-human" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures auto-closes the tracking issue when the write recovers (#1023)" {
+  # dev-lead succeeded this run (in the SUCCESS log) but an OPEN failure issue exists → close it.
+  local existing='[{"number":902,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:3 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local slog="$BATS_TEST_TMPDIR/ok.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\n' > "$slog"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; : > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_LOG="$slog" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"closed recovered promotion-failure issue #902 for dev-lead"* ]]
+  grep -q "CLOSE|.*902" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures --dry-run plans but writes nothing to GitHub (#1023)" {
+  _promo_fail_sync_stub '[]'
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would OPEN promotion-failure issue for dev-lead"* ]]
+  [ ! -s "$ISSUE_LOG" ]
+}
+
+@test "orchestrator: sync-promotion-failures is a clean no-op when no promotion was attempted (#1023)" {
+  _promo_fail_sync_stub '[]'
+  run env ISSUE_REPO="petry-projects/.github" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no promotion attempts recorded this run"* ]]
+  [ ! -s "$ISSUE_LOG" ]
 }
 
 # ── orchestrator: autocut — auto-cut a new candidate when a reusable changes on main (#1069) ─
@@ -3772,6 +3894,131 @@ YML
   [ "$status" -eq 0 ]
   grep -q "git/tags .*tag=dev-lead/v3.0.0 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
   grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/v3-next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+}
+
+# ── autocut bump-signal scoping + pagination + fail-safe (#1023 defect 1) ───────
+# Signals are derived ONLY from commits touching a WATCHED path (reusable + optional
+# .agents[a].autocut.watched_paths[]), and the range is ENUMERATED with pagination + a `since`
+# window instead of trusting one capped response. An unrelated feat!/BREAKING outside the watched
+# paths must NOT raise the bump; a BREAKING beyond the first page's cap MUST still be detected;
+# and a range that cannot be enumerated fails safe to MAJOR (loudly), never silently to patch.
+#
+# The stub serves the reusable path's commit list PER PAGE (re-<n>.json) and, for any OTHER
+# watched path, an "extra" list (ex-1.json) — so scoping and multi-path union can be exercised
+# distinctly. The boundary commit (sha=NEXTSHA) terminates a list and is EXCLUDED from signals.
+#   args: agent host reusable MAINSHA NEXTSHA versions date re_page1 [re_page2] [ex_page1] [watched_paths_json]
+_scoped_autocut_stub() {
+  local agent="$1" host="$2" reusable="$3" MAINSHA="$4" NEXTSHA="$5" versions="$6" date="$7"
+  local re1="${8:-[]}" re2="${9:-[]}" ex1="${10:-[]}" watched="${11:-}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
+  local refs="" v; for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
+  printf '%s' "$re1" > "$STUB_BIN/re-1.json"
+  printf '%s' "$re2" > "$STUB_BIN/re-2.json"
+  printf '%s' "$ex1" > "$STUB_BIN/ex-1.json"
+  local IFACE; IFACE="$(_iface_yaml)"
+  local B64; B64="$(printf '%s' "$IFACE" | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+args="\$*"
+page="\$(printf '%s' "\$args" | sed -n 's/.*page=\\([0-9]*\\).*/\\1/p')"; page="\${page:-1}"
+case "\$args" in
+  *".default_branch"*) echo "main" ;;
+  *"commits?path=$reusable"*)
+    f="$STUB_BIN/re-\$page.json"; [ -f "\$f" ] && cat "\$f" || echo "[]" ;;
+  *"commits?path="*)
+    f="$STUB_BIN/ex-\$page.json"; [ -f "\$f" ] && cat "\$f" || echo "[]" ;;
+  *"/commits/$NEXTSHA"*) echo "$date" ;;
+  *"/commits/"*) echo "$MAINSHA" ;;
+  *"contents/"*"ref=$MAINSHA"*".content"*) echo "$B64" ;;
+  *"contents/"*"ref=$NEXTSHA"*".content"*) echo "$B64" ;;
+  *"contents/"*"ref=$MAINSHA"*) echo "blobNEW" ;;
+  *"contents/"*"ref=$NEXTSHA"*) echo "blobOLD" ;;
+  *"-X POST"*"git/tags"*) echo "\$args" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$args" >> "$GH_LOG"; exit 0 ;;
+  *"-X POST"*"git/refs"*) echo "\$args" >> "$GH_LOG"; echo "{}" ;;
+  *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
+  *"git/ref/tags/$agent/v"*"-next"*) printf '\n' ;;
+  *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) printf '\n' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<GITEOF
+#!/usr/bin/env bash
+case "\$*" in *"rev-parse"*"$agent/next"*) echo "$NEXTSHA" ;; *) : ;; esac
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  AUTOCUT_RINGS="$BATS_TEST_TMPDIR/scoped-autocut-rings.json"
+  if [ -n "$watched" ]; then
+    jq --arg a "$agent" --argjson w "$watched" \
+      '{version, description, org_infra_repos, member_tokens, agents: {($a): (.agents[$a] + {autocut: {watched_paths: $w}})}}' \
+      "$RINGS" > "$AUTOCUT_RINGS"
+  else
+    jq --arg a "$agent" \
+      '{version, description, org_infra_repos, member_tokens, agents: {($a): .agents[$a]}}' \
+      "$RINGS" > "$AUTOCUT_RINGS"
+  fi
+}
+
+# 100 non-breaking filler commits (a full page) so a signal beyond the cap sits on page 2.
+_filler_page() { jq -nc '[range(100)|{sha:("f\(.)"),commit:{message:"chore: filler \(.)"}}]'; }
+
+@test "orchestrator: autocut — an unrelated feat! OUTSIDE the watched paths does NOT raise the bump (#1023)" {
+  # The reusable's path-scoped commit list carries only a fix; the boundary terminates it. The
+  # `feat!` that would force a major touched an unrelated file (docs/), so it never appears in
+  # `commits?path=<reusable>` and must not move the bump. Scoping ⇒ patch, not major.
+  local re1='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: correct a log line"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  _scoped_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "2026-08-01T00:00:00Z" "$re1"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v2.1.1 " "$GH_LOG"       # patch bump
+  ! grep -q "tag=dev-lead/v3" "$GH_LOG"                     # NOT a spurious major
+}
+
+@test "orchestrator: autocut — a breaking feat! on a CONFIGURED extra watched path IS detected → major (#1023)" {
+  # watched_paths adds a shared library; the reusable itself only had a fix, but the extra watched
+  # path carries a `feat!`. Multi-path union ⇒ major (a change to a watched dependency counts).
+  local re1='[{"sha":"newcommit0000000000000000000000000000","commit":{"message":"fix: reusable tidy"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  local ex1='[{"sha":"libcommit00000000000000000000000000000","commit":{"message":"feat!: drop the legacy shared entrypoint"}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  _scoped_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "2026-08-01T00:00:00Z" "$re1" "[]" "$ex1" '["scripts/lib/shared.sh"]'
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 " "$GH_LOG"
+}
+
+@test "orchestrator: autocut — a BREAKING CHANGE in a watched-path commit BEYOND the page cap IS detected → major (#1023)" {
+  # Page 1 is a full 100-commit page of fillers (no boundary, no breaking); the boundary and the
+  # BREAKING CHANGE commit are on page 2. If pagination stopped at the cap the break would ship as
+  # a patch — the dangerous direction. Enumerating past the cap ⇒ major.
+  local re2='[{"sha":"breaker000000000000000000000000000000000","commit":{"message":"feat: extend the matrix\n\nBREAKING CHANGE: the matrix input is now required."}},{"sha":"cccccccccccccccccccccccccccccccccccccccc","commit":{"message":"chore: prior baseline"}}]'
+  _scoped_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "2026-08-01T00:00:00Z" "$(_filler_page)" "$re2"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 " "$GH_LOG"
+}
+
+@test "orchestrator: autocut — an UNRESOLVABLE range fails safe to MAJOR (loudly), never silently to patch (#1023)" {
+  # Every page is a full 100-commit page and the boundary is never reached within the page cap →
+  # the range cannot be enumerated. It must NOT silently downgrade to patch: fail safe to major
+  # with a ::warning::.
+  _scoped_autocut_stub dev-lead petry-projects/.github-private .github/workflows/dev-lead-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "2.1.0" \
+    "2026-08-01T00:00:00Z" "$(_filler_page)" "$(_filler_page)"
+  run env CANARY_AUTO_CUT=true CANARY_MAX_COMMIT_PAGES=2 CANARY_RINGS="$AUTOCUT_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=dev-lead/v3.0.0 " "$GH_LOG"       # fail-safe MAJOR, not patch
+  ! grep -q "tag=dev-lead/v2.1.1" "$GH_LOG"
+  [[ "$output" == *"could not be fully enumerated"* ]]      # and it is LOUD
+  [[ "$output" == *"failing safe to bump=major"* ]]
 }
 
 # ── workflow timeout headroom (#939) ─────────────────────────────────────────

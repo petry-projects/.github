@@ -258,6 +258,11 @@ jobs:
           # One TSV line per real promotion (agent, ring, sha, owning-repo) so the deployment
           # step records a deployment for EVERY move in a promote-all run, on the right host.
           CANARY_PROMOTIONS_LOG: ${{ runner.temp }}/promotions.tsv
+          # Sibling log of FAILED tag writes (agent, ring, sha, host, reason) — an UNEXPECTED
+          # write rejection, distinct from an expected gate-block (#1023 defect 2). The
+          # sync-promotion-failures step below turns a repeatedly-failing write into a durable,
+          # escalating tracking issue instead of a scrolling run-log line.
+          CANARY_PROMOTIONS_FAILED_LOG: ${{ runner.temp }}/promotions-failed.tsv
         run: |
           set -euo pipefail
           args=()
@@ -338,6 +343,23 @@ jobs:
         run: |
           set -uo pipefail
           bash scripts/canary-rollout.sh sync-issues || echo "::warning::issue sync failed (non-fatal)"
+
+      # Escalate FAILED tag writes (#1023 defect 2). A gate-blocked promotion is expected and
+      # tracked by the step above; a rejected tag WRITE is UNEXPECTED and, before this, left only
+      # a run-log line. Reconcile this run's success/failure logs into a durable per-agent
+      # tracking issue whose consecutive-failure streak escalates to needs-human + dev-lead, and
+      # auto-closes when a write recovers. Best-effort + always(): promote-all returns non-zero
+      # when an agent's write failed, so this must run even after that step "fails".
+      - name: Escalate failed promotion tag-writes
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_REPO: ${{ github.repository }}
+          CANARY_PROMOTIONS_LOG: ${{ runner.temp }}/promotions.tsv
+          CANARY_PROMOTIONS_FAILED_LOG: ${{ runner.temp }}/promotions-failed.tsv
+        run: |
+          set -uo pipefail
+          bash scripts/canary-rollout.sh sync-promotion-failures || echo "::warning::promotion-failure escalation failed (non-fatal)"
 
       # Reusable-registry drift audit (#1082): the registry (.agents{}) is the MANUAL source
       # of truth for what this pipeline manages — a *-reusable.yml added/renamed on a host but
