@@ -1813,9 +1813,18 @@ _DEFAULT_AGENT_REF_PATHS=$'scripts/\nprompts/\npersonas/'
 _watched_paths() {
   local agent="$1" reusable extra
   reusable="$(_agent_field "$agent" reusable)"
+  # Distinguish "the registry OMITS agent_ref_paths" (→ built-in fallback) from "the registry
+  # sets it to []" (→ an intentional opt-out that must be honoured). Testing the rendered list
+  # for emptiness conflates the two, so an agent that deliberately watches only its reusable
+  # would silently get scripts/, prompts/ and personas/ back. Probe presence with `has` first.
+  local declared
+  declared="$(_jq -r --arg a "$agent" \
+    'if (.agents[$a]? | type) == "object" and (.agents[$a] | has("agent_ref_paths")) then "agent"
+     elif has("agent_ref_paths") then "top"
+     else "none" end' 2>/dev/null || echo none)"
   extra="$(_jq -r --arg a "$agent" \
     '(.agents[$a].agent_ref_paths // .agent_ref_paths // []) | .[]?' 2>/dev/null || true)"
-  [ -z "$extra" ] && extra="$_DEFAULT_AGENT_REF_PATHS"
+  [ -z "$extra" ] && [ "$declared" = "none" ] && extra="$_DEFAULT_AGENT_REF_PATHS"
   { [ -n "$reusable" ] && printf '%s\n' "$reusable"; printf '%s\n' "$extra"; } \
     | awk 'NF && !seen[$0]++'
 }

@@ -4107,3 +4107,32 @@ GITEOF
   [[ "$output" == *"persona-mention"* ]]
   [[ "$output" == *"scripts/"* ]]
 }
+
+# ── explicit empty agent_ref_paths override (#1019) ───────────────────────────
+# `[]` is an intentional opt-out ("watch only my reusable"); an OMITTED key means
+# "use the built-in fallback". Testing the rendered list for emptiness conflates
+# the two and silently restores scripts/, prompts/, personas/.
+@test "_watched_paths: an explicit empty agent_ref_paths override is honoured (#1019)" {
+  local rings="$BATS_TEST_TMPDIR/rings-empty.json"
+  cat > "$rings" <<'JSON'
+{"agents":{"solo":{"host":"o/r","reusable":".github/workflows/solo-reusable.yml","agent_ref_paths":[]}}}
+JSON
+  run env CANARY_RINGS="$rings" bash -c "source '$ORCH'; _watched_paths solo"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".github/workflows/solo-reusable.yml"* ]]
+  [[ "$output" != *"scripts/"* ]]
+  [[ "$output" != *"prompts/"* ]]
+  [[ "$output" != *"personas/"* ]]
+}
+
+@test "_watched_paths: an OMITTED agent_ref_paths still falls back to the built-in set (#1019)" {
+  local rings="$BATS_TEST_TMPDIR/rings-omit.json"
+  cat > "$rings" <<'JSON'
+{"agents":{"solo":{"host":"o/r","reusable":".github/workflows/solo-reusable.yml"}}}
+JSON
+  run env CANARY_RINGS="$rings" bash -c "source '$ORCH'; _watched_paths solo"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scripts/"* ]]
+  [[ "$output" == *"prompts/"* ]]
+  [[ "$output" == *"personas/"* ]]
+}
