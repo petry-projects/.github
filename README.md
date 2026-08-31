@@ -17,6 +17,7 @@ The `standards/` directory contains the authoritative policy documents for this 
 | Standard | Topic | Key topics |
 |----------|-------|------------|
 | [`advanced-security`](standards/advanced-security.md) | GitHub Advanced Security configuration | Code Security Configurations, push-protection live-fire test (canary), licensing & billing, verification, compliance audit checks |
+| [`agent-rate-limits`](standards/agent-rate-limits.md) | Agent token-budget and rate-limit policy | What is limited, token-budget breaker, daily budget as per-agent cost bound, exempt actors, operator runbook |
 | [`agent-standards`](standards/agent-standards.md) | Copilot and agentic workflow standards | Required files, agent configuration security, AgentShield CI workflow, Decision-Making Reusables, BMAD Method Workflows |
 | [`ci-standards`](standards/ci-standards.md) | CI pipeline conventions and enforcement | Staged promotion through concentric rings, reusable workflow versioning (`stable` channel), action pinning policy, permissions policy, required workflows |
 | [`codeowners-standard`](standards/codeowners-standard.md) | CODEOWNERS file policy | Rule, team composition, required setup for new bots, branch protection |
@@ -40,6 +41,7 @@ Scheduled workflows in this repo post audit reports and status digests as issues
 | [`compliance-audit-and-improvement.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/compliance-audit-and-improvement.yml) | Weekly org standards compliance audit + runtime health survey, with per-finding remediation issues |
 | [`daily-org-status.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/daily-org-status.yml) | Daily "Org Status" digest posted as an issue for maintainers |
 | [`org-scorecard.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml) | Weekly OpenSSF Scorecard security-posture review across public repos; findings tracked as issues |
+| [`standards-deploy.yml`](https://github.com/petry-projects/.github/blob/main/.github/workflows/standards-deploy.yml) | Weekly fleet sweep that opens standards-sync PRs for repos drifted off the org-standard workflow stubs |
 
 ## Related
 
