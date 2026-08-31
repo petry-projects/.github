@@ -68,6 +68,9 @@ THIS_REPO="${GITHUB_REPOSITORY:-petry-projects/.github-private}"
 # is treated as UNRESOLVABLE and fails safe to a major bump (#1023 defect 1b), never silently to
 # patch. 50 pages = 5000 commits — far beyond any real inter-cut range.
 CANARY_MAX_COMMIT_PAGES="${CANARY_MAX_COMMIT_PAGES:-50}"
+if ! [[ "$CANARY_MAX_COMMIT_PAGES" =~ ^[0-9]+$ ]] || [ "$CANARY_MAX_COMMIT_PAGES" -le 0 ]; then
+  CANARY_MAX_COMMIT_PAGES=50
+fi
 
 # CANARY_PROMOTION_FAILURE_ESCALATE_AFTER — how many CONSECUTIVE scheduled runs a tag write may
 # fail before its tracking issue escalates to needs-human + dev-lead (#1023 defect 2). Default 2
@@ -2119,11 +2122,9 @@ _autocut_commit_signals() {
   local path page json acc="[]" truncated=0 path_done
   while IFS= read -r path; do
     [ -z "$path" ] && continue
-    local path_enc
-    path_enc="${path//&/%26}"; path_enc="${path_enc//\?/%3F}"; path_enc="${path_enc//#/%23}"
     page=1; path_done=0
     while [ "$page" -le "$CANARY_MAX_COMMIT_PAGES" ]; do
-      json="$(gh api "repos/$host/commits?path=$path_enc&sha=$mainsha&per_page=100&page=$page" 2>/dev/null)" || return 1
+      json="$(gh api --method GET "repos/$host/commits" -f path="$path" -f sha="$mainsha" -F per_page=100 -F page="$page" 2>/dev/null)" || return 1
       # Parse the page and extract found, count, and pre-boundary messages in a single jq invocation
       local parsed found count pre
       parsed="$(printf '%s\n' "$json" | jq -r --arg stop "$next_commit" '

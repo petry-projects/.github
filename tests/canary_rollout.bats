@@ -1826,6 +1826,18 @@ GHEOF
   grep -q "CLOSE|.*902" "$ISSUE_LOG"
 }
 
+@test "orchestrator: sync-promotion-failures gives success precedence when agent is in both logs (#1023)" {
+  # dev-lead failed initially (in FAILED log) but succeeded later (in SUCCESS log); success takes precedence.
+  local existing='[{"number":903,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local slog="$BATS_TEST_TMPDIR/ok.tsv"; printf 'dev-lead\tring0\tdddddddddddddddd\tpetry-projects/.github-private\n' > "$slog"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_LOG="$slog" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"closed recovered promotion-failure issue #903 for dev-lead"* ]]
+  grep -q "CLOSE|.*903" "$ISSUE_LOG"
+}
+
 @test "orchestrator: sync-promotion-failures --dry-run plans but writes nothing to GitHub (#1023)" {
   _promo_fail_sync_stub '[]'
   local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
