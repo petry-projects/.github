@@ -16,8 +16,12 @@ compliance audit — and any contributor — reads the limits and their exemptio
   [`standards/agent-rate-limits.json`](agent-rate-limits.json) (Phase 2,
   [#638](https://github.com/petry-projects/.github/issues/638)).
 - **Apply path (where it will be enforced):** a source-side gate library
-  (`scripts/lib/agent-rate-limit.sh`) is Phase 3; the private telemetry adapter +
-  wiring are Phases 4–5 (ADR §8). **Nothing reads this config yet** — see §3.
+  (`scripts/lib/agent-rate-limit.sh`) is Phase 3; the org-wide token-budget
+  breaker (the public side — thresholds, policy, decision, and the telemetry
+  adapter seam) is Phase 5 ([#641](https://github.com/petry-projects/.github/issues/641),
+  §4.1 below); the private telemetry poller + live-path wiring land separately
+  (ADR §8). **Nothing enforces this config yet** — the token-budget breaker ships
+  inert behind a flag; see §3 and §4.2.
 
 ---
 
@@ -115,6 +119,69 @@ not drift into prose-restated numbers, but that a reader must understand, are:
   logs a warning — an outage of an undocumented third-party endpoint must never
   stop the fleet (ADR §7). This is policy the gate will honor; it is not itself a
   value in this file.
+
+### 4.1 Where the breaker lives — the gate library + adapter seam
+
+The 5-hour `session` breaker is implemented in the source-side gate library
+[`scripts/lib/agent-rate-limit.sh`](../scripts/lib/agent-rate-limit.sh) (Phase 5,
+[#641](https://github.com/petry-projects/.github/issues/641)), alongside the
+per-agent-type controls:
+
+- `arl_token_budget_gate [window]` orchestrates the breaker for a window
+  (default `session`): it reads the threshold from this config, consults the
+  telemetry **adapter seam**, and emits `decision=allow` / `decision=defer`.
+- The **adapter seam** keeps the credentialed OAuth read private (ADR §8.2). The
+  private poller plugs the live read into one of two env vars, which the library
+  never sets itself:
+  - `AGENT_TOKEN_BUDGET_TELEMETRY_CMD` — a command whose stdout is the normalized
+    envelope, or
+  - `AGENT_TOKEN_BUDGET_TELEMETRY_FILE` — a file holding the envelope JSON.
+  The envelope is `{ "status": <http_status>, "retry_after": <int?>,
+  "body": <raw upstream?> }`; the library prefers the ADR §4.1 `limits[]` array
+  and falls back to the flattened `five_hour` / `seven_day` keys. **With neither
+  var set, the breaker fails safe to allow** (the disabled/degraded mode below).
+- The adapter reads both the `session` and `weekly_all` windows from one
+  envelope, so the Phase 6 weekly glide-path breaker
+  ([#994](https://github.com/petry-projects/.github/issues/994)) extends it
+  rather than refactoring.
+- When the breaker trips, the pause is surfaced through the same human-clearable
+  primitives as the rest of the library: `arl_token_breaker_marker <window>` (a
+  deduped HTML marker) plus `arl_breaker_label` (`needs-human-review`). A human
+  clears both to acknowledge the pause. `arl_token_priority_rank <agent_type>`
+  encodes the Claude-priority-on-recovery order (Claude-backed agents ahead of
+  `initiative-driver`) from the `claude_priority` flag.
+
+### 4.2 Rollout — canary / dry-run first, then promotion (AC #5)
+
+Activation is **staged and reversible**, and never overrides a pause a human set
+deliberately (ADR §7, `.github-private#1525`):
+
+1. **Inert (default).** The integration into `arl_admission_gate` is gated by the
+   `AGENT_TOKEN_BUDGET_ENABLED` env flag, which is **off by default**. With the
+   flag unset the gate reads no telemetry and the breaker cannot change any
+   dispatch decision — the provisional config (`status: provisional`, §3) stays
+   inert until human sign-off, exactly as the pr-limits config did before its own
+   gate.
+2. **Dry-run.** Run with `AGENT_TOKEN_BUDGET_ENABLED=true` **and** `DRY_RUN=true`
+   (or `DEV_LEAD_DRY_RUN=true`). The gate computes and logs the real
+   allow/defer decision but always returns allow with no side effects, so a
+   canary can observe how often the breaker *would* trip against live telemetry
+   before it changes behavior.
+3. **Canary.** Enable enforcement (`AGENT_TOKEN_BUDGET_ENABLED=true`, no
+   `DRY_RUN`) for a canary slice via the central promotion channel
+   ([agent-canary-rings-adr](../docs/initiatives/agent-canary-rings-adr.md)), with
+   the telemetry seam wired to the private poller. Watch that deferrals correlate
+   with real budget pressure and that Claude-backed agents recover first.
+4. **Promote.** Roll the flag out fleet-wide through the same channel once the
+   canary is clean. Because the threshold is read from this config at run time,
+   tuning it afterward is a config edit (§7.1), not a redeploy.
+
+**Degraded / disabled-behind-flag mode (AC #6).** If the private telemetry
+companion is not yet wired (no seam configured) the breaker **allows with a
+warning** rather than blocking — the story ships complete regardless of the
+telemetry wiring, and no acceptance criterion depends on a source that might be
+unavailable. Turning the flag on without a wired seam is therefore safe: it stays
+inert-allowing until the seam is present.
 
 ## 5. The daily budget is the per-agent cost bound
 
