@@ -63,7 +63,7 @@ _find_files() {
 # body is a verbatim copy of .github-private's extract_top_level_symbols (the fn
 # arms only) so shell detection is byte-identical to the private gate.
 extract_shell_functions() {
-  awk '
+  tr -d '\r' < "$1" | awk '
     # NAME() {   (POSIX + ksh, brace same line), column 0 only.
     /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
       name = $0
@@ -85,7 +85,7 @@ extract_shell_functions() {
       print name
       next
     }
-  ' "$1"
+  '
 }
 
 # extract_markdown_headings <file>
@@ -93,7 +93,7 @@ extract_shell_functions() {
 # ``` / ~~~ fenced code blocks are skipped, so bash `#`-comments are not treated
 # as headings. H3+ sub-headings are intentionally not emitted.
 extract_markdown_headings() {
-  awk '
+  tr -d '\r' < "$1" | awk '
     # Toggle fenced code blocks. A fence is ``` or ~~~ (3+), optionally indented.
     /^[[:space:]]*(`{3,}|~{3,})/ {
       line = $0
@@ -112,7 +112,7 @@ extract_markdown_headings() {
       print text
       next
     }
-  ' "$1"
+  '
 }
 
 # duplicates_with_counts — read symbols on stdin, emit "SYMBOL<TAB>COUNT" for
@@ -126,7 +126,7 @@ report=""
 
 _record() {
   # _record <file> <kind> <findings>   (<findings> is "SYMBOL<TAB>COUNT" lines)
-  local file="$1" kind="$2" findings="$3"
+  local file="$1" kind="$2" findings="$3" sym count
   [ -n "$findings" ] || return 0
   fail=1
   report="${report}- \`${file}\` — duplicated top-level ${kind}:

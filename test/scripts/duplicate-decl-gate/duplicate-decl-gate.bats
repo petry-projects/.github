@@ -8,8 +8,7 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   GATE="$REPO_ROOT/scripts/check-duplicate-decls.sh"
-  WORKDIR="$BATS_TEST_TMPDIR/scan"
-  mkdir -p "$WORKDIR"
+  WORKDIR="$(mktemp -d "$BATS_TEST_TMPDIR/scan.XXXXXX")"
 }
 
 # ── The audit guard (AC: audit main; a green tree stays green) ────────────────
