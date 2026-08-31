@@ -319,9 +319,10 @@ envelope_limits() {
   [[ "$output" == *"decision=defer"* ]]
 }
 
-@test "gate: a fresh 429 with retry-after BLOCKS (hard cap signal, ADR §7)" {
+@test "gate: a fresh 429 with a future deadline BLOCKS (hard cap signal, ADR §7)" {
   write_token_config 90 true
-  write_telemetry '{"status":429,"retry_after":120}'
+  local future_deadline; future_deadline=$(( $(date +%s) + 300 ))
+  write_telemetry "{\"status\":429,\"retry_after\":120,\"retry_until\":${future_deadline}}"
   run bash -c "source '$LIB'; arl_token_budget_gate session"
   [ "$status" -eq 1 ]
   [[ "$output" == *"decision=defer"* ]]
@@ -529,6 +530,14 @@ envelope_limits() {
   run bash -c "source '$LIB'; arl_token_budget_gate session"
   [ "$status" -eq 1 ]
   [[ "$output" == *"decision=defer"* ]]
+}
+
+@test "gate: a 429 with no deadline anchor (no retry_until/observed_at) allows, not defers (stale cached response)" {
+  write_token_config 90 true
+  write_telemetry '{"status":429,"retry_after":3600}'
+  run bash -c "source '$LIB'; arl_token_budget_gate session"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
 }
 
 # --------------------------------------------------------------------------

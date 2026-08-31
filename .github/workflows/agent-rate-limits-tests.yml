@@ -8,6 +8,7 @@
 #   - tests/test_agent_rate_limits_config.bats
 #   - tests/test_agent_rate_limit.bats
 #   - tests/test_agent_rate_limit_token_budget.bats
+#   - tests/test_agent_rate_limit_weekly_glide.bats
 #   - .github/workflows/agent-rate-limits-tests.yml
 #
 # Gate: bats validates that standards/agent-rate-limits.json parses as JSON, all
@@ -21,7 +22,11 @@
 # open/half-open transitions, and malformed-input degradation that allows)
 # against a stubbed `gh`; and that the org-wide token-budget breaker (#641)
 # defers over the config threshold, blocks on a fresh 429, and fails safe to
-# allow on telemetry error — against a mocked telemetry adapter, no live network.
+# allow on telemetry error; and that the weekly glide-path breaker (#994) defers
+# over a time-varying threshold derived from the payload's resets_at (with
+# partial days rounded up), ignores the per-model weekly_scoped limit, and fails
+# safe to allow on telemetry error — against a mocked telemetry adapter, no live
+# network.
 # ShellCheck of the lib is covered by the existing scripts/**/*.sh job in ci.yml.
 #
 # Context: ADR docs/initiatives/agent-rate-limits-adr.md (#637). #638 delivers the
@@ -39,6 +44,7 @@ on:
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
       - 'tests/test_agent_rate_limit_token_budget.bats'
+      - 'tests/test_agent_rate_limit_weekly_glide.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
   push:
     branches:
@@ -49,6 +55,7 @@ on:
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
       - 'tests/test_agent_rate_limit_token_budget.bats'
+      - 'tests/test_agent_rate_limit_weekly_glide.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
 
 permissions:
@@ -82,4 +89,5 @@ jobs:
           bats --print-output-on-failure \
             tests/test_agent_rate_limits_config.bats \
             tests/test_agent_rate_limit.bats \
-            tests/test_agent_rate_limit_token_budget.bats
+            tests/test_agent_rate_limit_token_budget.bats \
+            tests/test_agent_rate_limit_weekly_glide.bats
