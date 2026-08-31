@@ -1890,13 +1890,24 @@ cmd_sync_promotion_failures() {
     gh label create dev-lead --repo "$ISSUE_REPO" --color 5319e7 --description "Route to the dev-lead agent for action" >/dev/null 2>&1 || true
     gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
   fi
+  local issues_json
+  issues_json="$(gh issue list --repo "$ISSUE_REPO" --label canary-promotion-failure --state all -L 100 --json number,state,body 2>/dev/null || echo "[]")"
+  local -A failed_map=()
+  local fa
+  while IFS= read -r fa; do
+    [ -n "$fa" ] && failed_map["$fa"]=1
+  done < <(printf '%s\n' "$failed_agents")
+  local -A promo_failures=()
+  while IFS=$'\t' read -r _pf_agent _pf_num _pf_state _pf_count; do
+    [ -n "$_pf_agent" ] && promo_failures["$_pf_agent"]="${_pf_num}"$'\t'"${_pf_state}"$'\t'"${_pf_count}"
+  done < <(printf '%s\n' "$issues_json" | jq -r '(sort_by(.number) // []) | .[]? | select(.body != null) | (try (.body | capture("<!-- canary-promo-fail:(?<agent>[^ ]+) -->")) catch null) as $c | select($c != null) | ([.body | match("canary-promo-fail-count:([0-9]+)") | .captures[0].string] | first // "0") as $count | "\($c.agent)\t\(.number)\t\(.state | ascii_upcase)\t\($count)"' 2>/dev/null)
   local agent
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local outcome="ok"
-    printf '%s\n' "$failed_agents" | grep -qxF "$agent" && outcome="failed"
+    [ -n "${failed_map["$agent"]:-}" ] && outcome="failed"
     local ns num istate prior
-    ns="$(_promo_fail_issue_find "$agent" || true)"
+    ns="${promo_failures["$agent"]:-}"
     num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"
     [ -z "$prior" ] && prior=0
     local count; count="$(promotion_failure_next_count "$prior" "$outcome")"
@@ -2105,27 +2116,25 @@ _watched_paths() {
 #                                    (#1023 defect 1b), the more dangerous direction.
 _autocut_commit_signals() {
   local agent="$1" host="$2" next_commit="$3" mainsha="$4"
-  local since_date since_arg="" path page json pre acc="[]" truncated=0 path_done
-  since_date="$(_commit_date "$host" "$next_commit")"
-  [ -n "$since_date" ] && since_arg="&since=$since_date"
+  local path page json acc="[]" truncated=0 path_done
   while IFS= read -r path; do
     [ -z "$path" ] && continue
+    local path_enc
+    path_enc="${path//&/%26}"; path_enc="${path_enc//\?/%3F}"; path_enc="${path_enc//#/%23}"
     page=1; path_done=0
     while [ "$page" -le "$CANARY_MAX_COMMIT_PAGES" ]; do
-      json="$(gh api "repos/$host/commits?path=$path&sha=$mainsha&per_page=100&page=$page$since_arg" 2>/dev/null)" || return 1
-      jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
-      # Accumulate this page's pre-boundary commit messages (boundary sha EXCLUDED). `found` is
-      # 1 when the boundary appears in this page; `count` is the page length (a short page is the
-      # last page for this path — `since` already bounds it to the range, so no boundary is fine).
-      pre="$(jq -c --arg stop "$next_commit" '
-        (map(.sha)) as $shas
+      json="$(gh api "repos/$host/commits?path=$path_enc&sha=$mainsha&per_page=100&page=$page" 2>/dev/null)" || return 1
+      # Parse the page and extract found, count, and pre-boundary messages in a single jq invocation
+      local parsed found count pre
+      parsed="$(printf '%s\n' "$json" | jq -r --arg stop "$next_commit" '
+        if type != "array" then error("not an array") else . end
+        | (map(.sha)) as $shas
         | ([ range(0; length) | select($shas[.] == $stop) ] | first) as $idx
-        | (if $idx == null then . else .[0:$idx] end | map(.commit.message // ""))
-      ' <<< "$json" 2>/dev/null)" || return 1
+        | (any(.[]?; .sha == $stop) // false) as $found
+        | "\($found)\t\(length)\t\(if $idx == null then . else .[0:$idx] end | map(.commit.message // "") | @json)"
+      ' 2>/dev/null)" || return 1
+      IFS=$'\t' read -r found count pre < <(printf '%s\n' "$parsed")
       acc="$(jq -cn --argjson a "$acc" --argjson b "$pre" '$a + $b' 2>/dev/null)" || return 1
-      local found count
-      found="$(jq -r --arg stop "$next_commit" 'any(.[]?; .sha == $stop) // false' <<< "$json" 2>/dev/null)"
-      count="$(jq -r 'length' <<< "$json" 2>/dev/null)"
       if [ "$found" = "true" ] || [ "${count:-0}" -lt 100 ]; then path_done=1; break; fi
       page=$((page + 1))
     done
@@ -2133,11 +2142,11 @@ _autocut_commit_signals() {
   done <<< "$(_watched_paths "$agent")"
   [ "$truncated" -eq 1 ] && return 3
   local out
-  out="$(jq -r '
-    { b: any(.[]?; (. // "") | test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
+  out="$(printf '%s\n' "$acc" | jq -r '
+    { b: any(.[]?; (. // "") | test("^[\\w-]+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
       f: any(.[]?; (. // "") | test("^feat(\\([^)]*\\))?:")) }
     | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
-  ' <<< "$acc" 2>/dev/null)" || return 1
+  ' 2>/dev/null)" || return 1
   [ -z "$out" ] && return 1
   printf '%s\n' "$out"
 }

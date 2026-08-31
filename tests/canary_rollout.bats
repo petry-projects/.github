@@ -1375,7 +1375,7 @@ GITEOF
     "$STUB_BIN/gh" > "$STUB_BIN/gh.tmp" && mv "$STUB_BIN/gh.tmp" "$STUB_BIN/gh" && chmod +x "$STUB_BIN/gh"
   local flog="$BATS_TEST_TMPDIR/promotions-failed.tsv"; : > "$flog"
   run env CANARY_RINGS="$RINGS" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" promote auto-rebase
-  [ "$status" -ne 0 ]                                   # the failed write surfaces as a non-zero run
+  [ "$status" -eq 1 ]                                   # the failed write surfaces as a non-zero run
   [[ "$output" == *"::error::failed to move"* ]]
   # One failure-log line: agent, ring, candidate sha, owning host, and a reason (5 columns).
   grep -qP "^auto-rebase\tstable\t[0-9a-f]+\tpetry-projects/\.github\t.+" "$flog"
