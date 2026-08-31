@@ -3970,6 +3970,77 @@ GITEOF
   [[ "$output" == *"promote of agent-shield returned 3 (continuing fleet)"* ]]
 }
 
+@test "orchestrator: promote-all names every failed agent in an aggregated summary (#1019)" {
+  # The sweep still exits 0 by design, but a green run must not imply "everything
+  # promoted": a permission/API rejection has to be visible without reading the whole log.
+  run env CANARY_RINGS="$RINGS" bash -c "
+    source '$ORCH'
+    cmd_promote() { case \"\$1\" in agent-shield) return 3 ;; dev-lead) return 4 ;; *) echo \"promoted \$1\"; return 0 ;; esac; }
+    cmd_promote_all
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent-shield(3)"* ]]
+  [[ "$output" == *"dev-lead(4)"* ]]
+  [[ "$output" == *"promote-all summary: 2 failed"* ]]
+}
+
+@test "orchestrator: promote-all reports a clean sweep when no agent fails (#1019)" {
+  run env CANARY_RINGS="$RINGS" bash -c "
+    source '$ORCH'
+    cmd_promote() { echo \"promoted \$1\"; return 0; }
+    cmd_promote_all
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promote-all summary: all agents promoted or already current."* ]]
+  [[ "$output" != *"failed"* ]]
+}
+
+# ── compare-API truncation (#1019) ────────────────────────────────────────────
+# The compare API caps `.files` at 300 and sets `.truncated: true`. Reading `.files`
+# alone would omit changed paths — and since autocut ships only when a WATCHED path
+# changed, an omitted `scripts/…` entry silently skips the cut. Truncation must never
+# read as "no change".
+@test "_gh_changed_files: unions per-commit files when the compare response is truncated (#1019)" {
+  local stub; stub="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$stub:$PATH"
+  cat > "$stub/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$3" in
+  */compare/*)
+    echo '{"truncated":true,"files":[{"filename":"docs/a.md"}],"commits":[{"sha":"aaa"},{"sha":"bbb"}]}' ;;
+  */commits/aaa) echo '{"files":[{"filename":"scripts/engine.sh"},{"filename":"docs/a.md"}]}' ;;
+  */commits/bbb) echo '{"files":[{"filename":"prompts/deep-review.md"}]}' ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$stub/gh"
+  run bash -c "source '$ORCH'; _gh_changed_files owner/repo base head"
+  [ "$status" -eq 0 ]
+  # the file the truncated compare DID return is kept …
+  [[ "$output" == *"docs/a.md"* ]]
+  # … and the watched paths only reachable per-commit are recovered
+  [[ "$output" == *"scripts/engine.sh"* ]]
+  [[ "$output" == *"prompts/deep-review.md"* ]]
+  # deduplicated (docs/a.md appears in both the compare and commit aaa)
+  [ "$(printf '%s\n' "$output" | grep -c '^docs/a\.md$')" -eq 1 ]
+}
+
+@test "_gh_changed_files: uses the compare file list directly when not truncated (#1019)" {
+  local stub; stub="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$stub:$PATH"
+  cat > "$stub/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$3" in
+  */compare/*) echo '{"truncated":false,"files":[{"filename":"scripts/only.sh"}],"commits":[{"sha":"aaa"}]}' ;;
+  */commits/*) echo '{"files":[{"filename":"SHOULD-NOT-BE-FETCHED"}]}' ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$stub/gh"
+  run bash -c "source '$ORCH'; _gh_changed_files owner/repo base head"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scripts/only.sh"* ]]
+  [[ "$output" != *"SHOULD-NOT-BE-FETCHED"* ]]
+}
+
 # ── enum ↔ registry agreement (a newly registered agent must be dispatchable) ──
 @test "canary-rollout.yml: the agent choice list agrees with the registry (#1019)" {
   local wf="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"

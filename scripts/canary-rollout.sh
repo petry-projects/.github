@@ -1258,10 +1258,11 @@ cmd_promote_all() {
     echo "no agents registered in $CANARY_RINGS — nothing to promote."; return 0
   fi
   echo "== canary-rollout promote-all: fleet-wide (gate standard: .github#548) =="
+  local failed=()
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     echo "──────── agent: $agent ────────"
-    cmd_promote "$agent" "$@" || { rc=$?; echo "::warning::promote of $agent returned $rc (continuing fleet)"; }
+    cmd_promote "$agent" "$@" || { rc=$?; echo "::warning::promote of $agent returned $rc (continuing fleet)"; failed+=("$agent($rc)"); }
   done <<< "$agents"
   # A per-agent promote failure is deliberately ISOLATED (logged "continuing fleet" above) so one
   # agent cannot halt the sweep — but propagating its rc also took the whole scheduled promote-all
@@ -1269,6 +1270,17 @@ cmd_promote_all() {
   # it is a held/blocked promotion, tracked by sync-issues. Return success from the fleet sweep;
   # genuine per-agent failures remain visible in the log and the blocker-issue path, not via a red
   # scheduled run. (A single-agent `promote <agent>` still returns that agent's real exit code.)
+  #
+  # BUT a green run must not imply "everything promoted" (#1019 review): with the rc swallowed, a
+  # permission or API rejection would otherwise be indistinguishable from a clean sweep unless
+  # someone read the whole log. Emit ONE aggregated summary naming every failed agent, so the
+  # failure is visible at a glance in the job summary while the sweep still exits 0.
+  if [ ${#failed[@]} -gt 0 ]; then
+    echo "::warning title=promote-all: ${#failed[@]} agent(s) failed::${failed[*]} — the sweep still exits 0 by design (#1019); investigate these before trusting a green promote-all."
+    echo "promote-all summary: ${#failed[@]} failed — ${failed[*]}"
+  else
+    echo "promote-all summary: all agents promoted or already current."
+  fi
   return 0
 }
 
@@ -1811,12 +1823,42 @@ _watched_paths() {
 # _gh_changed_files <repo> <base> <head> — filenames changed between <base>..<head> via the
 # compare API (one per line; empty on error / no diff). Raw fetch + local jq (mirrors _run_json)
 # so a test stub can serve the compare payload without re-implementing --jq.
+#
+# TRUNCATION (#1019): the compare API caps `.files` at 300 entries and sets
+# `.truncated: true` when the range exceeds it. Reading `.files` alone would then
+# silently OMIT changed paths — and since autocut ships a new version only when a
+# WATCHED path changed, an omitted `scripts/…` entry means the cut is skipped and
+# the change never reaches the fleet, with nothing red anywhere. That is exactly the
+# silent-non-delivery failure this issue exists to remove, so the truncated case must
+# never be treated as "no change". On truncation we fall back to enumerating each
+# commit in the range (`.commits[].sha` → `repos/<repo>/commits/<sha>`) and union
+# their file lists. Errors still degrade to empty (the caller treats empty as
+# "unknown", not "unchanged").
 _gh_changed_files() {
-  local repo="$1" base="$2" head="$3" json
+  local repo="$1" base="$2" head="$3" json truncated files
   { [ -z "$base" ] || [ -z "$head" ]; } && { echo ""; return 0; }
   json="$(gh api "repos/$repo/compare/$base...$head" 2>/dev/null)" || { echo ""; return 0; }
   [ -z "$json" ] && { echo ""; return 0; }
-  jq -r '.files[]?.filename // empty' <<< "$json" 2>/dev/null || echo ""
+
+  truncated="$(jq -r '.truncated // false' <<< "$json" 2>/dev/null || echo false)"
+  if [ "$truncated" != "true" ]; then
+    jq -r '.files[]?.filename // empty' <<< "$json" 2>/dev/null || echo ""
+    return 0
+  fi
+
+  # Truncated: union the per-commit file lists. Seed with whatever the compare DID
+  # return so a per-commit fetch failure can only ever lose precision, not regress
+  # below the un-truncated behaviour.
+  files="$(jq -r '.files[]?.filename // empty' <<< "$json" 2>/dev/null || echo "")"
+  local sha commit_json
+  while IFS= read -r sha; do
+    [ -z "$sha" ] && continue
+    commit_json="$(gh api "repos/$repo/commits/$sha" 2>/dev/null)" || continue
+    [ -z "$commit_json" ] && continue
+    files+=$'\n'"$(jq -r '.files[]?.filename // empty' <<< "$commit_json" 2>/dev/null || echo "")"
+  done < <(jq -r '.commits[]?.sha // empty' <<< "$json" 2>/dev/null)
+
+  printf '%s\n' "$files" | awk 'NF && !seen[$0]++'
 }
 
 # _host_release_versions <agent> — echo every MAJOR.MINOR.PATCH (one per line) that has an
