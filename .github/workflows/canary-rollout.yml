@@ -68,9 +68,29 @@ on:
         options: [autocut, evaluate, evaluate-all, promote, promote-all, rollback, sync-issues, drift]
         default: evaluate
       agent:
+        # This list MUST equal `.agents | keys` in standards/canary-rings.json so every
+        # REGISTERED agent is dispatchable by hand (#1019). Agreement is asserted by the
+        # "the agent choice list agrees with the registry" test in tests/canary_rollout.bats —
+        # when a new agent is registered, add it here or that gate fails. Keep alphabetical.
         description: "agent to act on"
         type: choice
-        options: [dev-lead, agent-shield, auto-rebase, dependency-audit, dependabot-automerge, dependabot-rebase, pr-review-mention]
+        options:
+          - add-to-project
+          - agent-shield
+          - apply-repo-settings
+          - auto-rebase
+          - ci-failure-analyst
+          - dependabot-automerge
+          - dependabot-rebase
+          - dependency-audit
+          - dev-lead
+          - feature-ideation
+          - idea-enhancer
+          - idea-triage
+          - initiative-planner
+          - persona-mention
+          - pr-auto-review
+          - pr-review-mention
         default: dev-lead
       override:
         description: "promote: advance even if the gate is not PROMOTE (records a warning)"

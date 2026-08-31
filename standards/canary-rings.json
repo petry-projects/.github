@@ -10,6 +10,12 @@
     "$org_infra": "org_infra_repos minus the host (the host is already in `next`)",
     "*": "every other consumer not named in an earlier ring"
   },
+  "_agent_ref_paths_note": "agent_ref_paths (#1019): the host-relative paths a consumer EXECUTES at its pinned channel tag BEYOND the reusable workflow blob — the reusable checks these out at `agent_ref` (e.g. scripts/, prompts/, personas/). autocut's change detection and the `drift` ship-drift report watch the reusable PLUS these paths, so a script-only change is no longer invisible (a merged-but-not-shipped change reaches nobody). This top-level list is the fleet default; an agent may override with `.agents[<a>].agent_ref_paths`. Patterns ending in `/` match by directory prefix.",
+  "agent_ref_paths": [
+    "scripts/",
+    "prompts/",
+    "personas/"
+  ],
   "_autocut_note": "autocut (#1069): `canary-rollout.sh autocut` (gated by org var CANARY_AUTO_CUT) auto-cuts a new immutable <agent>/vX.Y.Z + moves `next` when a reusable's blob on its host main HEAD differs from the current `next` candidate. Since #712 (epic #1083 pillar 2) the bump is DETECTED from the change: a conventional-commit `!`/`BREAKING CHANGE` or a `workflow_call` interface break (removed/renamed input|secret, or a newly-required input) → major (seeding a fresh v<newMAJOR>-next per #657 F4); a non-breaking `feat` → minor; else patch. The optional `.agents[<a>].autocut.bump` knob (patch|minor|major) is now an OVERRIDE that forces a level (not the sole source); it fails safe to patch on any signal-fetch error.",
   "agents": {
     "dev-lead": {
