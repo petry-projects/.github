@@ -44,6 +44,9 @@ All repositories in this org follow shared engineering standards defined in
 - **[Agent Standards](https://github.com/petry-projects/.github/blob/main/standards/agent-standards.md)** — AgentShield deep security scan; required agent
   files and compliance exemptions; BMAD Method workflows; decision-making reusables.
 
+- **[Agent Rate Limits](https://github.com/petry-projects/.github/blob/main/standards/agent-rate-limits.md)** — Token-budget breaker; daily budget as the
+  per-agent cost bound; exempt actors; canary / dry-run rollout; operator runbook.
+
 - **[Dependabot Policy](https://github.com/petry-projects/.github/blob/main/standards/dependabot-policy.md)** — Stack-specific templates (npm, Go, Rust,
   Python, Terraform, Actions); auto-merge workflow; vulnerability audit CI check; CODEOWNERS approval
   timing.
@@ -86,10 +89,8 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
   — Daily "Org Status" digest posted as an issue for maintainers.
 - **[OpenSSF Scorecard](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml)**
   — Weekly security-posture review across public repos; findings tracked as issues.
-
-- **[Ruleset Remediation Runbook](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md)** — Snapshot every ruleset
-  for rollback insurance; bypass actor management; legacy ruleset migration; verify and rollback
-  procedures.
+- **[Standards deploy](https://github.com/petry-projects/.github/blob/main/.github/workflows/standards-deploy.yml)**
+  — Weekly fleet sweep that opens standards-sync PRs for repos drifted off the org-standard workflow stubs.
 
 ---
 
