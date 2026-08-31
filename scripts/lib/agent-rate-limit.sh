@@ -682,6 +682,60 @@ arl_token_budget_decision() {
 }
 
 # ---------------------------------------------------------------------------
+# arl_token_transport_decision <envelope_json> <now_epoch> — PURE-ish. The
+# telemetry-TRANSPORT-level fail-safe shared by BOTH the session and weekly-glide
+# breakers, so there is exactly one 429 / non-200 convention (post-ADR #1). Echoes
+# exactly one token on stdout:
+#   defer   — a fresh, unexpired 429 with a positive retry-after (the one hard,
+#             first-hand cap signal that BLOCKS; ADR §7). A stale 429 whose
+#             retry_until (or observed_at + retry_after) has already passed is
+#             treated as expired degraded telemetry and allows instead.
+#   allow   — any other non-200 / unavailable telemetry (fail-safe with warning).
+#   proceed — a usable 200 body; the caller inspects `.body` for the window.
+# Logs the human-readable reason to stderr. Returns 0 always.
+# ---------------------------------------------------------------------------
+arl_token_transport_decision() {
+  local envelope="$1" now status retry_after
+  now="$(arl_sanitize_int "${2:-}")"
+  status="$(arl_sanitize_int "$(jq -r '.status? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+
+  # Fresh 429 with a positive retry-after: the one telemetry response that
+  # blocks (ADR §7). An observation timestamp (observed_at) or absolute deadline
+  # (retry_until) in the envelope guards against a stale file deferring forever:
+  # if the deadline has already passed, treat it as expired degraded telemetry.
+  if [ "$status" -eq 429 ]; then
+    retry_after="$(arl_sanitize_int "$(jq -r '.retry_after? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+    if [ "$retry_after" -gt 0 ]; then
+      local retry_deadline observed_at
+      retry_deadline="$(arl_sanitize_int "$(jq -r '.retry_until? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+      if [ "$retry_deadline" -eq 0 ]; then
+        observed_at="$(arl_sanitize_int "$(jq -r '.observed_at? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+        if [ "$observed_at" -gt 0 ]; then
+          retry_deadline=$(( observed_at + retry_after ))
+        fi
+      fi
+      if [ "$retry_deadline" -gt 0 ] && [ "$now" -ge "$retry_deadline" ]; then
+        arl_log "warning: token-budget 429 retry window expired (deadline=${retry_deadline}, now=${now}) — allowing dispatch (degraded)"
+        printf 'allow'
+        return 0
+      fi
+      arl_log "token-budget: fresh 429 with retry-after=${retry_after}s — deferring (hard cap signal)"
+      printf 'defer'
+      return 0
+    fi
+  fi
+
+  # Any other non-200 fails safe: allow-with-warning.
+  if [ "$status" -ne 200 ]; then
+    arl_log "warning: token-budget telemetry unavailable (status=${status}) — allowing dispatch (degraded)"
+    printf 'allow'
+    return 0
+  fi
+
+  printf 'proceed'
+}
+
+# ---------------------------------------------------------------------------
 # arl_token_budget_gate [window] — orchestrate the token-budget breaker for
 # <window> (default: session). Reads the config threshold, consults the
 # telemetry adapter seam, and emits decision=allow/defer.
@@ -714,46 +768,17 @@ arl_token_budget_gate() {
     return 0
   fi
 
-  local now envelope status retry_after body
+  local now envelope transport body
   now="$(arl_now)"
   envelope="$(arl_token_fetch_envelope)"
-  status="$(arl_sanitize_int "$(jq -r '.status? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
 
-  # Fresh 429 with a positive retry-after: the one telemetry response that
-  # blocks (ADR §7) — a hard, first-hand signal the cap is already hit.
-  # An observation timestamp (observed_at) or absolute deadline (retry_until)
-  # in the envelope guards against a stale file deferring forever: if the
-  # deadline has already passed, treat the 429 as expired degraded telemetry
-  # and allow with a warning.
-  if [ "$status" -eq 429 ]; then
-    retry_after="$(arl_sanitize_int "$(jq -r '.retry_after? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
-    if [ "$retry_after" -gt 0 ]; then
-      local retry_deadline observed_at
-      # Prefer explicit retry_until; fall back to observed_at + retry_after.
-      retry_deadline="$(arl_sanitize_int "$(jq -r '.retry_until? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
-      if [ "$retry_deadline" -eq 0 ]; then
-        observed_at="$(arl_sanitize_int "$(jq -r '.observed_at? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
-        if [ "$observed_at" -gt 0 ]; then
-          retry_deadline=$(( observed_at + retry_after ))
-        fi
-      fi
-      if [ "$retry_deadline" -gt 0 ] && [ "$now" -ge "$retry_deadline" ]; then
-        arl_log "warning: token-budget 429 retry window expired (deadline=${retry_deadline}, now=${now}) — allowing dispatch (degraded)"
-        printf 'decision=allow\n'
-        return 0
-      fi
-      arl_log "token-budget: fresh 429 with retry-after=${retry_after}s — deferring (hard cap signal)"
-      printf 'decision=defer\n'
-      return 1
-    fi
-  fi
-
-  # Any other non-200 fails safe: allow-with-warning.
-  if [ "$status" -ne 200 ]; then
-    arl_log "warning: token-budget telemetry unavailable (status=${status}) — allowing dispatch (degraded)"
-    printf 'decision=allow\n'
-    return 0
-  fi
+  # Shared transport-level fail-safe (429 / non-200) — one convention for both
+  # breakers.
+  transport="$(arl_token_transport_decision "$envelope" "$now")"
+  case "$transport" in
+    defer)  printf 'decision=defer\n'; return 1 ;;
+    allow)  printf 'decision=allow\n'; return 0 ;;
+  esac
 
   body="$(jq -c '.body? // {}' <<<"$envelope" 2>/dev/null || printf '{}')"
 
@@ -772,6 +797,281 @@ arl_token_budget_gate() {
   fi
 
   arl_token_budget_decision "$percent" "$threshold" "true"
+}
+
+# ===========================================================================
+# Weekly-budget GLIDE-PATH breaker (#994, Phase 6 of epic #636; ADR §7)
+# ---------------------------------------------------------------------------
+# The orthogonal, TIME-VARYING control on the account-wide `weekly_all` (7-day,
+# FIXED) window that the static session breaker cannot express: pause new dispatch
+# when
+#     weekly_all.percent >= clamp(ceiling_pct - reserve_pct_per_day * days_until_reset,
+#                                 floor_pct, ceiling_pct)
+# so the fleet reserves ~reserve_pct_per_day% of the weekly budget per remaining
+# day and cannot burn the whole week in the first two days. Every number is read
+# from config (org_wide.token_budget.limits.weekly_all) — no threshold, slope, or
+# weekday is hardcoded (AC #1).
+#
+# What makes this breaker DIFFERENT from the session breaker (keep this explicit):
+# it CAN close before `resets_at` — but never because utilization fell. Within a
+# fixed window percent is monotonically non-decreasing; the glide-path threshold
+# RISES as the reset approaches, so each poll re-evaluates statelessly and the
+# breaker may close because the THRESHOLD moved past a static percent, not because
+# usage dipped. There is deliberately NO percentage resume mark (conflating this
+# with the session breaker's "resets_at only" rule in either direction is the bug
+# to avoid). Because each poll is a fresh, stateless re-evaluation, no persistent
+# trip state is stored and a downward percentage dip (which cannot occur in a
+# fixed window) is structurally unable to un-trip it.
+#
+# Reuses Phase 5's telemetry adapter (one call serves both windows), the shared
+# transport-level fail-safe (arl_token_transport_decision), the percent extractor,
+# the is_active check, the pause-worthy scope guard, and the pure decision core.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# arl_token_glide_int <key> — echo a numeric weekly_all glide <key> from config,
+# or empty when absent/non-integer (the caller degrades to allow — a threshold
+# must never be hardcoded, AC #1).
+# ---------------------------------------------------------------------------
+arl_token_glide_int() {
+  local key="$1" config value
+  config="$(arl_config_path)"
+  value="$(jq -er --arg k "$key" \
+    '(.org_wide.token_budget.limits.weekly_all[$k])? // empty' "$config" 2>/dev/null || printf '')"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$value"
+  fi
+}
+
+arl_token_glide_reserve() { arl_token_glide_int reserve_pct_per_day; }
+arl_token_glide_floor()   { arl_token_glide_int floor_pct; }
+arl_token_glide_ceiling() { arl_token_glide_int ceiling_pct; }
+
+# ---------------------------------------------------------------------------
+# arl_token_glide_enabled — echo "true"/"false" for the weekly_all.enabled config
+# arm. Missing/false degrades to "false" (inert): the glide breaker stays off
+# until a maintainer arms it in config, independent of the AGENT_TOKEN_BUDGET_ENABLED
+# env flag that arms integration (staged rollout, AC #6/#7).
+# ---------------------------------------------------------------------------
+arl_token_glide_enabled() {
+  local config value
+  config="$(arl_config_path)"
+  value="$(jq -r '(.org_wide.token_budget.limits.weekly_all.enabled) // false' "$config" 2>/dev/null || printf 'false')"
+  case "$value" in
+    true) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_iso_to_epoch <iso8601> — echo the epoch seconds for an ISO-8601
+# timestamp (the telemetry `resets_at`), or empty when unparseable. Kept separate
+# from the pure day arithmetic so parsing (date-dependent) and the round-up rule
+# (pure, unit-tested) do not entangle.
+# ---------------------------------------------------------------------------
+arl_token_iso_to_epoch() {
+  local iso="${1:-}" epoch
+  [ -z "$iso" ] && return 0
+  epoch="$(date -d "$iso" +%s 2>/dev/null || printf '')"
+  if [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$epoch"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_days_until_reset <reset_epoch> <now_epoch> — PURE. Echo the whole
+# days remaining until the reset, rounding a PARTIAL day UP (AC #2): the day
+# before reset evaluates as 1 day left, not 0, so the reserve is held for any
+# fraction of a day that remains. At or after the reset instant echoes 0.
+# ---------------------------------------------------------------------------
+arl_token_days_until_reset() {
+  local reset now diff
+  reset="$(arl_sanitize_int "${1:-}")"
+  now="$(arl_sanitize_int "${2:-}")"
+  diff=$(( reset - now ))
+  if [ "$diff" -le 0 ]; then
+    printf '0'
+    return 0
+  fi
+  # Ceiling division by 86400 (integer): (diff + 86399) / 86400.
+  printf '%s' "$(( (diff + 86399) / 86400 ))"
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_glide_threshold <days_until_reset> <reserve_pct_per_day> <floor_pct>
+#                           <ceiling_pct> — PURE. Echo the glide-path pause
+# threshold: clamp(ceiling - reserve*days, floor, ceiling). The threshold RISES
+# toward the ceiling as the reset approaches (fewer days left) and is held at the
+# floor far from the reset (the "don't spend the whole week on day one" guard).
+# ---------------------------------------------------------------------------
+arl_token_glide_threshold() {
+  local days reserve floor ceiling raw
+  days="$(arl_sanitize_int "${1:-}")"
+  reserve="$(arl_sanitize_int "${2:-}")"
+  floor="$(arl_sanitize_int "${3:-}")"
+  ceiling="$(arl_sanitize_int "${4:-}")"
+  raw=$(( ceiling - reserve * days ))
+  if [ "$raw" -gt "$ceiling" ]; then raw="$ceiling"; fi
+  if [ "$raw" -lt "$floor" ]; then raw="$floor"; fi
+  printf '%s' "$raw"
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_extract_resets_at <body_json> <window> — PURE. Echo the ISO `resets_at`
+# for <window>, preferring the ADR §4.1 limits[] entry (matched on kind) and
+# falling back to the flattened key (weekly_all -> seven_day). Empty when absent
+# (the caller degrades to allow — days_until_reset cannot be computed).
+# ---------------------------------------------------------------------------
+arl_token_extract_resets_at() {
+  local body="$1" window="$2" flat value
+  case "$window" in
+    session) flat="five_hour" ;;
+    weekly_all) flat="seven_day" ;;
+    *) flat="" ;;
+  esac
+  value="$(jq -r --arg k "$window" --arg f "$flat" '
+    ( [ .limits[]? | select(.kind == $k) | .resets_at ] | .[0] ) as $from_limits
+    | ( if $from_limits != null then $from_limits
+        elif ($f != "" and (.[$f].resets_at? != null)) then .[$f].resets_at
+        else null end )
+    | if . == null then empty else . end
+  ' <<<"$body" 2>/dev/null || printf '')"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_glide_trip_reason <percent> <threshold> <days> <resets_at> — echo a
+# compact, MACHINE-READABLE trip reason (AC #4): which window, the observed
+# percent, the computed threshold, the days until reset, and the reset timestamp
+# — so the reason is a parseable object, not prose buried in a log line.
+# ---------------------------------------------------------------------------
+arl_token_glide_trip_reason() {
+  local percent threshold days resets_at
+  percent="$(arl_sanitize_int "${1:-}")"
+  threshold="$(arl_sanitize_int "${2:-}")"
+  days="$(arl_sanitize_int "${3:-}")"
+  resets_at="${4:-}"
+  jq -cn \
+    --arg w "weekly_all" \
+    --argjson p "$percent" \
+    --argjson t "$threshold" \
+    --argjson d "$days" \
+    --arg r "$resets_at" \
+    '{window: $w, observed_percent: $p, threshold_pct: $t, days_until_reset: $d, resets_at: $r}'
+}
+
+# ---------------------------------------------------------------------------
+# arl_token_weekly_glide_gate — orchestrate the weekly glide-path breaker for the
+# account-wide `weekly_all` window. Reads the glide config, consults the shared
+# telemetry adapter seam, derives days_until_reset from the payload's `resets_at`,
+# computes the time-varying threshold, and emits decision=allow/defer.
+#
+# Decision order:
+#   1. Config weekly_all.enabled != true            -> allow (inert; config arm)
+#   2. weekly_all not pause-worthy                   -> allow (scope guard)
+#   3. Incomplete glide config (reserve/floor/ceil)  -> allow (degraded)
+#   4. Fresh 429 + retry-after                       -> defer (hard cap signal)
+#   5. Any other non-200 / unavailable telemetry     -> allow-with-warning
+#   6. weekly_all explicitly inactive                -> allow (not binding)
+#   7. Missing weekly_all percent in a 200 body      -> allow-with-warning
+#   8. Missing / unparseable resets_at               -> allow-with-warning
+#   9. percent >= glide threshold                    -> defer, else allow
+#
+# Returns 0 on allow, 1 on defer. Guard-only: reads telemetry, never mutates.
+# ---------------------------------------------------------------------------
+arl_token_weekly_glide_gate() {
+  local window="weekly_all"
+
+  # 1. Config-level arm — inert until a maintainer enables it in config, even
+  #    when the integration env flag is on (staged dry-run rollout, AC #7).
+  if [ "$(arl_token_glide_enabled)" != "true" ]; then
+    arl_log "token-budget weekly-glide: not enabled in config (weekly_all.enabled) — allowing (inert)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  # 2. Scope guard — only the account-wide window is pause-worthy (ADR §2.5).
+  if [ "$(arl_token_window_pause_worthy "$window")" != "true" ]; then
+    arl_log "token-budget weekly-glide: window '${window}' is not pause-worthy — allowing (scope guard)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  # 3. The schedule must be fully expressible from config; a missing part
+  #    degrades to allow rather than hardcoding a fallback (AC #1).
+  local reserve floor ceiling
+  reserve="$(arl_token_glide_reserve)"
+  floor="$(arl_token_glide_floor)"
+  ceiling="$(arl_token_glide_ceiling)"
+  if [ -z "$reserve" ] || [ -z "$floor" ] || [ -z "$ceiling" ]; then
+    arl_log "token-budget weekly-glide: incomplete glide config (reserve/floor/ceiling) — allowing (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  local now envelope transport body
+  now="$(arl_now)"
+  envelope="$(arl_token_fetch_envelope)"
+
+  # 4/5. Shared transport-level fail-safe (429 / non-200) — one convention.
+  transport="$(arl_token_transport_decision "$envelope" "$now")"
+  case "$transport" in
+    defer)  printf 'decision=defer\n'; return 1 ;;
+    allow)  printf 'decision=allow\n'; return 0 ;;
+  esac
+
+  body="$(jq -c '.body? // {}' <<<"$envelope" 2>/dev/null || printf '{}')"
+
+  # 6. An inactive window is not binding.
+  if [ "$(arl_token_window_active "$body" "$window")" = "false" ]; then
+    arl_log "token-budget weekly-glide: window '${window}' is not active — allowing (not binding)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  # 7. Missing percent -> cannot evaluate -> allow-with-warning (AC #5).
+  local percent
+  percent="$(arl_token_extract_percent "$body" "$window")"
+  if [ -z "$percent" ]; then
+    arl_log "warning: token-budget weekly-glide telemetry has no '${window}' window entry — allowing dispatch (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  # 8. days_until_reset derives from the authoritative resets_at, never a
+  #    hardcoded weekday (AC #2). A missing/unparseable value fails safe.
+  local resets_at reset_epoch
+  resets_at="$(arl_token_extract_resets_at "$body" "$window")"
+  if [ -z "$resets_at" ]; then
+    arl_log "warning: token-budget weekly-glide telemetry has no resets_at for '${window}' — allowing dispatch (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+  reset_epoch="$(arl_token_iso_to_epoch "$resets_at")"
+  if [ -z "$reset_epoch" ]; then
+    arl_log "warning: token-budget weekly-glide could not parse resets_at='${resets_at}' — allowing dispatch (degraded)"
+    printf 'decision=allow\n'
+    return 0
+  fi
+
+  # 9. Compute the time-varying threshold and evaluate (reusing the pure core).
+  local days threshold decision_out
+  days="$(arl_token_days_until_reset "$reset_epoch" "$now")"
+  threshold="$(arl_token_glide_threshold "$days" "$reserve" "$floor" "$ceiling")"
+  arl_log "token-budget weekly-glide: ${days} day(s) until reset (${resets_at}) -> threshold ${threshold}% vs observed ${percent}%"
+
+  # `|| true`: the pure core returns non-zero on defer; the decision rides in
+  # stdout — neutralize the exit so a `set -e` caller is not aborted here.
+  decision_out="$(arl_token_budget_decision "$percent" "$threshold" "true")" || true
+  if [ "$decision_out" = "decision=defer" ]; then
+    arl_log "token-budget weekly-glide TRIP: $(arl_token_glide_trip_reason "$percent" "$threshold" "$days" "$resets_at")"
+    printf 'decision=defer\n'
+    return 1
+  fi
+  printf 'decision=allow\n'
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -874,11 +1174,23 @@ arl_admission_gate() {
   #     defer returns non-zero — neutralize it so a `set -e` caller is not
   #     aborted before the decision is emitted.
   if [ "${AGENT_TOKEN_BUDGET_ENABLED:-false}" = "true" ]; then
-    local token_decision
+    local token_decision glide_decision
     token_decision="$(arl_token_budget_gate session)" || true
     if [ "$token_decision" = "decision=defer" ]; then
       arl_log "token-budget escalation: $(arl_token_breaker_marker session) — add to tracking issue/PR body, remove when cleared"
       arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (5-hour Claude session window at/over threshold)"
+      return $?
+    fi
+
+    # 2.6 Weekly glide-path breaker (Phase 6, #994). Orthogonal to the 5-hour
+    #     session breaker: a time-varying threshold on the FIXED 7-day weekly_all
+    #     window. Shares the same env arm; the config weekly_all.enabled flag keeps
+    #     it inert until sign-off even when this env flag is on. `|| true`: the
+    #     decision rides in captured stdout and a defer returns non-zero.
+    glide_decision="$(arl_token_weekly_glide_gate)" || true
+    if [ "$glide_decision" = "decision=defer" ]; then
+      arl_log "token-budget escalation: $(arl_token_breaker_marker weekly_all) — add to tracking issue/PR body, remove when cleared"
+      arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (7-day Claude weekly window over glide-path threshold)"
       return $?
     fi
   fi
