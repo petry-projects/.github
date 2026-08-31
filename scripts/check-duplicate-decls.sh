@@ -162,7 +162,7 @@ report=""
 
 _record() {
   # _record <file> <kind> <findings>   (<findings> is "SYMBOL<TAB>COUNT" lines)
-  local file="$1" kind="$2" findings="$3" sym count
+  local file="$1" kind="$2" findings="$3" sym count IFS
   [ -n "$findings" ] || return 0
   fail=1
   report="${report}- \`${file}\` — duplicated top-level ${kind}:
