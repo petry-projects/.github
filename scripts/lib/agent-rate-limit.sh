@@ -856,7 +856,10 @@ arl_token_glide_ceiling() { arl_token_glide_int ceiling_pct; }
 arl_token_glide_enabled() {
   local config value
   config="$(arl_config_path)"
-  value="$(jq -r '(.org_wide.token_budget.limits.weekly_all.enabled) // false' "$config" 2>/dev/null || printf 'false')"
+  value=""
+  if [ -n "$config" ]; then
+    value="$(jq -r '(.org_wide.token_budget.limits.weekly_all.enabled)? // "false"' "$config" 2>/dev/null || printf 'false')"
+  fi
   case "$value" in
     true) printf 'true' ;;
     *) printf 'false' ;;
