@@ -7,6 +7,7 @@
 #   - scripts/lib/agent-rate-limit.sh
 #   - tests/test_agent_rate_limits_config.bats
 #   - tests/test_agent_rate_limit.bats
+#   - tests/test_agent_rate_limit_token_budget.bats
 #   - .github/workflows/agent-rate-limits-tests.yml
 #
 # Gate: bats validates that standards/agent-rate-limits.json parses as JSON, all
@@ -18,8 +19,10 @@
 # that the agent-rate-limit.sh guard returns allow/defer correctly (concurrency /
 # cooldown / daily-budget / exempt bypass, the consecutive-failure breaker's
 # open/half-open transitions, and malformed-input degradation that allows)
-# against a stubbed `gh`. ShellCheck of the lib is covered by the existing
-# scripts/**/*.sh job in ci.yml.
+# against a stubbed `gh`; and that the org-wide token-budget breaker (#641)
+# defers over the config threshold, blocks on a fresh 429, and fails safe to
+# allow on telemetry error — against a mocked telemetry adapter, no live network.
+# ShellCheck of the lib is covered by the existing scripts/**/*.sh job in ci.yml.
 #
 # Context: ADR docs/initiatives/agent-rate-limits-adr.md (#637). #638 delivers the
 # data file (INERT, no workflow reads it yet pending human sign-off); #639 delivers
@@ -35,6 +38,7 @@ on:
       - 'scripts/lib/agent-rate-limit.sh'
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
+      - 'tests/test_agent_rate_limit_token_budget.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
   push:
     branches:
@@ -44,6 +48,7 @@ on:
       - 'scripts/lib/agent-rate-limit.sh'
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
+      - 'tests/test_agent_rate_limit_token_budget.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
 
 permissions:
@@ -76,4 +81,5 @@ jobs:
         run: |
           bats --print-output-on-failure \
             tests/test_agent_rate_limits_config.bats \
-            tests/test_agent_rate_limit.bats
+            tests/test_agent_rate_limit.bats \
+            tests/test_agent_rate_limit_token_budget.bats
