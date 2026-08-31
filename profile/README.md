@@ -89,7 +89,7 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
   — Daily "Org Status" digest posted as an issue for maintainers.
 - **[OpenSSF Scorecard](https://github.com/petry-projects/.github/blob/main/.github/workflows/org-scorecard.yml)**
   — Weekly security-posture review across public repos; findings tracked as issues.
-- **[Standards deploy](https://github.com/petry-projects/.github/blob/main/.github/workflows/standards-deploy.yml)**
+- **[Standards Deploy](https://github.com/petry-projects/.github/blob/main/.github/workflows/standards-deploy.yml)**
   — Weekly fleet sweep that opens standards-sync PRs for repos drifted off the org-standard workflow stubs.
 
 ---
