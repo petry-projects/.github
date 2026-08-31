@@ -144,10 +144,14 @@ _gh_move_tag() {
   out="$(_gh_write api -X PATCH "repos/$repo/git/refs/tags/$tag" \
       -f sha="$sha" -F force=true 2>&1)" && return 0
   rc=$?
-  # Only a genuinely-absent ref (404) warrants creating it; every other PATCH failure is a
-  # real rejection to surface, not to paper over with a create.
+  # Only a genuinely-absent ref warrants creating it; every other PATCH failure is a real
+  # rejection to surface, not to paper over with a create. GitHub reports an absent ref two ways:
+  # a 404 "Not Found", and — the case that took the scheduled promote-all red every 4h (#1019) —
+  # a PATCH of a never-created channel tag returns 422 "Reference does not exist". Both are
+  # create-if-missing signals; "Reference already exists" (a distinct 422) is NOT, so it still
+  # falls through to the surfaced rejection below.
   local low="${out,,}"
-  if [[ "$low" != *"not found"* && "$low" != *"http 404"* ]]; then
+  if [[ "$low" != *"not found"* && "$low" != *"http 404"* && "$low" != *"reference does not exist"* ]]; then
     # #749: on a 403 "Resource not accessible by integration" — the failure #745/#746 did NOT
     # fix — dump the write token's EFFECTIVE permissions + scope so the next step is decided
     # from data, not another guess. Only runs on the 403 branch (a non-404 that is also a
@@ -1259,7 +1263,13 @@ cmd_promote_all() {
     echo "──────── agent: $agent ────────"
     cmd_promote "$agent" "$@" || { rc=$?; echo "::warning::promote of $agent returned $rc (continuing fleet)"; }
   done <<< "$agents"
-  return "$rc"
+  # A per-agent promote failure is deliberately ISOLATED (logged "continuing fleet" above) so one
+  # agent cannot halt the sweep — but propagating its rc also took the whole scheduled promote-all
+  # red every 4h (#1019), even for a per-agent failure already surfaced as a ::warning:: and, when
+  # it is a held/blocked promotion, tracked by sync-issues. Return success from the fleet sweep;
+  # genuine per-agent failures remain visible in the log and the blocker-issue path, not via a red
+  # scheduled run. (A single-agent `promote <agent>` still returns that agent's real exit code.)
+  return 0
 }
 
 cmd_rollback() {
@@ -1776,6 +1786,39 @@ _gh_head_sha() { gh api "repos/$1/commits/$2" --jq '.sha' 2>/dev/null || echo ""
 # _gh_blob_sha <repo> <path> <ref> — the git blob SHA of <path> at <ref> (empty on error).
 _gh_blob_sha() { gh api "repos/$1/contents/$2?ref=$3" --jq '.sha' 2>/dev/null || echo ""; }
 
+# ── watched agent_ref paths (#1019) ─────────────────────────────────────────────
+# A consumer checks out MORE than the reusable at its pinned channel tag: the reusable checks
+# out scripts/ (and prompts/, personas/) at `agent_ref`. Autocut/drift must therefore watch the
+# whole agent_ref-consumed path set, not just the reusable blob. The set is DERIVED FROM THE
+# REGISTRY (source of truth) — a top-level `agent_ref_paths` default with an optional per-agent
+# `.agents[a].agent_ref_paths` override — falling back to this built-in only if the registry
+# omits it entirely (defense-in-depth, never the primary source).
+_DEFAULT_AGENT_REF_PATHS=$'scripts/\nprompts/\npersonas/'
+
+# _watched_paths <agent> — newline list of host-relative paths a consumer EXECUTES at agent_ref:
+# the registry `reusable` file plus the configured `agent_ref_paths` (per-agent override, else
+# top-level default, else the built-in fallback). Deduped, blanks dropped.
+_watched_paths() {
+  local agent="$1" reusable extra
+  reusable="$(_agent_field "$agent" reusable)"
+  extra="$(_jq -r --arg a "$agent" \
+    '(.agents[$a].agent_ref_paths // .agent_ref_paths // []) | .[]?' 2>/dev/null || true)"
+  [ -z "$extra" ] && extra="$_DEFAULT_AGENT_REF_PATHS"
+  { [ -n "$reusable" ] && printf '%s\n' "$reusable"; printf '%s\n' "$extra"; } \
+    | awk 'NF && !seen[$0]++'
+}
+
+# _gh_changed_files <repo> <base> <head> — filenames changed between <base>..<head> via the
+# compare API (one per line; empty on error / no diff). Raw fetch + local jq (mirrors _run_json)
+# so a test stub can serve the compare payload without re-implementing --jq.
+_gh_changed_files() {
+  local repo="$1" base="$2" head="$3" json
+  { [ -z "$base" ] || [ -z "$head" ]; } && { echo ""; return 0; }
+  json="$(gh api "repos/$repo/compare/$base...$head" 2>/dev/null)" || { echo ""; return 0; }
+  [ -z "$json" ] && { echo ""; return 0; }
+  jq -r '.files[]?.filename // empty' <<< "$json" 2>/dev/null || echo ""
+}
+
 # _host_release_versions <agent> — echo every MAJOR.MINOR.PATCH (one per line) that has an
 # immutable <agent>/vX.Y.Z tag on the agent's host, via the API (the App token reads every
 # host; release tags are on the remote for both this-repo and cross-repo agents).
@@ -1823,6 +1866,31 @@ _autocut_commit_signals() {
   printf '%s\n' "$out"
 }
 
+# _autocut_range_signals <host> <base> <head> — the conventional-commit signals over ALL commits
+# between <base> and <head> (the compare range), echoing "<breaking 0|1> <feat 0|1>". Used as the
+# fallback signal source when the reusable-path-scoped scan finds no boundary (a SCRIPT-ONLY
+# change touches no reusable commit, #1019), so a script-only `feat`/`!`/`BREAKING CHANGE` still
+# bumps correctly. Detection is byte-identical to _autocut_commit_signals; only the commit source
+# differs (compare `.commits[]` — already correctly bounded, no boundary search). Returns non-zero
+# on any fetch/parse error so the caller stays fail-safe to patch (never auto-major on missing data).
+_autocut_range_signals() {
+  local host="$1" base="$2" head="$3" json out
+  { [ -z "$base" ] || [ -z "$head" ]; } && return 1
+  json="$(gh api "repos/$host/compare/$base...$head" 2>/dev/null)" || return 1
+  [ -z "$json" ] && return 1
+  out="$(jq -r '
+    if (.commits | type) != "array" then error("no commits array") else . end
+    | (.commits | map(.commit.message // "")) as $msgs
+    | {
+        b: any($msgs[]; test("^\\w+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
+        f: any($msgs[]; test("^feat(\\([^)]*\\))?:"))
+      }
+    | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
+  ' <<< "$json" 2>/dev/null)" || return 1
+  [ -z "$out" ] && return 1
+  printf '%s\n' "$out"
+}
+
 # _gh_file_content <repo> <path> <ref> — the decoded text of <path> at <ref> on <repo> via the
 # contents API (base64 → text). Non-zero on any fetch/decode error.
 _gh_file_content() {
@@ -1859,6 +1927,11 @@ _autocut_detect_bump() {
   fi
   local breaking=0 feat=0 driver="" sigs iface
   if sigs="$(_autocut_commit_signals "$host" "$reusable" "$next_commit" "$mainsha")"; then
+    read -r breaking feat <<< "$sigs"
+  elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
+    # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
+    # so the boundary scan finds nothing — or the path-scoped fetch errored): fall back to the
+    # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
     read -r breaking feat <<< "$sigs"
   else
     echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
@@ -1917,10 +1990,35 @@ _autocut_agent() {
   IFS=$'\t' read -r next_resolved_tag next_commit < <(_resolved_channel "$agent" next)
   next_blob=""
   [ -n "$next_commit" ] && next_blob="$(_gh_blob_sha "$host" "$reusable" "$next_commit")"
-  # Idempotency: nothing to cut when main HEAD already IS the candidate, or the reusable blob
-  # is byte-identical between main and the current next candidate.
-  if [ "$mainsha" = "$next_commit" ] || { [ -n "$next_blob" ] && [ "$main_blob" = "$next_blob" ]; }; then
+  # Fast no-op: main HEAD already IS the current candidate — nothing merged since the last cut.
+  if [ "$mainsha" = "$next_commit" ]; then
     echo "autocut $agent: reusable unchanged on $host (next candidate up to date) — no cut."
+    return 0
+  fi
+  # Decide whether anything a consumer EXECUTES at agent_ref changed between the current `next`
+  # candidate and main HEAD (#1019). Previously autocut compared ONLY the reusable FILE blob, so a
+  # script-only change — scripts/, prompts/, personas/, what the reusable checks out at agent_ref —
+  # shipped NOWHERE (no cut, no soak, no promotion). Detection now covers the reusable blob (the
+  # fast path, kept byte-identical for a reusable change) OR any other registry-derived watched
+  # path (via the compare API).
+  local reusable_changed=0
+  if [ -z "$next_commit" ] || [ -z "$next_blob" ]; then
+    # Cannot compare the reusable blob (no candidate yet, or reusable absent at the candidate):
+    # fail OPEN so a first cut / an unresolved candidate still seeds the pipeline (prior behaviour).
+    reusable_changed=1
+  elif [ "$main_blob" != "$next_blob" ]; then
+    reusable_changed=1
+  fi
+  local watched_changed=0 watched_hitlist=""
+  if [ "$reusable_changed" -eq 0 ] && [ -n "$next_commit" ]; then
+    local watched changed_files
+    watched="$(_watched_paths "$agent")"
+    changed_files="$(_gh_changed_files "$host" "$next_commit" "$mainsha")"
+    watched_hitlist="$(watched_hits "$changed_files" "$watched")"
+    [ -n "$watched_hitlist" ] && watched_changed=1
+  fi
+  if [ "$reusable_changed" -eq 0 ] && [ "$watched_changed" -eq 0 ]; then
+    echo "autocut $agent: no agent_ref-consumed path changed on $host (reusable + scripts/prompts/personas up to date) — no cut."
     return 0
   fi
   bump="$(_autocut_detect_bump "$agent" "$host" "$reusable" "$next_commit" "$mainsha")"
@@ -2150,6 +2248,53 @@ cmd_drift() {
     else
       echo "::warning::could not write the reusable-drift job summary"
     fi
+  fi
+
+  # ── per-agent "merged but not shipped" (#1019) ────────────────────────────────
+  # For each registered agent, compare the `next` channel commit against host main HEAD across
+  # the agent_ref-consumed paths. A non-empty diff means a change merged to host main that the
+  # pinned channel has NOT yet shipped — the exact failure mode where a PR merges, CI stays
+  # green, the issue closes, and the change reaches nobody. autocut should self-heal this on the
+  # next tick; the report makes any lag visible without a hand-run `git diff`.
+  echo "----"
+  echo "== agent_ref ship-drift: next channel vs host main (agent_ref-consumed paths) =="
+  local agents a unshipped_total=0 ship_rows=""
+  agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
+  while IFS= read -r a; do
+    [ -z "$a" ] && continue
+    local a_host a_defbranch a_main a_next hits hitcsv h changed_files watched
+    a_host="$(_agent_field "$a" host)"; a_host="${a_host:-$THIS_REPO}"
+    a_next="$(channel_commit "$a" next)"
+    a_defbranch="$(_gh_default_branch "$a_host")"; [ -z "$a_defbranch" ] && a_defbranch="main"
+    a_main="$(_gh_head_sha "$a_host" "$a_defbranch")"
+    if [ -z "$a_next" ] || [ -z "$a_main" ]; then
+      echo "  $a: could not resolve next/main HEAD on $a_host — skipping"
+      continue
+    fi
+    if [ "$a_next" = "$a_main" ]; then
+      echo "  $a: shipped — next (${a_next:0:12}) == $a_host main HEAD"
+      continue
+    fi
+    watched="$(_watched_paths "$a")"
+    changed_files="$(_gh_changed_files "$a_host" "$a_next" "$a_main")"
+    hits="$(watched_hits "$changed_files" "$watched")"
+    if [ -z "$hits" ]; then
+      echo "  $a: shipped — next differs from main but no agent_ref-consumed path changed"
+      continue
+    fi
+    hitcsv=""
+    while IFS= read -r h; do [ -z "$h" ] && continue; hitcsv="${hitcsv:+$hitcsv, }$h"; done <<< "$hits"
+    echo "::warning::DRIFT[unshipped] $a: $a_host main (${a_main:0:12}) has agent_ref changes not on next (${a_next:0:12}): $hitcsv"
+    ship_rows+="| \`$a\` | \`$a_host\` | \`$hitcsv\` | merged to main but not on the \`next\` channel (autocut should cut) |"$'\n'
+    unshipped_total=$((unshipped_total + 1))
+  done <<< "$agents"
+  echo "ship-drift summary: $unshipped_total agent(s) with merged-but-unshipped agent_ref changes"
+
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "$unshipped_total" -gt 0 ]; then
+    local smd
+    smd="$(printf '# Canary Rollout — ship-drift (merged but not shipped)\n\nLast updated: `%s` · %s agent(s) whose `next` channel lags host main across agent_ref-consumed paths.\n\n| agent | host | changed paths | note |\n|---|---|---|---|\n%s\n> autocut (#1069) should cut a new candidate on the next tick; a persistent row means autocut is disabled or blocked.\n' "$ts" "$unshipped_total" "${ship_rows%$'\n'}")"
+    printf '\n%s\n' "$smd" >> "$GITHUB_STEP_SUMMARY" \
+      || echo "::warning::could not write the ship-drift job summary"
   fi
   return 0
 }

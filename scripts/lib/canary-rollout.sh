@@ -389,6 +389,40 @@ set_difference() {
   done <<< "$a"
 }
 
+# ── watched agent_ref paths (autocut/drift ship detection, #1019) ─────────────
+# A consumer executes MORE than the reusable workflow at its pinned channel tag: the reusable
+# checks out scripts/ (and prompts/, personas/) at `agent_ref`. Autocut previously compared only
+# the reusable FILE blob, so a script-only change shipped nowhere. These pure cores decide, from
+# a list of files changed between two commits and the set of watched paths, whether anything a
+# consumer executes changed — powering both the autocut cut decision and the drift "merged but
+# not shipped" report.
+
+# watched_hits <changed_files_nl> <patterns_nl> — echo each watched pattern (in the given order,
+# at most once) that at least one changed file is covered by. A pattern ending in "/" matches by
+# directory prefix; otherwise it matches an exact file OR a file nested under it ("<pattern>/…").
+# Pure: bash only, no I/O — deterministically unit-testable.
+watched_hits() {
+  local files="$1" patterns="$2" p f
+  local -a pats=()
+  while IFS= read -r p; do [ -n "$p" ] && pats+=("$p"); done <<< "$patterns"
+  [ "${#pats[@]}" -eq 0 ] && return 0
+  for p in "${pats[@]}"; do
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      case "$p" in
+        */) if [ "${f#"$p"}" != "$f" ]; then printf '%s\n' "$p"; break; fi ;;
+        *)  if [ "$f" = "$p" ] || [ "${f#"$p"/}" != "$f" ]; then printf '%s\n' "$p"; break; fi ;;
+      esac
+    done <<< "$files"
+  done
+}
+
+# any_watched_change <changed_files_nl> <patterns_nl> — echo 1 if any changed file is covered by
+# any watched pattern, else 0. Thin wrapper over watched_hits (DRY).
+any_watched_change() {
+  if [ -n "$(watched_hits "$1" "$2")" ]; then echo 1; else echo 0; fi
+}
+
 # gate_summary_line <transition> <state> <dwell_h> <dwell_floor> <sample> <sample_target> <cum_fail> <cum_startup> [cum_benign]
 # One-line human/observability row (used by `evaluate`, doubling as the #502 report).
 # cum_benign (allowlisted failures excluded from cum_fail) is shown when provided.

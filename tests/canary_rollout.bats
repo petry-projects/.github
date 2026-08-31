@@ -1365,6 +1365,7 @@ case "\$*" in
       ok)     echo '{"ref":"refs/tags/x"}'; exit 0 ;;
       reject) echo "gh: Tag agent-shield/v2-ring0 update was blocked by ruleset release-channel-tags (HTTP 422)" >&2; exit 1 ;;
       absent) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      noref)  echo "gh: Reference does not exist (HTTP 422)" >&2; exit 1 ;;
     esac ;;
   *"-X POST"*"git/refs"*)
     echo "POST" >> "$CALL_LOG"
@@ -3811,4 +3812,227 @@ WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
   ' "$WORKFLOW")"
   [ -n "$minutes" ]
   [ "$minutes" -ge 20 ]
+}
+
+# ── #1019: watched agent_ref paths (autocut covers scripts/prompts/personas) ────
+# Autocut previously compared ONLY the reusable FILE blob, so a script-only change (what the
+# reusable checks out at agent_ref) shipped nowhere. These pin the pure path-matcher core and
+# the end-to-end autocut/drift/move/enum behaviour the fix adds.
+
+# ── watched_hits / any_watched_change (pure path matcher) ──
+@test "watched_hits: a changed file under a dir pattern is a hit (#1019)" {
+  run watched_hits $'scripts/lib/foo.sh\ndocs/readme.md' $'scripts/\nprompts/'
+  [ "$status" -eq 0 ]
+  [ "$output" = "scripts/" ]
+}
+
+@test "watched_hits: an exact file pattern matches (reusable) (#1019)" {
+  run watched_hits $'.github/workflows/dev-lead-reusable.yml' $'.github/workflows/dev-lead-reusable.yml\nscripts/'
+  [ "$output" = ".github/workflows/dev-lead-reusable.yml" ]
+}
+
+@test "watched_hits: no changed file under any watched pattern → empty (#1019)" {
+  run watched_hits $'docs/readme.md\nREADME.md' $'scripts/\nprompts/\npersonas/'
+  [ -z "$output" ]
+}
+
+@test "any_watched_change: 1 when a watched path changed, 0 otherwise (#1019)" {
+  [ "$(any_watched_change $'scripts/x.sh' $'scripts/')" = "1" ]
+  [ "$(any_watched_change $'docs/x.md' $'scripts/')" = "0" ]
+  [ "$(any_watched_change '' $'scripts/')" = "0" ]
+  [ "$(any_watched_change $'scripts/x.sh' '')" = "0" ]
+}
+
+@test "watched_hits: a file named exactly like a dir prefix's parent is not a false hit (#1019)" {
+  # 'scripts' (no slash) as a plain file must NOT match the 'scripts/' dir pattern.
+  run watched_hits $'scriptsfoo/bar' $'scripts/'
+  [ -z "$output" ]
+}
+
+# ── autocut: script-only changes must cut (the core #1019 defect) ──
+# The reusable blob is byte-identical between `next` and main HEAD, but a scripts/ file changed.
+# Autocut MUST still cut a new candidate and move next. The stub returns an identical reusable
+# blob at both refs, an empty commits?path list (script-only: no reusable commit), and a compare
+# payload carrying the changed file list + the commit messages that drive the bump.
+_scriptonly_stub() {
+  # args: agent host reusable mainsha nextsha versions compare_json [bump]
+  local agent="$1" host="$2" reusable="$3" MAINSHA="$4" NEXTSHA="$5" versions="$6" compare_json="$7" bump="${8:-}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export GH_LOG="$STUB_BIN/gh-writes.log"; : > "$GH_LOG"
+  local refs="" v
+  for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
+  printf '%s' "$compare_json" > "$STUB_BIN/compare.json"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *".default_branch"*) echo "main" ;;
+  *"compare/"*) cat "$STUB_BIN/compare.json" ;;
+  *"commits?path="*) echo '[]' ;;
+  *"contents/"*"ref=$MAINSHA"*) echo "sameBLOB" ;;
+  *"contents/"*"ref=$NEXTSHA"*) echo "sameBLOB" ;;
+  *"-X POST"*"git/tags"*) echo "\$*" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$GH_LOG"; exit 0 ;;
+  *"-X POST"*"git/refs"*) echo "\$*" >> "$GH_LOG"; echo "{}" ;;
+  *"/commits/"*) echo "$MAINSHA" ;;
+  *"matching-refs/tags/$agent/v"*) printf '%s' "$refs" ;;
+  *"git/ref/tags/$agent/v"*"-next"*) printf '\n' ;;
+  *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) printf '\n' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<GITEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"rev-parse"*"$agent/next"*) echo "$NEXTSHA" ;;
+  *) : ;;
+esac
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  SCRIPTONLY_RINGS="$BATS_TEST_TMPDIR/scriptonly-rings.json"
+  if [ -n "$bump" ]; then
+    jq --arg a "$agent" --arg b "$bump" \
+      '{version, description, org_infra_repos, member_tokens, agent_ref_paths, agents: {($a): (.agents[$a] + {autocut: {bump: $b}})}}' \
+      "$RINGS" > "$SCRIPTONLY_RINGS"
+  else
+    jq --arg a "$agent" \
+      '{version, description, org_infra_repos, member_tokens, agent_ref_paths, agents: {($a): .agents[$a]}}' \
+      "$RINGS" > "$SCRIPTONLY_RINGS"
+  fi
+}
+
+@test "orchestrator: autocut cuts on a SCRIPT-ONLY change (reusable blob identical) (#1019)" {
+  local compare='{"files":[{"filename":"scripts/lib/dev-lead-retrigger.sh"}],"commits":[{"commit":{"message":"fix: forced dispatches survive sweep concurrency"}}]}'
+  _scriptonly_stub persona-mention petry-projects/.github .github/workflows/persona-mention-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "1.2.0" "$compare"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$SCRIPTONLY_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # fix-only script change → patch bump v1.2.0 → v1.2.1, cut on the host + next moved.
+  grep -q "repos/petry-projects/.github/git/tags .*tag=persona-mention/v1.2.1 .*object=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github/git/refs/tags/persona-mention/next .*sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$GH_LOG"
+}
+
+@test "orchestrator: autocut does NOT cut when only a non-watched path changed (#1019)" {
+  # reusable identical AND the only change is under docs/ (not scripts/prompts/personas/ or the
+  # reusable) → nothing a consumer executes changed → no cut.
+  local compare='{"files":[{"filename":"docs/notes.md"}],"commits":[{"commit":{"message":"docs: tidy"}}]}'
+  _scriptonly_stub persona-mention petry-projects/.github .github/workflows/persona-mention-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "1.2.0" "$compare"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$SCRIPTONLY_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no cut"* ]]
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "orchestrator: autocut bump detection applies to a script-only feat → MINOR (#1019)" {
+  local compare='{"files":[{"filename":"scripts/lib/dev-lead-retrigger.sh"}],"commits":[{"commit":{"message":"feat: add a --force retrigger mode"}}]}'
+  _scriptonly_stub persona-mention petry-projects/.github .github/workflows/persona-mention-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "1.2.0" "$compare"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$SCRIPTONLY_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  grep -q "git/tags .*tag=persona-mention/v1.3.0 " "$GH_LOG"
+}
+
+@test "orchestrator: autocut bump detection applies to a script-only feat! → MAJOR (#1019)" {
+  local compare='{"files":[{"filename":"scripts/lib/dev-lead-retrigger.sh"}],"commits":[{"commit":{"message":"feat!: drop the legacy retrigger path"}}]}'
+  _scriptonly_stub persona-mention petry-projects/.github .github/workflows/persona-mention-reusable.yml \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccccccccccccccccccccccccccccccccccccccc "1.2.0" "$compare"
+  run env CANARY_AUTO_CUT=true CANARY_RINGS="$SCRIPTONLY_RINGS" bash "$ORCH" autocut
+  [ "$status" -eq 0 ]
+  # major bump v1.2.0 → v2.0.0 seeded on a fresh v2-next line.
+  grep -q "git/tags .*tag=persona-mention/v2.0.0 " "$GH_LOG"
+  grep -q "PATCH repos/petry-projects/.github/git/refs/tags/persona-mention/v2-next " "$GH_LOG"
+}
+
+# ── _gh_move_tag: create the ref when the PATCH reports 422 "Reference does not exist" ──
+# A promotion into a channel that has never been tagged (e.g. persona-mention/ring0,
+# apply-repo-settings) PATCHes a nonexistent ref, which GitHub answers 422 "Reference does not
+# exist" (NOT 404). The mover must treat that as create-if-missing and POST the ref (#1019).
+@test "_gh_move_tag: creates the ref on a 422 'Reference does not exist' (#1019)" {
+  _move_tag_stub noref ok
+  run bash -c "source '$ORCH' && _gh_move_tag petry-projects/.github persona-mention/ring0 8837cee9db2988837cee9db2988837cee9db298"
+  [ "$status" -eq 0 ]
+  grep -q '^PATCH$' "$CALL_LOG"
+  grep -q '^POST$' "$CALL_LOG"
+  [[ "$output" != *"::error::"* ]]
+}
+
+# ── promote-all: a per-agent failure it already logged must not take the run red ──
+@test "orchestrator: promote-all returns 0 when a per-agent promote fails (continuing fleet) (#1019)" {
+  run env CANARY_RINGS="$RINGS" bash -c "
+    source '$ORCH'
+    cmd_promote() { if [ \"\$1\" = agent-shield ]; then return 3; fi; echo \"promoted \$1\"; return 0; }
+    cmd_promote_all
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promote of agent-shield returned 3 (continuing fleet)"* ]]
+}
+
+# ── enum ↔ registry agreement (a newly registered agent must be dispatchable) ──
+@test "canary-rollout.yml: the agent choice list agrees with the registry (#1019)" {
+  local wf="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
+  # Extract the `agent:` input's choice options — a YAML block list of `          - <name>`
+  # entries under `options:`, bounded to the agent block (stop at the next same-indent key).
+  local enum_sorted registry_sorted
+  enum_sorted="$(awk '
+    /^      agent:/ { in_agent=1; next }
+    in_agent && /^      [^[:space:]]/ && !/^      agent:/ { in_agent=0 }
+    in_agent && /^        options:/ { in_opts=1; next }
+    in_opts && /^          - / { sub(/^          - /, ""); print; next }
+    in_opts && /^        [^[:space:]-]/ { in_opts=0 }
+  ' "$wf" | sort -u)"
+  [ -n "$enum_sorted" ]
+  registry_sorted="$(jq -r '.agents|keys[]' "$RINGS" | sort -u)"
+  [ "$enum_sorted" = "$registry_sorted" ]
+}
+
+# ── drift: per-agent "merged but not shipped" signal (#1019) ──
+# For each agent, drift compares the `next` channel commit against host main HEAD across the
+# agent_ref-consumed paths, so "merged but not shipped" is visible without a hand-run git diff.
+_shipdrift_stub() {
+  # A single cross-repo agent whose next != main and a scripts/ file changed between them.
+  local agent="$1" host="$2" NEXTSHA="$3" MAINSHA="$4" compare_json="$5"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '%s' "$compare_json" > "$STUB_BIN/compare.json"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"contents/.github/workflows"*) echo '[]' ;;
+  *".default_branch"*) echo "main" ;;
+  *"compare/"*) cat "$STUB_BIN/compare.json" ;;
+  *"/commits/"*) echo "$MAINSHA" ;;
+  *"git/ref/tags/$agent/v"*"-next"*) printf '\n' ;;
+  *"git/ref/tags/$agent/next"*) printf '%s\tcommit\n' "$NEXTSHA" ;;
+  *"git/ref/tags/$agent/v"*) printf '\n' ;;
+  *"matching-refs/tags/$agent/v"*) printf '\n' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # cross-repo agent resolves channel tags via gh api, not git
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  SHIPDRIFT_RINGS="$BATS_TEST_TMPDIR/shipdrift-rings.json"
+  jq --arg a "$agent" \
+    '{version, description, org_infra_repos, member_tokens, agent_ref_paths, agents: {($a): .agents[$a]}}' \
+    "$RINGS" > "$SHIPDRIFT_RINGS"
+}
+
+@test "orchestrator: drift reports an agent whose next lags host main across agent_ref paths (#1019)" {
+  # persona-mention is cross-repo (host=.github); next resolves via gh api. next != main and a
+  # scripts/ file differs between them → merged-but-unshipped.
+  local compare='{"files":[{"filename":"scripts/lib/persona-mention.sh"}],"commits":[{"commit":{"message":"fix: x"}}]}'
+  _shipdrift_stub persona-mention petry-projects/.github \
+    cccccccccccccccccccccccccccccccccccccccc aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$compare"
+  # Force THIS_REPO=.github-private so persona-mention (host=.github) is cross-repo and resolves
+  # its `next` channel tag via gh api (the stub), not local git (mirrors the #613 cross-repo tests).
+  run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$SHIPDRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT[unshipped]"* ]]
+  [[ "$output" == *"persona-mention"* ]]
+  [[ "$output" == *"scripts/"* ]]
 }
