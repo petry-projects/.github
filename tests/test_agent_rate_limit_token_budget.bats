@@ -474,3 +474,89 @@ envelope_limits() {
   [[ "$output" == *"defer"* ]]
   [[ "$output" == *"decision=allow"* ]]
 }
+
+# --------------------------------------------------------------------------
+# Timeout on AGENT_TOKEN_BUDGET_TELEMETRY_CMD (coderabbitai: line 592)
+# --------------------------------------------------------------------------
+@test "fetch: a blocking AGENT_TOKEN_BUDGET_TELEMETRY_CMD times out and fails safe to status 0" {
+  write_token_config 90 true
+  # A command that sleeps longer than the 1-second test timeout
+  export AGENT_TOKEN_BUDGET_TELEMETRY_CMD="sleep 10"
+  export AGENT_TOKEN_BUDGET_TELEMETRY_TIMEOUT=1
+  run bash -c "source '$LIB'; arl_token_fetch_envelope"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '{"status":0}' ]]
+}
+
+@test "gate: a blocking telemetry CMD times out and allows admission (fail-open)" {
+  write_token_config 90 true
+  export AGENT_TOKEN_BUDGET_TELEMETRY_CMD="sleep 10"
+  export AGENT_TOKEN_BUDGET_TELEMETRY_TIMEOUT=1
+  run bash -c "source '$LIB'; arl_token_budget_gate session"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# 429 expiry: an expired retry window allows dispatch (coderabbitai: line 724)
+# --------------------------------------------------------------------------
+@test "gate: a 429 with observed_at+retry_after in the past allows (expired window, fail-open)" {
+  write_token_config 90 true
+  # observed 200 seconds ago, retry_after=120 — deadline has passed
+  local past_ts
+  past_ts=$(( $(date +%s) - 200 ))
+  write_telemetry "{\"status\":429,\"retry_after\":120,\"observed_at\":${past_ts}}"
+  run bash -c "source '$LIB'; arl_token_budget_gate session"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "gate: a 429 with retry_until in the past allows (expired absolute deadline, fail-open)" {
+  write_token_config 90 true
+  local past_deadline
+  past_deadline=$(( $(date +%s) - 60 ))
+  write_telemetry "{\"status\":429,\"retry_after\":120,\"retry_until\":${past_deadline}}"
+  run bash -c "source '$LIB'; arl_token_budget_gate session"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "gate: a 429 with retry_until in the future still defers (window not expired)" {
+  write_token_config 90 true
+  local future_deadline
+  future_deadline=$(( $(date +%s) + 300 ))
+  write_telemetry "{\"status\":429,\"retry_after\":120,\"retry_until\":${future_deadline}}"
+  run bash -c "source '$LIB'; arl_token_budget_gate session"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Fail-open: empty/error from arl_token_budget_gate must not defer (gemini: line 862)
+# --------------------------------------------------------------------------
+@test "admission gate: an empty token_decision from a broken gate allows, not defers (fail-open)" {
+  write_token_config 90 true
+  write_telemetry "$(envelope_limits 99 40)"
+  export AGENT_RATE_LIMITS_STATE="$TMP/state.json"
+  printf '%s' '{"dev-lead":{"last_run_epoch":0,"daily_count":0,"consecutive_failures":0,"breaker_opened_epoch":0}}' >"$AGENT_RATE_LIMITS_STATE"
+  export GH_STUB_STDOUT='[{"status":"in_progress"}]'
+  # Override arl_token_budget_gate to emit nothing (simulating a broken gate)
+  run bash -c "source '$LIB'; arl_token_budget_gate() { return 0; }; AGENT_TOKEN_BUDGET_ENABLED=true arl_admission_gate dev-lead donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Marker surfacing when token breaker defers (codeant-ai: line 859-862)
+# --------------------------------------------------------------------------
+@test "admission gate: token-budget defer emits escalation marker to stderr" {
+  write_token_config 90 true
+  write_telemetry "$(envelope_limits 99 40)"
+  export AGENT_RATE_LIMITS_STATE="$TMP/state.json"
+  printf '%s' '{"dev-lead":{"last_run_epoch":0,"daily_count":0,"consecutive_failures":0,"breaker_opened_epoch":0}}' >"$AGENT_RATE_LIMITS_STATE"
+  export GH_STUB_STDOUT='[{"status":"in_progress"}]'
+  run bash -c "source '$LIB'; AGENT_TOKEN_BUDGET_ENABLED=true arl_admission_gate dev-lead donpetry-bot" 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"<!--"* ]]
+  [[ "$output" == *"session"* ]]
+}

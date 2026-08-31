@@ -589,7 +589,8 @@ arl_token_priority_rank() {
 arl_token_fetch_envelope() {
   local raw=""
   if [ -n "${AGENT_TOKEN_BUDGET_TELEMETRY_CMD:-}" ]; then
-    raw="$(bash -c "$AGENT_TOKEN_BUDGET_TELEMETRY_CMD" 2>/dev/null || printf '')"
+    local _timeout="${AGENT_TOKEN_BUDGET_TELEMETRY_TIMEOUT:-10}"
+    raw="$(timeout "$_timeout" bash -c "$AGENT_TOKEN_BUDGET_TELEMETRY_CMD" 2>/dev/null || printf '')"
   elif [ -n "${AGENT_TOKEN_BUDGET_TELEMETRY_FILE:-}" ] && [ -f "${AGENT_TOKEN_BUDGET_TELEMETRY_FILE}" ]; then
     raw="$(cat "$AGENT_TOKEN_BUDGET_TELEMETRY_FILE" 2>/dev/null || printf '')"
   fi
@@ -616,7 +617,7 @@ arl_token_extract_percent() {
     *) flat="" ;;
   esac
   value="$(jq -r --arg k "$window" --arg f "$flat" '
-    ( [ (.limits // [])[] | select(.kind == $k) | .percent ] | .[0] ) as $from_limits
+    ( [ .limits[]? | select(.kind == $k) | .percent ] | .[0] ) as $from_limits
     | ( if $from_limits != null then $from_limits
         elif ($f != "" and (.[$f].percent? != null)) then .[$f].percent
         else null end )
@@ -636,7 +637,7 @@ arl_token_extract_percent() {
 arl_token_window_active() {
   local body="$1" window="$2" value
   value="$(jq -r --arg k "$window" '
-    ( [ (.limits // [])[] | select(.kind == $k) | .is_active ] | .[0] ) as $a
+    ( [ .limits[]? | select(.kind == $k) | .is_active ] | .[0] ) as $a
     | if $a == null then true else $a end
   ' <<<"$body" 2>/dev/null || printf 'true')"
   case "$value" in
@@ -713,15 +714,34 @@ arl_token_budget_gate() {
     return 0
   fi
 
-  local envelope status retry_after body
+  local now envelope status retry_after body
+  now="$(arl_now)"
   envelope="$(arl_token_fetch_envelope)"
   status="$(arl_sanitize_int "$(jq -r '.status? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
 
   # Fresh 429 with a positive retry-after: the one telemetry response that
   # blocks (ADR §7) — a hard, first-hand signal the cap is already hit.
+  # An observation timestamp (observed_at) or absolute deadline (retry_until)
+  # in the envelope guards against a stale file deferring forever: if the
+  # deadline has already passed, treat the 429 as expired degraded telemetry
+  # and allow with a warning.
   if [ "$status" -eq 429 ]; then
     retry_after="$(arl_sanitize_int "$(jq -r '.retry_after? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
     if [ "$retry_after" -gt 0 ]; then
+      local retry_deadline observed_at
+      # Prefer explicit retry_until; fall back to observed_at + retry_after.
+      retry_deadline="$(arl_sanitize_int "$(jq -r '.retry_until? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+      if [ "$retry_deadline" -eq 0 ]; then
+        observed_at="$(arl_sanitize_int "$(jq -r '.observed_at? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+        if [ "$observed_at" -gt 0 ]; then
+          retry_deadline=$(( observed_at + retry_after ))
+        fi
+      fi
+      if [ "$retry_deadline" -gt 0 ] && [ "$now" -ge "$retry_deadline" ]; then
+        arl_log "warning: token-budget 429 retry window expired (deadline=${retry_deadline}, now=${now}) — allowing dispatch (degraded)"
+        printf 'decision=allow\n'
+        return 0
+      fi
       arl_log "token-budget: fresh 429 with retry-after=${retry_after}s — deferring (hard cap signal)"
       printf 'decision=defer\n'
       return 1
@@ -856,7 +876,8 @@ arl_admission_gate() {
   if [ "${AGENT_TOKEN_BUDGET_ENABLED:-false}" = "true" ]; then
     local token_decision
     token_decision="$(arl_token_budget_gate session)" || true
-    if [ "$token_decision" != "decision=allow" ]; then
+    if [ "$token_decision" = "decision=defer" ]; then
+      arl_log "token-budget escalation: $(arl_token_breaker_marker session) — add to tracking issue/PR body, remove when cleared"
       arl_finish "$agent_type" "defer" "org-wide token-budget breaker is open (5-hour Claude session window at/over threshold)"
       return $?
     fi
