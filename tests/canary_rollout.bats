@@ -4004,7 +4004,7 @@ GITEOF
   local stub; stub="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$stub:$PATH"
   cat > "$stub/gh" <<'GHEOF'
 #!/usr/bin/env bash
-case "$3" in
+case "$*" in
   */compare/*)
     echo '{"truncated":true,"files":[{"filename":"docs/a.md"}],"commits":[{"sha":"aaa"},{"sha":"bbb"}]}' ;;
   */commits/aaa) echo '{"files":[{"filename":"scripts/engine.sh"},{"filename":"docs/a.md"}]}' ;;
@@ -4028,7 +4028,7 @@ GHEOF
   local stub; stub="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$stub:$PATH"
   cat > "$stub/gh" <<'GHEOF'
 #!/usr/bin/env bash
-case "$3" in
+case "$*" in
   */compare/*) echo '{"truncated":false,"files":[{"filename":"scripts/only.sh"}],"commits":[{"sha":"aaa"}]}' ;;
   */commits/*) echo '{"files":[{"filename":"SHOULD-NOT-BE-FETCHED"}]}' ;;
   *) echo '{}' ;;
