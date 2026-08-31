@@ -1556,13 +1556,6 @@ check_centralized_workflow_stubs() {
     # #482). Higher tiers are also acceptable so a repo pinned ahead of its tier
     # (e.g. a ring1 repo still on /stable, or .github-private's /next promoted to
     # /stable) is never flagged — only @main / inline / off-channel pins are.
-    if [ "$canonical" = "RING" ]; then
-      is_ring=1
-      chan="${reusable%-reusable}"
-      canonical="$(ring_canonical_ref "$chan" "$repo")"
-      legacy="$(ring_legacy_csv "$chan" "$repo")"
-    fi
-
     # Skip workflows that don't exist in this repo. Required workflows are
     # checked separately by check_required_workflows; conditional ones
     # (dependabot-rebase, feature-ideation) are intentionally optional.
@@ -2289,29 +2282,6 @@ ensure_required_labels() {
     "enhancement|a2eeef|Feature requests"
     "documentation|0075ca|Documentation changes"
     "in-progress|fbca04|An agent is actively working this issue"
-  )
-
-  for config in "${label_configs[@]}"; do
-    IFS='|' read -r name color description <<< "$config"
-    gh label create "$name" \
-      --repo "$ORG/$repo" \
-      --description "$description" \
-      --color "$color" \
-      --force 2>/dev/null || true
-  done
-}
-
-# Create all required labels (idempotent — uses --force to update if present)
-ensure_required_labels() {
-  local repo="$1"
-  # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
   )
 
   for config in "${label_configs[@]}"; do

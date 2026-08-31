@@ -341,15 +341,6 @@ that already produce them. See [petry-projects/.github#575](https://github.com/p
 > gh pr checks <PR-number> --repo petry-projects/<repo>
 > ```
 
-> **Check names must match exactly.** GitHub-managed CodeQL produces a check named
-> `CodeQL` — **not** `Analyze (actions)`, `Analyze (javascript-typescript)`, or
-> `CodeQL / Analyze (go)`. Requiring a check name that no job produces permanently
-> blocks every PR. Verify check names against actual workflow runs:
->
-> ```bash
-> gh pr checks <PR-number> --repo petry-projects/<repo>
-> ```
-
 #### Ecosystem-Specific Configuration
 
 The ecosystems scanned by each check depend on which languages/tools the repo
@@ -545,35 +536,6 @@ from the functional labels above (which use red/blue/teal/yellow to signal categ
 > the applier provisions `dev-lead:hands-off` from that manifest like any other
 > persona. The applier only creates/updates labels (never deletes), so the existing
 > `dev-lead:hands-off` label is retained in the meantime.
-
----
-
-## CODEOWNERS Standard
-
-All repositories MUST have a `CODEOWNERS` file at `.github/CODEOWNERS`
-(or `CODEOWNERS` at the repo root for repos with no `.github/` directory).
-
-The full policy lives in [`codeowners-standard.md`](codeowners-standard.md).
-Summary:
-
-- The default owner line MUST be `* @petry-projects/org-leads`
-- Direct listings of users or bot accounts (e.g.,
-  `@petry-projects-pr-review-agent`, `@dependabot-automerge-petry`) are
-  **forbidden** — manage membership through the team instead
-- GitHub Apps cannot be code owners (platform limitation); use machine-user
-  accounts added to the team
-
-### Standard Template
-
-```gitignore
-# CODEOWNERS
-# Standard: https://github.com/petry-projects/.github/blob/main/standards/codeowners-standard.md
-
-* @petry-projects/org-leads
-```
-
-Repos with finer-grained path ownership MUST include `@petry-projects/org-leads`
-on every owner line so the team can always satisfy `require_code_owner_review`.
 
 ---
 

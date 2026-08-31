@@ -1829,20 +1829,6 @@ _promo_fail_latest() {
   awk -F'\t' -v a="$agent" '$1==a{ r=$2"\t"$3"\t"$4"\t"$5 } END{ if (r!="") print r }' "$f"
 }
 
-# _promo_fail_issue_find <agent> — "number<TAB>STATE<TAB>count" of the newest promotion-failure
-# tracking issue for <agent> (count parsed from its body marker, 0 if absent), empty if none.
-_promo_fail_issue_find() {
-  local agent="$1"; local marker="<!-- canary-promo-fail:$agent -->"
-  gh issue list --repo "$ISSUE_REPO" --label canary-promotion-failure --state all -L 100 \
-      --json number,state,body 2>/dev/null \
-    | jq -r --arg m "$marker" '
-        [ .[] | select((.body // "") | contains($m)) ] | sort_by(.number) | last
-        | if . == null then "" else
-            ([ (.body // "") | match("canary-promo-fail-count:([0-9]+)") | .captures[0].string ] | (first // "0")) as $c
-            | "\(.number)\t\(.state | ascii_upcase)\t\($c)"
-          end' 2>/dev/null || echo ""
-}
-
 # _promo_fail_body <agent> <count> <threshold> <ring> <cand> <host> <reason> <escalated:0|1>
 _promo_fail_body() {
   local agent="$1" count="$2" threshold="$3" ring="$4" cand="$5" host="$6" reason="$7" escalated="$8" note
@@ -1913,6 +1899,9 @@ cmd_sync_promotion_failures() {
     ns="${promo_failures["$agent"]:-}"
     num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"
     [ -z "$prior" ] && prior=0
+    # A CLOSED tracking issue means the streak already ended; its stale count must not seed the
+    # next streak or one transient failure would escalate on its first occurrence after recovery.
+    [ "$istate" = "CLOSED" ] && prior=0
     local count; count="$(promotion_failure_next_count "$prior" "$outcome")"
     if [ "$outcome" = "failed" ]; then
       local latest ring cand host reason escalate body title
@@ -2080,14 +2069,14 @@ _commit_date() {
   gh api "repos/$1/commits/$2" --jq '.commit.committer.date // .commit.author.date // empty' 2>/dev/null || echo ""
 }
 
-# _watched_paths <agent> — the repo paths whose commits carry release-bump signals for this
+# _autocut_signal_paths <agent> — the repo paths whose commits carry release-bump signals for this
 # agent, one per line, de-duplicated. ALWAYS includes the registry `reusable` path; extend it
 # with the optional `.agents[a].autocut.watched_paths[]` knob (e.g. a shared library the reusable
 # sources). Bump detection is scoped to commits touching THESE paths, so an unrelated commit
 # elsewhere in the range never moves the bump (#1023 defect 1a): the classic failure was a
 # `docs: feat!:` on an unrelated file forcing a spurious major that seeds a fresh `v<newMAJOR>-next`
 # (#657 F4) and strands consumers pinned to the old major.
-_watched_paths() {
+_autocut_signal_paths() {
   local agent="$1"
   { _agent_field "$agent" reusable
     _jq -r --arg a "$agent" '.agents[$a]?.autocut?.watched_paths? // [] | .[]?'
@@ -2120,11 +2109,13 @@ _watched_paths() {
 _autocut_commit_signals() {
   local agent="$1" host="$2" next_commit="$3" mainsha="$4"
   local path page json acc="[]" truncated=0 path_done
+  local since; since="$(_commit_date "$host" "$next_commit")"
   while IFS= read -r path; do
     [ -z "$path" ] && continue
     page=1; path_done=0
     while [ "$page" -le "$CANARY_MAX_COMMIT_PAGES" ]; do
-      json="$(gh api --method GET "repos/$host/commits" -f path="$path" -f sha="$mainsha" -F per_page=100 -F page="$page" 2>/dev/null)" || return 1
+      local since_args=(); [ -n "$since" ] && since_args=(-f "since=$since")
+      json="$(gh api --method GET "repos/$host/commits" -f path="$path" -f sha="$mainsha" "${since_args[@]}" -F per_page=100 -F page="$page" 2>/dev/null)" || return 1
       # Parse the page and extract found, count, and pre-boundary messages in a single jq invocation
       local parsed found count pre
       parsed="$(printf '%s\n' "$json" | jq -r --arg stop "$next_commit" '
@@ -2140,7 +2131,7 @@ _autocut_commit_signals() {
       page=$((page + 1))
     done
     [ "$path_done" -eq 1 ] || truncated=1
-  done <<< "$(_watched_paths "$agent")"
+  done <<< "$(_autocut_signal_paths "$agent")"
   [ "$truncated" -eq 1 ] && return 3
   local out
   out="$(printf '%s\n' "$acc" | jq -r '
@@ -2213,27 +2204,25 @@ _autocut_detect_bump() {
     echo "::notice::autocut $agent: bump=$override (registry override .agents[$agent].autocut.bump)" >&2
     echo "$override"; return 0
   fi
-  local breaking=0 feat=0 driver="" sigs iface rc
-  if sigs="$(_autocut_commit_signals "$agent" "$host" "$next_commit" "$mainsha")"; then
+  local breaking=0 feat=0 driver="" sigs iface rc=0
+  sigs="$(_autocut_commit_signals "$agent" "$host" "$next_commit" "$mainsha")" || rc=$?
+  if [ "$rc" -eq 0 ]; then
     read -r breaking feat <<< "$sigs"
+  elif [ "$rc" -eq 3 ]; then
+    # Unresolvable range (#1023 defect 1b): the range could not be fully enumerated, so a
+    # breaking change may hide beyond the cap. FAIL SAFE TO MAJOR, loudly — never silently to
+    # patch, the more dangerous direction (a breaking change shipped as a patch breaks pinned
+    # consumers with no signal). A false major is at worst a spurious fresh v-line + this warning.
+    echo "::warning::autocut $agent: commit range ${next_commit:0:12}..${mainsha:0:12} on $host could not be fully enumerated within $CANARY_MAX_COMMIT_PAGES pages — cannot rule out a breaking change; failing safe to bump=major (not patch). Investigate the range." >&2
+    breaking=1; feat=0; driver="unresolvable commit range (fail-safe major)"
   elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
     # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
     # so the boundary scan finds nothing — or the path-scoped fetch errored): fall back to the
     # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
     read -r breaking feat <<< "$sigs"
   else
-    rc=$?
-    if [ "$rc" -eq 3 ]; then
-      # Unresolvable range (#1023 defect 1b): the range could not be fully enumerated, so a
-      # breaking change may hide beyond the cap. FAIL SAFE TO MAJOR, loudly — never silently to
-      # patch, the more dangerous direction (a breaking change shipped as a patch breaks pinned
-      # consumers with no signal). A false major is at worst a spurious fresh v-line + this warning.
-      echo "::warning::autocut $agent: commit range ${next_commit:0:12}..${mainsha:0:12} on $host could not be fully enumerated within $CANARY_MAX_COMMIT_PAGES pages — cannot rule out a breaking change; failing safe to bump=major (not patch). Investigate the range." >&2
-      breaking=1; feat=0; driver="unresolvable commit range (fail-safe major)"
-    else
-      echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
-      echo "patch"; return 0
-    fi
+    echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
+    echo "patch"; return 0
   fi
   [ "$breaking" = 1 ] && [ -z "$driver" ] && driver="conventional-commit breaking change"
   # An interface break escalates to major; a fetch error here is non-fatal (keep commit signals)
