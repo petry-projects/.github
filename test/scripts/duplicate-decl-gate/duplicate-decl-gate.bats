@@ -109,6 +109,19 @@ EOF
   [[ "$output" == *"dup"* ]]
 }
 
+@test "shell: a 'function NAME' line inside a heredoc is not a declaration" {
+  cat > "$WORKDIR/heredoc.sh" <<'OUTER'
+#!/usr/bin/env bash
+real_fn() { echo real; }
+cat <<'EOF'
+function fake_fn
+function fake_fn
+EOF
+OUTER
+  run bash "$GATE" "$WORKDIR"
+  [ "$status" -eq 0 ]
+}
+
 # ── Markdown: duplicate top-level (H1/H2) headings, fence-aware ───────────────
 
 @test "markdown: fails on a duplicated top-level heading" {
@@ -141,6 +154,34 @@ do_thing
 # Run it for real:
 do_thing_again
 ```
+EOF
+  run bash "$GATE" "$WORKDIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "markdown: heading inside a 4-backtick fence is not detected (3-backtick cannot close 4-backtick)" {
+  cat > "$WORKDIR/doc.md" <<'EOF'
+# Title
+
+````bash
+## Not a real heading
+## Not a real heading
+````
+EOF
+  run bash "$GATE" "$WORKDIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "markdown: headings inside an HTML comment block are not detected" {
+  cat > "$WORKDIR/doc.md" <<'EOF'
+# Title
+
+<!--
+## Hidden Section
+## Hidden Section
+-->
+
+## Real Section
 EOF
   run bash "$GATE" "$WORKDIR"
   [ "$status" -eq 0 ]
@@ -209,6 +250,15 @@ EOF
 EOF
   run bash "$GATE" "$WORKDIR"
   [ "$status" -eq 1 ]
+}
+
+@test "json: fails on non-standard JSON literals (NaN, Infinity)" {
+  cat > "$WORKDIR/nan.json" <<'EOF'
+{"value": NaN}
+EOF
+  run bash "$GATE" "$WORKDIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-standard"* ]]
 }
 
 # ── Scope: excluded directories are skipped ──────────────────────────────────

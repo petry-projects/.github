@@ -54,7 +54,7 @@ _find_files() {
   local ext="$1"
   find "$SCAN_DIR" \
     \( -type d \( -name .git -o -name node_modules -o -name test -o -name tests -o -name .dev-lead \) -prune \) \
-    -o \( -type f -name "*.${ext}" -print \)
+    -o \( -type f -name "*.${ext}" -print0 \)
 }
 
 # extract_shell_functions <file>
@@ -64,6 +64,13 @@ _find_files() {
 # arms only) so shell detection is byte-identical to the private gate.
 extract_shell_functions() {
   tr -d '\r' < "$1" | awk '
+    # Skip lines inside a heredoc body (close on bare delimiter line).
+    inheredoc {
+      stripped = $0
+      sub(/^\t*/, "", stripped)
+      if (stripped == hd) { inheredoc = 0; hd = "" }
+      next
+    }
     # NAME() {   (POSIX + ksh, brace same line), column 0 only.
     /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
       name = $0
@@ -85,6 +92,18 @@ extract_shell_functions() {
       print name
       next
     }
+    # Detect heredoc opening (<<[-] followed by quoted or bare delimiter).
+    /<</ {
+      tmp = $0
+      sub(/.*<<-?[[:space:]]*/, "", tmp)
+      if (substr(tmp, 1, 1) == "\047" || substr(tmp, 1, 1) == "\"") {
+        tmp = substr(tmp, 2)
+        sub(/[\047"].*$/, "", tmp)
+      } else {
+        sub(/[^A-Za-z0-9_].*$/, "", tmp)
+      }
+      if (tmp ~ /^[A-Za-z_][A-Za-z0-9_]*$/) { inheredoc = 1; hd = tmp }
+    }
   '
 }
 
@@ -95,15 +114,32 @@ extract_shell_functions() {
 extract_markdown_headings() {
   tr -d '\r' < "$1" | awk '
     # Toggle fenced code blocks. A fence is ``` or ~~~ (3+), optionally indented.
+    # Track fence length so a 3-backtick line cannot close a 4+-backtick fence.
     /^[[:space:]]*(`{3,}|~{3,})/ {
       line = $0
       sub(/^[[:space:]]*/, "", line)
       ch = substr(line, 1, 1)
-      if (!infence) { infence = 1; fence = ch }
-      else if (ch == fence) { infence = 0; fence = "" }
+      len = 0; while (substr(line, len+1, 1) == ch) len++
+      if (!infence) { infence = 1; fence = ch; fencelen = len }
+      else if (ch == fence && len >= fencelen) { infence = 0; fence = ""; fencelen = 0 }
       next
     }
     infence { next }
+    # Track HTML comment blocks <!-- ... --> (may span lines); skip headings inside.
+    {
+      line_in_html = inhtml
+      tmp = $0
+      while (length(tmp) > 0) {
+        if (!inhtml) {
+          if (!match(tmp, /<!--/)) break
+          tmp = substr(tmp, RSTART + 4); inhtml = 1
+        } else {
+          if (!match(tmp, /-->/)) break
+          tmp = substr(tmp, RSTART + 3); inhtml = 0
+        }
+      }
+      if (line_in_html) next
+    }
     /^#{1,2}[[:space:]]+[^[:space:]]/ {
       text = $0
       sub(/^#{1,2}[[:space:]]+/, "", text)   # strip leading hashes
@@ -141,25 +177,25 @@ EOF
 }
 
 # ── shell: duplicate top-level function declarations ─────────────────────────
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
   findings="$(extract_shell_functions "$f" | duplicates_with_counts)"
   _record "$f" "function declarations" "$findings"
-done < <(_find_files sh | LC_ALL=C sort)
+done < <(_find_files sh | LC_ALL=C sort -z)
 
 # ── markdown: duplicate top-level headings ───────────────────────────────────
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
   findings="$(extract_markdown_headings "$f" | duplicates_with_counts)"
   _record "$f" "headings" "$findings"
-done < <(_find_files md | LC_ALL=C sort)
+done < <(_find_files md | LC_ALL=C sort -z)
 
 # ── json: duplicate object keys / unparseable files ──────────────────────────
 json_files=()
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
   json_files+=("$f")
-done < <(_find_files json | LC_ALL=C sort)
+done < <(_find_files json | LC_ALL=C sort -z)
 
 if [ "${#json_files[@]}" -gt 0 ]; then
   if ! command -v python3 >/dev/null 2>&1; then
@@ -167,8 +203,12 @@ if [ "${#json_files[@]}" -gt 0 ]; then
     exit 2
   fi
   json_report="$(python3 - "${json_files[@]}" <<'PY'
-import json, sys
+import json, sys, re
 from collections import Counter
+
+# Python's json decoder accepts NaN/Infinity by default; reject them explicitly
+# so we don't pass non-standard JSON that strict consumers would reject.
+_NAN_RE = re.compile(r'(?<!["\w])(-?Infinity|NaN)(?!["\w])')
 
 rc = 0
 out = []
@@ -181,7 +221,10 @@ for path in sys.argv[1:]:
         return dict(pairs)
     try:
         with open(path, encoding="utf-8") as fh:
-            json.load(fh, object_pairs_hook=hook)
+            raw = fh.read()
+        if _NAN_RE.search(raw):
+            raise ValueError("non-standard JSON literal (NaN/Infinity)")
+        json.loads(raw, object_pairs_hook=hook)
     except (ValueError, OSError) as exc:
         rc = 1
         out.append("- `%s` — not parseable as JSON: %s" % (path, exc))
