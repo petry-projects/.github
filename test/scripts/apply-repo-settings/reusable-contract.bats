@@ -72,7 +72,7 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 # load-bearing rulesets FIRST, and neither script's failure may skip the other.
 @test "reusable runs apply-rulesets.sh BEFORE apply-repo-settings.sh (load-bearing first, #1038)" {
   local run_blocks rulesets_line settings_line
-  run_blocks="$(yq '[.jobs[].steps[].run // ""] | join("\n")' "$REUSABLE")"
+  run_blocks="$(yq '[.jobs[]?.steps[]?.run // ""] | join("\n")' "$REUSABLE")"
   rulesets_line="$(printf '%s\n' "$run_blocks" | grep -n 'bash scripts/apply-rulesets.sh' | head -1 | cut -d: -f1)"
   settings_line="$(printf '%s\n' "$run_blocks" | grep -n 'bash scripts/apply-repo-settings.sh' | head -1 | cut -d: -f1)"
   [ -n "$rulesets_line" ]
@@ -82,7 +82,7 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
 
 @test "reusable guards each script so one failure never skips the other, and names failures (#1038)" {
   local run_blocks
-  run_blocks="$(yq '[.jobs[].steps[].run // ""] | join("\n")' "$REUSABLE")"
+  run_blocks="$(yq '[.jobs[]?.steps[]?.run // ""] | join("\n")' "$REUSABLE")"
   # Each applier invocation is guarded (|| record) rather than left to abort the step.
   printf '%s\n' "$run_blocks" | grep -qE 'apply-rulesets\.sh[^|]*\|\|'
   printf '%s\n' "$run_blocks" | grep -qE 'apply-repo-settings\.sh[^|]*\|\|'

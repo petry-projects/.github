@@ -476,7 +476,8 @@ if [ "$1" = "--all" ]; then
 
   # Collect "repo:step" for every step that failed across the whole sweep, so the
   # run reports exactly WHAT failed WHERE rather than an opaque count (issue #1038).
-  all_failed=()
+  local all_failed=()
+  local repo repo_json step
   for repo in $repos; do
     # Fetch full repo JSON once and share across functions
     repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
