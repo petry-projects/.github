@@ -60,11 +60,9 @@ amdl_trim() {
 # Multiple spaces become multiple hyphens (GitHub does not collapse them). Pure.
 # ---------------------------------------------------------------------------
 amdl_slugify() {
-  local text="$1"
-  text="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
-  text="$(printf '%s' "$text" | tr -cd 'a-z0-9 -')"
-  text="${text// /-}"
-  printf '%s' "$text"
+  local text="${1,,}"
+  text="${text//[^a-z0-9 -]/}"
+  printf '%s' "${text// /-}"
 }
 
 # ---------------------------------------------------------------------------
@@ -74,18 +72,23 @@ amdl_slugify() {
 # ---------------------------------------------------------------------------
 amdl_extract_headings() {
   local file="$1"
-  local lineno=0 in_fence=0 fence_char="" line trimmed fc hashes text level
+  local lineno=0 in_fence=0 fence_char="" fence_len=0 line trimmed hashes text level
+  local _fc _flen
   while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
     trimmed="${line#"${line%%[![:space:]]*}"}"
-    if [[ "$trimmed" == '```'* || "$trimmed" == '~~~'* ]]; then
-      fc="${trimmed:0:3}"
+    if [[ "$trimmed" =~ ^(\`{3,}|~{3,}) ]]; then
+      _fc="${BASH_REMATCH[1]:0:1}"
+      _flen="${#BASH_REMATCH[1]}"
       if [ "$in_fence" -eq 0 ]; then
         in_fence=1
-        fence_char="$fc"
-      elif [ "$fc" = "$fence_char" ]; then
+        fence_char="$_fc"
+        fence_len="$_flen"
+      elif [[ "$trimmed" =~ ^(\`{3,}|~{3,})[[:space:]]*$ ]] && \
+           [ "$_fc" = "$fence_char" ] && [ "$_flen" -ge "$fence_len" ]; then
         in_fence=0
         fence_char=""
+        fence_len=0
       fi
       continue
     fi
@@ -94,10 +97,12 @@ amdl_extract_headings() {
       hashes="${BASH_REMATCH[1]}"
       text="${BASH_REMATCH[2]}"
       level="${#hashes}"
-      # Strip a trailing closed-ATX run of '#' and surrounding whitespace.
-      text="$(amdl_trim "$text")"
+      # Strip leading whitespace
+      text="${text#"${text%%[![:space:]]*}"}"
+      # Strip trailing closed-ATX run of '#' and surrounding whitespace
       text="${text%"${text##*[![:space:]#]}"}"
-      text="$(amdl_trim "$text")"
+      # Strip trailing whitespace
+      text="${text%"${text##*[![:space:]]}"}"
       printf '%s\t%s\t%s\n' "$level" "$lineno" "$text"
     fi
   done < "$file"
@@ -154,19 +159,24 @@ amdl_check_heading_hierarchy() {
 # ---------------------------------------------------------------------------
 amdl_check_fenced_code_closure() {
   local file="$1"
-  local lineno=0 in_fence=0 fence_char="" open_line=0 line trimmed fc
+  local lineno=0 in_fence=0 fence_char="" fence_len=0 open_line=0 line trimmed
+  local _fc _flen
   while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
     trimmed="${line#"${line%%[![:space:]]*}"}"
-    if [[ "$trimmed" == '```'* || "$trimmed" == '~~~'* ]]; then
-      fc="${trimmed:0:3}"
+    if [[ "$trimmed" =~ ^(\`{3,}|~{3,}) ]]; then
+      _fc="${BASH_REMATCH[1]:0:1}"
+      _flen="${#BASH_REMATCH[1]}"
       if [ "$in_fence" -eq 0 ]; then
         in_fence=1
-        fence_char="$fc"
+        fence_char="$_fc"
+        fence_len="$_flen"
         open_line="$lineno"
-      elif [ "$fc" = "$fence_char" ]; then
+      elif [[ "$trimmed" =~ ^(\`{3,}|~{3,})[[:space:]]*$ ]] && \
+           [ "$_fc" = "$fence_char" ] && [ "$_flen" -ge "$fence_len" ]; then
         in_fence=0
         fence_char=""
+        fence_len=0
       fi
     fi
   done < "$file"
@@ -206,8 +216,9 @@ amdl_classify_reference() {
   fi
   if [[ "$target" == \#* ]]; then
     anchor="${target#\#}"
-    anchor="$(printf '%s' "$anchor" | tr '[:upper:]' '[:lower:]')"
-    if ! printf '%s\n' "$slugs" | grep -qxF "$anchor"; then
+    anchor="${anchor,,}"
+    local padded_slugs=$'\n'"$slugs"$'\n'
+    if [[ "$padded_slugs" != *$'\n'"$anchor"$'\n'* ]]; then
       printf '%s\tin-document anchor "#%s" does not match any heading\n' "$lineno" "$anchor"
     fi
     return 0
@@ -227,35 +238,60 @@ amdl_classify_reference() {
 # directory. Skips content inside fenced code blocks. Pure.
 # ---------------------------------------------------------------------------
 amdl_check_cross_references() {
-  local file="$1" base slugs lvl ln text
+  local file="$1" base slugs lvl ln text slug n
   base="$(dirname -- "$file")"
   slugs=""
+  declare -A slug_count
   while IFS=$'\t' read -r lvl ln text; do
     : "${lvl:-}" "${ln:-}"
     [ -n "$text" ] || continue
-    slugs+="$(amdl_slugify "$text")"$'\n'
+    slug="$(amdl_slugify "$text")"
+    n="${slug_count["$slug"]:-0}"
+    slug_count["$slug"]=$((n + 1))
+    if [ "$n" -eq 0 ]; then
+      slugs+="$slug"$'\n'
+    else
+      slugs+="${slug}-${n}"$'\n'
+    fi
   done < <(amdl_extract_headings "$file")
 
-  local lineno=0 in_fence=0 fence_char="" line trimmed fc target
+  local lineno=0 in_fence=0 fence_char="" fence_len=0 line trimmed target temp_line
+  local _fc _flen
+  local inline_regex='(.*)\]\(([^)]*)\)(.*)'
+  local ref_regex='^[[:space:]]*\[[^]]+\]:[[:space:]]*(.*)'
   while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
     trimmed="${line#"${line%%[![:space:]]*}"}"
-    if [[ "$trimmed" == '```'* || "$trimmed" == '~~~'* ]]; then
-      fc="${trimmed:0:3}"
+    if [[ "$trimmed" =~ ^(\`{3,}|~{3,}) ]]; then
+      _fc="${BASH_REMATCH[1]:0:1}"
+      _flen="${#BASH_REMATCH[1]}"
       if [ "$in_fence" -eq 0 ]; then
         in_fence=1
-        fence_char="$fc"
-      elif [ "$fc" = "$fence_char" ]; then
+        fence_char="$_fc"
+        fence_len="$_flen"
+      elif [[ "$trimmed" =~ ^(\`{3,}|~{3,})[[:space:]]*$ ]] && \
+           [ "$_fc" = "$fence_char" ] && [ "$_flen" -ge "$fence_len" ]; then
         in_fence=0
         fence_char=""
+        fence_len=0
       fi
       continue
     fi
     [ "$in_fence" -eq 0 ] || continue
-    while IFS= read -r target; do
-      [ -n "$target" ] || continue
+
+    # Extract inline links: [text](target)
+    temp_line="$line"
+    while [[ "$temp_line" =~ $inline_regex ]]; do
+      local _pre="${BASH_REMATCH[1]}" _tgt="${BASH_REMATCH[2]}" _post="${BASH_REMATCH[3]}"
+      amdl_classify_reference "$_tgt" "$base" "$slugs" "$lineno"
+      temp_line="${_pre}${_post}"
+    done
+
+    # Extract reference definitions: [label]: target
+    if [[ "$line" =~ $ref_regex ]]; then
+      target="${BASH_REMATCH[1]}"
       amdl_classify_reference "$target" "$base" "$slugs" "$lineno"
-    done < <(amdl_extract_link_targets "$line")
+    fi
   done < "$file"
   return 0
 }
@@ -279,7 +315,7 @@ amdl_check_section_present() {
 # ---------------------------------------------------------------------------
 amdl_check_org_import() {
   local file="$1"
-  if grep -qE 'petry-projects/\.github' "$file"; then
+  if grep -qE '\[([^]]*)\]\([^)]*petry-projects/\.github[^)]*\)' "$file"; then
     return 0
   fi
   printf '%s\tno link back to the canonical petry-projects/.github AGENTS.md is present\n' "-"
@@ -325,6 +361,10 @@ amdl_dispatch_rule() {
 amdl_lint() {
   local file="$1" rules="${2:-$AMDL_DEFAULT_RULES}" scope="${3:-canonical}"
   local id level applies element check_out finding
+  if ! jq -e '.rules | length > 0' "$rules" >/dev/null 2>&1; then
+    printf 'agents-md-lint: rule-set file is invalid or contains no rules: %s\n' "$rules" >&2
+    return 2
+  fi
   while IFS=$'\t' read -r id level applies element; do
     : "${element:-}"
     if [ "$applies" != "all" ] && [ "$applies" != "$scope" ]; then

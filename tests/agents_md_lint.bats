@@ -43,13 +43,15 @@ setup() {
 @test "amdl_extract_headings emits level<TAB>line<TAB>text and skips code fences" {
   run amdl_extract_headings "$FIX/valid.md"
   [ "$status" -eq 0 ]
+  headings_out="$output"
   # Exactly one H1, and the '#' inside the bash fence is not emitted.
-  h1_count="$(printf '%s\n' "$output" | awk -F'\t' '$1==1' | wc -l | tr -d ' ')"
+  h1_count="$(printf '%s\n' "$headings_out" | awk -F'\t' '$1==1' | wc -l | tr -d ' ')"
   [ "$h1_count" -eq 1 ]
   # The commented '#' inside the fenced block must not appear as a heading.
-  ! printf '%s\n' "$output" | grep -q 'inside a fenced code block'
+  run grep -q 'inside a fenced code block' <<< "$headings_out"
+  [ "$status" -eq 1 ]
   # The H3 sub-detail is captured at level 3.
-  printf '%s\n' "$output" | grep -qP '^3\t'
+  printf '%s\n' "$headings_out" | grep -qP '^3\t'
 }
 
 # --- single H1 -------------------------------------------------------------
@@ -127,8 +129,11 @@ setup() {
 @test "amdl_check_cross_references ignores http(s) URLs" {
   run amdl_check_cross_references "$FIX/dangling-xref.md"
   [ "$status" -eq 0 ]
-  ! printf '%s\n' "$output" | grep -q 'example.com'
-  ! printf '%s\n' "$output" | grep -q 'agents.md'
+  xref_out="$output"
+  run grep -q 'example.com' <<< "$xref_out"
+  [ "$status" -eq 1 ]
+  run grep -q 'agents.md' <<< "$xref_out"
+  [ "$status" -eq 1 ]
 }
 
 @test "amdl_check_cross_references flags a broken in-document anchor" {
@@ -170,7 +175,9 @@ setup() {
 @test "valid fixture produces no required-level findings and exits 0 in both modes" {
   run bash "$SCRIPT" --mode informational "$FIX/valid.md"
   [ "$status" -eq 0 ]
-  ! printf '%s\n' "$output" | grep -q '^required'
+  info_out="$output"
+  run grep -q '^required' <<< "$info_out"
+  [ "$status" -eq 1 ]
   run bash "$SCRIPT" --mode failing "$FIX/valid.md"
   [ "$status" -eq 0 ]
 }
@@ -185,9 +192,11 @@ setup() {
 @test "missing required section is a recommended finding — reported but never fails" {
   run bash "$SCRIPT" --mode informational "$FIX/missing-section.md"
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qP '^recommended\tsecurity-section-present\t'
+  missing_out="$output"
+  printf '%s\n' "$missing_out" | grep -qP '^recommended\tsecurity-section-present\t'
   # No required-level finding for this structurally-sound-but-section-light file.
-  ! printf '%s\n' "$output" | grep -q '^required'
+  run grep -q '^required' <<< "$missing_out"
+  [ "$status" -eq 1 ]
   # And even in failing mode a recommended-only file passes.
   run bash "$SCRIPT" --mode failing "$FIX/missing-section.md"
   [ "$status" -eq 0 ]
@@ -198,7 +207,7 @@ setup() {
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qP '^required\theading-hierarchy-valid\t'
   run bash "$SCRIPT" --mode failing "$FIX/skipped-heading.md"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dangling cross-reference is a required finding that fails --mode failing" {
@@ -206,7 +215,7 @@ setup() {
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qP '^required\tcross-reference-integrity\t'
   run bash "$SCRIPT" --mode failing "$FIX/dangling-xref.md"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "default mode is informational (exit 0 even with required findings)" {
