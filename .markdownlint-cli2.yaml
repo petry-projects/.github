@@ -1,6 +1,10 @@
 ignores:
   - ".claude/**"
   - "node_modules/**"
+  # Structural-linter fixtures are DELIBERATELY malformed (skipped heading
+  # levels, dangling cross-references, …) so scripts/agents-md-lint.sh has a
+  # negative case per failure mode. Linting them as real docs would always fail.
+  - "tests/fixtures/agents-md/**"
 
 config:
   MD010:

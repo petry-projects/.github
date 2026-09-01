@@ -1,9 +1,13 @@
 # Quality gate for the AGENTS.md structural rule set (the documented,
-# machine-readable single source of truth) and its validating bats contract test.
+# machine-readable single source of truth), its validating bats contract test,
+# and the Phase-2 standalone structural linter that reads it.
 #
 # Triggered on any PR (and main push) that touches:
 #   - scripts/lib/agents-md-rules.json
+#   - scripts/agents-md-lint.sh
 #   - tests/test_agents_md_rules_config.bats
+#   - tests/agents_md_lint.bats
+#   - tests/fixtures/agents-md/**
 #   - .github/workflows/agents-md-rules-tests.yml
 #
 # Gate: bats validates that scripts/lib/agents-md-rules.json parses as JSON, all
@@ -13,12 +17,15 @@
 # hierarchy, resolvable cross-references) are 'required' while contested
 # section-presence rules stay 'recommended', the captured spec snapshot records
 # a source + date, and the informational->blocking promotion gate encodes two
-# clean cycles plus maintainer sign-off.
+# clean cycles plus maintainer sign-off. It also runs tests/agents_md_lint.bats,
+# which exercises the Phase-2 linter's pure helpers over synthetic fixtures (a
+# valid AGENTS.md plus one per failure mode) with no network.
 #
-# Context: reference doc docs/initiatives/agents-md-validation.md (#643, Phase 1
-# of epic #642). This story delivers the data file only (INERT, no workflow reads
-# it yet); the Phase-2 linter consumes it later. Modeled on
-# .github/workflows/agent-rate-limits-tests.yml.
+# Context: reference doc docs/initiatives/agents-md-validation.md (#643 Phase 1,
+# #644 Phase 2 of epic #642). Phase 1 delivered the data file; Phase 2 adds the
+# standalone linter (scripts/agents-md-lint.sh) that reads it. The linter's own
+# shellcheck coverage comes from ci.yml's ShellCheck job (scripts/**/*.sh).
+# Modeled on .github/workflows/agent-rate-limits-tests.yml.
 
 name: AGENTS.md Rules Tests
 
@@ -26,14 +33,20 @@ on:
   pull_request:
     paths:
       - 'scripts/lib/agents-md-rules.json'
+      - 'scripts/agents-md-lint.sh'
       - 'tests/test_agents_md_rules_config.bats'
+      - 'tests/agents_md_lint.bats'
+      - 'tests/fixtures/agents-md/**'
       - '.github/workflows/agents-md-rules-tests.yml'
   push:
     branches:
       - main
     paths:
       - 'scripts/lib/agents-md-rules.json'
+      - 'scripts/agents-md-lint.sh'
       - 'tests/test_agents_md_rules_config.bats'
+      - 'tests/agents_md_lint.bats'
+      - 'tests/fixtures/agents-md/**'
       - '.github/workflows/agents-md-rules-tests.yml'
 
 permissions:
@@ -65,4 +78,5 @@ jobs:
       - name: Run bats suite
         run: |
           bats --print-output-on-failure \
-            tests/test_agents_md_rules_config.bats
+            tests/test_agents_md_rules_config.bats \
+            tests/agents_md_lint.bats
