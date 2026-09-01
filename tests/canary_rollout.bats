@@ -3671,6 +3671,49 @@ GITEOF
   [[ "$output" != *"FALLBACK"* ]]
 }
 
+
+# ── _is_evicted_run: concurrency-eviction classifier (#1047, slice 1 of #1054) ──
+# A run is an EVICTION (return 0) iff conclusion is exactly "cancelled" AND the
+# completed-step count is exactly 0 — a concurrency `cancel-in-progress` preemption
+# that executed no candidate code. Every other shape fails closed (return non-zero)
+# so the gate keeps counting it: a cancel AFTER real work stays genuinely ambiguous.
+@test "_is_evicted_run: cancelled + 0 completed steps IS an eviction" {
+  _is_evicted_run cancelled 0
+}
+@test "_is_evicted_run: cancelled + a non-zero step count is NOT an eviction (human cancel mid-flight)" {
+  run _is_evicted_run cancelled 3
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: success + 0 steps is NOT an eviction" {
+  run _is_evicted_run success 0
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: failure + 0 steps is NOT an eviction" {
+  run _is_evicted_run failure 0
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: an empty step count is NOT an eviction (fail closed)" {
+  run _is_evicted_run cancelled ""
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: a non-numeric step count is NOT an eviction (fail closed)" {
+  run _is_evicted_run cancelled abc
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: a missing step-count argument is NOT an eviction (fail closed)" {
+  run _is_evicted_run cancelled
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: no arguments at all is NOT an eviction (fail closed)" {
+  run _is_evicted_run
+  [ "$status" -ne 0 ]
+}
+@test "_is_evicted_run: emits nothing on either branch" {
+  run _is_evicted_run cancelled 0
+  [ -z "$output" ]
+  run _is_evicted_run cancelled 3
+  [ -z "$output" ]
+}
 # ── a fleet whose v2 major line EXISTS: v2-next=cand(cccc), v2-ring0/ring1/stable=old(bbbb) →
 #    frontier ring0, transition next->ring0. Bare tags resolve to a DIFFERENT sha (aaaa) so a test
 #    can prove the engine PREFERS the v-form. Ref mutations are logged to MOVE_LOG.
