@@ -259,6 +259,14 @@ major_component() {
   fi
 }
 
+# _is_release_tag_suffix <suffix> — return 0 iff <suffix> (a tag name with the
+# leading "<agent>/" already stripped, e.g. "v139.4.0") is an immutable release tag:
+# a "v" followed by a strict MAJOR.MINOR.PATCH. Pure. This is the filter that keeps the
+# candidate-cut-date resolution from mistaking a v-scoped channel tag "v<M>-<tier>"
+# (a lightweight ref that shadows the release, sorting earlier) for the release tag,
+# which returned an empty cut date and wedged the gate at BLOCKED indeterminate (#1046).
+_is_release_tag_suffix() { [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+
 # channel_tag <agent> <tier> [major] — build a channel tag name. With a MAJOR the
 # v-scoped form `<agent>/v<major>-<tier>` (mirrors ring_canonical_ref in
 # ring-pins.sh); without it the legacy bare `<agent>/<tier>`. Pure. (Epic #657 F4.)

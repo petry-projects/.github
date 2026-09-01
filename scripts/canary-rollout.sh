@@ -353,10 +353,19 @@ _epoch() {
 # release tag <agent>/vX.Y.Z on <repo> whose (dereferenced) commit equals <commit>. The
 # cross-repo analogue of the local for-each-ref path: a cross-repo agent's release tags
 # live on its host, not this checkout (#1049). Empty if no matching release tag is found.
+#
+# matching-refs/tags/<agent>/v matches EVERY <agent>/v… ref by prefix, so it also returns
+# the v-scoped channel tags <agent>/v<M>-<tier> — which are lightweight (type=commit) and
+# always point at a real commit. Because "-" (0x2D) sorts before "." (0x2E), such a channel
+# tag precedes the release <agent>/v<M>.<m>.<p> and, when it points at the candidate commit,
+# used to match first with an empty tagger date — wedging the gate at BLOCKED indeterminate
+# (#1046). So every ref is filtered to a strict release suffix before it can match; a channel
+# tag (or any other non-release <agent>/v… ref) is skipped, never the shadow of a release.
 _gh_candidate_cut_date() {
-  local repo="$1" agent="$2" commit="$3" obj type csha cdate
-  while IFS=$'\t' read -r _ obj type; do
+  local repo="$1" agent="$2" commit="$3" ref obj type csha cdate
+  while IFS=$'\t' read -r ref obj type; do
     [ -z "$obj" ] && continue
+    _is_release_tag_suffix "${ref#refs/tags/"$agent"/}" || continue
     if [ "$type" = "tag" ]; then
       IFS=$'\t' read -r csha cdate < <(gh api "repos/$repo/git/tags/$obj" \
         --jq '[(.object?.sha // "" | tostring), (.tagger?.date // "" | tostring)] | @tsv' 2>/dev/null) || true
@@ -365,6 +374,7 @@ _gh_candidate_cut_date() {
     fi
     if [ "$csha" = "$commit" ]; then _to_z "$cdate"; return 0; fi
   done < <(gh api "repos/$repo/git/matching-refs/tags/$agent/v" \
+             --paginate \
              --jq '.[]? | [.ref, (.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>/dev/null)
   echo ""
 }
@@ -375,18 +385,28 @@ _gh_candidate_cut_date() {
 # OWN cut, NOT a rolling window — so a pre-cut failure of a prior version is excluded.
 # For a cross-repo agent (host != THIS_REPO) the release tags live on the host, so the
 # date is resolved there via the GitHub API instead of the local for-each-ref (#1049).
+#
+# The local glob refs/tags/<agent>/v* also matches the v-scoped channel tags
+# <agent>/v<M>-<tier>, and for-each-ref sorts them before the release <agent>/v<M>.<m>.<p>
+# ("-" < "."). A channel tag is lightweight, so its %(*objectname) is empty and its
+# %(creatordate) is the COMMIT date — the same-repo counterpart of the #1046 shadow: the
+# path silently reported the candidate's commit date instead of the release's tagger date.
+# Refs are filtered to a strict release suffix, and only the annotated tag's dereferenced
+# commit + %(creatordate) (its tagger date) is used — a lightweight ref's commit date is
+# never substituted. The final fallback is the candidate commit's own date, unchanged.
 candidate_cut_date() {
-  local agent="$1" commit="$2" host obj deref cdate c
+  local agent="$1" commit="$2" host ref deref cdate
   host="$(_agent_field "$agent" host)"
   if [ -n "$host" ] && [ "$host" != "$THIS_REPO" ]; then
     _gh_candidate_cut_date "$host" "$agent" "$commit"
     return 0
   fi
-  while IFS='|' read -r obj deref cdate; do
-    c="$deref"; [ -z "$c" ] && c="$obj"
-    if [ "$c" = "$commit" ]; then _to_z "$cdate"; return 0; fi
+  while IFS='|' read -r ref _ deref cdate; do
+    _is_release_tag_suffix "${ref#refs/tags/"$agent"/}" || continue
+    [ -z "$deref" ] && continue   # lightweight release-named tag — no tagger date to trust
+    if [ "$deref" = "$commit" ]; then _to_z "$cdate"; return 0; fi
   done < <(git for-each-ref \
-             --format='%(objectname)|%(*objectname)|%(creatordate:iso-strict)' \
+             --format='%(refname)|%(objectname)|%(*objectname)|%(creatordate:iso-strict)' \
              "refs/tags/${agent}/v*" 2>/dev/null)
   git log -1 --format=%cI "$commit" 2>/dev/null || echo ""
 }
