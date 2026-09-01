@@ -161,16 +161,20 @@ pp_apply_security_and_analysis() {
       fi
     done <<< "$post_actuals"
 
+    # Check GHAS status after PATCH for gated-key verification below.
+    local post_ghas_status
+    post_ghas_status=$(echo "$post_patch" | jq -r '.advanced_security.status // "null"')
+
     # A key still non-compliant after a "successful" (HTTP 200) PATCH is either a
     # legitimate plan skip or a real failure — and they must be distinguished, or
     # the run reports success having applied nothing (issue #1038, AC6b). A
-    # plan-gated key (GHAS/Copilot-only) that the org plan does not support is a
-    # legitimate skip: GitHub accepts the PATCH and silently ignores it. A CORE
-    # key (secret_scanning / secret_scanning_push_protection) still not applied is
-    # a genuine failure — the security-critical setting did not take — so return
-    # non-zero after checking every key.
-    local post_entry post_key post_expected post_actual is_plan_gated plan_key
-    local verify_failed=false
+    # plan-gated key (GHAS/Copilot-only) that is null (unavailable on this plan)
+    # is a legitimate skip. A plan-gated key that is "disabled" (present but
+    # disabled) or a CORE key still not applied is a genuine failure — the
+    # security-critical setting did not take — so return non-zero after checking
+    # every key. GHAS-gated keys are excepted when GHAS itself is not enabled.
+    local post_entry post_key post_expected post_actual is_plan_gated is_ghas_gated
+    local plan_key ghas_key verify_failed=false
     for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
       post_key="${post_entry%%:*}"
       post_expected="${post_entry#*:}"
@@ -187,12 +191,30 @@ pp_apply_security_and_analysis() {
           break
         fi
       done
-      if [ "$is_plan_gated" = true ]; then
-        skip "  $post_key still $post_actual after PATCH — unsupported on this org plan, skipping"
-      else
-        err "  $post_key still $post_actual after PATCH (expected $post_expected) — the security-critical setting did not take"
-        verify_failed=true
+      # Plan-gated keys are only skipped when their status is null (unavailable
+      # on this org plan). If a plan-gated key is "disabled" (present, not null),
+      # that is a failure — the key exists but was not enabled.
+      if [ "$is_plan_gated" = true ] && [ "$post_actual" = "null" ]; then
+        skip "  $post_key still null after PATCH — unsupported on this org plan, skipping"
+        continue
       fi
+      # GHAS-gated keys are skipped when GHAS itself is not enabled, since GitHub
+      # silently ignores enable requests when GHAS is unavailable. Preserve the
+      # secret_scanning_non_provider_patterns exception via this check.
+      is_ghas_gated=false
+      for ghas_key in "${PP_GHAS_GATED_KEYS[@]}"; do
+        if [ "$post_key" = "$ghas_key" ]; then
+          is_ghas_gated=true
+          break
+        fi
+      done
+      if [ "$is_ghas_gated" = true ] && [ "$post_ghas_status" != "enabled" ]; then
+        skip "  $post_key still $post_actual after PATCH — GitHub Advanced Security not enabled, skipping"
+        continue
+      fi
+      # All other keys still non-compliant are genuine failures.
+      err "  $post_key still $post_actual after PATCH (expected $post_expected) — the security-critical setting did not take"
+      verify_failed=true
     done
     if [ "$verify_failed" = true ]; then
       return 1

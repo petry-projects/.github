@@ -524,6 +524,41 @@ _only_real_step() {
   [ "$status" -eq 0 ]
 }
 
+@test "pp_apply_security_and_analysis returns 1 when a PLAN-GATED key is disabled post-PATCH (AC6b)" {
+  # A plan-gated key that is "disabled" (not null) is a failure — the key exists
+  # on this plan but was not enabled (a genuine API/permission issue).
+  gh() {
+    [[ "$*" == *"-X PATCH"* ]] && return 0
+    if [[ "$*" == *"repos/$ORG/acme"* ]]; then
+      # Core keys enabled, but a plan-gated key is "disabled" not "null"
+      printf '{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"secret_scanning_ai_detection":{"status":"disabled"}}'
+      return 0
+    fi
+    printf '{}'
+  }
+  run pp_apply_security_and_analysis acme
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"secret_scanning_ai_detection still disabled after PATCH"* ]]
+}
+
+@test "pp_apply_security_and_analysis skips GHAS-gated keys when GHAS is not enabled post-PATCH (AC6b)" {
+  # secret_scanning_non_provider_patterns is gated on GitHub Advanced Security.
+  # When GHAS is unavailable (status not "enabled"), the key may be "disabled"
+  # (present but disabled), but that's a legitimate skip, not a failure.
+  gh() {
+    [[ "$*" == *"-X PATCH"* ]] && return 0
+    if [[ "$*" == *"repos/$ORG/acme"* ]]; then
+      # Core keys enabled, GHAS disabled, GHAS-gated key also disabled
+      printf '{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"},"advanced_security":{"status":"not_enabled"},"secret_scanning_non_provider_patterns":{"status":"disabled"}}'
+      return 0
+    fi
+    printf '{}'
+  }
+  run pp_apply_security_and_analysis acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"secret_scanning_non_provider_patterns still disabled"* ]]
+}
+
 @test "a failing pp_apply_security_and_analysis propagates its name into FAILED_STEPS (AC6b/AC6d)" {
   _only_real_step pp_apply_security_and_analysis
   gh() {
