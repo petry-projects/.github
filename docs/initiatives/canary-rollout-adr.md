@@ -70,7 +70,7 @@ parks at the frontier), and any in-window failure is triaged before promotion, s
 
 ### Cadence
 
-[`.github/workflows/canary-rollout.yml`](../../.github/workflows/canary-rollout.yml) runs every **4 hours** (`cron: "0 */4 * * *"`),
+[`.github/workflows/canary-rollout.yml`](../../.github/workflows/canary-rollout.yml) runs every **4 hours** (`cron: "33 */4 * * *"`, offset off the top of the hour),
 ordering **autocut → promote-all → sync-issues**. `autocut` (#1069, gated by the `CANARY_AUTO_CUT` variable) cuts a new
 `<agent>/vX.Y.Z` + moves `next` whenever a registered reusable's blob on its host `main` HEAD differs from the current candidate.
 Timer promotion is **arm-gated**: when `CANARY_AUTO_PROMOTE == 'true'` the run advances every PROMOTE-ready agent one ring (BLOCKED
