@@ -701,6 +701,39 @@ _run_signature() {
   echo "$sig"
 }
 
+# Memoization cache for _run_completed_step_count: keyed by "repo:run_id".
+# Avoids duplicate gh run view calls for the same (repo, run_id). The $'\x01' sentinel marks
+# a prior lookup failure so it is not retried (mirrors _RUN_SIG_CACHE).
+declare -A _RUN_STEPCOUNT_CACHE=()
+
+# _run_completed_step_count <repo> <run_id> — the number of steps across all jobs that ran to
+# a terminal EXECUTED state (conclusion success|failure), i.e. steps that actually executed
+# candidate code. This is the discriminator _is_evicted_run needs (#1054): a concurrency-
+# evicted run (every job cancelled before any step ran) has ZERO such steps, while a human
+# cancel mid-flight has > 0. Empty repo/wildcard/id → "" exit 0. A gh error → "" exit 1
+# (fail-closed: an unreadable run is NOT classified as an eviction, so the gate keeps counting
+# it — the same fail-closed direction as _run_signature and _is_evicted_run).
+_run_completed_step_count() {
+  local repo="$1" id="$2" cache_key json count
+  { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
+  cache_key="${repo}:${id}"
+  if [[ -v _RUN_STEPCOUNT_CACHE["$cache_key"] ]]; then
+    if [ "${_RUN_STEPCOUNT_CACHE[$cache_key]}" = $'\x01' ]; then
+      echo ""; return 1  # cached lookup failure — signal to caller
+    fi
+    echo "${_RUN_STEPCOUNT_CACHE[$cache_key]}"
+    return 0
+  fi
+  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" || {
+    _RUN_STEPCOUNT_CACHE["$cache_key"]=$'\x01'
+    echo ""; return 1
+  }
+  count="$(jq '[.jobs[]?|.steps[]?|select(.conclusion=="success" or .conclusion=="failure")]|length' \
+    2>/dev/null <<< "$json" || echo "")"
+  _RUN_STEPCOUNT_CACHE["$cache_key"]="$count"
+  echo "$count"
+}
+
 # _failure_benign <repo> <run_id> <workflow_name> <patterns_tsv> — return 0 if this
 # in-window failure matches any allowlist entry, else 1. Fail-closed on an empty signature.
 _failure_benign() {
@@ -733,7 +766,10 @@ _failure_suspect() {
 }
 
 # _cumulative_health <agent> <since_z> <differs 0|1> <repo...> — failures +
-# startup_failures across EVERY given tier repo since the candidate cut. Failures
+# startup_failures across EVERY given tier repo since the candidate cut. A concurrency-
+# evicted run (cancelled + 0 completed steps — _is_evicted_run, #1047/#1054) is classified
+# BEFORE the benign filter and excluded entirely: it is not evidence either way. A cancelled
+# run WITH completed steps is NOT an eviction and is counted like a failure. Failures
 # matching the per-reusable known-benign allowlist (#1025 P2) are counted separately and
 # excluded from the blocking total; which allowlist entries apply depends on whether the
 # candidate changed the reusable (differs — see _benign_patterns, #668). A counted (non-
@@ -743,31 +779,81 @@ _failure_suspect() {
 # REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count>".
 _cumulative_health() {
   local agent="$1" since="$2" differs="$3"; shift 3
-  local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf
+  local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf rconcl scount
   wf="$(_agent_field "$agent" run_workflow)"
   patterns="$(_benign_patterns "$agent" "$differs")"
   suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
-    if [ -z "$patterns" ] && [ -z "$suspect_patterns" ]; then
-      # No benign or suspect patterns to match — count all failures with one jq pass,
-      # avoiding a gh run view call per failure.
-      fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
-    else
-      while IFS=$'\t' read -r rid rwf; do
-        if [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
-          benign=$(( benign + 1 ))
-        else
-          fail=$(( fail + 1 ))
-          if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
-            suspect=$(( suspect + 1 ))
-          fi
+    # Classify every failure- OR cancelled-conclusion run. A concurrency-evicted run
+    # (cancelled + 0 completed steps — #1047's _is_evicted_run) is not evidence either way,
+    # so it is classified BEFORE the benign filter and excluded from cum_fail. Order matters:
+    # the benign mechanism cannot catch an eviction, because an evicted run has no failed-step
+    # signature (_run_signature → "" → fails closed → would be counted) for a benign class to
+    # match (#1054). Every other run — a real `failure`, or a `cancelled` AFTER real work (a
+    # human cancel mid-flight, genuinely ambiguous) — is counted exactly as before via the
+    # benign/suspect path. A `failure` run is never an eviction (conclusion != cancelled), so
+    # it never incurs the extra step-count lookup.
+    while IFS=$'\t' read -r rid rwf rconcl; do
+      if [ "$rconcl" = "cancelled" ]; then
+        # || guard: _run_completed_step_count returns non-zero on an unreadable run, which
+        # would trip `set -e` here (this loop is NOT in an if-condition context). On failure
+        # scount is "" → _is_evicted_run fails closed → the run is counted, not excluded.
+        scount="$(_run_completed_step_count "$repo" "$rid")" || scount=""
+        if _is_evicted_run "$rconcl" "$scount"; then
+          continue  # not evidence either way — excluded from cum_fail before the benign filter
         fi
-      done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
-    fi
+      fi
+      if [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
+        benign=$(( benign + 1 ))
+      else
+        fail=$(( fail + 1 ))
+        if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
+          suspect=$(( suspect + 1 ))
+        fi
+      fi
+    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="cancelled")|[(.databaseId // "" | tostring),(.workflowName // ""),(.conclusion // "")]|@tsv' 2>/dev/null <<< "$json")
   done
   echo "$fail $startup $benign $suspect"
+}
+
+# _evaluate_run_ledger <agent> <candidate_commit> — for the `evaluate` output, name the run
+# ids COUNTED toward cum_fail and those EXCLUDED as concurrency-evictions, over the SAME
+# per-candidate window + tier repos the gate counts (#1054). This closes the observability gap
+# the incident hit: `cum_fail=1` alone gave no way to see WHICH run caused it, and tracing the
+# live false REGRESSION took ~20 minutes of manual API work. Read-only; it mirrors the eviction
+# classification in _cumulative_health so the ledger and cum_fail always agree. Emits nothing
+# when there are no failure/cancelled runs in the window (keeps a clean evaluate uncluttered).
+_evaluate_run_ledger() {
+  local agent="$1" cand="$2" wf cut_z repo json rid rconcl scount counted="" excluded=""
+  wf="$(_agent_field "$agent" run_workflow)"
+  cut_z="$(candidate_cut_date "$agent" "$cand")"
+  [ -z "$cut_z" ] && return 0
+  local chan_array=() ch all=() seen=" " dedup=() r
+  IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
+  for ch in "${chan_array[@]}"; do
+    while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all+=("$r"); done < <(resolve_members "$agent" "$ch")
+  done
+  for r in "${all[@]}"; do case "$seen" in *" $r "*) ;; *) dedup+=("$r"); seen+="$r ";; esac; done
+  for repo in "${dedup[@]}"; do
+    json="$(_run_json "$repo" "$wf" "$cut_z")"
+    while IFS=$'\t' read -r rid rconcl; do
+      [ -z "$rid" ] && continue
+      if [ "$rconcl" = "cancelled" ]; then
+        scount="$(_run_completed_step_count "$repo" "$rid")" || scount=""  # || guard: don't trip set -e
+        if _is_evicted_run "$rconcl" "$scount"; then
+          excluded+=" ${repo}#${rid}"
+          continue
+        fi
+      fi
+      counted+=" ${repo}#${rid}"
+    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="cancelled")|[(.databaseId // ""|tostring),(.conclusion // "")]|@tsv' 2>/dev/null <<< "$json")
+  done
+  [ -z "$counted" ] && [ -z "$excluded" ] && return 0
+  echo "run ledger (per-candidate window, tiers the gate counts):"
+  echo "  counted toward cum_fail:${counted:-  none}"
+  echo "  excluded as concurrency-evicted:${excluded:-  none}"
 }
 
 # _baseline_daily <agent> <window_days> <repo...> — per-day EXECUTED counts on the
@@ -1149,6 +1235,7 @@ cmd_evaluate() {
   else
     gate_summary_line "$transition" "$state" "$dwell" "$floor" "$sample" "$target" "$cum_fail" "$cum_startup" "$cum_benign"
     echo "decision for next ring '$frontier' [$transition]: $state"
+    _evaluate_run_ledger "$agent" "$cand"
     if [ "$state" = "BLOCKED" ]; then
       if [ "$triage" = "REGRESSION" ]; then
         echo "::error::triage=REGRESSION — candidate changed the reusable and a run failed since cut. HALT + hold; recommend rollback."

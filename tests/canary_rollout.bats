@@ -4600,3 +4600,219 @@ JSON
   [[ "$output" == *"prompts/"* ]]
   [[ "$output" == *"personas/"* ]]
 }
+
+# ── _run_completed_step_count: executed-step counter for eviction classification (#1054) ──
+# Counts steps that actually ran to a terminal executed state (conclusion success|failure)
+# across all jobs. A concurrency-evicted run (every job cancelled before any candidate code
+# ran) has ZERO such steps; a human cancel mid-flight has > 0. Fail-closed: an unreadable
+# run yields an empty count (→ _is_evicted_run treats it as NOT an eviction, so it is counted).
+@test "_run_completed_step_count: an all-cancelled run with no executed steps counts 0 (evicted shape) (#1054)" {
+  local sb; sb="$(mktemp -d "$BATS_TEST_TMPDIR/sb.XXXXXX")"; export PATH="$sb:$PATH"
+  cat > "$sb/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"run view"*) echo '{"jobs":[{"conclusion":"cancelled","steps":[{"name":"Set up job","conclusion":"cancelled"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$sb/gh"
+  run bash -c "source '$ORCH'; _run_completed_step_count petry-projects/.github-private 555"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+@test "_run_completed_step_count: a human cancel mid-flight counts the steps that executed (#1054)" {
+  local sb; sb="$(mktemp -d "$BATS_TEST_TMPDIR/sb.XXXXXX")"; export PATH="$sb:$PATH"
+  cat > "$sb/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"run view"*) echo '{"jobs":[{"conclusion":"cancelled","steps":[{"name":"Build","conclusion":"success"},{"name":"Test","conclusion":"failure"},{"name":"Deploy","conclusion":"cancelled"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$sb/gh"
+  run bash -c "source '$ORCH'; _run_completed_step_count petry-projects/.github-private 556"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]   # Build(success) + Test(failure) executed; Deploy(cancelled) did not
+}
+@test "_run_completed_step_count: an unreadable run fails closed (empty count, non-zero rc) (#1054)" {
+  local sb; sb="$(mktemp -d "$BATS_TEST_TMPDIR/sb.XXXXXX")"; export PATH="$sb:$PATH"
+  cat > "$sb/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"run view"*) exit 1 ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$sb/gh"
+  run bash -c "source '$ORCH'; _run_completed_step_count petry-projects/.github-private 557"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+# ── orchestrator: concurrency-EVICTED runs excluded from cum_fail + sample (#1054, slice 2) ──
+# Lay out the dev-lead cross-repo frontier exactly like _benign_stub (next=cand cccc;
+# ring0/ring1/stable=prior bbbb; reusable byte-identical so differs=0). The source tier
+# (.github-private) returns <n_success> success runs plus <n_cancelled> `cancelled` runs;
+# `gh run view` yields <view_json> for every run so the orchestrator can read each run's
+# completed-step count and classify it with _is_evicted_run BEFORE the benign filter.
+# Only .github-private returns runs (other tier repos → []) so counts are deterministic.
+# Times are in HOURS so a test can drive dwell below the 4h next->ring0 floor.
+_evicted_stub() {
+  local cut_hours="$1" run_hours_ago="$2" n_success="$3" n_cancelled="$4" view_json="$5"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-${cut_hours} hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_hours}H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-${run_hours_ago} hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_hours_ago}H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*"petry-projects/.github-private"*)
+    jq -nc --arg d "$run_iso" \
+      '[range($n_success)|{conclusion:"success",createdAt:\$d,databaseId:(2000+.),workflowName:"Dev-Lead Agent"}]
+       + [range($n_cancelled)|{conclusion:"cancelled",createdAt:\$d,databaseId:(3000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run list"*) echo "[]" ;;
+  *"run view"*) echo '$view_json' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: an evicted run (cancelled + 0 completed steps) is excluded from cum_fail → not REGRESSION, cum_fail=0 (#1054)" {
+  # The real observed shape: 5 success + 1 cancelled-with-0-steps (every job cancelled).
+  # dwell 2h < the 4h next->ring0 floor, so the clean verdict is SOAKING on dwell — never a
+  # REGRESSION recommending rollback, and cum_fail stays 0.
+  _evicted_stub 2 1 5 1 '{"jobs":[{"conclusion":"cancelled","steps":[{"name":"Set up job","conclusion":"cancelled"}]}]}'
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cum_fail=0"* ]]
+  [[ "$output" != *"REGRESSION"* ]]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"SOAKING"* ]]
+}
+
+@test "orchestrator: a cancelled run WITH completed steps is still counted in cum_fail — not laundered into benign (#1054)" {
+  # A human cancelling mid-flight: cancelled conclusion but 3 completed (success) steps.
+  # Genuinely ambiguous → NOT an eviction → counted → BLOCKED. cum_fail=1 and benign=0
+  # (the empty failed-step signature must not be laundered into the benign allowlist).
+  _evicted_stub 6 1 5 1 '{"jobs":[{"conclusion":"cancelled","steps":[{"name":"Build","conclusion":"success"},{"name":"Test","conclusion":"success"},{"name":"Deploy","conclusion":"success"}]}]}'
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cum_fail=1"* ]]
+  [[ "$output" == *"benign=0"* ]]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: an evicted run is excluded from the source-tier sample — not scored as a success (#1054)" {
+  # 0 success + 3 evicted (cancelled/0-step). Evictions must not fill the sample floor:
+  # the source-tier sample stays 0 (not scored as successes) and cum_fail stays 0.
+  _evicted_stub 6 1 0 3 '{"jobs":[{"conclusion":"cancelled","steps":[]}]}'
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cum_fail=0"* ]]
+  [[ "$output" == *"sample=0/"* ]]
+}
+
+# ── orchestrator: evaluate names the counted + excluded run ids (#1054 AC4) ──
+# One genuine `failure` run (id 4000 — counted toward cum_fail) plus one cancelled/0-step
+# eviction (id 3000 — excluded). `gh run view` discriminates by id so the two runs classify
+# differently in a single evaluate; the ledger must name both.
+_evicted_ledger_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-6 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-6H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-1 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-1H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run view 3000"*) echo '{"jobs":[{"conclusion":"cancelled","steps":[{"name":"Set up job","conclusion":"cancelled"}]}]}' ;;
+  *"run view 4000"*) echo '{"jobs":[{"steps":[{"name":"Compile","conclusion":"failure"}]}]}' ;;
+  *"run view"*) echo '{"jobs":[{"steps":[]}]}' ;;
+  *"run list"*"petry-projects/.github-private"*)
+    jq -nc --arg d "$run_iso" \
+      '[{conclusion:"failure",createdAt:\$d,databaseId:4000,workflowName:"Dev-Lead Agent"},
+        {conclusion:"cancelled",createdAt:\$d,databaseId:3000,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: evaluate names the run ids counted toward cum_fail and those excluded as evicted (#1054)" {
+  _evicted_ledger_stub
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  # The counted failure (4000) and the excluded eviction (3000) are both named, in their
+  # respective ledgers, so an operator can see WHICH run drove cum_fail without manual API work.
+  [[ "$output" == *"4000"* ]]
+  [[ "$output" == *"3000"* ]]
+  [[ "$output" == *"counted"* ]]
+  [[ "$output" == *"evict"* ]]
+  [[ "$output" == *"cum_fail=1"* ]]
+}
+
+@test "orchestrator: a cancelled run whose gh run view is unreadable fails closed (counted, no crash) (#1054)" {
+  # Regression guard for the set -e trap: _run_completed_step_count returns non-zero on an
+  # unreadable run; that must NOT abort the gate. The cancelled run cannot be proven an
+  # eviction, so it fails closed → counted (cum_fail=1), and evaluate still exits cleanly.
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-6 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-6H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-1 hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-1H" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run view"*) exit 1 ;;
+  *"run list"*"petry-projects/.github-private"*)
+    jq -nc --arg d "$run_iso" \
+      '[{conclusion:"cancelled",createdAt:\$d,databaseId:7000,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run list"*) echo "[]" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cum_fail=1"* ]]
+  [[ "$output" == *"7000"* ]]
+}
