@@ -92,8 +92,9 @@ argate_iso_to_epoch() {
 # group by serializing a dispatch burst ahead of it (AC #2).
 # ---------------------------------------------------------------------------
 argate_concurrent() {
-  local runs="${1:-[]}" n
-  n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
+  local runs="${1:-[]}" n current_run_id="${GITHUB_RUN_ID:-}"
+  n="$(jq -r --arg current "$current_run_id" \
+    '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued") | select($current == "" or (.databaseId | tostring) != $current)] | length' \
     <<<"$runs" 2>/dev/null || printf '0')"
   arl_sanitize_int "$n"
 }
@@ -168,7 +169,7 @@ argate_last_failure_epoch() {
   # Build a jq array membership test from the failure-conclusion set.
   jqset="$(printf '%s\n' $ARGATE_FAILURE_CONCLUSIONS | jq -R . | jq -sc .)"
   latest="$(jq -r --argjson set "$jqset" \
-    '[.[]? | select(($set | index(.conclusion // "")) != null) | .createdAt // empty] | max // empty' \
+    '[.[]? | . as $r | select(($set | index($r.conclusion // "")) != null) | .createdAt // empty] | max // empty' \
     <<<"$runs" 2>/dev/null || printf '')"
   argate_iso_to_epoch "$latest"
 }

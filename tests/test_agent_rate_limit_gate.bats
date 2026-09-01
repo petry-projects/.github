@@ -158,6 +158,15 @@ refute_mutated() {
   [ "$output" = "0" ]
 }
 
+@test "argate_concurrent excludes the current run (GITHUB_RUN_ID) from the in-progress count" {
+  # databaseId 1 and 2 are both in_progress; GITHUB_RUN_ID=2 is this gate's own run.
+  # Only databaseId 1 should count — the gate must not see itself as a concurrent run.
+  local j; j="$(runs_json 'in_progress@2026-09-01T00:00:00Z' 'in_progress@2026-09-01T00:01:00Z')"
+  run bash -c "export GITHUB_RUN_ID=2; ARGATE_LIB_ONLY=1 source '$GATE'; argate_concurrent '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
 # --------------------------------------------------------------------------
 # Enforcing vs log-only split (AC #5)
 # --------------------------------------------------------------------------
@@ -218,10 +227,10 @@ refute_mutated() {
 @test "enforce: 3 consecutive recent failures (>= threshold) within backoff defers" {
   write_config "initiative-driver" 1 10 20 3 30
   # 3 failures, the newest 60s before now → within the 30-min backoff → breaker open.
-  # now = 2026-09-01T00:05:00Z (epoch 1893456300)
+  # now = 2026-09-01T00:05:00Z (epoch 1788221100)
   export GH_RUNS_JSON
   GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
-  run bash -c "SOURCE_NOW=1893456300 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=defer"* ]]
 }
@@ -234,7 +243,7 @@ refute_mutated() {
   export GH_RUNS_JSON
   GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
   export GH_ISSUE_BODY="tracking issue, no marker yet"
-  run bash -c "SOURCE_NOW=1893456300 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=defer"* ]]
   # Exactly one comment posting the breaker marker, and the label applied.
@@ -251,7 +260,7 @@ refute_mutated() {
   # Body already carries the marker for initiative-driver → no second post.
   export GH_ISSUE_BODY
   GH_ISSUE_BODY="prior escalation $(bash -c "source '$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh'; arl_breaker_marker initiative-driver")"
-  run bash -c "SOURCE_NOW=1893456300 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=defer"* ]]
   run grep -c 'issue comment' "$GH_STUB_LOG"
@@ -266,7 +275,7 @@ refute_mutated() {
   export GH_RUNS_JSON
   GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
   export GH_ISSUE_BODY="no marker"
-  run bash -c "DRY_RUN=true SOURCE_NOW=1893456300 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  run bash -c "DRY_RUN=true SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=allow"* ]]
   refute_mutated
