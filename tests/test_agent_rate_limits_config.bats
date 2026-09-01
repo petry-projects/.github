@@ -35,26 +35,33 @@ AGENT_TYPES=(dev-lead compliance-audit feature-ideation initiative-driver)
   [ "$status" -eq 0 ]
 }
 
-@test "status records the config is provisional / pending human sign-off" {
-  # Unlike pr-limits (already signed off), these numbers are NOT yet signed off
-  # (ADR §6/§7). A regression to signed-off without a human gate must fail CI.
+@test "status records the config is signed-off (epic #636 gate consumed, #640)" {
+  # The maintainer sign-off on #636 (2026-09-01) is consumed by the Phase-4
+  # wiring (#640): the per-agent limits are now live for initiative-driver
+  # (enforcing) and log-only for the rest. A regression BACK to provisional would
+  # falsely re-open the sign-off gate, so pin the signed-off state.
   run jq -er '.status' "$CONFIG"
   [ "$status" -eq 0 ]
-  [ "$output" = "provisional" ]
+  [ "$output" = "signed-off" ]
 }
 
-@test "an inline _note documents the numbers are pending sign-off" {
+@test "an inline _note records the human sign-off" {
   run jq -er '._note' "$CONFIG"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
-}
-
-@test "the _note records the config is inert (no consumer wired yet)" {
-  # AC #3: inert on merge. Assert the sign-off/inert intent is written down so a
-  # reader knows nothing enforces these values yet.
-  run jq -er '._note | ascii_downcase | test("inert|sign-off|sign off")' "$CONFIG"
+  # The sign-off provenance must be written down so a reader knows the gate cleared.
+  run jq -er '._note | ascii_downcase | test("sign-off|sign off")' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
+}
+
+@test "the weekly glide-path breaker stays disarmed (weekly_all.enabled false; AC #6)" {
+  # Signing off the per-agent limits must NOT arm the weekly glide-path breaker
+  # (#994) — that is an explicit out-of-scope follow-up. `jq -r`: a legitimate
+  # `false` must not flip the exit code.
+  run jq -r '.org_wide.token_budget.limits.weekly_all.enabled' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
 }
 
 @test "_schema_version is a positive integer" {

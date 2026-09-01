@@ -75,16 +75,57 @@ mark exists) is guarded by
 run in CI by
 [`.github/workflows/agent-rate-limits-tests.yml`](../.github/workflows/agent-rate-limits-tests.yml).
 
-## 3. Status — inert pending human sign-off
+## 3. Status — signed off and wired (Phase 4)
 
-Like the pr-limits config before its own sign-off gate, **every number in this
-file is a proposal (`status: provisional`) pending human sign-off** (epic
-[#636](https://github.com/petry-projects/.github/issues/636) gate). The config is
-**inert on merge**: no workflow, gate, or engine reads it in the Phase-2 story
-that adds it ([#638](https://github.com/petry-projects/.github/issues/638)). The
-Phase-3 gate library and the Phase-4/5 wiring consume it later, only after the
-values are signed off. This mirrors the PR-Limits staging exactly (ADR §7,
-[`pr-limits.md`](pr-limits.md)).
+The per-agent-type limits and consecutive-failure breakers are **signed off**
+(`status: signed-off`) — the maintainer sign-off comment on epic
+[#636](https://github.com/petry-projects/.github/issues/636) (2026-09-01) cleared
+the gate, mirroring the PR-Limits sign-off exactly (ADR §7,
+[`pr-limits.md`](pr-limits.md)). They are now **consumed at dispatch time** by the
+Phase-4 orchestrator
+[`scripts/agent-rate-limit-gate.sh`](../scripts/agent-rate-limit-gate.sh)
+([#640](https://github.com/petry-projects/.github/issues/640)), which wraps the
+pure gate library. The org-wide token-budget breaker (§4) stays out of the live
+path — `AGENT_TOKEN_BUDGET_ENABLED` is unset and
+`org_wide.token_budget.limits.weekly_all.enabled` stays `false` — so arming the
+weekly glide-path breaker remains a separate, deliberately out-of-scope change
+([#994](https://github.com/petry-projects/.github/issues/994)).
+
+### 3.1 Canary scope — enforcing vs log-only, and the promotion path (AC #5)
+
+Only **`initiative-driver` enforces** in this rollout: it is pure bash (no model
+spend) and the direct target of the dispatch-race defect
+[#443](https://github.com/petry-projects/.github/issues/443). Its stub
+(`standards/workflows/initiative-driver.yml` and every enrolled repo's live copy)
+calls the orchestrator with `--mode enforce`; a `defer` decision simply skips the
+dispatch step (a clean no-op — never a cancel, never a job failure).
+
+**Every other agent type runs the gate in `--mode log-only`:** the decision is
+computed from run history and logged, but the emitted decision is always `allow`,
+so nothing is acted on. `feature-ideation-reusable.yml` is wired this way.
+
+**Because Actions runners are ephemeral, the orchestrator derives all counters
+from run history** (`gh run list`) rather than a state file — concurrency,
+cooldown's last-run, the rolling daily count, and the breaker's
+`consecutive_failures` — and feeds them to the library's pure
+`arl_admission_decision` / `arl_breaker_decision`. It never reads or writes
+`AGENT_RATE_LIMITS_STATE`.
+
+**To promote another agent type from log-only to enforcing** (a discrete
+follow-up change, one agent type at a time):
+
+1. Confirm the agent type's limits in `agent-rate-limits.json` are the intended
+   enforcing values (they already are — this file is the source of truth).
+2. In that agent's dispatch workflow, change the gate step's `--mode log-only` to
+   `--mode enforce`, and add an `if: steps.<gate-step-id>.outputs.decision !=
+   'defer'` guard to the dispatch step so a `defer` skips dispatch while an
+   empty/missing decision still dispatches (fail-open — an outage of the gate must
+   never stop the fleet).
+3. Provide `--tracking-repo` / `--tracking-issue` so an open breaker escalates the
+   library's marker + `needs-human-review` label onto a tracking issue exactly
+   once (deduped).
+4. Ship it as its own PR with its own review — never flip several agent types in
+   one change.
 
 ## 4. The token-budget breaker
 

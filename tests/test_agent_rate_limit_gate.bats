@@ -1,0 +1,332 @@
+#!/usr/bin/env bats
+# Tests for scripts/agent-rate-limit-gate.sh — the Phase-4 dispatch-time
+# orchestrator that wires the pure gate library (scripts/lib/agent-rate-limit.sh)
+# into the agent-dispatching workflows (#640, Phase 4 of epic #636).
+#
+# The orchestrator is the thin I/O glue AGENTS.md prescribes: it gathers facts
+# from run history (via a single `gh run list`), DERIVES the admission counters
+# and the breaker's consecutive_failures from that history (no state backend —
+# Actions runners are ephemeral; AC #3), and feeds them to the library's pure
+# arl_admission_decision / arl_breaker_decision. It enforces for the
+# initiative-driver canary and runs log-only for every other agent type (AC #5),
+# escalates an open breaker exactly once via the library's marker/label idiom
+# (AC #4), and honours DRY_RUN (AC #7).
+#
+# Every threshold is read by the library from standards/agent-rate-limits.json —
+# no number is restated here (AC #1). `gh` is stubbed; no network is touched.
+
+bats_require_minimum_version 1.5.0
+
+GATE="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/agent-rate-limit-gate.sh"
+
+setup() {
+  TMP="$(mktemp -d "$BATS_TEST_TMPDIR/gate.XXXXXX")"
+  export TMP
+
+  # A dispatching gh stub: `run list` returns the scripted run history,
+  # `issue view` returns the scripted tracking-issue body, and every mutating
+  # subcommand is logged (and no-ops) so a test can assert exactly-once posting
+  # and read-only-ness. Behaviour is env-driven so no per-test stub variant is
+  # needed (mirrors test/scripts/compliance-remediate/stubs/gh).
+  mkdir -p "$TMP/bin"
+  cat >"$TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${GH_STUB_LOG:-}" ]; then
+  printf '%q ' "$@" >>"$GH_STUB_LOG"
+  printf '\n' >>"$GH_STUB_LOG"
+fi
+case "$1 ${2:-}" in
+  "run list")
+    printf '%s' "${GH_RUNS_JSON:-[]}"
+    ;;
+  "issue view")
+    printf '{"body":%s}' "$(printf '%s' "${GH_ISSUE_BODY:-}" | jq -Rs .)"
+    ;;
+  *)
+    : # comment / edit / anything else: no-op, exit 0
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$TMP/bin/gh"
+  PATH="$TMP/bin:$PATH"
+  export PATH
+  export GH_STUB_LOG="$TMP/gh.log"
+  : >"$GH_STUB_LOG"
+
+  # A single-agent config so the library resolves thresholds from a file, never
+  # a hardcoded number (AC #1). Signature: agent max cooldown daily cb_thr cb_backoff.
+  write_config() {
+    local agent="$1" max="$2" cooldown="$3" daily="$4" cb_threshold="$5" cb_backoff="$6"
+    export AGENT_RATE_LIMITS_CONFIG="$TMP/agent-rate-limits.json"
+    jq -n \
+      --arg agent "$agent" \
+      --argjson max "$max" --argjson cooldown "$cooldown" --argjson daily "$daily" \
+      --argjson cb_threshold "$cb_threshold" --argjson cb_backoff "$cb_backoff" \
+      '{
+        status: "signed-off", _schema_version: 1,
+        agent_types: { ($agent): {
+          max_concurrent_runs: $max, max_runtime_minutes: 30,
+          cooldown_minutes: $cooldown, daily_run_budget: $daily,
+          circuit_breaker: { consecutive_failure_threshold: $cb_threshold, backoff_minutes: $cb_backoff }
+        } },
+        org_wide: {},
+        exempt_actors: ["dependabot[bot]", "@petry-projects/org-leads"],
+        exempt_labels: ["security"]
+      }' >"$AGENT_RATE_LIMITS_CONFIG"
+  }
+
+  # Build a run-history JSON array. Each argument is "conclusion@ISO8601"; a
+  # status of in_progress/queued is expressed as "in_progress@ISO" (empty
+  # conclusion). Runs are emitted as gh's `run list --json` shape.
+  runs_json() {
+    local out="[]" spec concl created status
+    for spec in "$@"; do
+      concl="${spec%@*}"; created="${spec#*@}"
+      case "$concl" in
+        in_progress|queued) status="$concl"; concl="" ;;
+        *) status="completed" ;;
+      esac
+      out="$(jq -c \
+        --arg s "$status" --arg c "$concl" --arg t "$created" \
+        '. + [{databaseId: (length+1), status: $s, conclusion: (if $c=="" then null else $c end), createdAt: $t}]' \
+        <<<"$out")"
+    done
+    printf '%s' "$out"
+  }
+}
+
+teardown() {
+  [ -n "${TMP:-}" ] && [ -d "$TMP" ] && rm -rf "$TMP"
+}
+
+# Assert the gh log contains no mutating issue subcommand.
+refute_mutated() {
+  touch "$GH_STUB_LOG"
+  run grep -qE 'issue comment|issue edit|--add-label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
+  [ "$status" -eq 1 ]
+}
+
+# --------------------------------------------------------------------------
+# Sourcing contract — set -euo pipefail-safe, defines the orchestrator API.
+# --------------------------------------------------------------------------
+@test "sourcing the orchestrator is side-effect-free and defines argate_gate" {
+  run bash -c "set -euo pipefail; ARGATE_LIB_ONLY=1 source '$GATE'; declare -F argate_gate >/dev/null && echo ok"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Pure derivation from run history (AC #3) — no state backend involved.
+# --------------------------------------------------------------------------
+@test "argate_concurrent counts in-progress and queued runs" {
+  local j; j="$(runs_json 'success@2026-09-01T00:00:00Z' 'in_progress@2026-09-01T01:00:00Z' 'queued@2026-09-01T02:00:00Z')"
+  run bash -c "ARGATE_LIB_ONLY=1 source '$GATE'; argate_concurrent '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
+@test "argate_consecutive_failures counts the leading failure streak (most-recent-first)" {
+  # Newest → oldest: failure, failure, success, failure  => streak of 2.
+  local j; j="$(runs_json 'failure@2026-09-01T00:00:00Z' 'success@2026-09-01T01:00:00Z' 'failure@2026-09-01T02:00:00Z' 'failure@2026-09-01T03:00:00Z')"
+  run bash -c "ARGATE_LIB_ONLY=1 source '$GATE'; argate_consecutive_failures '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
+@test "argate_consecutive_failures is zero when the newest completed run succeeded" {
+  local j; j="$(runs_json 'failure@2026-09-01T00:00:00Z' 'failure@2026-09-01T01:00:00Z' 'success@2026-09-01T02:00:00Z')"
+  run bash -c "ARGATE_LIB_ONLY=1 source '$GATE'; argate_consecutive_failures '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "argate_consecutive_failures skips a cancelled run without breaking the streak (#1047 lesson)" {
+  # A concurrency-evicted (cancelled) run must neither count as a failure nor
+  # reset the streak: newest→oldest failure, cancelled, failure, success => streak of 2.
+  local j; j="$(runs_json 'failure@2026-09-01T03:00:00Z' 'cancelled@2026-09-01T02:00:00Z' 'failure@2026-09-01T01:00:00Z' 'success@2026-09-01T00:00:00Z')"
+  run bash -c "ARGATE_LIB_ONLY=1 source '$GATE'; argate_consecutive_failures '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
+@test "argate_concurrent ignores completed runs" {
+  local j; j="$(runs_json 'success@2026-09-01T00:00:00Z' 'failure@2026-09-01T01:00:00Z')"
+  run bash -c "ARGATE_LIB_ONLY=1 source '$GATE'; argate_concurrent '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "argate_concurrent excludes the current run (GITHUB_RUN_ID) from the in-progress count" {
+  # databaseId 1 and 2 are both in_progress; GITHUB_RUN_ID=2 is this gate's own run.
+  # Only databaseId 1 should count — the gate must not see itself as a concurrent run.
+  local j; j="$(runs_json 'in_progress@2026-09-01T00:00:00Z' 'in_progress@2026-09-01T00:01:00Z')"
+  run bash -c "export GITHUB_RUN_ID=2; ARGATE_LIB_ONLY=1 source '$GATE'; argate_concurrent '$j'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+# --------------------------------------------------------------------------
+# Enforcing vs log-only split (AC #5)
+# --------------------------------------------------------------------------
+@test "enforce: at the concurrency cap the decision is defer" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"defer"* ]]
+}
+
+@test "log-only: a computed defer is emitted as allow and never acted on" {
+  write_config "feature-ideation" 1 0 1 3 60
+  # 1 in-progress run == the cap of 1, so the COMPUTED decision is defer.
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' feature-ideation --mode log-only --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"allow"* ]]
+  # It must log that the enforced decision WOULD have been defer (observability).
+  [[ "$output" == *"defer"* ]]
+  refute_mutated
+}
+
+# --------------------------------------------------------------------------
+# Defer is a clean no-op: never a job failure, never a mutation (AC #1)
+# --------------------------------------------------------------------------
+@test "enforce: a defer exits 0 (defer is never a job failure) and mutates nothing" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  refute_mutated
+}
+
+@test "enforce: writes the decision to GITHUB_OUTPUT for the workflow to gate on" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  export GITHUB_OUTPUT="$TMP/gh_output"
+  : >"$GITHUB_OUTPUT"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  run grep -q '^decision=defer$' "$GITHUB_OUTPUT"
+  [ "$status" -eq 0 ]
+}
+
+@test "enforce: under all limits with a clean breaker allows" {
+  write_config "initiative-driver" 1 10 20 3 30
+  # No runs at all → concurrency 0, no cooldown, daily 0, no failures → allow.
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Consecutive-failure breaker derived from run history feeds the library (AC #3/#4)
+# --------------------------------------------------------------------------
+@test "enforce: 3 consecutive recent failures (>= threshold) within backoff defers" {
+  write_config "initiative-driver" 1 10 20 3 30
+  # 3 failures, the newest 60s before now → within the 30-min backoff → breaker open.
+  # now = 2026-09-01T00:05:00Z (epoch 1788221100)
+  export GH_RUNS_JSON
+  GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Breaker escalation posts exactly once and dedups (AC #4)
+# --------------------------------------------------------------------------
+@test "enforce: an open breaker escalates once — posts the marker and applies the label" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON
+  GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
+  export GH_ISSUE_BODY="tracking issue, no marker yet"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  # Exactly one comment posting the breaker marker, and the label applied.
+  run grep -c 'issue comment' "$GH_STUB_LOG"
+  [ "$output" = "1" ]
+  run grep -qE 'issue edit .*--add-label' "$GH_STUB_LOG"
+  [ "$status" -eq 0 ]
+}
+
+@test "enforce: escalation dedups when the marker is already on the tracking issue" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON
+  GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
+  # Body already carries the marker for initiative-driver → no second post.
+  export GH_ISSUE_BODY
+  GH_ISSUE_BODY="prior escalation $(bash -c "source '$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh'; arl_breaker_marker initiative-driver")"
+  run bash -c "SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  run grep -c 'issue comment' "$GH_STUB_LOG"
+  [ "$output" = "0" ]
+}
+
+# --------------------------------------------------------------------------
+# DRY_RUN mutates nothing (AC #7)
+# --------------------------------------------------------------------------
+@test "DRY_RUN: an open breaker logs the intended decision but mutates nothing" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON
+  GH_RUNS_JSON="$(runs_json 'failure@2026-09-01T00:04:00Z' 'failure@2026-09-01T00:03:00Z' 'failure@2026-09-01T00:02:00Z')"
+  export GH_ISSUE_BODY="no marker"
+  run bash -c "DRY_RUN=true SOURCE_NOW=1788221100 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  refute_mutated
+}
+
+@test "DEV_LEAD_DRY_RUN is honoured as an alias for DRY_RUN" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "DEV_LEAD_DRY_RUN=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Exempt actors/labels bypass the gate (AC #1, same policy as the library)
+# --------------------------------------------------------------------------
+@test "enforce: an exempt actor is allowed even over the concurrency cap" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor 'dependabot[bot]'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "enforce: an exempt label is allowed even over the concurrency cap" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --labels security"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# Fail-safe: a run-list fetch failure degrades to allow (AC #1)
+# --------------------------------------------------------------------------
+@test "enforce: an unreadable config degrades to allow (never blocks the fleet)" {
+  export AGENT_RATE_LIMITS_CONFIG="$TMP/does-not-exist.json"
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json 'in_progress@2026-09-01T00:00:00Z' 'in_progress@2026-09-01T00:01:00Z')"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# The gate is read-only on the happy path (AC #1)
+# --------------------------------------------------------------------------
+@test "enforce: an allow decision issues no mutating gh subcommand" {
+  write_config "initiative-driver" 1 10 20 3 30
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  refute_mutated
+}

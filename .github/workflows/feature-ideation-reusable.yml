@@ -184,6 +184,7 @@ jobs:
       contents: read
       discussions: write
       id-token: write
+      actions: read  # agent-rate-limit gate reads this workflow's run history (log-only, #640)
     steps:
       - name: Checkout calling repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -225,6 +226,24 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+
+      - name: Agent rate-limit admission gate (log-only canary)
+        # Phase-4 wiring of the source-side gate (scripts/lib/agent-rate-limit.sh)
+        # before the ideate dispatch (#640, AC #1/#5). feature-ideation runs the gate
+        # in LOG-ONLY mode: the admission + consecutive-failure-breaker decision is
+        # DERIVED from this workflow's run history (no state backend — AC #3) and
+        # logged, but never acted on. Only initiative-driver enforces in this story
+        # (AC #5). Promotion path: change `--mode log-only` to `--mode enforce` here
+        # in a discrete follow-up (see standards/agent-rate-limits.md). Fail-safe: the
+        # step can never fail the ideation run.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash .feature-ideation-tooling/scripts/agent-rate-limit-gate.sh feature-ideation \
+            --mode log-only \
+            --workflow "${{ github.workflow }}" \
+            --actor "${{ github.actor }}" || true
 
       - name: Run Claude Code — BMAD Analyst
         id: claude

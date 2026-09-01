@@ -1,6 +1,6 @@
 {
-  "status": "provisional",
-  "_note": "PROVISIONAL — pending human sign-off (epic #636 gate). This is the machine-readable single source of truth for per-agent-type rate limits, circuit breakers, and the org-wide Claude token-budget breaker. Decision record: docs/initiatives/agent-rate-limits-adr.md (#637). Every number here is a PROPOSAL from ADR §6/§7, not a signed-off value. The config is INERT on merge: no workflow, gate, or engine reads it in this Phase-2 story (#638) — the Phase-3 gate library and Phase-4/5 wiring consume it later, only after human sign-off, mirroring the pr-limits sign-off gate (epic #505 gate #566). Consumers read values from this single file, never hardcoded.",
+  "status": "signed-off",
+  "_note": "Human sign-off 2026-09-01 (epic #636 gate; maintainer sign-off comment on #636). This is the machine-readable single source of truth for per-agent-type rate limits, circuit breakers, and the org-wide Claude token-budget breaker. Decision record: docs/initiatives/agent-rate-limits-adr.md (#637). The per-agent-type limits and consecutive-failure breakers are now CONSUMED at dispatch time by scripts/agent-rate-limit-gate.sh (Phase 4, #640): initiative-driver ENFORCES, every other agent type runs log-only. org_wide.token_budget stays out of the live path (AGENT_TOKEN_BUDGET_ENABLED is unset) and org_wide.limits.weekly_all.enabled stays false — arming the weekly glide-path breaker is a separate, deliberately-out-of-scope change (#994). Consumers read values from this single file, never hardcoded.",
   "_schema_version": 1,
   "agent_types": {
     "dev-lead": {
