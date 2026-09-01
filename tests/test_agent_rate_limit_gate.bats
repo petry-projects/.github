@@ -103,6 +103,7 @@ teardown() {
 
 # Assert the gh log contains no mutating issue subcommand.
 refute_mutated() {
+  touch "$GH_STUB_LOG"
   run grep -qE 'issue comment|issue edit|--add-label|api -X (POST|PATCH|PUT|DELETE)' "$GH_STUB_LOG"
   [ "$status" -eq 1 ]
 }
