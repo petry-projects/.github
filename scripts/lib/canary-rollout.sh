@@ -386,6 +386,26 @@ benign_match() {
   if [[ "$sig" =~ $step_re ]]; then echo "yes"; else echo "no"; fi
 }
 
+# _is_evicted_run <conclusion> <completed_step_count> — pure classifier for a
+# concurrency-EVICTED run (#1047, wired by slice 2 #1054). Returns 0 (IS an
+# eviction — not evidence either way) iff <conclusion> is exactly "cancelled" AND
+# <completed_step_count> is exactly 0: a `cancel-in-progress: true` preemption on
+# the reusable's per-issue/per-PR lane (#402) that ran no candidate code and so
+# cannot be evidence of a regression. Returns non-zero in EVERY other case —
+# `cancelled` with a non-zero step count (a human cancelling mid-flight, genuinely
+# ambiguous and NOT to be laundered into "benign"), any other conclusion, and a
+# missing/empty/non-numeric count. Fail closed: when in doubt it is NOT an eviction,
+# so the gate keeps counting it. Discriminates on the completed-step count, not on
+# conclusion alone. Emits nothing; sourced under `set -euo pipefail`, so it returns
+# and never exits.
+_is_evicted_run() {
+  [ "$#" -ge 2 ] || return 1
+  local conclusion="$1" count="$2"
+  [ "$conclusion" = "cancelled" ] || return 1
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$count" -eq 0 ]
+}
+
 # next_channel_in_order <current_channel> <ordered_channels_csv>
 # Given the frontier channel and the ordered channel list (e.g. "next,ring0,ring1,stable"),
 # echo the channel that a PROMOTE advances next, or empty if already at the last ring.
