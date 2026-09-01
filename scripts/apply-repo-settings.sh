@@ -192,18 +192,34 @@ apply_labels() {
     label_configs+=("${_PERSONA_OPT_OUT_CONFIGS_CACHE[@]}")
   fi
 
+  # Record per-label failures rather than swallowing them. The old
+  # `gh label create … && ok || err` chain always evaluated to 0, so a genuine
+  # apply failure was invisible: the driver's `apply_labels || FAILED_STEPS+=(...)`
+  # never fired, and the run reported success having applied nothing (issue #1038,
+  # AC6a). Keep applying the remaining labels on a failure, then return non-zero
+  # if any label failed.
+  local label_failed=false
   for config in "${label_configs[@]}"; do
     IFS='|' read -r name color description <<< "$config"
     if [ "$DRY_RUN" = "true" ]; then
       skip "DRY_RUN=true — would create/update label '$name' (#$color) in $ORG/$repo"
     else
-      gh label create "$name" \
+      if gh label create "$name" \
         --repo "$ORG/$repo" \
         --description "$description" \
         --color "$color" \
-        --force 2>/dev/null && ok "  label '$name' applied" || err "  failed to apply label '$name'"
+        --force 2>/dev/null; then
+        ok "  label '$name' applied"
+      else
+        err "  failed to apply label '$name'"
+        label_failed=true
+      fi
     fi
   done
+
+  if [ "$label_failed" = true ]; then
+    return 1
+  fi
 }
 
 apply_settings() {
@@ -350,13 +366,24 @@ apply_codeql_default_setup() {
        -F state=configured \
        -F query_suite=default 2>&1); then
     ok "  CodeQL default setup enabled"
-  else
-    # Non-fatal: log warning and continue so --all runs are not blocked by
-    # repos that lack code scanning capability (private without GHAS,
-    # archived, or empty default branch).
-    warn "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
     return 0
   fi
+
+  # The PATCH failed. Distinguish a GENUINELY BENIGN response — the repo simply
+  # cannot (or need not) run CodeQL default setup — from a real failure that must
+  # surface. Benign: Advanced Security unavailable (private without GHAS), no
+  # analyzable languages, an empty default branch, or already enabled. Everything
+  # else (a permission gap like "resource not accessible", a 5xx, a rate limit) is
+  # a real failure: returning 0 here would let the driver report success on a step
+  # that applied nothing (issue #1038, AC6c).
+  local benign_re='advanced security|no analyzable languages|no codeql|does not have.*language|supported languages|default branch is empty|empty repository|git repository is empty|already (configured|enabled|set up)|"status":[[:space:]]*"?404|http 404|not found'
+  if [[ "${api_err,,}" =~ $benign_re ]]; then
+    skip "  CodeQL default setup not applicable for $repo (unsupported or already set) — skipping. API response: $api_err"
+    return 0
+  fi
+
+  err "  Failed to enable CodeQL default setup for $repo — manual review required. API response: $api_err"
+  return 1
 }
 
 # ---------------------------------------------------------------------------

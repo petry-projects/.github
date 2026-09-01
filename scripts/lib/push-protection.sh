@@ -161,16 +161,40 @@ pp_apply_security_and_analysis() {
       fi
     done <<< "$post_actuals"
 
-    local post_entry post_key post_expected post_actual
+    # A key still non-compliant after a "successful" (HTTP 200) PATCH is either a
+    # legitimate plan skip or a real failure — and they must be distinguished, or
+    # the run reports success having applied nothing (issue #1038, AC6b). A
+    # plan-gated key (GHAS/Copilot-only) that the org plan does not support is a
+    # legitimate skip: GitHub accepts the PATCH and silently ignores it. A CORE
+    # key (secret_scanning / secret_scanning_push_protection) still not applied is
+    # a genuine failure — the security-critical setting did not take — so return
+    # non-zero after checking every key.
+    local post_entry post_key post_expected post_actual is_plan_gated plan_key
+    local verify_failed=false
     for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
       IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
       post_actual="${actuals[$post_key]:-null}"
-      if [ "$post_actual" != "$post_expected" ]; then
-        info "  $post_key still not $post_expected after PATCH — the org plan may not support this feature (current: $post_actual)"
-      else
+      if [ "$post_actual" = "$post_expected" ]; then
         ok "  $post_key: $post_actual (verified)"
+        continue
+      fi
+      is_plan_gated=false
+      for plan_key in "${PP_PLAN_GATED_KEYS[@]}"; do
+        if [ "$post_key" = "$plan_key" ]; then
+          is_plan_gated=true
+          break
+        fi
+      done
+      if [ "$is_plan_gated" = true ]; then
+        skip "  $post_key still $post_actual after PATCH — unsupported on this org plan, skipping"
+      else
+        err "  $post_key still $post_actual after PATCH (expected $post_expected) — the security-critical setting did not take"
+        verify_failed=true
       fi
     done
+    if [ "$verify_failed" = true ]; then
+      return 1
+    fi
   else
     err "Failed to PATCH security_and_analysis for $ORG/$repo — the authenticated token must have repository admin permissions (or the org plan may not support these features)"
     return 1

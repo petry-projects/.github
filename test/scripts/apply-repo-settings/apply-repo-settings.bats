@@ -34,7 +34,8 @@ teardown() {
 # gh stub:
 #   - contents/personas/<id>/persona.yml → the fixture manifest for <id> (raw YAML)
 #   - contents/personas                  → $PERSONA_DIRS_JSON (directory listing)
-#   - label create ...                   → recorded to $CALLS (a write we assert on)
+#   - label create ...                   → recorded to $CALLS (a write we assert on);
+#                                          exits 1 for the label named in $FAIL_LABEL
 #   - check-suites/preferences (GET)     → $CHECK_SUITE_GET_JSON (default {}, exit $CHECK_SUITE_GET_RC)
 #   - check-suites/preferences (PATCH)   → recorded to $CALLS; emits $CHECK_SUITE_PATCH_STDERR
 #                                          on stderr and exits $CHECK_SUITE_PATCH_RC (default 0)
@@ -55,7 +56,13 @@ case "\$args" in
   *"contents/personas"*)
     printf '%s' "\${PERSONA_DIRS_JSON:-[]}"; exit 0 ;;
   *"label create"*)
-    printf '%s\n' "\$args" >> "$CALLS"; exit 0 ;;
+    printf '%s\n' "\$args" >> "$CALLS"
+    # Simulate a failing \`gh label create\` for one specific label so AC6a can
+    # assert per-label failure is recorded (and the remaining labels still apply).
+    if [ -n "\${FAIL_LABEL:-}" ] && [[ "\$args" == *"label create \${FAIL_LABEL} "* ]]; then
+      exit 1
+    fi
+    exit 0 ;;
   *"check-suites/preferences"*)
     # The script distinguishes the GET (read prefs) from the PATCH (write) by the
     # -X PATCH flag; mirror that so both legs of apply_check_suite_prefs are exercised.
@@ -434,4 +441,153 @@ _stub_apply_steps() {
   run apply_settings acme \
     '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":true,"allow_rebase_merge":true,"has_discussions":true,"has_issues":false,"squash_merge_commit_title":"PR_TITLE","squash_merge_commit_message":"COMMIT_MESSAGES"}'
   [ "$status" -eq 1 ]
+}
+
+# ── AC6: three more steps must be able to REPORT failure ────────────────────────
+# apply_repo guards every step with `step || FAILED_STEPS+=(...)`. A step that
+# returns 0 on failure is therefore invisible — FAILED_STEPS stays empty, main()
+# exits 0, and the workflow reports success having applied nothing. These lock in
+# that apply_labels, pp_apply_security_and_analysis and apply_codeql_default_setup
+# each surface a genuine API failure with a non-zero return, and that the return
+# propagates into FAILED_STEPS by name.
+
+# _run_apply_repo <fail-step-name> — run the REAL target step under apply_repo while
+# stubbing the OTHER four to succeed, then capture rc with errexit off. FAILED_STEPS
+# is observable in the current shell afterward (apply_repo is NOT run via `run`,
+# whose subshell would hide the mutation).
+_only_real_step() {
+  local keep="$1" step
+  for step in apply_settings apply_labels pp_apply_security_and_analysis \
+              apply_codeql_default_setup apply_check_suite_prefs; do
+    [ "$step" = "$keep" ] && continue
+    eval "$step() { return 0; }"
+  done
+}
+
+# ── AC6a — apply_labels ─────────────────────────────────────────────────────────
+@test "apply_labels returns non-zero when a label create fails, still applying the rest (AC6a)" {
+  export FAIL_LABEL=bug   # the 'bug' label create exits 1; every other label succeeds
+  run apply_labels acme
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"failed to apply label 'bug'"* ]]
+  # One failure does not abort the loop — labels before AND after 'bug' still applied.
+  grep -q 'label create security' "$CALLS"
+  grep -q 'label create documentation' "$CALLS"
+  grep -q 'qa-lead:hands-off' "$CALLS"
+}
+
+@test "a failing apply_labels propagates its name into FAILED_STEPS (AC6a/AC6d)" {
+  export FAIL_LABEL=bug
+  _only_real_step apply_labels
+  FAILED_STEPS=()
+  set +e; apply_repo acme '{}'; local rc=$?; set -e
+  [ "$rc" -eq 0 ]   # the driver records but does not abort
+  printf '%s\n' "${FAILED_STEPS[@]}" | grep -qx 'labels'
+}
+
+# ── AC6b — pp_apply_security_and_analysis ───────────────────────────────────────
+@test "pp_apply_security_and_analysis returns non-zero when a CORE setting stays non-compliant post-PATCH (AC6b)" {
+  # The PATCH 'succeeds' (HTTP 200) but the core secret_scanning setting is still
+  # disabled on re-fetch — a silent no-op (wrong scope / plan). That is a real
+  # failure the run must not paper over.
+  gh() {
+    [[ "$*" == *"-X PATCH"* ]] && return 0
+    if [[ "$*" == *"repos/$ORG/acme"* ]]; then
+      printf '{"secret_scanning":{"status":"disabled"},"secret_scanning_push_protection":{"status":"disabled"}}'
+      return 0
+    fi
+    printf '{}'
+  }
+  run pp_apply_security_and_analysis acme
+  [ "$status" -ne 0 ]
+}
+
+@test "pp_apply_security_and_analysis returns 0 when only PLAN-GATED keys remain unset post-PATCH (AC6b)" {
+  # Core keys land; the GHAS/Copilot-only keys stay null because the plan does not
+  # support them — a legitimate skip, not a failure.
+  local SEEN="$BATS_TEST_TMPDIR/sa-seen"
+  gh() {
+    [[ "$*" == *"-X PATCH"* ]] && return 0
+    if [[ "$*" == *"repos/$ORG/acme"* ]]; then
+      if [ -f "$SEEN" ]; then
+        # post-PATCH re-fetch: core enabled, plan-gated keys still absent (null)
+        printf '{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}'
+      else
+        : > "$SEEN"   # pre-PATCH: everything non-compliant so a PATCH is attempted
+        printf '{"secret_scanning":{"status":"disabled"},"secret_scanning_push_protection":{"status":"disabled"}}'
+      fi
+      return 0
+    fi
+    printf '{}'
+  }
+  run pp_apply_security_and_analysis acme
+  [ "$status" -eq 0 ]
+}
+
+@test "a failing pp_apply_security_and_analysis propagates its name into FAILED_STEPS (AC6b/AC6d)" {
+  _only_real_step pp_apply_security_and_analysis
+  gh() {
+    [[ "$*" == *"-X PATCH"* ]] && return 0
+    if [[ "$*" == *"repos/$ORG/acme"* ]]; then
+      printf '{"secret_scanning":{"status":"disabled"},"secret_scanning_push_protection":{"status":"disabled"}}'
+      return 0
+    fi
+    printf '{}'
+  }
+  FAILED_STEPS=()
+  set +e; apply_repo acme '{}'; local rc=$?; set -e
+  [ "$rc" -eq 0 ]
+  printf '%s\n' "${FAILED_STEPS[@]}" | grep -qx 'security_and_analysis'
+}
+
+# ── AC6c — apply_codeql_default_setup ───────────────────────────────────────────
+@test "apply_codeql_default_setup returns non-zero on a genuine API error (AC6c)" {
+  # A real permission gap ("Resource not accessible…") is NOT a benign not-supported
+  # response — it must surface, not be swallowed as success.
+  gh() {
+    if [[ "$*" == *"-X PATCH"* ]]; then
+      printf 'gh: Resource not accessible by personal access token (HTTP 403)\n'
+      printf '{"message":"Resource not accessible by personal access token","status":"403"}\n'
+      return 1
+    fi
+    printf 'not-configured\n'   # current-state GET → not configured, so we PATCH
+  }
+  run apply_codeql_default_setup acme
+  [ "$status" -ne 0 ]
+}
+
+@test "apply_codeql_default_setup returns 0 on a benign not-supported response (AC6c)" {
+  # GHAS unavailable for the repo — GitHub rejects the PATCH but the repo genuinely
+  # cannot support CodeQL default setup. A legitimate skip, not a failure.
+  gh() {
+    if [[ "$*" == *"-X PATCH"* ]]; then
+      printf 'gh: Advanced Security must be enabled for this repository to use code scanning. (HTTP 403)\n'
+      return 1
+    fi
+    printf 'not-configured\n'
+  }
+  run apply_codeql_default_setup acme
+  [ "$status" -eq 0 ]
+}
+
+@test "apply_codeql_default_setup is a no-op (rc 0) when already configured (AC6c, preserved)" {
+  gh() { printf 'configured\n'; }
+  run apply_codeql_default_setup acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already configured"* ]]
+}
+
+@test "a failing apply_codeql_default_setup propagates its name into FAILED_STEPS (AC6c/AC6d)" {
+  _only_real_step apply_codeql_default_setup
+  gh() {
+    if [[ "$*" == *"-X PATCH"* ]]; then
+      printf 'gh: Resource not accessible by personal access token (HTTP 403)\n'
+      return 1
+    fi
+    printf 'not-configured\n'
+  }
+  FAILED_STEPS=()
+  set +e; apply_repo acme '{}'; local rc=$?; set -e
+  [ "$rc" -eq 0 ]
+  printf '%s\n' "${FAILED_STEPS[@]}" | grep -qx 'codeql_default_setup'
 }
