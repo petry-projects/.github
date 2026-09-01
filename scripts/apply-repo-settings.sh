@@ -541,6 +541,34 @@ apply_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+# apply_repo — run every per-repo apply_* step INDEPENDENTLY.
+#
+# The regression this exists to prevent (issue #1038): the driver used to run each
+# step bare under `set -e`, so ONE failure (originally the check-suites/preferences
+# 403) aborted the whole script and every later step — including, at the workflow
+# layer, the load-bearing pr-quality ruleset self-heal — never ran. 30/30 CI runs
+# failed and ruleset convergence never executed.
+#
+# A cosmetic step (labels, check-suite prefs) must NEVER abort the security-critical
+# ones. Each step is guarded with `|| FAILED_STEPS+=(...)`: a failure is recorded by
+# name but does not prevent the following steps. The caller inspects FAILED_STEPS and
+# exits non-zero — naming which steps failed — after the whole sequence has run.
+# ---------------------------------------------------------------------------
+
+# Failed step names for the repo currently being processed. The caller resets this
+# before each apply_repo call and reports its contents afterward.
+FAILED_STEPS=()
+
+apply_repo() {
+  local repo="$1" repo_json="$2"
+  apply_settings                 "$repo" "$repo_json" || FAILED_STEPS+=("settings")
+  apply_labels                   "$repo"              || FAILED_STEPS+=("labels")
+  pp_apply_security_and_analysis "$repo"              || FAILED_STEPS+=("security_and_analysis")
+  apply_codeql_default_setup     "$repo"              || FAILED_STEPS+=("codeql_default_setup")
+  apply_check_suite_prefs        "$repo"              || FAILED_STEPS+=("check_suite_prefs")
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
