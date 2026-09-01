@@ -376,7 +376,7 @@ apply_codeql_default_setup() {
   # else (a permission gap like "resource not accessible", a 5xx, a rate limit) is
   # a real failure: returning 0 here would let the driver report success on a step
   # that applied nothing (issue #1038, AC6c).
-  local benign_re='advanced security|no analyzable languages|no codeql|does not have.*language|supported languages|default branch is empty|empty repository|git repository is empty|already (configured|enabled|set up)|"status":[[:space:]]*"?404|http 404|not found'
+  local benign_re='advanced security|no analyzable languages|no codeql|does not have.*language|supported languages|default branch is empty|empty repository|git repository is empty|already (configured|enabled|set up)|"status":[[:space:]]*"?404|http 404'
   if [[ "${api_err,,}" =~ $benign_re ]]; then
     skip "  CodeQL default setup not applicable for $repo (unsupported or already set) — skipping. API response: $api_err"
     return 0
