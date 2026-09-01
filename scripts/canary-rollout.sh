@@ -2210,7 +2210,7 @@ _autocut_range_signals() {
         f: any($msgs[]; test("^feat(\\([^)]*\\))?:"))
       }
     | "\(if .b then 1 else 0 end) \(if .f then 1 else 0 end)"
-  ' <<< "$json" 2>/dev/null)" || return 1
+  ' 2>/dev/null)" || return 1
   [ -z "$out" ] && return 1
   printf '%s\n' "$out"
 }
@@ -2293,10 +2293,18 @@ _autocut_detect_bump() {
     # so a script-only feat/breaking still bumps correctly (#1019). A fetch error (rc=1) falls
     # through to the patch fail-safe instead, preserving watched-path scoping under API failures.
     read -r breaking feat <<< "$sigs"
-  elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
+  elif [ "$rc" -eq 3 ]; then
+    # Unresolvable range (#1023 defect 1b): the range could not be fully enumerated, so a
+    # breaking change may hide beyond the cap. FAIL SAFE TO MAJOR, loudly — never silently to
+    # patch, the more dangerous direction (a breaking change shipped as a patch breaks pinned
+    # consumers with no signal). A false major is at worst a spurious fresh v-line + this warning.
+    echo "::warning::autocut $agent: commit range ${next_commit:0:12}..${mainsha:0:12} on $host could not be fully enumerated within $CANARY_MAX_COMMIT_PAGES pages — cannot rule out a breaking change; failing safe to bump=major (not patch). Investigate the range." >&2
+    breaking=1; feat=0; driver="unresolvable commit range (fail-safe major)"
+  elif [ "$rc" -eq 2 ] && sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
     # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
-    # so the boundary scan finds nothing — or the path-scoped fetch errored): fall back to the
-    # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
+    # so the boundary scan finds nothing — rc=2): fall back to the compare-range commit messages
+    # so a script-only feat/breaking still bumps correctly (#1019). A fetch error (rc=1) falls
+    # through to the patch fail-safe instead, preserving watched-path scoping under API failures.
     read -r breaking feat <<< "$sigs"
   else
     echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2
