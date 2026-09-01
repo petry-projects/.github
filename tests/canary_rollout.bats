@@ -1239,11 +1239,12 @@ esac
 GHEOF
   chmod +x "$STUB_BIN/gh"
   # git: auto-rebase is this-repo — channel tags and the release tag date live in the local
-  # checkout. The for-each-ref simulates a lightweight release tag at the candidate commit.
+  # checkout. The for-each-ref simulates an ANNOTATED release tag (refname|obj|*obj|creatordate)
+  # dereferencing to the candidate commit, so candidate_cut_date resolves its tagger date (#1046).
   cat > "$STUB_BIN/git" <<GITEOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"for-each-ref"*) printf '%s||%s\n' "$cand" "$cut_iso" ;;
+  *"for-each-ref"*) printf 'refs/tags/auto-rebase/v2.0.0|tagobj|%s|%s\n' "$cand" "$cut_iso" ;;
   *"rev-parse"*"auto-rebase/next"*)   echo "$cand" ;;
   *"rev-parse"*"auto-rebase/ring0"*)  echo "$cand" ;;
   *"rev-parse"*"auto-rebase/ring1"*)  echo "$cand" ;;
@@ -1339,7 +1340,7 @@ GHEOF
   cat > "$STUB_BIN/git" <<GITEOF
 #!/usr/bin/env bash
 case "\$*" in
-  *"for-each-ref"*) printf '%s||%s\n' "$cand" "$cut_iso" ;;
+  *"for-each-ref"*) printf 'refs/tags/auto-rebase/v2.0.0|tagobj|%s|%s\n' "$cand" "$cut_iso" ;;
   *"rev-parse"*"auto-rebase/next"*)   echo "$cand" ;;
   *"rev-parse"*"auto-rebase/ring0"*)  echo "$cand" ;;
   *"rev-parse"*"auto-rebase/ring1"*)  echo "$cand" ;;
@@ -3534,6 +3535,115 @@ GHEOF
   run _looks_like_oid ""; [ "$status" -ne 0 ]
   run _looks_like_oid "{}"; [ "$status" -ne 0 ]
   run _looks_like_oid "dev-lead/next"; [ "$status" -ne 0 ]
+}
+
+# ── _is_release_tag_suffix: only <agent>/v<M>.<m>.<p> counts as a release tag (#1046) ──
+# The suffix is the tag name minus the "<agent>/" prefix, so an immutable release is
+# "v139.4.0" while a v-scoped channel tag is "v139-next". Only the former is a release.
+@test "_is_release_tag_suffix: accepts a strict vMAJOR.MINOR.PATCH suffix" {
+  _is_release_tag_suffix "v139.4.0"
+  _is_release_tag_suffix "v1.0.0"
+  _is_release_tag_suffix "v10.20.30"
+}
+@test "_is_release_tag_suffix: rejects a v-scoped channel tag suffix (the #1046 shadow)" {
+  run _is_release_tag_suffix "v139-next";  [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "v139-ring0"; [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "v2-stable";  [ "$status" -ne 0 ]
+}
+@test "_is_release_tag_suffix: rejects bare channel tags and other non-release refs" {
+  run _is_release_tag_suffix "next";     [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "stable";   [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "v139";     [ "$status" -ne 0 ]   # not a full semver
+  run _is_release_tag_suffix "v139.4";   [ "$status" -ne 0 ]   # missing patch
+  run _is_release_tag_suffix "139.4.0";  [ "$status" -ne 0 ]   # missing the v prefix
+  run _is_release_tag_suffix "";         [ "$status" -ne 0 ]
+}
+
+# ── _gh_candidate_cut_date / candidate_cut_date: a v-scoped channel tag must NOT shadow
+#    the release tag (#1046). matching-refs and for-each-ref both sort "-" (0x2D) before
+#    "." (0x2E), so <agent>/v139-next always precedes <agent>/v139.4.0 — the exact live
+#    ordering that returned an empty cut date and wedged the gate at BLOCKED (indeterminate).
+_X="33451103a2cfa8f64449df9030e6e7628381b406"   # candidate commit (both tags point here)
+_CUT="2026-08-31T23:37:09Z"                       # the release tag's tagger date
+
+@test "_gh_candidate_cut_date (cross-repo API): annotated release resolves even when a lightweight v-channel tag sorts earlier at the same commit (#1046)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*)
+    printf 'refs/tags/dev-lead/v139-next\t%s\tcommit\n' "$_X"       # lightweight channel, sorts FIRST
+    printf 'refs/tags/dev-lead/v139.4.0\ttagobj139\ttag\n' ;;        # annotated release
+  *"git/tags/tagobj139"*) printf '%s\t%s\n' "$_X" "$_CUT" ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _gh_candidate_cut_date petry-projects/.github-private dev-lead $_X"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$_CUT" ]
+}
+
+@test "_gh_candidate_cut_date (cross-repo API): only a v-channel tag at the commit → empty (no release found)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*)
+    printf 'refs/tags/dev-lead/v139-next\t%s\tcommit\n' "$_X" ;;    # channel tag ONLY, no release
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _gh_candidate_cut_date petry-projects/.github-private dev-lead $_X"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "candidate_cut_date (cross-repo): dev-lead routes to the API path and resolves past a shadowing v-channel tag (#1046)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*)
+    printf 'refs/tags/dev-lead/v139-next\t%s\tcommit\n' "$_X"
+    printf 'refs/tags/dev-lead/v139.4.0\ttagobj139\ttag\n' ;;
+  *"git/tags/tagobj139"*) printf '%s\t%s\n' "$_X" "$_CUT" ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  # GITHUB_REPOSITORY=.github forces THIS_REPO=.github, so dev-lead (host .github-private) is cross-repo.
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && candidate_cut_date dev-lead $_X"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$_CUT" ]
+}
+
+@test "candidate_cut_date (same-repo for-each-ref): annotated release resolves its TAGGER date past a lightweight v-channel tag at the same commit (#1046)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  # gh is only reached for _agent_current_major (matching-refs) — return no versions so the
+  # bare-tier path is taken and does not interfere with the local cut-date resolution.
+  printf '#!/usr/bin/env bash\necho ""\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  # git for-each-ref emits refname|objectname|*objectname|creatordate. The lightweight channel
+  # tag (empty deref) sorts first; the annotated release (deref = candidate) carries the tagger date.
+  cat > "$STUB_BIN/git" <<GITEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"for-each-ref"*)
+    printf 'refs/tags/auto-rebase/v139-next|%s||\n' "$_X"
+    printf 'refs/tags/auto-rebase/v139.4.0|tagobj139|%s|%s\n' "$_X" "$_CUT" ;;
+  *"log -1"*) echo "COMMIT-DATE-FALLBACK" ;;   # must NOT be reached — a release tag resolves
+  *) : ;;
+esac
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  # auto-rebase host = .github == THIS_REPO → the local for-each-ref path.
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && candidate_cut_date auto-rebase $_X"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$_CUT" ]
+  [[ "$output" != *"FALLBACK"* ]]
 }
 
 # ── a fleet whose v2 major line EXISTS: v2-next=cand(cccc), v2-ring0/ring1/stable=old(bbbb) →
