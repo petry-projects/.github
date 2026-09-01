@@ -35,7 +35,12 @@ teardown() {
 #   - contents/personas/<id>/persona.yml → the fixture manifest for <id> (raw YAML)
 #   - contents/personas                  → $PERSONA_DIRS_JSON (directory listing)
 #   - label create ...                   → recorded to $CALLS (a write we assert on)
+#   - check-suites/preferences (GET)     → $CHECK_SUITE_GET_JSON (default {}, exit $CHECK_SUITE_GET_RC)
+#   - check-suites/preferences (PATCH)   → recorded to $CALLS; emits $CHECK_SUITE_PATCH_STDERR
+#                                          on stderr and exits $CHECK_SUITE_PATCH_RC (default 0)
 #   - anything else                      → {}
+# The check-suites env vars default to the no-op path, so tests that don't touch
+# apply_check_suite_prefs behave exactly as before.
 _stub_gh() {
   cat > "$STUB_BIN/gh" <<EOF
 #!/usr/bin/env bash
@@ -51,11 +56,39 @@ case "\$args" in
     printf '%s' "\${PERSONA_DIRS_JSON:-[]}"; exit 0 ;;
   *"label create"*)
     printf '%s\n' "\$args" >> "$CALLS"; exit 0 ;;
+  *"check-suites/preferences"*)
+    # The script distinguishes the GET (read prefs) from the PATCH (write) by the
+    # -X PATCH flag; mirror that so both legs of apply_check_suite_prefs are exercised.
+    if [[ "\$args" == *PATCH* ]]; then
+      printf 'PATCH %s\n' "\$args" >> "$CALLS"
+      [ -n "\${CHECK_SUITE_PATCH_STDERR:-}" ] && printf '%s\n' "\${CHECK_SUITE_PATCH_STDERR}" >&2
+      exit "\${CHECK_SUITE_PATCH_RC:-0}"
+    fi
+    printf '%s' "\${CHECK_SUITE_GET_JSON:-{}}"; exit "\${CHECK_SUITE_GET_RC:-0}" ;;
   *) printf '{}'; exit 0 ;;
 esac
 EOF
   chmod +x "$STUB_BIN/gh"
 }
+
+# JSON the check-suites/preferences GET returns to advertise a given auto-trigger
+# setting for BOTH configured app_ids (1236702 Claude, 347564 CodeRabbit). "true"
+# means auto-trigger is ON → apply_check_suite_prefs must PATCH it off.
+# Pass a second argument to set a different value for the second app (mixed-state tests).
+_check_suite_prefs_json() {
+  local s1="$1" s2="${2:-$1}"
+  printf '{"preferences":{"auto_trigger_checks":[{"app_id":1236702,"setting":%s},{"app_id":347564,"setting":%s}]}}' \
+    "$s1" "$s2"
+}
+
+# The verbatim error a fine-grained PAT / GITHUB_TOKEN gets from the legacy
+# check-suites API (captured from the TalkTerm canary run, issue #1042). This is the
+# environmental failure apply_check_suite_prefs must absorb rather than fail on.
+_CHECK_SUITE_403_ERR='gh: You must authenticate with a personal access token, or basic auth, or via a GitHub App in order to change check suite permissions. (HTTP 403)
+{"message":"You must authenticate with a personal access token, or basic auth, or via a GitHub App in order to change check suite permissions.","documentation_url":"https://docs.github.com/rest/checks/suites#update-repository-preferences-for-check-suites","status":"403"}'
+# Separate single-form fixtures so each detection branch is exercised in isolation.
+_CHECK_SUITE_403_PHRASE_ONLY='gh: You must authenticate with a personal access token. (HTTP 403)'
+_CHECK_SUITE_403_JSON_ONLY='{"message":"Forbidden","status":"403"}'
 
 # Call functions loaded into BATS via setup()'s source "$APPLY".
 _run_fn() { run "$@"; }
@@ -232,4 +265,97 @@ _apply_labels() {
   _run_fn persona_opt_out_label_configs
   [ "$status" -eq 0 ]
   [[ "$output" == "qa-lead:hands-off|"* ]]
+}
+
+# ── apply_check_suite_prefs — the check-suites/preferences 403 degradation ──────
+# The legacy check-suites/preferences endpoint accepts ONLY a classic PAT (or a
+# GitHub App); a fine-grained PAT or GITHUB_TOKEN gets HTTP 403. When the configured
+# token lacks that capability the whole settings run was reporting apply-repo-settings
+# as 100%-failed fleet-wide even though every other setting applied — the exact
+# environmental failure the canary caught on TalkTerm (issue #1042). These lock in
+# that a 403 here is absorbed (the run continues) while a genuine error still fails.
+
+@test "a 403 on the check-suites PATCH is absorbed — skips loudly, rc 0 (issue #1042)" {
+  # Auto-trigger is ON, so the function proceeds to the PATCH, which 403s.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true)"
+  export CHECK_SUITE_PATCH_RC=1
+  export CHECK_SUITE_PATCH_STDERR="$_CHECK_SUITE_403_ERR"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipping check-suite prefs"* ]]
+  # Names the tracking issue so the skip is traceable, not silent.
+  [[ "$output" == *".github-private#1209"* ]]
+  # It really did attempt the PATCH (the 403 came from the API, not a short-circuit).
+  grep -q 'PATCH' "$CALLS"
+}
+
+@test "a non-403 error on the check-suites PATCH still fails hard, rc 1" {
+  # A real fault (e.g. 5xx) must NOT be swallowed — only the 403 capability gap is.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true)"
+  export CHECK_SUITE_PATCH_RC=1
+  export CHECK_SUITE_PATCH_STDERR='gh: Something is broken on our end (HTTP 502)
+{"message":"Server Error","status":"502"}'
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PATCH failed"* ]]
+}
+
+@test "403 is absorbed when error is the HTTP-phrase form only (no JSON body)" {
+  # Exercises the 'http 403' detection branch in isolation.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true)"
+  export CHECK_SUITE_PATCH_RC=1
+  export CHECK_SUITE_PATCH_STDERR="$_CHECK_SUITE_403_PHRASE_ONLY"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipping check-suite prefs"* ]]
+}
+
+@test "403 is absorbed when error is the JSON-status form only (no HTTP phrase)" {
+  # Exercises the '"status":"403"' detection branch in isolation.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true)"
+  export CHECK_SUITE_PATCH_RC=1
+  export CHECK_SUITE_PATCH_STDERR="$_CHECK_SUITE_403_JSON_ONLY"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipping check-suite prefs"* ]]
+}
+
+@test "apply_check_suite_prefs PATCHes when one app is enabled and one is already disabled" {
+  # Mixed state: only app 1236702 (Claude) has auto-trigger ON — function must PATCH.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true false)"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  grep -q 'PATCH' "$CALLS"
+}
+
+@test "apply_check_suite_prefs is a no-op when auto-trigger is already disabled" {
+  # Both configured apps already report setting:false → nothing to PATCH.
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json false)"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already correct"* ]]
+  touch "$CALLS"
+  run grep -q 'PATCH' "$CALLS"
+  [ "$status" -eq 1 ]
+}
+
+@test "apply_check_suite_prefs treats a never-run app (missing) as no orphaned suite" {
+  # Default GET returns {} (no auto_trigger_checks) → both apps "missing" → no PATCH.
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already correct"* ]]
+  touch "$CALLS"
+  run grep -q 'PATCH' "$CALLS"
+  [ "$status" -eq 1 ]
+}
+
+@test "apply_check_suite_prefs --dry-run issues no PATCH" {
+  export DRY_RUN=true
+  export CHECK_SUITE_GET_JSON="$(_check_suite_prefs_json true)"
+  _run_fn apply_check_suite_prefs acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping check-suite prefs PATCH"* ]]
+  touch "$CALLS"
+  run grep -q 'PATCH' "$CALLS"
+  [ "$status" -eq 1 ]
 }
