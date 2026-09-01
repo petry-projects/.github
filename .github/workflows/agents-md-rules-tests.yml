@@ -1,0 +1,68 @@
+# Quality gate for the AGENTS.md structural rule set (the documented,
+# machine-readable single source of truth) and its validating bats contract test.
+#
+# Triggered on any PR (and main push) that touches:
+#   - scripts/lib/agents-md-rules.json
+#   - tests/test_agents_md_rules_config.bats
+#   - .github/workflows/agents-md-rules-tests.yml
+#
+# Gate: bats validates that scripts/lib/agents-md-rules.json parses as JSON, all
+# required keys exist, the scope is structural with semantic/content checks
+# explicitly out of scope, every rule is tagged exactly 'required' or
+# 'recommended', the structurally-stable rules (single H1, valid heading
+# hierarchy, resolvable cross-references) are 'required' while contested
+# section-presence rules stay 'recommended', the captured spec snapshot records
+# a source + date, and the informational->blocking promotion gate encodes two
+# clean cycles plus maintainer sign-off.
+#
+# Context: reference doc docs/initiatives/agents-md-validation.md (#643, Phase 1
+# of epic #642). This story delivers the data file only (INERT, no workflow reads
+# it yet); the Phase-2 linter consumes it later. Modeled on
+# .github/workflows/agent-rate-limits-tests.yml.
+
+name: AGENTS.md Rules Tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/lib/agents-md-rules.json'
+      - 'tests/test_agents_md_rules_config.bats'
+      - '.github/workflows/agents-md-rules-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/lib/agents-md-rules.json'
+      - 'tests/test_agents_md_rules_config.bats'
+      - '.github/workflows/agents-md-rules-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agents-md-rules-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Validate structural rule set
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          # Read-only test job — never pushes; don't leave the token in git config.
+          persist-credentials: false
+
+      - name: Install bats and jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats jq
+
+      - name: Run bats suite
+        run: |
+          bats --print-output-on-failure \
+            tests/test_agents_md_rules_config.bats
