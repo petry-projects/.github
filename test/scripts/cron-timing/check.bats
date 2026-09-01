@@ -33,7 +33,7 @@ teardown() {
   mkdir -p "${TMP}/wf"
   printf 'on:\n  schedule:\n    - cron: %s\n' "'0 7 * * *'" > "${TMP}/wf/bad.yml"
   run bash "$CHECK" "${TMP}/wf"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"bad.yml"* ]]
   [[ "$output" == *"minute 0"* ]]
   [[ "$output" == *"Scheduled Workflow Timing"* ]]
@@ -43,14 +43,14 @@ teardown() {
   mkdir -p "${TMP}/wf"
   printf 'on:\n  schedule:\n    - cron: %s\n' "'0 * * * *'" > "${TMP}/wf/hourly.yml"
   run bash "$CHECK" "${TMP}/wf"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "check suggests a non-zero replacement minute for the offending file" {
   mkdir -p "${TMP}/wf"
   printf 'on:\n  schedule:\n    - cron: %s\n' "'0 7 * * *'" > "${TMP}/wf/org-scorecard.yml"
   run bash "$CHECK" "${TMP}/wf"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Suggested minute"* ]]
 }
 
@@ -62,7 +62,7 @@ teardown() {
 @test "no two workflows in this repo share an identical cron expression (AC #2)" {
   # Collect every cron expression across the repo's own workflows and assert the
   # set has no duplicates — the two historical collisions must be de-collided.
-  run bash -c "grep -rhoE \"cron:[[:space:]]*['\\\"][^'\\\"]+['\\\"]\" \"${REPO_ROOT}/.github/workflows\"/*.yml | sed -E \"s/cron:[[:space:]]*['\\\"]//; s/['\\\"].*//\" | sort | uniq -d"
+  run bash -c "set -o pipefail; grep -rhoE \"cron:[[:space:]]*['\\\"][^'\\\"]+['\\\"]\" \"${REPO_ROOT}/.github/workflows\"/*.yml | sed -E \"s/cron:[[:space:]]*['\\\"]//; s/['\\\"]\\$//\" | sort | uniq -d"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }

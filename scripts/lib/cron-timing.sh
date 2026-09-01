@@ -25,8 +25,10 @@ cron_minute_is_zero() {
 }
 
 # Deterministic off-peak minute (1..59) for a workflow filename. Hashing the
-# filename spreads workflows across the hour, de-collides files that previously
-# shared a cron, and lets the check and the value agree without hand-picking.
+# filename spreads workflows across the hour and moves any minute-0 cron to a
+# non-zero minute, letting the check and the suggested value agree without
+# hand-picking. Uniqueness across files is not guaranteed — hash collisions are
+# possible; the no-duplicate-crons test catches any that occur in practice.
 # cksum is POSIX and reproducible on every runner; the basename keeps the result
 # path-independent so callers may pass a bare name or a full path.
 cron_offset_minute() {
