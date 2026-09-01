@@ -1475,6 +1475,74 @@ stale-base revert class) surfaces on the first approval rather than going unnoti
 
 ---
 
+## Scheduled Workflow Timing
+
+**Origin.** This is the org-wide promotion of the repo-local "Scheduled
+workflows" convention first established in
+[`petry-projects/.github-private`](https://github.com/petry-projects/.github-private)
+(epic `#722`, story `#726`), where it took that repo from a fleet-worst offender
+to **0 minute-0 crons out of 20**. This section is the canonical, fleet-wide
+statement of the rule; the `.github-private` repo-local section defers to it, and
+so does every downstream repo. (Precedent: the same repo-local → org promotion
+path the Cost-reporting section followed.)
+
+### The standard
+
+Every `schedule:` cron in a workflow MUST be offset **off the top of the hour**:
+
+1. **No `0 * * * *`.** An hourly job pinned to minute 0 stacks the whole fleet's
+   hourly load onto `:00`. If a job must run hourly, pick any other minute
+   (`11 * * * *`, `37 * * * *`, …).
+2. **No minute-0 starts at all.** The minute field of a `schedule:` cron MUST NOT
+   be `0` — this applies to daily, weekly, and every-N-hours crons alike
+   (`0 7 * * *`, `0 8 * * 1`, `0 */4 * * *` are all non-compliant). The top of
+   the hour is GitHub's most contended slot; scheduled workflows there are the
+   most likely to be **delayed or dropped** under load.
+3. **Spread minutes across the hour.** Two workflows in the same repo MUST NOT
+   share an identical cron expression. Choosing a distinct minute per workflow
+   both de-collides them and smooths the repo's own load.
+4. **Higher-frequency idempotent sweeps.** A safety-net sweep that only needs to
+   run *eventually* (an every-N-hours reconciler, a chain-stall backstop) SHOULD
+   use a coarse interval (`*/15`, `*/4h`) with a non-zero minute — never
+   `0 * * * *`. Because these sweeps are idempotent, the exact minute is
+   immaterial to correctness; picking a non-zero one keeps them off the
+   contended slot at zero behavioural cost. Do **not** change a sweep's
+   *frequency* to satisfy this rule — only its minute.
+
+> **Change the minute field only.** When bringing an existing workflow into
+> compliance, edit **only** the cron minute; never the hour, day-of-week, or
+> frequency. Retiming *when* or *how often* a workflow runs changes its
+> behaviour and is out of scope for a timing-compliance change.
+
+### Picking the minute deterministically
+
+Choose the offset by **hashing the workflow filename**, not by hand, so the CI
+check and the chosen value always agree and a newly added workflow gets a
+defensible, collision-resistant minute automatically. The canonical recipe lives
+in [`scripts/lib/cron-timing.sh`](../scripts/lib/cron-timing.sh)
+(`cron_offset_minute`): `cksum` of the basename, `% 59 + 1`, yielding a minute in
+**1–59**. Distinct filenames hash to distinct minutes, which is what
+de-collides workflows that previously shared a cron.
+
+### CI enforcement
+
+[`scripts/check-cron-timing.sh`](../scripts/check-cron-timing.sh) scans a repo's
+`.github/workflows/*.yml`, fails on any cron whose minute field is `0`, and
+prints the suggested replacement minute alongside a pointer to this section. It
+is wired into this repo's `ci.yml` **Lint** job and its
+`.dev-lead/scripts/dev-lead-lint.sh`, and is unit-tested by
+[`test/scripts/cron-timing/`](../test/scripts/cron-timing). Downstream repos
+adopting the check point it at their own `.github/workflows/` — the rule is the
+same everywhere and defers to this section for its rationale.
+
+> **Templates in `standards/workflows/` are deliberately not swept by this
+> repo's check.** Retiming a template's cron changes what every consumer repo
+> receives, i.e. downstream fan-out — tracked separately in
+> [`petry-projects/.github-private#726`](https://github.com/petry-projects/.github-private/issues/726),
+> not folded into a source-of-truth timing fix.
+
+---
+
 ## Workflow Patterns by Tech Stack
 
 ### TypeScript / Node.js (npm)
@@ -1757,7 +1825,7 @@ org-level workflows that run across all repositories:
 
 ### OpenSSF Scorecard (`org-scorecard.yml`)
 
-- **Schedule:** Weekly (Monday 9:00 UTC)
+- **Schedule:** Weekly (Monday 09:06 UTC — offset off the top of the hour per [Scheduled Workflow Timing](#scheduled-workflow-timing))
 - **Purpose:** Security posture scoring for all public repos
 - **Token Requirements (`ORG_SCORECARD_TOKEN`):** Must be a Fine-Grained Personal Access
   Token with **Repository access** set to "All repositories" (or specific audit targets).

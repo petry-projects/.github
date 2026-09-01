@@ -11,7 +11,7 @@ name: PR-limits Report
 
 on:
   schedule:
-    - cron: '0 12 * * *'   # once daily, 07:00 CDT (UTC-5)
+    - cron: '44 12 * * *'   # once daily, 12:44 UTC — 07:44 CDT (UTC-5)
   workflow_dispatch:         # allow manual trigger from the Actions tab
 
 permissions: {}              # no default permissions; the job grants only what it needs

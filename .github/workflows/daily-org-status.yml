@@ -3,7 +3,7 @@ name: Daily Org Status
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # 6:00 AM CDT (UTC-5) — shifts to 5 AM in winter CST
+    - cron: '55 11 * * *'   # 11:55 UTC — 6:55 AM CDT (UTC-5), shifts to 5:55 AM in winter CST
   workflow_dispatch:         # allow manual trigger from Actions tab
 
 permissions: {}              # no default permissions; each job grants only what it needs

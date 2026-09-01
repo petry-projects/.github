@@ -2,7 +2,7 @@ name: Compliance Issue Re-trigger
 
 on:
   schedule:
-    - cron: '0 * * * *'   # Hourly, on the hour (≤ one engagement per repo per run)
+    - cron: '11 * * * *'   # Hourly at :11 — off the top of the hour (≤ one engagement per repo per run)
   workflow_dispatch:
     inputs:
       stale_days:

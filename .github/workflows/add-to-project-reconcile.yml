@@ -34,7 +34,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: "0 7 * * *" # daily 07:00 UTC
+    - cron: "54 7 * * *" # daily 07:54 UTC
 
 permissions:
   contents: read

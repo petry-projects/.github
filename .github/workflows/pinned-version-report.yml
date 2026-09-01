@@ -6,7 +6,7 @@ name: Pinned-version report
 
 on:
   schedule:
-    - cron: '0 8 * * 1'   # Mondays 08:00 UTC
+    - cron: '31 8 * * 1'   # Mondays 08:31 UTC
   workflow_dispatch:
 
 permissions:
