@@ -468,7 +468,7 @@ _only_real_step() {
 @test "apply_labels returns non-zero when a label create fails, still applying the rest (AC6a)" {
   export FAIL_LABEL=bug   # the 'bug' label create exits 1; every other label succeeds
   run apply_labels acme
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"failed to apply label 'bug'"* ]]
   # One failure does not abort the loop — labels before AND after 'bug' still applied.
   grep -q 'label create security' "$CALLS"
@@ -499,7 +499,7 @@ _only_real_step() {
     printf '{}'
   }
   run pp_apply_security_and_analysis acme
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "pp_apply_security_and_analysis returns 0 when only PLAN-GATED keys remain unset post-PATCH (AC6b)" {
@@ -553,7 +553,7 @@ _only_real_step() {
     printf 'not-configured\n'   # current-state GET → not configured, so we PATCH
   }
   run apply_codeql_default_setup acme
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "apply_codeql_default_setup returns 0 on a benign not-supported response (AC6c)" {

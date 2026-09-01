@@ -172,7 +172,9 @@ pp_apply_security_and_analysis() {
     local post_entry post_key post_expected post_actual is_plan_gated plan_key
     local verify_failed=false
     for post_entry in "${PP_REQUIRED_SA_SETTINGS[@]}"; do
-      IFS=':' read -r post_key post_expected _ _ <<< "$post_entry"
+      post_key="${post_entry%%:*}"
+      post_expected="${post_entry#*:}"
+      post_expected="${post_expected%%:*}"
       post_actual="${actuals[$post_key]:-null}"
       if [ "$post_actual" = "$post_expected" ]; then
         ok "  $post_key: $post_actual (verified)"
