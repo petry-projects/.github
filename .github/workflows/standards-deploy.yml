@@ -16,7 +16,7 @@ name: Standards Deploy
 
 on:
   schedule:
-    - cron: '0 8 * * 1'   # Every Monday at 08:00 UTC — offset from the Fri 12:00 UTC compliance audit
+    - cron: '16 8 * * 1'   # Every Monday at 08:16 UTC — offset from the Fri compliance audit
   workflow_dispatch:
     inputs:
       target_repo:

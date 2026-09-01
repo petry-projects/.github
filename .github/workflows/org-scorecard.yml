@@ -6,7 +6,7 @@ name: Org Scorecard Review
 
 on:
   schedule:
-    - cron: '0 9 * * 1'
+    - cron: '6 9 * * 1'   # Mondays 09:06 UTC
   workflow_dispatch:
 
 permissions:

@@ -85,6 +85,12 @@ jobs:
           # Template workflows use placeholder expressions — informational only
           ./actionlint -ignore 'context' standards/workflows/*.yml || true
 
+      - name: Lint scheduled workflow timing
+        if: always()
+        # Fail any workflow whose cron fires on the top of the hour (minute 0).
+        # Standard: standards/ci-standards.md → "Scheduled Workflow Timing".
+        run: bash scripts/check-cron-timing.sh
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest

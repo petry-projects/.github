@@ -59,7 +59,7 @@ name: Canary Rollout
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # every 4 hours — autocut → promote-all → sync-issues
+    - cron: "33 */4 * * *"   # every 4 hours at :33 — autocut → promote-all → sync-issues
   workflow_dispatch:
     inputs:
       command:
