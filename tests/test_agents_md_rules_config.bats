@@ -97,7 +97,7 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agents-md-rules.json"
 }
 
 @test "every rule has a unique id, a description and an element" {
-  run jq -e '.rules | all(.[]; has("id") and (.id | type == "string" and length > 0) and has("description") and has("element"))' "$CONFIG"
+  run jq -e '.rules | all(.[]; has("id") and (.id | type == "string" and length > 0) and has("description") and has("element") and has("applies_to") and has("check") and has("rationale"))' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
   # ids must be unique — the linter and audit summary key findings on them.
@@ -142,13 +142,13 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agents-md-rules.json"
 }
 
 @test "promotion gate encodes two clean cycles and maintainer sign-off (AC #1 task 4)" {
-  run jq -er '.promotion | has("clean_cycles_required") and has("maintainer_sign_off_required")' "$CONFIG"
+  run jq -er '.promotion | has("clean_cycles_required") and has("maintainer_sign_off_required") and has("target_severity")' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
   run jq -er '.promotion.clean_cycles_required' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
-  run jq -r '.promotion.maintainer_sign_off_required' "$CONFIG"
+  run jq -e '.promotion.maintainer_sign_off_required == true' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
