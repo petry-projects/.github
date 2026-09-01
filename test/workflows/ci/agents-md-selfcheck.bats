@@ -54,11 +54,12 @@ step_block_with() {
 }
 
 @test "agents-md-selfcheck: ci runs the structural linter against this repo's AGENTS.md" {
-  local block
+  local block code
   block="$(step_block_with 'scripts/agents-md-lint.sh')"
   [[ -n "$block" ]]
-  # It must target the repo's own canonical AGENTS.md (the self-validation).
-  [[ "$block" == *"AGENTS.md"* ]]
+  # Strip comments so a comment mentioning AGENTS.md cannot satisfy the assertion.
+  code="$(printf '%s\n' "$block" | grep -vE '^[[:space:]]*#')"
+  [[ "$code" == *"AGENTS.md"* ]]
 }
 
 @test "agents-md-selfcheck: the self-check stays informational (no --mode failing)" {
@@ -71,7 +72,8 @@ step_block_with() {
   block="$(step_block_with 'scripts/agents-md-lint.sh')"
   [[ -n "$block" ]]
   code="$(printf '%s\n' "$block" | grep -vE '^[[:space:]]*#')"
-  [[ "$code" == *"scripts/agents-md-lint.sh"* ]]
+  # Verify the linter is invoked with AGENTS.md as its argument, not just mentioned.
+  [[ "$code" == *"scripts/agents-md-lint.sh"*"AGENTS.md"* ]]
   [[ "$code" != *"--mode failing"* ]]
   [[ "$code" != *"--mode=failing"* ]]
 }
