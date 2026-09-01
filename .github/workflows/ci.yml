@@ -112,6 +112,40 @@ jobs:
             echo "No shell scripts found — skipping"
           fi
 
+  # Informational self-validation of THIS repo's canonical AGENTS.md against the
+  # standalone structural linter (scripts/agents-md-lint.sh, Phase 2 of epic
+  # #642). Phase 3 (#646) runs it on every PR in the linter's default
+  # INFORMATIONAL mode: each structural finding surfaces as a GitHub ::warning::
+  # annotation, but the job never fails the build. This job is deliberately NOT a
+  # branch-protection required status check — promotion to a blocking/required
+  # check (--mode failing + branch protection) is deferred to Phase 4. Do NOT add
+  # it to branch protection or pass --mode failing while it remains informational.
+  # See test/workflows/ci/agents-md-selfcheck.bats.
+  agents-md-selfcheck:
+    name: AGENTS.md Self-Check (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lint canonical AGENTS.md (informational)
+        # Default (informational) mode always exits 0 — structural findings
+        # surface as ::warning:: annotations without failing the build, mirroring
+        # run-bats.sh's non-fatal-signal convention. Do NOT pass --mode failing:
+        # promoting this to a blocking/required check is Phase 4 (see job header).
+        run: |
+          bash scripts/agents-md-lint.sh AGENTS.md \
+            | while IFS=$'\t' read -r severity rule line message; do
+                [ -n "$rule" ] || continue
+                if [ "$line" = "-" ] || [ -z "$line" ]; then
+                  echo "::warning file=AGENTS.md::[${severity}] ${rule}: ${message}"
+                else
+                  echo "::warning file=AGENTS.md,line=${line}::[${severity}] ${rule}: ${message}"
+                fi
+              done
+
   agent-security:
     name: Agent Security Scan
     runs-on: ubuntu-latest
