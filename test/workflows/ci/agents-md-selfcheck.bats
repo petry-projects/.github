@@ -26,10 +26,15 @@ step_block_with() {
         [[ "$block" == *"$marker"* ]] && out="$block"
       fi
       block="$line"$'\n'
-    else
+    elif [[ "$line" =~ ^[[:space:]]{8} ]] || [[ "$line" =~ ^[[:space:]]*$ ]]; then
       if [[ -n "$block" ]]; then
         block+="$line"$'\n'
       fi
+    else
+      if [[ "$block" == "      - "* ]]; then
+        [[ "$block" == *"$marker"* ]] && out="$block"
+      fi
+      block=""
     fi
   done < "$TT_WORKFLOW"
   if [[ "$block" == "      - "* ]]; then
