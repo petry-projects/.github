@@ -359,3 +359,79 @@ _apply_labels() {
   run grep -q 'PATCH' "$CALLS"
   [ "$status" -eq 1 ]
 }
+
+# ── apply_repo — a cosmetic step must not abort the security-critical one ────────
+# The regression this issue exists for (#1038): the driver ran each step bare under
+# `set -e`, so a single failure (originally the check-suites 403) aborted the whole
+# script and every later step — including, at the workflow layer, the load-bearing
+# ruleset self-heal — never ran. apply_repo must run every apply_* step
+# INDEPENDENTLY: a failure is recorded (by name) but never prevents a later step.
+
+# Stub every per-repo apply_* step to append its name to $ORDER when invoked, so a
+# test can assert exactly which ran and in what order. Pass a step name as $1 to make
+# that one step FAIL (return 1) while still recording that it ran.
+_stub_apply_steps() {
+  local fail="${1:-}"
+  ORDER="$BATS_TEST_TMPDIR/apply-order.log"; export ORDER; : > "$ORDER"
+  local step
+  for step in apply_settings apply_labels pp_apply_security_and_analysis \
+              apply_codeql_default_setup apply_check_suite_prefs; do
+    eval "$step() { echo '$step' >> \"\$ORDER\"; [ '$step' = '$fail' ] && return 1; return 0; }"
+  done
+}
+
+@test "apply_repo runs every step even when an EARLY step fails (issue #1038, AC1)" {
+  _stub_apply_steps pp_apply_security_and_analysis   # the security step fails
+  FAILED_STEPS=()
+  apply_repo acme '{}'
+  # Every step ran, in order — the failure did not abort the sequence.
+  run cat "$ORDER"
+  [ "${lines[0]}" = "apply_settings" ]
+  [ "${lines[1]}" = "apply_labels" ]
+  [ "${lines[2]}" = "pp_apply_security_and_analysis" ]
+  [ "${lines[3]}" = "apply_codeql_default_setup" ]
+  [ "${lines[4]}" = "apply_check_suite_prefs" ]
+  # The later cosmetic step (check-suite prefs) ran despite the earlier failure.
+  grep -qx 'apply_check_suite_prefs' "$ORDER"
+}
+
+@test "apply_repo records the failed step BY NAME (issue #1038, AC1)" {
+  _stub_apply_steps pp_apply_security_and_analysis
+  FAILED_STEPS=()
+  apply_repo acme '{}'
+  [ "${#FAILED_STEPS[@]}" -eq 1 ]
+  printf '%s\n' "${FAILED_STEPS[@]}" | grep -qx 'security_and_analysis'
+}
+
+@test "a failing check-suite step is recorded but apply_repo still RETURNS (does not abort — issue #1038, AC4)" {
+  # The literal AC4 mechanism: a failing apply_check_suite_prefs (the check-suites 403)
+  # must not abort the driver. It is the last step here, so the guarantee that matters
+  # is that apply_repo returns SUCCESS despite it — that non-abort is exactly what lets
+  # the workflow reach the next step (apply-rulesets.sh; see reusable-contract.bats).
+  _stub_apply_steps apply_check_suite_prefs           # the cosmetic step fails
+  FAILED_STEPS=()
+  # Call directly (not via `run`, whose subshell would hide the FAILED_STEPS mutation)
+  # and capture the rc with errexit off, mirroring the _apply_labels helper.
+  set +e; apply_repo acme '{}'; local rc=$?; set -e
+  [ "$rc" -eq 0 ]                                      # driver did NOT propagate the abort
+  printf '%s\n' "${FAILED_STEPS[@]}" | grep -qx 'check_suite_prefs'
+}
+
+@test "apply_repo leaves FAILED_STEPS empty when every step succeeds (issue #1038, AC1)" {
+  _stub_apply_steps                                   # no step fails
+  FAILED_STEPS=()
+  apply_repo acme '{}'
+  [ "${#FAILED_STEPS[@]}" -eq 0 ]
+}
+
+@test "apply_settings returns non-zero when its repo PATCH fails (issue #1038, AC1)" {
+  # Once the driver records failures via `step || FAILED_STEPS+=(...)`, set -e is
+  # suppressed inside apply_settings — so a genuine PATCH failure must be surfaced by
+  # an explicit non-zero return, not left to errexit. Otherwise the failure is
+  # swallowed and the run wrongly reports success.
+  gh() { [[ "$*" == *PATCH*"repos/$ORG/acme"* ]] && return 1; printf '{}'; }
+  # repo_json is compliant except has_issues=false, so exactly one PATCH is attempted.
+  run apply_settings acme \
+    '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":true,"allow_rebase_merge":true,"has_discussions":true,"has_issues":false,"squash_merge_commit_title":"PR_TITLE","squash_merge_commit_message":"COMMIT_MESSAGES"}'
+  [ "$status" -eq 1 ]
+}

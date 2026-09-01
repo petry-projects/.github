@@ -65,6 +65,32 @@ REGISTRY="${REPO_ROOT}/standards/canary-rings.json"
   echo "$run_blocks" | grep -qF 'bash scripts/apply-rulesets.sh'
 }
 
+# ── ordering + independence (#1038): the ruleset self-heal is load-bearing ──────
+# The 30/30 failures happened because the settings script ran FIRST under errexit and
+# aborted (on the check-suites 403) before the ruleset self-heal — pr-quality
+# convergence, the whole point of this workflow — ever ran. The reusable must run the
+# load-bearing rulesets FIRST, and neither script's failure may skip the other.
+@test "reusable runs apply-rulesets.sh BEFORE apply-repo-settings.sh (load-bearing first, #1038)" {
+  local run_blocks rulesets_line settings_line
+  run_blocks="$(yq '[.jobs[]?.steps[]?.run // ""] | join("\n")' "$REUSABLE")"
+  rulesets_line="$(printf '%s\n' "$run_blocks" | grep -n 'bash scripts/apply-rulesets.sh' | head -1 | cut -d: -f1)"
+  settings_line="$(printf '%s\n' "$run_blocks" | grep -n 'bash scripts/apply-repo-settings.sh' | head -1 | cut -d: -f1)"
+  [ -n "$rulesets_line" ]
+  [ -n "$settings_line" ]
+  [ "$rulesets_line" -lt "$settings_line" ]
+}
+
+@test "reusable guards each script so one failure never skips the other, and names failures (#1038)" {
+  local run_blocks
+  run_blocks="$(yq '[.jobs[]?.steps[]?.run // ""] | join("\n")' "$REUSABLE")"
+  # Each applier invocation is guarded (|| record) rather than left to abort the step.
+  printf '%s\n' "$run_blocks" | grep -qE 'apply-rulesets\.sh[^|]*\|\|'
+  printf '%s\n' "$run_blocks" | grep -qE 'apply-repo-settings\.sh[^|]*\|\|'
+  # Any failure surfaces a named GitHub error annotation, then a non-zero exit.
+  printf '%s\n' "$run_blocks" | grep -qF '::error'
+  printf '%s\n' "$run_blocks" | grep -qE 'exit[[:space:]]+1'
+}
+
 @test "reusable checks out petry-projects/.github at the checkout_ref input" {
   run yq '[.jobs[].steps[] | select(.uses | contains("checkout")) | .with.repository] | contains(["petry-projects/.github"])' "$REUSABLE"
   [ "$output" = "true" ]

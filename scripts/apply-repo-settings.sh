@@ -289,7 +289,15 @@ apply_settings() {
     return 0
   fi
 
-  gh api -X PATCH "repos/$ORG/$repo" "${patch_args[@]}" > /dev/null
+  # Guard the PATCH explicitly rather than relying on `set -e`: the driver invokes
+  # every apply_* step as `step || FAILED_STEPS+=(...)`, which suppresses errexit
+  # inside the function — so a genuine PATCH failure must be surfaced by an explicit
+  # non-zero return, or it would be silently swallowed and the run wrongly report
+  # success (issue #1038).
+  if ! gh api -X PATCH "repos/$ORG/$repo" "${patch_args[@]}" > /dev/null; then
+    err "Failed to PATCH settings for $ORG/$repo — the authenticated token must have repository admin permissions"
+    return 1
+  fi
   ok "$ORG/$repo settings updated successfully"
 }
 
@@ -415,6 +423,34 @@ apply_check_suite_prefs() {
 }
 
 # ---------------------------------------------------------------------------
+# apply_repo — run every per-repo apply_* step INDEPENDENTLY.
+#
+# The regression this exists to prevent (issue #1038): the driver used to run each
+# step bare under `set -e`, so ONE failure (originally the check-suites/preferences
+# 403) aborted the whole script and every later step — including, at the workflow
+# layer, the load-bearing pr-quality ruleset self-heal — never ran. 30/30 CI runs
+# failed and ruleset convergence never executed.
+#
+# A cosmetic step (labels, check-suite prefs) must NEVER abort the security-critical
+# ones. Each step is guarded with `|| FAILED_STEPS+=(...)`: a failure is recorded by
+# name but does not prevent the following steps. The caller inspects FAILED_STEPS and
+# exits non-zero — naming which steps failed — after the whole sequence has run.
+# ---------------------------------------------------------------------------
+
+# Failed step names for the repo currently being processed. The caller resets this
+# before each apply_repo call and reports its contents afterward.
+FAILED_STEPS=()
+
+apply_repo() {
+  local repo="$1" repo_json="$2"
+  apply_settings                 "$repo" "$repo_json" || FAILED_STEPS+=("settings")
+  apply_labels                   "$repo"              || FAILED_STEPS+=("labels")
+  pp_apply_security_and_analysis "$repo"              || FAILED_STEPS+=("security_and_analysis")
+  apply_codeql_default_setup     "$repo"              || FAILED_STEPS+=("codeql_default_setup")
+  apply_check_suite_prefs        "$repo"              || FAILED_STEPS+=("check_suite_prefs")
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -438,25 +474,29 @@ if [ "$1" = "--all" ]; then
     exit 1
   fi
 
-  failed=0
+  # Collect "repo:step" for every step that failed across the whole sweep, so the
+  # run reports exactly WHAT failed WHERE rather than an opaque count (issue #1038).
+  local all_failed=()
+  local repo repo_json step
   for repo in $repos; do
     # Fetch full repo JSON once and share across functions
     repo_json=$(gh api "repos/$ORG/$repo" 2>/dev/null || echo "{}")
     if [ "$repo_json" = "{}" ]; then
       err "Could not fetch settings for $ORG/$repo — check token permissions and repo name"
-      failed=$((failed + 1))
+      all_failed+=("$repo:fetch")
       continue
     fi
 
-    apply_settings "$repo" "$repo_json" || failed=$((failed + 1))
-    apply_labels "$repo"
-    pp_apply_security_and_analysis "$repo" || failed=$((failed + 1))
-    apply_codeql_default_setup "$repo" || failed=$((failed + 1))
-    apply_check_suite_prefs "$repo" || failed=$((failed + 1))
+    FAILED_STEPS=()
+    apply_repo "$repo" "$repo_json"
+    for step in "${FAILED_STEPS[@]}"; do
+      all_failed+=("$repo:$step")
+    done
   done
 
-  if [ "$failed" -gt 0 ]; then
-    err "$failed repo(s) failed — check output above for details"
+  if [ "${#all_failed[@]}" -gt 0 ]; then
+    echo "::error::apply-repo-settings: failed steps: ${all_failed[*]}"
+    err "${#all_failed[@]} step(s) failed — check output above for details"
     exit 1
   fi
 
@@ -476,16 +516,22 @@ else
     exit 1
   fi
 
-  apply_settings "$1" "$repo_json"
-  apply_labels "$1"
-  pp_apply_security_and_analysis "$1"
-  apply_codeql_default_setup "$1"
-  apply_check_suite_prefs "$1"
+  FAILED_STEPS=()
+  apply_repo "$1" "$repo_json"
 
   # Same guard as --all: a single-repo run must not exit 0 while the mandated
   # opt-out hatch is missing from that repo.
   if [ "$_PERSONA_OPT_OUT_SYNC_FAILED" = true ]; then
     err "persona opt-out labels could not be derived faithfully — static labels applied, but the <id>:hands-off family is incomplete or guessed"
+    exit 1
+  fi
+
+  # A cosmetic step failing must not have aborted the security-critical ones — but
+  # the run still exits non-zero, naming the failed steps, so the failure is visible
+  # (issue #1038).
+  if [ "${#FAILED_STEPS[@]}" -gt 0 ]; then
+    echo "::error::apply-repo-settings: failed steps for $1: ${FAILED_STEPS[*]}"
+    err "${#FAILED_STEPS[@]} step(s) failed for $ORG/$1 — check output above for details"
     exit 1
   fi
 fi
