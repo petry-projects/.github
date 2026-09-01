@@ -83,10 +83,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY }}
           DRY_RUN: ${{ inputs.dry_run }}
+        # NOTE: `set -u -o pipefail` but NOT `-e`. The ruleset self-heal is the
+        # load-bearing step (pr-quality convergence, the whole point of this
+        # workflow), so it runs FIRST — and a failure in EITHER script must not
+        # prevent the other from running. That is the exact regression #1038 fixes:
+        # the settings script used to run first under errexit and abort on the
+        # check-suites 403, so the rulesets never converged (30/30 runs). Each
+        # applier is guarded; any failure surfaces a named ::error and a non-zero exit.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           repo="${GITHUB_REPOSITORY##*/}"
-          echo "Applying standard settings to ${repo} (dry_run=${DRY_RUN}) ..."
-          bash scripts/apply-repo-settings.sh "$repo"
+          failed=()
           echo "Applying branch-policy rulesets (pr-quality, code-quality) to ${repo} ..."
-          bash scripts/apply-rulesets.sh "$repo"
+          bash scripts/apply-rulesets.sh "$repo" || failed+=("rulesets")
+          echo "Applying standard settings to ${repo} (dry_run=${DRY_RUN}) ..."
+          bash scripts/apply-repo-settings.sh "$repo" || failed+=("repo-settings")
+          if (( ${#failed[@]} )); then
+            echo "::error::apply-repo-settings: failed steps: ${failed[*]}"
+            exit 1
+          fi
