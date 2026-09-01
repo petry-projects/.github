@@ -121,20 +121,12 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agents-md-rules.json"
   [ "$output" -gt 0 ]
 }
 
-@test "the three structurally-stable rules exist and are 'required' (Dev Notes)" {
-  # single H1, valid heading hierarchy, resolvable cross-references — the stable
-  # subset the story says to mark required from day one.
-  for id in single-h1-title heading-hierarchy-valid cross-reference-integrity; do
+@test "the required rules exist and are 'required'" {
+  for id in single-h1-title heading-hierarchy-valid cross-reference-integrity org-repo-import-consistency fenced-code-block-closure; do
     run jq -er --arg id "$id" '.rules[] | select(.id == $id) | .level' "$CONFIG"
     [ "$status" -eq 0 ]
     [ "$output" = "required" ]
   done
-}
-
-@test "org-repo import-consistency rule is present (AC #1 / epic scope)" {
-  run jq -e '[.rules[].id] | index("org-repo-import-consistency") != null' "$CONFIG"
-  [ "$status" -eq 0 ]
-  [ "$output" = "true" ]
 }
 
 @test "contested section-presence rules stay 'recommended', never 'required' (Dev Notes)" {
