@@ -146,6 +146,17 @@ promotion_failure_should_escalate() {
   if [ "$count" -ge "$threshold" ]; then echo 1; else echo 0; fi
 }
 
+# ── autocut pagination termination (#1023) ────────────────────────────────────
+
+# commit_page_done <found> <count> <per_page> — return 1 (done/stop) when the boundary commit was
+# found OR when the page is short (fewer commits returned than per_page, meaning no further pages
+# exist), else return 0 (keep paginating). Pure: no I/O, unit-testable.
+commit_page_done() {
+  local found="$1" count="${2:-0}" per_page="${3:-100}"
+  if [ "$found" = "true" ] || [ "$count" -lt "$per_page" ]; then return 1; fi
+  return 0
+}
+
 # workflow_call_iface <yaml_text> — parse a reusable workflow's `on.workflow_call` block into
 # a normalized, sorted interface descriptor (one item per line), for a set-comparison diff:
 #   input <name> <required 0|1>

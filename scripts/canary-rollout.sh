@@ -1272,7 +1272,9 @@ cmd_promote() {
 # failure is what this log (and sync-promotion-failures) escalates. No-op when the log is unset.
 _log_promotion_failure() {
   [ -n "${CANARY_PROMOTIONS_FAILED_LOG:-}" ] || return 0
-  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$CANARY_PROMOTIONS_FAILED_LOG"
+  if ! printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$CANARY_PROMOTIONS_FAILED_LOG"; then
+    echo "::warning::could not append failure record for $1 to ${CANARY_PROMOTIONS_FAILED_LOG} (unwritable path?); tag-write failure may not be escalated." >&2
+  fi
 }
 
 # cmd_promote_all [--override] [--allow-pre-existing] [--dry-run] — the gated fleet
@@ -1880,12 +1882,19 @@ cmd_sync_promotion_failures() {
     gh label create needs-human --repo "$ISSUE_REPO" --color d93f0b --description "Requires human judgement (canary regression)" >/dev/null 2>&1 || true
   fi
   local issues_json
-  issues_json="$(gh issue list --repo "$ISSUE_REPO" --label canary-promotion-failure --state all -L 100 --json number,state,body 2>/dev/null || echo "[]")"
-  local -A failed_map=()
+  if ! issues_json="$(gh issue list --repo "$ISSUE_REPO" --label canary-promotion-failure --state all -L 100 --json number,state,body 2>/dev/null)"; then
+    echo "::error::could not list canary-promotion-failure issues on $ISSUE_REPO — aborting to avoid creating duplicate tracking issues." >&2
+    return 1
+  fi
+  local -A failed_map=() ok_map=()
   local fa
   while IFS= read -r fa; do
     [ -n "$fa" ] && failed_map["$fa"]=1
   done < <(printf '%s\n' "$failed_agents")
+  local oa
+  while IFS= read -r oa; do
+    [ -n "$oa" ] && ok_map["$oa"]=1
+  done < <(printf '%s\n' "$ok_agents")
   local -A promo_failures=()
   local _pf_agent _pf_num _pf_state _pf_count
   while IFS=$'\t' read -r _pf_agent _pf_num _pf_state _pf_count; do
@@ -1908,7 +1917,7 @@ cmd_sync_promotion_failures() {
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local outcome="ok"
-    [ -n "${failed_map["$agent"]:-}" ] && outcome="failed"
+    [ -n "${failed_map["$agent"]:-}" ] && [ -z "${ok_map["$agent"]:-}" ] && outcome="failed"
     local ns num istate prior
     ns="${promo_failures["$agent"]:-}"
     num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"
@@ -2143,12 +2152,13 @@ _autocut_commit_signals() {
       ' 2>/dev/null)" || return 1
       found="${parsed%%$'\t'*}"; rest="${parsed#*$'\t'}"; count="${rest%%$'\t'*}"; pre="${rest#*$'\t'}"
       acc="$(jq -cn --argjson a "$acc" --argjson b "$pre" '$a + $b' 2>/dev/null)" || return 1
-      if [ "$found" = "true" ] || [ "${count:-0}" -lt 100 ]; then path_done=1; break; fi
+      commit_page_done "$found" "${count:-0}" 100 || { path_done=1; break; }
       page=$((page + 1))
     done
     [ "$path_done" -eq 1 ] || truncated=1
   done <<< "$(_autocut_signal_paths "$agent")"
   [ "$truncated" -eq 1 ] && return 3
+  [ "$acc" = "[]" ] && return 2
   local out
   out="$(printf '%s\n' "$acc" | jq -r '
     { b: any(.[]?; (. // "") | test("^[\\w-]+(\\([^)]*\\))?!:") or test("(^|\\n)BREAKING[ -]CHANGE:")),
@@ -2231,10 +2241,11 @@ _autocut_detect_bump() {
     # consumers with no signal). A false major is at worst a spurious fresh v-line + this warning.
     echo "::warning::autocut $agent: commit range ${next_commit:0:12}..${mainsha:0:12} on $host could not be fully enumerated within $CANARY_MAX_COMMIT_PAGES pages — cannot rule out a breaking change; failing safe to bump=major (not patch). Investigate the range." >&2
     breaking=1; feat=0; driver="unresolvable commit range (fail-safe major)"
-  elif sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
+  elif [ "$rc" -eq 2 ] && sigs="$(_autocut_range_signals "$host" "$next_commit" "$mainsha")"; then
     # Reusable-path-scoped signals unavailable (a script-only change touches no reusable commit,
-    # so the boundary scan finds nothing — or the path-scoped fetch errored): fall back to the
-    # compare-range commit messages so a script-only feat/breaking still bumps correctly (#1019).
+    # so the boundary scan finds nothing — rc=2): fall back to the compare-range commit messages
+    # so a script-only feat/breaking still bumps correctly (#1019). A fetch error (rc=1) falls
+    # through to the patch fail-safe instead, preserving watched-path scoping under API failures.
     read -r breaking feat <<< "$sigs"
   else
     echo "::notice::autocut $agent: commit-signal fetch failed — bump=patch (fail-safe)" >&2

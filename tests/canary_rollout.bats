@@ -132,6 +132,21 @@ setup() {
   [ "$(promotion_failure_should_escalate 2 'y')" -eq 0 ]
 }
 
+# ── commit_page_done: pagination termination decision (#1023) ─────────────────
+@test "commit_page_done: returns 1 (done) when the boundary commit is found" {
+  ! commit_page_done "true" 100 100
+}
+@test "commit_page_done: returns 1 (done) when the page is short (< per_page)" {
+  ! commit_page_done "false" 42 100
+  ! commit_page_done "false" 0 100
+}
+@test "commit_page_done: returns 0 (continue) when page is full and boundary not found" {
+  commit_page_done "false" 100 100
+}
+@test "commit_page_done: returns 1 (done) on a boundary-found full page" {
+  ! commit_page_done "true" 100 100
+}
+
 # ── workflow_call_iface: parse an on.workflow_call interface into a descriptor ────
 # Pure YAML→descriptor transform: emits `input <name> <req 0|1>` and `secret <name>`
 # (sorted). Outputs are intentionally not emitted (they never drive a breaking verdict).
@@ -1836,6 +1851,18 @@ GHEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"closed recovered promotion-failure issue #903 for dev-lead"* ]]
   grep -q "CLOSE|.*903" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures does NOT seed a new streak from a CLOSED issue (#1023)" {
+  # A CLOSED tracking issue with a high prior count must not seed the next streak:
+  # the first new failure after recovery should start at count=1 (not count=6).
+  local existing='[{"number":904,"state":"CLOSED","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:5 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTION_FAILURE_ESCALATE_AFTER=2 CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(count=1)"* ]]
+  ! grep -q -- "--add-label needs-human" "$ISSUE_LOG"
 }
 
 @test "orchestrator: sync-promotion-failures --dry-run plans but writes nothing to GitHub (#1023)" {
@@ -3697,7 +3724,7 @@ _detect_autocut_stub() {
 #!/usr/bin/env bash
 case "\$*" in
   *".default_branch"*) echo "main" ;;
-  *"commits?path="*) cat "$STUB_BIN/commits.json" ;;
+  *"/commits"*"-f path="*) cat "$STUB_BIN/commits.json" ;;
   *"/commits/"*) echo "$MAINSHA" ;;
   *"contents/"*"ref=$MAINSHA"*".content"*) echo "$NEW_B64" ;;
   *"contents/"*"ref=$NEXTSHA"*".content"*) echo "$OLD_B64" ;;
@@ -3936,9 +3963,9 @@ args="\$*"
 page="\$(printf '%s' "\$args" | sed -n 's/.*page=\\([0-9]*\\).*/\\1/p')"; page="\${page:-1}"
 case "\$args" in
   *".default_branch"*) echo "main" ;;
-  *"commits?path=$reusable"*)
+  *"/commits"*"-f path=$reusable"*)
     f="$STUB_BIN/re-\$page.json"; [ -f "\$f" ] && cat "\$f" || echo "[]" ;;
-  *"commits?path="*)
+  *"/commits"*"-f path="*)
     f="$STUB_BIN/ex-\$page.json"; [ -f "\$f" ] && cat "\$f" || echo "[]" ;;
   *"/commits/$NEXTSHA"*) echo "$date" ;;
   *"/commits/"*) echo "$MAINSHA" ;;
@@ -4126,7 +4153,7 @@ _scriptonly_stub() {
 case "\$*" in
   *".default_branch"*) echo "main" ;;
   *"compare/"*) cat "$STUB_BIN/compare.json" ;;
-  *"commits?path="*) echo '[]' ;;
+  *"/commits"*"-f path="*) echo '[]' ;;
   *"contents/"*"ref=$MAINSHA"*) echo "sameBLOB" ;;
   *"contents/"*"ref=$NEXTSHA"*) echo "sameBLOB" ;;
   *"-X POST"*"git/tags"*) echo "\$*" >> "$GH_LOG"; echo "7a90000000000000000000000000000000000000" ;;
