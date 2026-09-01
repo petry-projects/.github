@@ -35,6 +35,13 @@ FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
+# Informational AGENTS.md structural-linter findings (issue #645, epic #642).
+# These are kept OUT of FINDINGS_FILE on purpose: they open no issues, never
+# join the umbrella, and never fail the run — Phase 3 ships structural
+# validation informational-only (see docs/initiatives/agents-md-validation.md).
+STRUCTURAL_FINDINGS_FILE="$REPORT_DIR/agents-md-structural.tsv"
+# Rule-set / promotion-gate reference the informational summary section links to.
+AGENTS_MD_RULESET_DOC="docs/initiatives/agents-md-validation.md"
 
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
@@ -155,6 +162,13 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 # "non-compliant" and the deploy sweep's "drift" stay in lockstep (#482).
 # shellcheck source=lib/ring-pins.sh
 . "$SCRIPT_DIR/lib/ring-pins.sh"
+
+# AGENTS.md structural linter — the pure, data-driven driver (amdl_lint) and its
+# default rule-set path (AMDL_DEFAULT_RULES). Sourced, not exec'd: agents-md-lint.sh
+# guards its CLI behind a BASH_SOURCE check, so sourcing only defines functions.
+# Phase 3 (#645) runs it over each scanned repo's AGENTS.md, informational-only.
+# shellcheck source=agents-md-lint.sh
+. "$SCRIPT_DIR/agents-md-lint.sh"
 
 # Canonical workflow-stub templates — the source of truth the caller-stub
 # surface-drift guard (check_stub_surface_drift) compares deployed stubs against.
@@ -2000,6 +2014,49 @@ check_claude_md() {
 # ---------------------------------------------------------------------------
 # Check: AGENTS.md exists and references org .github/AGENTS.md
 # ---------------------------------------------------------------------------
+# agents_md_lint_scope_for_repo <repo> — which structural rule scope to lint
+# under. The canonical file (this .github repo's own AGENTS.md) is exempt from
+# downstream-only rules (org-repo-import-consistency, which requires a back-link
+# to itself); every other repo is a downstream consumer and gets the full rule
+# set. Pure.
+agents_md_lint_scope_for_repo() {
+  local repo="$1"
+  if [ "$repo" = ".github" ]; then
+    printf 'canonical'
+  else
+    printf 'downstream'
+  fi
+}
+
+# record_agents_md_structural_findings <repo> <decoded_content> — run the
+# structural linter (amdl_lint, from scripts/agents-md-lint.sh) over an AGENTS.md
+# whose contents were already fetched + base64-decoded, and append its findings
+# to the INFORMATIONAL structural accumulator as
+# "<repo>\t<severity>\t<rule_id>\t<line>\t<message>". A no-op on empty content,
+# so the linter runs only when the file actually exists (a 404 stays on the
+# missing-agents-md presence path). These findings never enter FINDINGS_FILE, so
+# they open no issues, never join the umbrella, and never fail the run — Phase 3
+# ships structural validation informational-only (docs/initiatives/agents-md-validation.md).
+record_agents_md_structural_findings() {
+  local repo="$1" decoded="$2"
+  [ -n "$decoded" ] || return 0
+
+  local scope tmp findings sev rule line msg
+  scope="$(agents_md_lint_scope_for_repo "$repo")"
+  tmp="$(mktemp)"
+  printf '%s' "$decoded" > "$tmp"
+  findings="$(amdl_lint "$tmp" "$AMDL_DEFAULT_RULES" "$scope" 2>/dev/null || true)"
+  rm -f "$tmp"
+  [ -n "$findings" ] || return 0
+
+  while IFS=$'\t' read -r sev rule line msg; do
+    [ -n "$rule" ] || continue
+    printf '%s\t%s\t%s\t%s\t%s\n' "$repo" "$sev" "$rule" "$line" "$msg" \
+      >> "$STRUCTURAL_FINDINGS_FILE"
+  done <<< "$findings"
+  return 0
+}
+
 check_agents_md() {
   local repo="$1"
 
@@ -2013,11 +2070,11 @@ check_agents_md() {
     return
   fi
 
+  local decoded
+  decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+
   # For repos other than .github, AGENTS.md should reference the org-level .github/AGENTS.md
   if [ "$repo" != ".github" ]; then
-    local decoded
-    decoded=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-
     # Accept two forms of reference:
     #   1. Any path containing .github/AGENTS.md (relative link text or path reference)
     #   2. GitHub blob URL format: /petry-projects/.github/blob/<ref>/AGENTS.md (in href)
@@ -2028,6 +2085,13 @@ check_agents_md() {
         "AGENTS.md"
     fi
   fi
+
+  # Phase 3 (#645): run the structural linter over the fetched file, INFORMATIONAL
+  # and non-blocking. Runs only when content is present (the 404 path returned
+  # above), so the presence check does not regress. This also covers the
+  # cross-repo import-consistency rule (org-repo-import-consistency) under the
+  # downstream scope for non-.github repos.
+  record_agents_md_structural_findings "$repo" "$decoded"
 }
 
 # ---------------------------------------------------------------------------
@@ -2781,6 +2845,44 @@ HEREDOC
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Informational AGENTS.md structural-findings summary section
+# ---------------------------------------------------------------------------
+# Append the structural-linter findings collected in STRUCTURAL_FINDINGS_FILE to
+# the run summary as a clearly-labelled INFORMATIONAL (non-blocking) section that
+# links to the rule-set / promotion-gate doc. These findings never opened issues
+# and never affected the exit code — this section is their only surface.
+append_structural_findings_summary() {
+  local doc_link="https://github.com/$ORG/.github/blob/main/$AGENTS_MD_RULESET_DOC"
+  {
+    printf '\n## AGENTS.md Structural Findings (informational)\n\n'
+    printf '_Non-blocking: these structural-linter findings are advisory only — they open no issues and never fail the audit. Rule set and informational → blocking promotion gate: [%s](%s)._\n\n' \
+      "$AGENTS_MD_RULESET_DOC" "$doc_link"
+  } >> "$SUMMARY_FILE"
+
+  if [ ! -s "$STRUCTURAL_FINDINGS_FILE" ]; then
+    printf 'No structural findings — every scanned `AGENTS.md` is structurally valid.\n' >> "$SUMMARY_FILE"
+    return 0
+  fi
+
+  {
+    printf '| Repo | Severity | Rule | Line | Finding |\n'
+    printf '|------|----------|------|------|---------|\n'
+  } >> "$SUMMARY_FILE"
+
+  local repo sev rule line msg
+  while IFS=$'\t' read -r repo sev rule line msg; do
+    [ -n "$repo" ] || continue
+    # A finding message can contain a literal '|' (e.g. a rule's alternation
+    # regex like /standard|development standards/); escape it so it stays inside
+    # the cell instead of splitting the markdown table column.
+    msg="${msg//|/\\|}"
+    printf '| `%s` | %s | `%s` | %s | %s |\n' "$repo" "$sev" "$rule" "$line" "$msg" \
+      >> "$SUMMARY_FILE"
+  done < "$STRUCTURAL_FINDINGS_FILE"
+  return 0
+}
+
 main() {
   # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
   if [ -z "${GH_TOKEN:-}" ]; then
@@ -2801,6 +2903,9 @@ main() {
   # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
   : > "$ISSUES_FILE"
+  # Informational AGENTS.md structural findings accumulate here (never in
+  # FINDINGS_FILE) so they stay non-blocking (#645).
+  : > "$STRUCTURAL_FINDINGS_FILE"
 
   # Get all non-archived repos in the org
   local repos
@@ -2868,6 +2973,10 @@ main() {
 
   # Generate summary report
   generate_summary "$repo_count"
+
+  # Append the informational (non-blocking) AGENTS.md structural-findings section
+  # (#645). Ordered before issue management so it is part of the summary body.
+  append_structural_findings_summary
 
   # Create/update/close issues
   if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
