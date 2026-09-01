@@ -374,6 +374,7 @@ _gh_candidate_cut_date() {
     fi
     if [ "$csha" = "$commit" ]; then _to_z "$cdate"; return 0; fi
   done < <(gh api "repos/$repo/git/matching-refs/tags/$agent/v" \
+             --paginate \
              --jq '.[]? | [.ref, (.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>/dev/null)
   echo ""
 }

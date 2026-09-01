@@ -3546,17 +3546,17 @@ GHEOF
   _is_release_tag_suffix "v10.20.30"
 }
 @test "_is_release_tag_suffix: rejects a v-scoped channel tag suffix (the #1046 shadow)" {
-  run _is_release_tag_suffix "v139-next";  [ "$status" -ne 0 ]
-  run _is_release_tag_suffix "v139-ring0"; [ "$status" -ne 0 ]
-  run _is_release_tag_suffix "v2-stable";  [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "v139-next";  [ "$status" -eq 1 ]
+  run _is_release_tag_suffix "v139-ring0"; [ "$status" -eq 1 ]
+  run _is_release_tag_suffix "v2-stable";  [ "$status" -eq 1 ]
 }
 @test "_is_release_tag_suffix: rejects bare channel tags and other non-release refs" {
-  run _is_release_tag_suffix "next";     [ "$status" -ne 0 ]
-  run _is_release_tag_suffix "stable";   [ "$status" -ne 0 ]
-  run _is_release_tag_suffix "v139";     [ "$status" -ne 0 ]   # not a full semver
-  run _is_release_tag_suffix "v139.4";   [ "$status" -ne 0 ]   # missing patch
-  run _is_release_tag_suffix "139.4.0";  [ "$status" -ne 0 ]   # missing the v prefix
-  run _is_release_tag_suffix "";         [ "$status" -ne 0 ]
+  run _is_release_tag_suffix "next";     [ "$status" -eq 1 ]
+  run _is_release_tag_suffix "stable";   [ "$status" -eq 1 ]
+  run _is_release_tag_suffix "v139";     [ "$status" -eq 1 ]   # not a full semver
+  run _is_release_tag_suffix "v139.4";   [ "$status" -eq 1 ]   # missing patch
+  run _is_release_tag_suffix "139.4.0";  [ "$status" -eq 1 ]   # missing the v prefix
+  run _is_release_tag_suffix "";         [ "$status" -eq 1 ]
 }
 
 # ── _gh_candidate_cut_date / candidate_cut_date: a v-scoped channel tag must NOT shadow
@@ -3598,6 +3598,31 @@ GHEOF
   run bash -c "source '$ORCH' && _gh_candidate_cut_date petry-projects/.github-private dev-lead $_X"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "_gh_candidate_cut_date (cross-repo API): resolves release ref when many channel refs precede it (pagination guard)" {
+  # Regression for the pagination gap: --paginate is required so that a release tag
+  # which the API returns after a full page of channel refs is not silently dropped.
+  # The stub returns ring0..ring3 channel refs before the release ref, simulating the
+  # ordering that would push the release onto page 2 of a real paginated response.
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*)
+    printf 'refs/tags/dev-lead/v139-ring0\t%s\tcommit\n' "$_X"
+    printf 'refs/tags/dev-lead/v139-ring1\t%s\tcommit\n' "$_X"
+    printf 'refs/tags/dev-lead/v139-ring2\t%s\tcommit\n' "$_X"
+    printf 'refs/tags/dev-lead/v139-ring3\t%s\tcommit\n' "$_X"
+    printf 'refs/tags/dev-lead/v139.4.0\ttagobj139\ttag\n' ;;   # release — sorts after all channel refs
+  *"git/tags/tagobj139"*) printf '%s\t%s\n' "$_X" "$_CUT" ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run bash -c "source '$ORCH' && _gh_candidate_cut_date petry-projects/.github-private dev-lead $_X"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$_CUT" ]
 }
 
 @test "candidate_cut_date (cross-repo): dev-lead routes to the API path and resolves past a shadowing v-channel tag (#1046)" {
