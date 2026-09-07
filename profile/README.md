@@ -33,7 +33,7 @@ All repositories in this org follow shared engineering standards defined in
   by tech stack (Node.js, Go, Python, Electron).
 
 - **[Advanced Security](https://github.com/petry-projects/.github/blob/main/standards/advanced-security.md)** — Code Security Configurations for the org
-  fleet; push-protection live-fire canary test; custom secret scanning patterns; compliance audit checks.
+  fleet; push-protection live-fire canary test; backend liveness (secret scanning); compliance audit checks.
 
 - **[Push Protection](https://github.com/petry-projects/.github/blob/main/standards/push-protection.md)** — GitHub push protection (primary enforcement);
   local pre-commit prevention; CI secret scanning (secondary defense); incident response runbook.
