@@ -271,9 +271,33 @@ refs/tags/dev-lead/v1-stable"
   export GH_EXISTING_TAGS="dev-lead/v1-stable"   # v1-ring1 absent
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow dev-lead.yml
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -qi 'does not resolve'
-  ! echo "$output" | grep -qi 'Would open PR'
+  run grep -qi 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
+}
+
+# ── #1088: a NEWLY ring-managed agent is refused when its channel tag is absent ──
+# apply-repo-settings had drifted OUT of RING_REUSABLES, so emit_ref_for returned
+# empty and the deploy shipped its template VERBATIM — pinning the hardcoded
+# @apply-repo-settings/v1-stable, a tag that does not exist. That opened the
+# startup_failure PRs TalkTerm#489 / bmad#463. Now that it is ring-managed (AC1),
+# the deploy computes the tier channel AND the assert-exists guard (AC2) refuses a
+# non-resolving pin with a named error rather than deploying verbatim.
+
+@test "#1088: refuses a newly ring-managed agent whose computed channel tag is absent (assert-exists)" {
+  # apply-repo-settings has a v1 channel major, but the ring1 tier tag v1-ring1 was
+  # never cut (the fatal case). bmad-bgreat-suite is a ring1 repo → computed
+  # @apply-repo-settings/v1-ring1, which does not resolve → refuse.
+  export GH_MATCHING_REFS="refs/tags/apply-repo-settings/v1-stable"
+  export GH_EXISTING_TAGS="apply-repo-settings/v1-stable"   # v1-ring1 absent
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow apply-repo-settings.yml
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qi 'does not resolve'
+  echo "$output" | grep -qF '@apply-repo-settings/v1-ring1'
+  run grep -qi 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ── #878: marker injection for meta-repo consumer stubs prevents infinite churn ──

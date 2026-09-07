@@ -317,8 +317,9 @@ is_already_compliant() {
 # repo on a non-stable ring tier legitimately pins `<base>/<tier>` (e.g.
 # `<base>/ring1`). For those reusables the stub is compliant when it pins ANY ref
 # the shared ring model accepts for THIS repo (its tier channel + the transitional
-# legacy grace) — so the sweep never reverts an intentional ring/next pin. Non-ring
-# templates (e.g. add-to-project, not in RING_REUSABLES) keep the exact-match rule.
+# legacy grace) — so the sweep never reverts an intentional ring/next pin. A non-ring
+# template — one whose reusable is not registered in canary-rings.json, hence absent
+# from RING_REUSABLES — keeps the exact-match rule.
 is_pin_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
