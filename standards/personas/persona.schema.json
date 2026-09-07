@@ -8,6 +8,34 @@
   "required": ["schema_version", "id", "name", "title", "summary", "status", "owner", "definition", "triggers", "trust"],
   "allOf": [
     {
+      "if": {
+        "required": ["runtime"],
+        "properties": {
+          "runtime": {
+            "required": ["reusable"]
+          }
+        }
+      },
+      "then": {
+        "required": ["canary"]
+      },
+      "description": "A persona that ships a dedicated reusable workflow (runtime.reusable) MUST carry a canary block for ring registration. See ADR-0006."
+    },
+    {
+      "if": {
+        "required": ["canary"]
+      },
+      "then": {
+        "required": ["runtime"],
+        "properties": {
+          "runtime": {
+            "required": ["reusable"]
+          }
+        }
+      },
+      "description": "A persona with a canary block MUST declare runtime.reusable — shared-runtime personas served by the persona-runner MUST omit canary entirely. See ADR-0006."
+    },
+    {
       "if": {"properties": {"status": {"const": "stable"}}, "required": ["status"]},
       "then": {"required": ["evals"], "description": "A persona at status 'stable' MUST carry an evals block (the held-out gate). See persona-standards.md §1."}
     },
