@@ -65,9 +65,14 @@ jobs:
           REPORT_DIR: ${{ runner.temp }}/compliance-report
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           CREATE_ISSUES: 'true'
+          # The script is read-only by default (issue #1036, Defect 3). This is
+          # the official audit run, so it is explicitly authorised to mutate org
+          # issue/label state. DRY_RUN still suppresses mutation when dispatched
+          # with dry_run=true.
+          COMPLIANCE_AUDIT_APPLY: 'true'
         run: |
           mkdir -p "$REPORT_DIR"
-          bash scripts/compliance-audit.sh
+          bash scripts/compliance-audit.sh --apply
 
           # Parse outputs for downstream jobs
           FINDINGS_COUNT=$(jq length "$REPORT_DIR/findings.json")
