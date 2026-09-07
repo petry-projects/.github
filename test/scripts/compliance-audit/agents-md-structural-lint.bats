@@ -156,7 +156,8 @@ record() {
   # raise the downstream-only import rule.
   record ".github" "$NO_IMPORT_LINK"
   [ "$status" -eq 0 ]
-  ! grep -q 'org-repo-import-consistency' <<< "$output"
+  run grep -q 'org-repo-import-consistency' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "empty content records nothing (linter runs only when the file exists)" {
@@ -206,14 +207,17 @@ run_check() {
   content=$(printf '%s' "$SKIPPED_HEADING" | base64 | tr -d '\n')
   STUB_CONTENT="$content" run_check "some-app"
   [ "$status" -eq 0 ]
+  local full_output="$output"
   # No missing-agents-md finding (the file exists).
-  ! grep -q 'missing-agents-md' <<< "$output"
+  run grep -q 'missing-agents-md' <<< "$full_output"
+  [ "$status" -eq 1 ]
   # The structural accumulator carries the hierarchy finding.
-  structural="${output##*---STRUCTURAL---}"
+  structural="${full_output##*---STRUCTURAL---}"
   grep -q 'heading-hierarchy-valid' <<< "$structural"
   # And it is NOT in FINDINGS_FILE (non-blocking — opens no issue).
-  findings="${output%%---STRUCTURAL---*}"
-  ! grep -q 'heading-hierarchy-valid' <<< "$findings"
+  findings="${full_output%%---STRUCTURAL---*}"
+  run grep -q 'heading-hierarchy-valid' <<< "$findings"
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------

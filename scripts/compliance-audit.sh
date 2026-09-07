@@ -2041,19 +2041,14 @@ record_agents_md_structural_findings() {
   local repo="$1" decoded="$2"
   [ -n "$decoded" ] || return 0
 
-  local scope tmp findings sev rule line msg
+  local scope tmp
   scope="$(agents_md_lint_scope_for_repo "$repo")"
   tmp="$(mktemp)"
   printf '%s' "$decoded" > "$tmp"
-  findings="$(amdl_lint "$tmp" "$AMDL_DEFAULT_RULES" "$scope" 2>/dev/null || true)"
+  amdl_lint "$tmp" "$AMDL_DEFAULT_RULES" "$scope" 2>/dev/null \
+    | awk -v repo="$repo" -F'\t' 'BEGIN {OFS=FS} $2 != "" {print repo, $0}' \
+    >> "$STRUCTURAL_FINDINGS_FILE" || true
   rm -f "$tmp"
-  [ -n "$findings" ] || return 0
-
-  while IFS=$'\t' read -r sev rule line msg; do
-    [ -n "$rule" ] || continue
-    printf '%s\t%s\t%s\t%s\t%s\n' "$repo" "$sev" "$rule" "$line" "$msg" \
-      >> "$STRUCTURAL_FINDINGS_FILE"
-  done <<< "$findings"
   return 0
 }
 
