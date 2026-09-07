@@ -5,8 +5,36 @@
   "description": "The single index-of-record for one agentic persona. It ties together the persona's identity, the definition layer(s) that implement it, the skills it uses, its trigger surface, its trust/permission posture, its eval gate, and a pointer to its canary-rings entry. The manifest does NOT duplicate ring membership or gate knobs — those live in petry-projects/.github standards/canary-rings.json (the single source of truth). See standards/persona-standards.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "name", "title", "summary", "status", "owner", "definition", "triggers", "trust", "canary"],
+  "required": ["schema_version", "id", "name", "title", "summary", "status", "owner", "definition", "triggers", "trust"],
   "allOf": [
+    {
+      "if": {
+        "required": ["runtime"],
+        "properties": {
+          "runtime": {
+            "required": ["reusable"]
+          }
+        }
+      },
+      "then": {
+        "required": ["canary"]
+      },
+      "description": "A persona that ships a dedicated reusable workflow (runtime.reusable) MUST carry a canary block for ring registration. See ADR-0006."
+    },
+    {
+      "if": {
+        "required": ["canary"]
+      },
+      "then": {
+        "required": ["runtime"],
+        "properties": {
+          "runtime": {
+            "required": ["reusable"]
+          }
+        }
+      },
+      "description": "A persona with a canary block MUST declare runtime.reusable — shared-runtime personas served by the persona-runner MUST omit canary entirely. See ADR-0006."
+    },
     {
       "if": {"properties": {"status": {"const": "stable"}}, "required": ["status"]},
       "then": {"required": ["evals"], "description": "A persona at status 'stable' MUST carry an evals block (the held-out gate). See persona-standards.md §1."}
@@ -298,7 +326,7 @@
     "canary": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Pointer to the single source of truth for ring rollout. This manifest MUST NOT restate rings, members, or gate knobs — only reference the registry entry by id.",
+      "description": "OPTIONAL pointer to the ring registry, for a persona that ships its OWN reusable. Per ADR-0006 (.github-private docs/architecture/adr/0006-shared-runtime-personas-are-not-ring-registered.md) a persona served wholly by the SHARED persona runtime (the persona-mention router dispatching to persona-runner) is NOT individually ring-registered — no caller pins a per-persona channel tag — and MUST OMIT this block rather than point at a registry entry that does not exist. Include it only when the persona ships a dedicated reusable, in which case ADR-0002 applies in full. This manifest MUST NOT restate rings, members, or gate knobs — only reference the registry entry by id.",
       "required": ["registry", "agent"],
       "properties": {
         "registry": {
