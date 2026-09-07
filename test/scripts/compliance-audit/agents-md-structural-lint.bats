@@ -268,3 +268,54 @@ summary_with() {
   [ "$status" -eq 0 ]
   grep -q 'standard\\|development standards' <<< "$output"
 }
+
+# ---------------------------------------------------------------------------
+# Phase 4 (#647): the summary records the per-cycle STRUCTURAL FINDING COUNT and
+# links the append-only cycle log, so two consecutive clean cycles are auditable
+# from the issue history and the false-positive determination has a durable home.
+# ---------------------------------------------------------------------------
+
+@test "the summary records the per-cycle structural finding count (zero case)" {
+  summary_with ""
+  [ "$status" -eq 0 ]
+  # An explicit machine-readable count keys the cycle log's row for this cycle.
+  grep -qi 'structural findings this cycle: 0' <<< "$output"
+}
+
+@test "the summary records the per-cycle structural finding count (non-zero case)" {
+  summary_with 'a\trequired\theading-hierarchy-valid\t8\tH2 to H4\nb\trecommended\tsecurity-section-present\t-\tno security section\n'
+  [ "$status" -eq 0 ]
+  grep -qi 'structural findings this cycle: 2' <<< "$output"
+}
+
+@test "the summary links the append-only cycle log and names the false-positive determination" {
+  summary_with ""
+  [ "$status" -eq 0 ]
+  grep -q 'docs/initiatives/agents-md-validation-cycle-log.md' <<< "$output"
+  grep -qi 'false positive' <<< "$output"
+}
+
+# ---------------------------------------------------------------------------
+# structural_finding_count — the pure per-cycle counter behind the summary line.
+# ---------------------------------------------------------------------------
+
+count_of() {
+  local acc="$TMPDIR_TEST/structural.tsv"
+  printf '%b' "$1" > "$acc"
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    structural_finding_count "$2"
+  ' _ "$SCRIPT" "$acc"
+}
+
+@test "structural_finding_count is 0 for an empty accumulator" {
+  count_of ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "structural_finding_count counts one per recorded finding row" {
+  count_of 'a\trequired\theading-hierarchy-valid\t8\tmsg\nb\trecommended\tsecurity-section-present\t-\tmsg\n'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}

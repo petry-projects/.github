@@ -1,9 +1,12 @@
 # Initiative: AGENTS.md Structural Validation — Rule Set & Spec-Alignment Reference
 
-- **Status:** Phase 1 (documentation + rule set only) — the rule set is **inert on merge**; no linter, workflow, or audit consumes it yet.
-- **Date:** 2026-09-01
+- **Status:** Phase 4 (promotion **mechanism** + documentation) — the structural check is wired into the compliance audit
+  **informational-only**; Phase 4 adds the per-cycle record, the append-only cycle log, and the discrete blocking toggle,
+  but **arms nothing**. The check remains non-blocking on merge; promotion to blocking is a separate, human-gated decision.
+- **Date:** 2026-09-01 (Phase 1) · Phase 4 promotion mechanism added 2026-09-07
 - **Epic:** [#642 — AGENTS.md Specification Alignment & Automated Structural Validation](https://github.com/petry-projects/.github/issues/642)
-- **Story:** [#643 — Phase 1: Define the AGENTS.md structural rule set and spec-alignment reference](https://github.com/petry-projects/.github/issues/643)
+- **Story:** [#643 — Phase 1: Define the AGENTS.md structural rule set and spec-alignment reference](https://github.com/petry-projects/.github/issues/643);
+  [#647 — Phase 4: informational → blocking promotion mechanism](https://github.com/petry-projects/.github/issues/647)
 - **Sources:** discussion [#534 — AGENTS.md Specification Alignment & Automated Validation](https://github.com/petry-projects/.github/discussions/534);
   idea [#341 — Cross-Repo Standards Drift Detection via Multi-Repo Analysis](https://github.com/petry-projects/.github/discussions/341)
 - **Rule set:** [`scripts/lib/agents-md-rules.json`](../../scripts/lib/agents-md-rules.json)
@@ -142,12 +145,63 @@ Two further guarantees:
 - **Section-presence rules stay `recommended` for now.** The exact required-vs-recommended split for section presence is an open question in epic #642;
   starting them advisory avoids hard-requiring a contested section list before it is confirmed.
 
+### 4.1 How "two consecutive clean cycles" is recorded — the append-only cycle log
+
+The clean-cycle count must be **independently auditable and tamper-evident**, so it does **not** live only in the editable
+audit summary issue (which could be silently edited to fabricate a clean-cycle claim). Instead, each cycle's structural
+finding count and every confirmed false-positive determination are appended to a committed, append-only log:
+
+- **Cycle log:** [`docs/initiatives/agents-md-validation-cycle-log.md`](./agents-md-validation-cycle-log.md).
+- **Reader / validator:** [`scripts/agents-md-cycle-log.sh`](../../scripts/agents-md-cycle-log.sh) — a pure, bats-tested
+  helper with two subcommands: `validate` (every recorded determination names a maintainer; counts are integers; the
+  `Clean?` flag agrees with the false-positive count) and `eligibility` (reports whether the last two cycles are clean).
+  **It never promotes** — it only reports the precondition.
+
+The chain of custody:
+
+1. Each compliance-audit cycle's summary section states the machine-counted **structural findings this cycle**.
+2. A maintainer reviews those findings and decides which, if any, are **confirmed false positives**.
+3. The maintainer appends one row to the cycle log — finding count, confirmed-false-positive count and details, their
+   `@handle`, and the derived `Clean?` flag — in a reviewable pull request. **Every determination, including a clean
+   cycle, names the maintainer who made it.** Rows are never edited or deleted; git history is the tamper-evidence.
+4. `agents-md-cycle-log.sh eligibility docs/initiatives/agents-md-validation-cycle-log.md 2` then reports whether the
+   clean-cycle precondition is met. **Meeting it is not a promotion** — sign-off and the discrete flip below are still required.
+
+### 4.2 The discrete blocking toggle — delivered here, armed nowhere
+
+Promotion is a discrete, reviewable change gated behind the criteria above. This story (#647) delivers the **mechanism**
+and leaves it **disabled** (`promotion.toggle.enabled` is `false` in the rule set). Two independent points must be armed
+to enforce, and **this story arms neither**:
+
+| Toggle point | What flipping it does | State in this story |
+|--------------|-----------------------|---------------------|
+| **Linter failing mode** — [`scripts/agents-md-lint.sh`](../../scripts/agents-md-lint.sh) `--mode failing` | The linter exits non-zero on a `required`-level finding instead of report-only. The compliance audit invokes it informational-only today; a reviewable change would route required findings to a failing check. | Not enabled — audit stays informational. |
+| **Required status check** — branch protection | The local canonical-AGENTS.md CI self-check becomes a **required status check** on `main` (see [`standards/github-settings.md`](https://github.com/petry-projects/.github/blob/main/standards/github-settings.md)). | Not applied — no branch-protection change in this story. |
+
+The flip itself remains a human decision recorded against the documented criteria: two clean cycles in the cycle log
+**and** explicit maintainer sign-off. Neither the audit, the linter, nor the cycle-log helper ever performs it automatically.
+
+### 4.3 Maintainer promotion checklist
+
+When both preconditions are genuinely met, a maintainer promotes the check by, in a single reviewable PR:
+
+1. Confirming `agents-md-cycle-log.sh eligibility …` reports `clean-cycles-met=true` over the required two cycles.
+2. Recording explicit sign-off (the approving maintainer) in the PR description, referencing the two clean cycle-log rows.
+3. Flipping the toggle: set `promotion.default_severity` to `blocking` and `promotion.toggle.enabled` to `true` in the
+   rule set, wire the audit / CI self-check to `--mode failing`, and add the required status check per `standards/github-settings.md`.
+
+Until that PR merges, the check is informational and no AGENTS.md structural finding can fail a run.
+
 ---
 
 ## 5. References
 
-- [`scripts/lib/agents-md-rules.json`](../../scripts/lib/agents-md-rules.json) — the machine-readable rule set (this initiative's data artifact).
+- [`scripts/lib/agents-md-rules.json`](../../scripts/lib/agents-md-rules.json) — the machine-readable rule set (this initiative's data artifact), including the `promotion` gate and its `toggle`.
+- [`docs/initiatives/agents-md-validation-cycle-log.md`](./agents-md-validation-cycle-log.md) — the append-only, committed per-cycle log behind the clean-cycle precondition (Phase 4, #647).
+- [`scripts/agents-md-cycle-log.sh`](../../scripts/agents-md-cycle-log.sh) — pure reader/validator for the cycle log (`validate` + `eligibility`); reports the precondition, never promotes.
+- [`scripts/compliance-audit.sh`](../../scripts/compliance-audit.sh) — records this cycle's structural finding count in the audit summary and points at the cycle log (Phase 4, #647).
 - [`tests/test_agents_md_rules_config.bats`](../../tests/test_agents_md_rules_config.bats) — contract tests for the rule set.
+- [`tests/agents_md_cycle_log.bats`](../../tests/agents_md_cycle_log.bats) — contract tests for the cycle-log reader/validator.
 - [`.github/workflows/agents-md-rules-tests.yml`](../../.github/workflows/agents-md-rules-tests.yml) — CI gate that runs the contract tests.
 - [`.dev-lead/scripts/aw-standards-sync.sh`](../../.dev-lead/scripts/aw-standards-sync.sh) — the presence-only compliance framework this initiative extends.
 - [`AGENTS.md`](../../AGENTS.md) — the canonical org-level file the import-consistency rule points downstream repos back to.
