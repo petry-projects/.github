@@ -21,16 +21,31 @@
 # WITHOUT the `-reusable` suffix (e.g. `auto-rebase`, not `auto-rebase-reusable`)
 # and WITHOUT the `.yml` extension. dev-lead is included: it is ring-released too
 # (its reusable lives in .github-private but the same tier topology applies).
+#
+# This list MUST equal `.agents | keys` in standards/canary-rings.json so every
+# REGISTERED agent is ring-managed: the deploy sweep computes its repo's tier
+# channel (via emit_ref_for) and the audit accepts the tier channels, instead of
+# shipping the template's hardcoded @<agent>/v1-stable verbatim (#1088). Agreement
+# is asserted by the "RING_REUSABLES equals the canary-rings.json agent registry"
+# test in test/scripts/lib/ring-pins.bats — mirroring canary-rollout.yml's dispatch
+# `agent` enum, which carries the same registry-agreement contract (#1019).
 readonly RING_REUSABLES=(
+  add-to-project
+  agent-shield
+  apply-repo-settings
   auto-rebase
-  dependency-audit
+  ci-failure-analyst
   dependabot-automerge
   dependabot-rebase
-  agent-shield
-  pr-review-mention
+  dependency-audit
   dev-lead
   feature-ideation
+  idea-enhancer
+  idea-triage
+  initiative-planner
+  persona-mention
   pr-auto-review
+  pr-review-mention
 )
 
 # ring_tier_for_repo <repo> -> next|ring0|ring1|stable
@@ -228,14 +243,22 @@ ring_tag_exists() {
 }
 
 # ring_repin_uses <channel-base> <newref> -> rewrite a workflow stub read on stdin
-# so its reusable `uses:` ref (and any matching `agent_ref:`) points at <newref>.
-# Only lines referencing THIS agent's reusable are touched; the trailing comment
-# on a `uses:` line is preserved. Pure (sed only).
+# so its reusable `uses:` ref (and any matching `agent_ref:`/`checkout_ref:`) points
+# at <newref>. Only lines referencing THIS agent's reusable are touched; the trailing
+# comment on a rewritten line is preserved. Pure (sed only).
+#
+# `checkout_ref:` is a `with:` forward that some stubs (e.g. apply-repo-settings)
+# pin to the SAME channel as `uses:` so the reusable checks out the matching version
+# of .github's scripts — it must stay in lockstep with the `uses:` channel pin, so it
+# is re-pinned alongside `uses:` here. This only re-pins the VALUE of an input the
+# stub already forwards (never adds/forwards a new one), so it never introduces the
+# undeclared-input channel-skew defect (#1052).
 ring_repin_uses() {
   local base="$1" newref="$2"
   sed -E \
     -e "s#^([[:space:]]*uses:[[:space:]]*petry-projects/[^@[:space:]]*/${base}-reusable\.yml)@[^[:space:]]+#\1@${newref}#" \
-    -e "s#^([[:space:]]*agent_ref:[[:space:]]*[\"']?)${base}/[^\"'[:space:]]+#\1${newref}#"
+    -e "s#^([[:space:]]*agent_ref:[[:space:]]*[\"']?)${base}/[^\"'[:space:]]+#\1${newref}#" \
+    -e "s#^([[:space:]]*checkout_ref:[[:space:]]*[\"']?)${base}/[^\"'[:space:]]+#\1${newref}#"
   return 0
 }
 
