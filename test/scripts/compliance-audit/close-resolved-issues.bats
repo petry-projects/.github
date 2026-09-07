@@ -200,3 +200,29 @@ _source_audit() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing-label-"* ]]
 }
+
+@test "repo with inconclusive checks has no issue closed (failed workflow-list request guard)" {
+  # If check_action_pinning's workflow-list fetch fails, the repo is marked
+  # inconclusive. Any open finding issue in that repo must NOT be closed.
+  findings='[{"repo":"demo-repo","check":"missing-ci.yml"}]'
+  issues="[$(_issue 6001 'Compliance: settings-has_wiki' "generated $MARKER")]"
+  # Create both audited-repos and inconclusive-repos files
+  echo "$findings" > "$TEST_TMP/findings.json"
+  echo "$issues"   > "$MOCK_ISSUES_JSON"
+  printf 'demo-repo\n' > "$TEST_TMP/audited-repos.txt"
+  printf 'demo-repo\n' > "$TEST_TMP/inconclusive-repos.txt"
+
+  MOCK_ISSUES_JSON="$MOCK_ISSUES_JSON" MOCK_CLOSED_FILE="$MOCK_CLOSED_FILE" \
+  PATH="$MOCK_BIN:$PATH" REPORT_DIR="$TEST_TMP" bash -c '
+    set -uo pipefail
+    export MOCK_ISSUES_JSON MOCK_CLOSED_FILE
+    # shellcheck disable=SC1090
+    source "'"$REPO_ROOT"'/scripts/compliance-audit.sh"
+    close_resolved_issues "demo-repo" || true
+  ' 2>/dev/null
+
+  run cat "$MOCK_CLOSED_FILE"
+  [ "$status" -eq 0 ]
+  # Issue should NOT be closed
+  [[ "$output" != *"6001"* ]]
+}

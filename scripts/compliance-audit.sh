@@ -64,6 +64,10 @@ ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
 # recorded here was skipped/unscanned, so close_resolved_issues() must not treat
 # its empty findings set as "everything fixed".
 AUDITED_REPOS_FILE="$REPORT_DIR/audited-repos.txt"
+# Repos where closure-relevant checks could not complete (issue #1036, AC2 extension).
+# If a repo had an inconclusive check (e.g. workflow list unreadable), it's recorded
+# here and NOT marked audited, so close_resolved_issues() skips it.
+INCONCLUSIVE_REPOS_FILE="$REPORT_DIR/inconclusive-repos.txt"
 # Informational AGENTS.md structural-linter findings (issue #645, epic #642).
 # These are kept OUT of FINDINGS_FILE on purpose: they open no issues, never
 # join the umbrella, and never fail the run — Phase 3 ships structural
@@ -159,6 +163,17 @@ mark_repo_audited() {
 repo_was_audited() {
   [ -f "$AUDITED_REPOS_FILE" ] || return 1
   grep -qxF "$1" "$AUDITED_REPOS_FILE"
+}
+
+# mark_repo_inconclusive <repo>: record that a closure-relevant check failed for <repo>.
+mark_repo_inconclusive() {
+  printf '%s\n' "$1" >> "$INCONCLUSIVE_REPOS_FILE"
+}
+
+# repo_has_inconclusive_checks <repo>: return 0 if <repo> had a failed collection check.
+repo_has_inconclusive_checks() {
+  [ -f "$INCONCLUSIVE_REPOS_FILE" ] || return 1
+  grep -qxF "$1" "$INCONCLUSIVE_REPOS_FILE"
 }
 
 # issue_has_generated_marker <body>: return 0 if the issue body carries evidence
@@ -346,9 +361,13 @@ feature_ideation_context_is_placeholder() {
 check_action_pinning() {
   local repo="$1"
 
-  # List workflow files
+  # List workflow files. Detect collection failure to avoid false closures (issue #1036).
   local workflows
-  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  if ! workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
+    # Workflow list fetch failed — collection was inconclusive, don't mark repo audited
+    mark_repo_inconclusive "$repo"
+    return 0
+  fi
 
   for wf in $workflows; do
     [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
@@ -2699,6 +2718,13 @@ close_resolved_issues() {
     return
   fi
 
+  # AC2 (extended): skip repos with inconclusive checks (e.g. failed workflow-list
+  # request in check_action_pinning). Collection was incomplete, so don't close.
+  if repo_has_inconclusive_checks "$repo"; then
+    info "Skipping issue closure for $repo — collection was inconclusive (closure-relevant check failed)"
+    return
+  fi
+
   # AC3: refuse to close anything on a zero-finding run. Detection is fail-closed
   # (an unreadable ruleset is drift, not a pass), so a total of zero across every
   # repo is a failed scan, not a compliant org.
@@ -3132,7 +3158,10 @@ main() {
     # Record that this repo's checks actually ran (AC2). Reached only past the
     # repo_json guard above — a repo whose metadata could not be fetched hits the
     # `continue` and is deliberately NOT recorded, so its issues are never closed.
-    mark_repo_audited "$repo"
+    # Also skip if any closure-relevant check was inconclusive (issue #1036).
+    if ! repo_has_inconclusive_checks "$repo"; then
+      mark_repo_audited "$repo"
+    fi
 
     log_end
   done
