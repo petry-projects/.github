@@ -13,10 +13,21 @@
 #   $REPORT_DIR/issue-counts.json  — issue management counts (added/existing/removed)
 #
 # Environment variables:
-#   GH_TOKEN        — GitHub token with repo/org scope (required)
-#   REPORT_DIR      — directory for output files (default: mktemp -d)
-#   DRY_RUN         — set to "true" to skip issue creation (default: false)
-#   CREATE_ISSUES   — set to "false" to skip issue creation (default: true)
+#   GH_TOKEN               — GitHub token with repo/org scope (required)
+#   REPORT_DIR             — directory for output files (default: mktemp -d)
+#   DRY_RUN                — set to "true" to skip issue creation (default: false)
+#   CREATE_ISSUES          — set to "false" to skip issue creation (default: true)
+#   COMPLIANCE_AUDIT_APPLY — set to "true" (or pass --apply) to actually mutate
+#                            issue/label state (default: false → read-only)
+#
+# READ-ONLY BY DEFAULT (issue #1036, Defect 3): auditing is always safe to run,
+# but this script also creates, comments on, and CLOSES issues across every repo
+# in the org. Those mutations happen ONLY when explicitly enabled with the
+# `--apply` flag or `COMPLIANCE_AUDIT_APPLY=true` (the value the compliance-audit
+# workflow sets). Without it the script performs the read-only audit, prints the
+# issue actions it WOULD take, and exits 0 — so an agent working on this code, or
+# a maintainer inspecting output locally, cannot silently mutate production issue
+# state. `DRY_RUN=true` additionally suppresses mutation even when apply is on.
 
 set -euo pipefail
 
@@ -27,14 +38,36 @@ ORG="petry-projects"
 AUDIT_LABEL="compliance-audit"
 AUDIT_LABEL_COLOR="7057ff"
 AUDIT_LABEL_DESC="Automated compliance audit finding"
+# Machine-owned label (issue #1036, AC1c). The audit CREATES and CLOSES only
+# issues carrying this label; close_resolved_issues() keys on it, never on
+# AUDIT_LABEL. This leaves `compliance-audit` free for people to apply for triage
+# without arming the auto-closer. Do NOT hand-apply `compliance-finding`.
+FINDING_LABEL="compliance-finding"
+FINDING_LABEL_COLOR="5319e7"
+FINDING_LABEL_DESC="Machine-owned: created and auto-closed by the compliance audit. Do not hand-apply."
+# Stable machine-written marker embedded in every issue body this audit creates.
+# close_resolved_issues() requires it (or the legacy generated-by footer) as
+# evidence THIS TOOL created an issue before closing it (issue #1036, AC1b).
+AUDIT_GENERATED_MARKER="<!-- compliance-audit:generated -->"
 REPORT_DIR="${REPORT_DIR:-$(mktemp -d)}"
 DRY_RUN="${DRY_RUN:-false}"
 CREATE_ISSUES="${CREATE_ISSUES:-true}"
+# Read-only by default (issue #1036, Defect 3 / AC4). Enabled by --apply (parsed
+# in main) or COMPLIANCE_AUDIT_APPLY=true. See the script header.
+APPLY="${COMPLIANCE_AUDIT_APPLY:-false}"
 
 FINDINGS_FILE="$REPORT_DIR/findings.json"
 SUMMARY_FILE="$REPORT_DIR/summary.md"
 ISSUES_FILE="$REPORT_DIR/issues.json"
 ISSUE_COUNTS_FILE="$REPORT_DIR/issue-counts.json"
+# Repos whose checks actually RAN this execution (issue #1036, AC2). A repo not
+# recorded here was skipped/unscanned, so close_resolved_issues() must not treat
+# its empty findings set as "everything fixed".
+AUDITED_REPOS_FILE="$REPORT_DIR/audited-repos.txt"
+# Repos where closure-relevant checks could not complete (issue #1036, AC2 extension).
+# If a repo had an inconclusive check (e.g. workflow list unreadable), it's recorded
+# here and NOT marked audited, so close_resolved_issues() skips it.
+INCONCLUSIVE_REPOS_FILE="$REPORT_DIR/inconclusive-repos.txt"
 # Informational AGENTS.md structural-linter findings (issue #645, epic #642).
 # These are kept OUT of FINDINGS_FILE on purpose: they open no issues, never
 # join the umbrella, and never fail the run — Phase 3 ships structural
@@ -113,6 +146,48 @@ log() { echo "::group::$*" >&2; }
 log_end() { echo "::endgroup::" >&2; }
 info() { echo "[INFO] $*" >&2; }
 warn() { echo "::warning::$*" >&2; }
+
+# mutations_enabled: issue/label mutation is allowed only when explicitly applied
+# and not in dry-run (issue #1036, AC4). Everything gated behind this is a no-op
+# in the read-only default.
+mutations_enabled() {
+  [ "$APPLY" = "true" ] && [ "$DRY_RUN" != "true" ]
+}
+
+# mark_repo_audited <repo>: record that <repo>'s checks ran this execution.
+mark_repo_audited() {
+  printf '%s\n' "$1" >> "$AUDITED_REPOS_FILE"
+}
+
+# repo_was_audited <repo>: return 0 if <repo>'s checks ran this execution (AC2).
+repo_was_audited() {
+  [ -f "$AUDITED_REPOS_FILE" ] || return 1
+  grep -qxF "$1" "$AUDITED_REPOS_FILE"
+}
+
+# mark_repo_inconclusive <repo>: record that a closure-relevant check failed for <repo>.
+mark_repo_inconclusive() {
+  printf '%s\n' "$1" >> "$INCONCLUSIVE_REPOS_FILE"
+}
+
+# repo_has_inconclusive_checks <repo>: return 0 if <repo> had a failed collection check.
+repo_has_inconclusive_checks() {
+  [ -f "$INCONCLUSIVE_REPOS_FILE" ] || return 1
+  grep -qxF "$1" "$INCONCLUSIVE_REPOS_FILE"
+}
+
+# issue_has_generated_marker <body>: return 0 if the issue body carries evidence
+# THIS TOOL created it — the explicit machine marker on issues created after
+# #1036, or the legacy generated-by footer on issues created before it. A
+# hand-filed issue carries neither and is therefore never closable (AC1b).
+issue_has_generated_marker() {
+  local body="$1"
+  case "$body" in
+    *"$AUDIT_GENERATED_MARKER"*) return 0 ;;
+    *"automatically created by the [weekly compliance audit]"*) return 0 ;;
+  esac
+  return 1
+}
 
 # escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
 # This ensures that version tags (e.g. v2.1) and reusable basenames are treated
@@ -286,9 +361,13 @@ feature_ideation_context_is_placeholder() {
 check_action_pinning() {
   local repo="$1"
 
-  # List workflow files
+  # List workflow files. Detect collection failure to avoid false closures (issue #1036).
   local workflows
-  workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  if ! workflows=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
+    # Workflow list fetch failed — collection was inconclusive, don't mark repo audited
+    mark_repo_inconclusive "$repo"
+    return 0
+  fi
 
   for wf in $workflows; do
     [[ "$wf" != *.yml && "$wf" != *.yaml ]] && continue
@@ -532,7 +611,9 @@ check_labels() {
   for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
     IFS=':' read -r label color description <<< "$spec"
     if ! echo "$existing_labels" | grep -qx "$label"; then
-      if [ "$DRY_RUN" = "true" ]; then
+      # Read-only (or dry-run) never mutates: file the finding instead of
+      # auto-creating the label (issue #1036, AC4).
+      if ! mutations_enabled; then
         add_finding "$repo" "labels" "missing-label-$label" "warning" \
           "Required label \`$label\` is missing" \
           "standards/github-settings.md#labels--standard-set"
@@ -2290,6 +2371,12 @@ ensure_audit_label() {
     --description "$AUDIT_LABEL_DESC" \
     --color "$AUDIT_LABEL_COLOR" \
     --force 2>/dev/null || true
+  # Machine-owned finding label — the sole label the auto-closer keys on (AC1c).
+  gh label create "$FINDING_LABEL" \
+    --repo "$ORG/$repo" \
+    --description "$FINDING_LABEL_DESC" \
+    --color "$FINDING_LABEL_COLOR" \
+    --force 2>/dev/null || true
   gh label create "dev-lead" \
     --repo "$ORG/$repo" \
     --description "For dev-lead agent pickup" \
@@ -2339,6 +2426,11 @@ create_issue_for_finding() {
     2>/dev/null | head -1 || echo "")
 
   if [ -n "$existing" ]; then
+    # Migrate the machine-owned finding label onto pre-existing issues so the
+    # auto-closer (which keys on FINDING_LABEL) can retire them once resolved
+    # (issue #1036, AC1c). Idempotent; a no-op if already present.
+    gh issue edit "$existing" --repo "$ORG/$repo" --add-label "$FINDING_LABEL" 2>/dev/null || true
+
     # Update existing issue with a comment; only count as existing if the update succeeds
     local update_ok=true
     gh issue comment "$existing" --repo "$ORG/$repo" \
@@ -2445,12 +2537,15 @@ ${detail}
 ${remediation_steps}
 
 ---
-*This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*"
+*This issue was automatically created by the [weekly compliance audit](https://github.com/${ORG}/.github/blob/main/.github/workflows/compliance-audit.yml).*
+${AUDIT_GENERATED_MARKER}"
 
   local issue_url
-  # Individual finding issues get both compliance-audit and dev-lead labels so agents can pick them up.
+  # Finding issues carry: compliance-finding (machine-owned closer key, AC1c),
+  # compliance-audit (human-facing triage label), and dev-lead (agent pickup).
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
+    --label "$FINDING_LABEL" \
     --label "$AUDIT_LABEL" \
     --label "dev-lead" \
     --body "$body" 2>/dev/null || echo "")
@@ -2603,18 +2698,56 @@ Findings are grouped by remediation category. Address each category together to 
   fi
 }
 
+# close_resolved_issues <repo>: retire finding issues whose check is no longer
+# present. Fail-CLOSED to match the detection paths (issue #1036):
+#   AC2  — only for a repo actually scanned this run; a repo that was skipped,
+#          scoped out, or aborted mid-collection has an empty findings set that
+#          must NOT be read as "everything fixed".
+#   AC3  — never when total findings across all repos is zero; that is a failed
+#          scan, not a compliant org.
+#   AC1c — enumerate ONLY the machine-owned FINDING_LABEL, never AUDIT_LABEL.
+#   AC1  — close ONLY issues titled exactly `Compliance: <check>`.
+#   AC1b — close ONLY issues whose body carries this tool's generated-by marker.
 close_resolved_issues() {
   local repo="$1"
 
-  # Get all open compliance-audit issues
-  local open_issues
-  open_issues=$(gh issue list --repo "$ORG/$repo" \
-    --label "$AUDIT_LABEL" \
-    --state open \
-    --json number,title \
-    -q '.[] | "\(.number)\t\(.title)"' 2>/dev/null || echo "")
+  # AC2: a repo that was not actually scanned this run must not have its findings
+  # closed — its empty findings set is "not scanned", not "clean".
+  if ! repo_was_audited "$repo"; then
+    info "Skipping issue closure for $repo — not scanned this run (avoids closing live findings on a skipped/scoped-out repo)"
+    return
+  fi
 
-  [ -z "$open_issues" ] && return
+  # AC2 (extended): skip repos with inconclusive checks (e.g. failed workflow-list
+  # request in check_action_pinning). Collection was incomplete, so don't close.
+  if repo_has_inconclusive_checks "$repo"; then
+    info "Skipping issue closure for $repo — collection was inconclusive (closure-relevant check failed)"
+    return
+  fi
+
+  # AC3: refuse to close anything on a zero-finding run. Detection is fail-closed
+  # (an unreadable ruleset is drift, not a pass), so a total of zero across every
+  # repo is a failed scan, not a compliant org.
+  local total_findings
+  total_findings=$(jq 'length' "$FINDINGS_FILE" 2>/dev/null || echo "")
+  if [ -z "$total_findings" ]; then
+    warn "Could not read total finding count from $FINDINGS_FILE — skipping issue closure (fail closed)"
+    return
+  fi
+  if [ "$total_findings" -eq 0 ]; then
+    warn "Total finding count is zero across all repos — treating as a failed scan and refusing to close any issue (issue #1036, AC3)"
+    return
+  fi
+
+  # AC1c: enumerate ONLY machine-owned finding issues. `compliance-audit` is
+  # deliberately NOT queried — hand-filed issues anyone labels it stay untouched.
+  local open_issues_json
+  open_issues_json=$(gh issue list --repo "$ORG/$repo" \
+    --label "$FINDING_LABEL" \
+    --state open \
+    --limit 1000 \
+    --json number,title,body 2>/dev/null || echo "[]")
+  [ -z "$open_issues_json" ] && open_issues_json="[]"
 
   # Get current findings for this repo (bail if jq fails to avoid false closures)
   local current_checks
@@ -2623,8 +2756,33 @@ close_resolved_issues() {
     return
   fi
 
-  while IFS=$'\t' read -r issue_num issue_title; do
-    # Extract the check name from the title "Compliance: <check>"
+  # Iterate one compact JSON object per line (jq escapes any newlines inside the
+  # body, so a multi-line body cannot corrupt the loop).
+  local obj
+  while IFS= read -r obj; do
+    [ -z "$obj" ] && continue
+    local issue_num issue_title issue_body
+    issue_num=$(jq -r '.number' <<< "$obj")
+    issue_title=$(jq -r '.title' <<< "$obj")
+    issue_body=$(jq -r '.body // ""' <<< "$obj")
+
+    # AC1: only per-finding issues titled exactly `Compliance: <check>`. The
+    # umbrella (`Compliance audit — <date>`) and hand-filed issues never match.
+    case "$issue_title" in
+      "Compliance: "*) : ;;
+      *)
+        info "Skipping #$issue_num in $repo — not a per-finding \`Compliance: <check>\` title: $issue_title"
+        continue
+        ;;
+    esac
+
+    # AC1b: only issues THIS TOOL created (evidenced by the generated-by marker),
+    # never on the title or label alone.
+    if ! issue_has_generated_marker "$issue_body"; then
+      info "Skipping #$issue_num in $repo — no compliance-audit generated-by marker (not machine-created)"
+      continue
+    fi
+
     local check_name="${issue_title#Compliance: }"
 
     # If this check is no longer in findings, close the issue
@@ -2638,7 +2796,29 @@ close_resolved_issues() {
         warn "Failed to close resolved issue #$issue_num in $repo: $issue_title"
       fi
     fi
-  done <<< "$open_issues"
+  done < <(echo "$open_issues_json" | jq -c '.[]' 2>/dev/null)
+}
+
+# print_planned_issue_actions: in read-only mode, report the issue mutations the
+# script WOULD perform if run with --apply, so a maintainer can preview intent
+# without touching production issue state (issue #1036, AC4). Read-only: prints
+# the per-finding create/update plan and appends a note to the summary. Closures
+# are not enumerated here (that would require querying every repo's open issues);
+# the note makes clear they are gated behind --apply too.
+print_planned_issue_actions() {
+  local total
+  total=$(jq 'length' "$FINDINGS_FILE" 2>/dev/null || echo 0)
+  info "Would ensure org labels and file/update $total finding issue(s) (and close resolved ones) — suppressed in read-only mode."
+
+  # Pre-parse findings into tab-separated format to avoid spawning jq inside the loop.
+  local planned_actions
+  planned_actions=$(jq -r '.[] | [.repo, .check] | @tsv' "$FINDINGS_FILE" 2>/dev/null || echo "")
+
+  local p_repo p_check
+  while IFS=$'\t' read -r p_repo p_check; do
+    [ -z "$p_repo" ] && continue
+    info "  would file/update: $ORG/$p_repo — Compliance: $p_check"
+  done <<< "$planned_actions"
 }
 
 # ---------------------------------------------------------------------------
@@ -2879,6 +3059,16 @@ append_structural_findings_summary() {
 }
 
 main() {
+  # Explicit apply flag (issue #1036, AC4). --apply enables mutation; it can also
+  # be enabled via COMPLIANCE_AUDIT_APPLY=true (see APPLY default above).
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --apply) APPLY="true"; shift ;;
+      --) shift; break ;;
+      *) shift ;;
+    esac
+  done
+
   # Preflight: verify GH_TOKEN is set and gh CLI is authenticated
   if [ -z "${GH_TOKEN:-}" ]; then
     echo "::error::GH_TOKEN is not set. Ensure ORG_SCORECARD_TOKEN secret is configured and passed as an env var to this step." \
@@ -2894,10 +3084,14 @@ main() {
   info "Starting compliance audit for $ORG"
   info "Report directory: $REPORT_DIR"
   info "Dry run: $DRY_RUN"
+  info "Apply (mutate issues/labels): $APPLY"
+  mutations_enabled || info "Read-only mode — no issues or labels will be created, commented on, or closed. Pass --apply or set COMPLIANCE_AUDIT_APPLY=true to enable mutation."
 
   # Initialize findings and issues tracking files
   echo "[]" > "$FINDINGS_FILE"
   : > "$ISSUES_FILE"
+  # Record of repos actually scanned this run (issue #1036, AC2).
+  : > "$AUDITED_REPOS_FILE"
   # Informational AGENTS.md structural findings accumulate here (never in
   # FINDINGS_FILE) so they stay non-blocking (#645).
   : > "$STRUCTURAL_FINDINGS_FILE"
@@ -2961,6 +3155,14 @@ main() {
     check_check_suite_prefs "$repo"
     pp_run_all_checks "$repo"
 
+    # Record that this repo's checks actually ran (AC2). Reached only past the
+    # repo_json guard above — a repo whose metadata could not be fetched hits the
+    # `continue` and is deliberately NOT recorded, so its issues are never closed.
+    # Also skip if any closure-relevant check was inconclusive (issue #1036).
+    if ! repo_has_inconclusive_checks "$repo"; then
+      mark_repo_audited "$repo"
+    fi
+
     log_end
   done
 
@@ -2973,8 +3175,8 @@ main() {
   # (#645). Ordered before issue management so it is part of the summary body.
   append_structural_findings_summary
 
-  # Create/update/close issues
-  if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+  # Create/update/close issues — only when mutation is explicitly enabled (AC4).
+  if mutations_enabled && [ "$CREATE_ISSUES" = "true" ]; then
     info "Managing issues..."
 
     for repo in $repos; do
@@ -3005,12 +3207,16 @@ main() {
     # Append per-check issue links and related open PRs to the step summary
     info "Fetching linked PRs for issue summary..."
     append_issue_pr_links
+  elif [ "$CREATE_ISSUES" = "true" ]; then
+    # Read-only (or dry-run): report what issue management WOULD do, mutate nothing (AC4).
+    info "Read-only — issue management skipped (APPLY=$APPLY, DRY_RUN=$DRY_RUN). Planned actions:"
+    print_planned_issue_actions
   else
-    info "Skipping issue creation (DRY_RUN=$DRY_RUN, CREATE_ISSUES=$CREATE_ISSUES)"
+    info "Skipping issue creation (CREATE_ISSUES=$CREATE_ISSUES)"
   fi
 
   # Write issue-management counts and append to summary (conditional on issue management running)
-  if [ "$CREATE_ISSUES" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+  if mutations_enabled && [ "$CREATE_ISSUES" = "true" ]; then
     printf '{"added":%d,"existing":%d,"removed":%d,"retriggered":%d}\n' \
       "$ISSUES_ADDED" "$ISSUES_EXISTING" "$ISSUES_REMOVED" "$ISSUES_RETRIGGERED" > "$ISSUE_COUNTS_FILE"
     cat >> "$SUMMARY_FILE" <<HEREDOC
@@ -3030,7 +3236,7 @@ HEREDOC
 
 ## Issue Management
 
-_Issue management was skipped (DRY\_RUN=$DRY_RUN, CREATE\_ISSUES=$CREATE_ISSUES)._
+_Issue management was skipped — read-only (APPLY=$APPLY, DRY\_RUN=$DRY_RUN, CREATE\_ISSUES=$CREATE_ISSUES)._
 HEREDOC
   fi
 

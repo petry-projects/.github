@@ -505,6 +505,16 @@ computed from the persona manifests rather than hand-listed.
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
+| `compliance-finding` | `#5319e7` (purple) | **Machine-owned.** Created and auto-closed by [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh). Do NOT hand-apply. |
+
+> **`compliance-finding` is machine-owned (issue #1036).** The compliance audit
+> creates this label and it is the **only** label the audit's auto-closer keys on:
+> `close_resolved_issues()` closes an issue solely when it carries
+> `compliance-finding`, is titled exactly `Compliance: <check>`, **and** its body
+> carries the audit's generated-by marker. Do not hand-apply `compliance-finding`
+> to an issue you do not want the audit to close. The human-facing
+> `compliance-audit` label is safe to apply for triage — it no longer arms the
+> closer.
 
 ### Derived family — persona opt-out labels (`<id>:hands-off`)
 
@@ -681,10 +691,15 @@ Every Friday at 12:00 UTC, the **Org Standards Compliance Audit** runs across al
    - Dependency vulnerabilities
 
 3. **Issue creation and categorization:**
-   - Each finding becomes a GitHub Issue in the repository, labeled `compliance-audit`
+   - Each finding becomes a GitHub Issue in the repository, labeled `compliance-finding`
+     (machine-owned) plus `compliance-audit` (human triage) and `dev-lead` (agent pickup)
    - High-priority findings (errors) are escalated for immediate remediation
-   - Issues include a `dev-lead` label for agent-driven automation
-   - Fixed issues are auto-closed by the audit
+   - Fixed issues are auto-closed by the audit — but **only** issues that carry the
+     machine-owned `compliance-finding` label, are titled `Compliance: <check>`, and
+     carry the audit's generated-by marker (issue #1036). Hand-filed issues and the
+     cross-repo umbrella are never auto-closed.
+   - The audit is **read-only by default** and mutates issue/label state only when run
+     with `--apply` / `COMPLIANCE_AUDIT_APPLY=true` (set by the workflow)
 
 4. **Org-level summary and reporting:**
    - Overall compliance health report
