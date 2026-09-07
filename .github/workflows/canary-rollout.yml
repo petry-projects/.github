@@ -91,6 +91,7 @@ on:
           - persona-mention
           - pr-auto-review
           - pr-review-mention
+          - solution-architect
         default: dev-lead
       override:
         description: "promote: advance even if the gate is not PROMOTE (records a warning)"

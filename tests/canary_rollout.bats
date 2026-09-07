@@ -862,6 +862,44 @@ GHEOF
   [ "$status" -eq 0 ]
 }
 
+@test "canary-rings.json: solution-architect onboarded on the shared persona runtime (no dedicated reusable, #1078)" {
+  # Registered against the SHARED, convention-driven persona runtime — persona-runner-reusable.yml
+  # in .github-private (the reusable that actually executes this persona), NOT a per-persona blob.
+  run jq -e '.agents["solution-architect"].host == "petry-projects/.github-private"' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["solution-architect"].reusable == ".github/workflows/persona-runner-reusable.yml"' "$RINGS"
+  [ "$status" -eq 0 ]
+  # run_workflow = the persona-runner.yml caller display name the gate samples on the ring tiers.
+  run jq -e '.agents["solution-architect"].run_workflow == "Persona Runtime"' "$RINGS"
+  [ "$status" -eq 0 ]
+  # standard ring model
+  run bash -c "jq -r '.agents[\"solution-architect\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  # AC #3: next = the dogfood ring (.github-private), matching agents.persona-mention
+  run jq -e '.agents["solution-architect"].rings[] | select(.channel=="next") | .members | index("petry-projects/.github-private")' "$RINGS"
+  [ "$status" -eq 0 ]
+  # ring1 = the real consumers that gate ring1->stable (consistent with persona-mention)
+  run jq -e '.agents["solution-architect"].rings[] | select(.channel=="ring1") | (.members|index("petry-projects/TalkTerm")) and (.members|index("petry-projects/bmad-bgreat-suite"))' "$RINGS"
+  [ "$status" -eq 0 ]
+  # gate mirrors agents.persona-mention: #548 defaults, standard transition knobs, no opt-in blocks
+  run jq -e '.agents["solution-architect"].gate.baseline_window_days == 14 and .agents["solution-architect"].gate.baseline_spike_cap_multiple == 3' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["solution-architect"].gate.transitions["next->ring0"].waive_sample_if_no_caller == true and .agents["solution-architect"].gate.transitions["ring0->ring1"].waive_sample == true and .agents["solution-architect"].gate.transitions["ring1->stable"].sample_min == 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["solution-architect"].gate.transitions["ring1->stable"].dwell_hours == 12' "$RINGS"
+  [ "$status" -eq 0 ]
+  # no opt-in gate machinery (like persona-mention): no correctness, no suspect classes, empty benign list,
+  # no synthetic-canary fields
+  run jq -e '.agents["solution-architect"].gate | (has("correctness")|not) and (has("suspect_failure_classes")|not) and ((.benign_failure_classes // []) | length == 0)' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["solution-architect"] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+  [ "$status" -eq 0 ]
+  # AC #2: inline _note documents (a) no dedicated reusable / shared runtime, and (b) autocut does
+  # not fire on prompt-only changes — naming .github-private#1592 and the persona_reach_check.sh control.
+  run jq -e '.agents["solution-architect"]._note | test("1592") and test("persona_reach_check.sh") and test("shared"; "i")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: valid JSON + dev-lead host + ordered rings" {
   run jq -e '.agents["dev-lead"].host == "petry-projects/.github-private"' "$RINGS"
   [ "$status" -eq 0 ]
