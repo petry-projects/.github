@@ -26,7 +26,31 @@ setup() {
   # channel-ified in #606 (Story B of the shim-identity epic #604)
   ring_is_ring_reusable feature-ideation
   ring_is_ring_reusable pr-auto-review
-  ! ring_is_ring_reusable add-to-project
+  # #1088: the 7 agents that had drifted OUT of RING_REUSABLES are all registered
+  # in canary-rings.json, so they are ring-managed too. Before #1088 they returned
+  # false here, so emit_ref_for returned empty and the deploy shipped their template
+  # verbatim (hardcoded @<agent>/v1-stable) instead of the repo's tier channel.
+  ring_is_ring_reusable add-to-project
+  ring_is_ring_reusable apply-repo-settings
+  ring_is_ring_reusable ci-failure-analyst
+  ring_is_ring_reusable idea-enhancer
+  ring_is_ring_reusable idea-triage
+  ring_is_ring_reusable initiative-planner
+  ring_is_ring_reusable persona-mention
+  # a name that is NOT a registered agent is still not ring-managed
+  ! ring_is_ring_reusable not-a-real-agent
+}
+
+# #1088 (AC1/AC3): RING_REUSABLES must not drift from the registry. It MUST equal
+# `.agents | keys` in standards/canary-rings.json so every REGISTERED agent is
+# ring-managed by the deploy sweep (emit_ref_for) and the audit — mirroring the
+# "the agent choice list agrees with the registry" assertion in canary_rollout.bats.
+@test "RING_REUSABLES equals the canary-rings.json agent registry (#1088)" {
+  local reusables_sorted registry_sorted
+  reusables_sorted="$(printf '%s\n' "${RING_REUSABLES[@]}" | sort -u)"
+  registry_sorted="$(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json" | sort -u)"
+  [ -n "$reusables_sorted" ]
+  [ "$reusables_sorted" = "$registry_sorted" ]
 }
 
 @test "ring_canonical_ref: feature-ideation and pr-auto-review resolve to tier channels (#606)" {

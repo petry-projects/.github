@@ -21,16 +21,31 @@
 # WITHOUT the `-reusable` suffix (e.g. `auto-rebase`, not `auto-rebase-reusable`)
 # and WITHOUT the `.yml` extension. dev-lead is included: it is ring-released too
 # (its reusable lives in .github-private but the same tier topology applies).
+#
+# This list MUST equal `.agents | keys` in standards/canary-rings.json so every
+# REGISTERED agent is ring-managed: the deploy sweep computes its repo's tier
+# channel (via emit_ref_for) and the audit accepts the tier channels, instead of
+# shipping the template's hardcoded @<agent>/v1-stable verbatim (#1088). Agreement
+# is asserted by the "RING_REUSABLES equals the canary-rings.json agent registry"
+# test in test/scripts/lib/ring-pins.bats — mirroring canary-rollout.yml's dispatch
+# `agent` enum, which carries the same registry-agreement contract (#1019).
 readonly RING_REUSABLES=(
+  add-to-project
+  agent-shield
+  apply-repo-settings
   auto-rebase
-  dependency-audit
+  ci-failure-analyst
   dependabot-automerge
   dependabot-rebase
-  agent-shield
-  pr-review-mention
+  dependency-audit
   dev-lead
   feature-ideation
+  idea-enhancer
+  idea-triage
+  initiative-planner
+  persona-mention
   pr-auto-review
+  pr-review-mention
 )
 
 # ring_tier_for_repo <repo> -> next|ring0|ring1|stable
