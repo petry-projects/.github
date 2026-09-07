@@ -901,6 +901,11 @@ GHEOF
   # not fire on prompt-only changes — naming .github-private#1592 and the persona_reach_check.sh control.
   run jq -e '.agents["solution-architect"]._note | test("1592") and test("persona_reach_check.sh") and test("shared"; "i")' "$RINGS"
   [ "$status" -eq 0 ]
+  # AC #2 (behavioral): agent_ref_paths overrides the global fleet default to exclude prompts/ so
+  # autocut's change detection never fires on a prompt-only change.  scripts/ and personas/ are
+  # retained; prompts/ must be absent from the agent-level list.
+  run jq -e '.agents["solution-architect"].agent_ref_paths | (index("scripts/") != null) and (index("personas/") != null) and (index("prompts/") == null)' "$RINGS"
+  [ "$status" -eq 0 ]
 }
 
 @test "canary-rings.json: valid JSON + dev-lead host + ordered rings" {
