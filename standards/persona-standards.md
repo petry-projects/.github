@@ -352,15 +352,37 @@ Rollout is unchanged from the existing model (`ci-standards.md` §Canary rings,
 makes the **registration** a single action.
 
 1. **Cut** an immutable `<id>/vX.Y.Z` at a merged, CI-passed commit on the host.
-2. **Register once** — add one entry under `agents.<id>` in
-   [`canary-rings.json`](canary-rings.json): `host`, `reusable`, `run_workflow`,
-   `rings[]`, `gate`. This is the **only** place ring membership is written.
-3. **Point the manifest at it** — `persona.yml`'s `canary.agent` MUST equal
-   `<id>` and `canary.registry` MUST reference `canary-rings.json`. The manifest
-   restates nothing from the registry.
+2. **Register once — but ONLY if the persona ships its own reusable.** Add one
+   entry under `agents.<id>` in [`canary-rings.json`](canary-rings.json): `host`,
+   `reusable`, `run_workflow`, `rings[]`, `gate`. This is the **only** place ring
+   membership is written.
+
+   > **A shared-runtime persona is NOT registered.** Per ADR-0006 (in
+   > `.github-private` `docs/architecture/adr/`), a persona served wholly by the
+   > shared persona runtime — the `persona-mention` router dispatching to
+   > `persona-runner` — has no dedicated reusable and **no caller pins a
+   > per-persona channel tag**, so a ring promotion would advance a tag nothing
+   > reads. Such a persona MUST NOT appear in `canary-rings.json`; a registered
+   > id is a defect, not a promotion. Its rollout is the runtime's rollout, and
+   > its promotion evidence is the reach check (step 4 below), not a ring label.
+   > Steps 1, 2, 3 and the ring soak in step 4 apply only to a persona with its
+   > own reusable.
+3. **Point the manifest at it** — for a registered persona, `persona.yml`'s
+   `canary.agent` MUST equal `<id>` and `canary.registry` MUST reference
+   `canary-rings.json`; the manifest restates nothing from the registry. A
+   shared-runtime persona **omits the `canary` block entirely** (it is optional
+   in `persona.schema.json`) rather than pointing at an entry that does not
+   exist.
 4. **Stage outward** one ring at a time — `next → ring0 → ring1 → stable` — each
    a single central channel-tag move, gated by the soak/dwell defaults in the
    registry. Roll back by moving the tag to the prior immutable `vX.Y.Z`.
+
+   > For a **shared-runtime** persona there is no per-persona tag to stage.
+   > `status` advances in the manifest, and the evidence that a promotion is real
+   > is `scripts/persona_reach_check.sh` (in `.github-private`) plus a live
+   > mention that resolves to the persona — never a ring label. Which repos can
+   > reach it is governed by the `persona-mention` router's own rings. Roll back
+   > with an ordinary revert PR.
 5. **Eval gate** — the persona's `evals.path` must exist and pass by
    `evals.required_before` (recommended: `stable`).
 
@@ -410,9 +432,14 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] AgentShield passes on all layers; no immutable file is touched.
 - [ ] `evals/<id>/` holds `dev/` + `holdout/` splits with ≥ `evals.min_cases`
       held-out cases; `validate-cases.py` passes and the eval gate is green.
-- [ ] Exactly one `agents.<id>` entry exists in `canary-rings.json`;
-      `persona.yml` `canary.agent` points at it and restates nothing.
-- [ ] The persona has soaked through `next → ring0 → ring1` before `stable`.
+- [ ] **If the persona ships its own reusable:** exactly one `agents.<id>` entry
+      exists in `canary-rings.json`; `persona.yml` `canary.agent` points at it and
+      restates nothing; and the persona has soaked `next → ring0 → ring1` before
+      `stable`.
+- [ ] **If the persona rides the shared runtime (ADR-0006):** there is **no**
+      `agents.<id>` entry and **no** `canary` block; `scripts/persona_reach_check.sh`
+      passes for the persona at its declared `status`; and a live
+      `@petry-projects/<id>` mention has been observed resolving to it.
 
 Copy [`standards/personas/TEMPLATE/`](personas/TEMPLATE/) to start; the worked
 example is **QA Lead** (`personas/qa-lead/` in `.github-private`), which wraps
