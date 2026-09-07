@@ -2719,6 +2719,7 @@ close_resolved_issues() {
   open_issues_json=$(gh issue list --repo "$ORG/$repo" \
     --label "$FINDING_LABEL" \
     --state open \
+    --limit 1000 \
     --json number,title,body 2>/dev/null || echo "[]")
   [ -z "$open_issues_json" ] && open_issues_json="[]"
 
@@ -2783,14 +2784,15 @@ print_planned_issue_actions() {
   total=$(jq 'length' "$FINDINGS_FILE" 2>/dev/null || echo 0)
   info "Would ensure org labels and file/update $total finding issue(s) (and close resolved ones) — suppressed in read-only mode."
 
-  # Per-finding preview to stderr (grouped by repo as encountered).
-  while IFS= read -r finding; do
-    [ -z "$finding" ] && continue
-    local p_repo p_check
-    p_repo=$(echo "$finding" | jq -r '.repo')
-    p_check=$(echo "$finding" | jq -r '.check')
+  # Pre-parse findings into tab-separated format to avoid spawning jq inside the loop.
+  local planned_actions
+  planned_actions=$(jq -r '.[] | [.repo, .check] | @tsv' "$FINDINGS_FILE" 2>/dev/null || echo "")
+
+  local p_repo p_check
+  while IFS=$'\t' read -r p_repo p_check; do
+    [ -z "$p_repo" ] && continue
     info "  would file/update: $ORG/$p_repo — Compliance: $p_check"
-  done < <(jq -c '.[]' "$FINDINGS_FILE" 2>/dev/null)
+  done <<< "$planned_actions"
 }
 
 # ---------------------------------------------------------------------------
