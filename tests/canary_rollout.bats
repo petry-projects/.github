@@ -875,8 +875,11 @@ GHEOF
   # standard ring model
   run bash -c "jq -r '.agents[\"solution-architect\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
   [ "$output" = "next,ring0,ring1,stable" ]
-  # AC #3: next = the dogfood ring (.github-private), matching agents.persona-mention
-  run jq -e '.agents["solution-architect"].rings[] | select(.channel=="next") | .members | index("petry-projects/.github-private")' "$RINGS"
+  # AC #3: next = the dogfood ring ($host = .github-private), matching agents.persona-mention
+  run jq -e '.agents["solution-architect"].rings[] | select(.channel=="next") | .members | index("$host")' "$RINGS"
+  [ "$status" -eq 0 ]
+  # ring0 = org_infra repos ($org_infra), consistent with dev-lead and ci-failure-analyst
+  run jq -e '.agents["solution-architect"].rings[] | select(.channel=="ring0") | .members | index("$org_infra")' "$RINGS"
   [ "$status" -eq 0 ]
   # ring1 = the real consumers that gate ring1->stable (consistent with persona-mention)
   run jq -e '.agents["solution-architect"].rings[] | select(.channel=="ring1") | (.members|index("petry-projects/TalkTerm")) and (.members|index("petry-projects/bmad-bgreat-suite"))' "$RINGS"

@@ -1089,14 +1089,14 @@
           "channel": "next",
           "order": 0,
           "members": [
-            "petry-projects/.github-private"
+            "$host"
           ]
         },
         {
           "channel": "ring0",
           "order": 1,
           "members": [
-            "petry-projects/.github"
+            "$org_infra"
           ]
         },
         {
