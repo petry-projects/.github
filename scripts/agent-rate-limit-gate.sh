@@ -106,8 +106,10 @@ argate_concurrent() {
 # is no run history.
 # ---------------------------------------------------------------------------
 argate_last_run_epoch() {
-  local runs="${1:-[]}" latest
-  latest="$(jq -r '[.[]?.createdAt // empty] | max // empty' <<<"$runs" 2>/dev/null || printf '')"
+  local runs="${1:-[]}" latest current_run_id="${GITHUB_RUN_ID:-}"
+  latest="$(jq -r --arg current "$current_run_id" \
+    '[.[]? | select($current == "" or (.databaseId | tostring) != $current) | .createdAt // empty] | max // empty' \
+    <<<"$runs" 2>/dev/null || printf '')"
   argate_iso_to_epoch "$latest"
 }
 
@@ -117,15 +119,16 @@ argate_last_run_epoch() {
 # initiative-driver this is a dispatches/day bound).
 # ---------------------------------------------------------------------------
 argate_daily_count() {
-  local runs="${1:-[]}" now threshold_iso n
+  local runs="${1:-[]}" now threshold_iso n current_run_id="${GITHUB_RUN_ID:-}"
   now="$(arl_sanitize_int "${2:-}")"
   threshold_iso="$(date -u -d "@$(( now - ARGATE_DAILY_WINDOW_SECONDS ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')"
   if [ -z "$threshold_iso" ]; then
     printf '0'
     return 0
   fi
-  n="$(jq -r --arg th "$threshold_iso" \
-    '[.[]? | select((.createdAt // "") >= $th)] | length' <<<"$runs" 2>/dev/null || printf '0')"
+  n="$(jq -r --arg th "$threshold_iso" --arg current "$current_run_id" \
+    '[.[]? | select((.createdAt // "") >= $th) | select($current == "" or (.databaseId | tostring) != $current)] | length' \
+    <<<"$runs" 2>/dev/null || printf '0')"
   arl_sanitize_int "$n"
 }
 

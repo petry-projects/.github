@@ -20,8 +20,9 @@ compliance audit — and any contributor — reads the limits and their exemptio
   breaker (the public side — thresholds, policy, decision, and the telemetry
   adapter seam) is Phase 5 ([#641](https://github.com/petry-projects/.github/issues/641),
   §4.1 below); the private telemetry poller + live-path wiring land separately
-  (ADR §8). **Nothing enforces this config yet** — the token-budget breaker ships
-  inert behind a flag; see §3 and §4.2.
+  (ADR §8). The per-agent-type limits and consecutive-failure breakers are now
+  enforced at dispatch time (see §3); **the token-budget breaker is not yet
+  enforced** — it ships inert behind a flag; see §4.2.
 
 ---
 
@@ -100,9 +101,11 @@ spend) and the direct target of the dispatch-race defect
 calls the orchestrator with `--mode enforce`; a `defer` decision simply skips the
 dispatch step (a clean no-op — never a cancel, never a job failure).
 
-**Every other agent type runs the gate in `--mode log-only`:** the decision is
-computed from run history and logged, but the emitted decision is always `allow`,
-so nothing is acted on. `feature-ideation-reusable.yml` is wired this way.
+**`feature-ideation` runs the gate in `--mode log-only`** (`feature-ideation-reusable.yml`):
+the decision is computed from run history and logged, but the emitted decision is
+always `allow`, so nothing is acted on. `dev-lead` and `compliance-audit` are not
+yet wired because their dispatch workflows live in `petry-projects/.github-private`
+and are out of scope for this rollout.
 
 **Because Actions runners are ephemeral, the orchestrator derives all counters
 from run history** (`gh run list`) rather than a state file — concurrency,

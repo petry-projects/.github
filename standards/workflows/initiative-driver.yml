@@ -103,6 +103,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: petry-projects/.github
+          ref: v1
           path: .arl-gate-tooling
           fetch-depth: 1
           persist-credentials: false
@@ -118,14 +119,22 @@ jobs:
         id: arl_gate
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+          ARL_ACTOR: ${{ github.actor }}
+          ARL_TRACKING_REPO: ${{ github.repository }}
+          # For issue events use the event's issue number; for schedule/workflow_dispatch
+          # fall back to a configured repo variable so argate_escalate can post the
+          # breaker marker and apply the needs-human-review label (both are skipped when
+          # tracking_issue is empty). Set INITIATIVE_DRIVER_TRACKING_ISSUE to the epic
+          # or operations issue number for this repo to enable escalation on non-issue runs.
+          ARL_TRACKING_ISSUE: ${{ github.event.issue.number || vars.INITIATIVE_DRIVER_TRACKING_ISSUE || '' }}
         run: |
           set -euo pipefail
           bash .arl-gate-tooling/scripts/agent-rate-limit-gate.sh initiative-driver \
             --mode enforce \
             --workflow initiative-driver.yml \
-            --actor "${{ github.actor }}" \
-            --tracking-repo "${{ github.repository }}" \
-            --tracking-issue "${{ github.event.issue.number }}" || true
+            --actor "$ARL_ACTOR" \
+            --tracking-repo "$ARL_TRACKING_REPO" \
+            --tracking-issue "$ARL_TRACKING_ISSUE" || true
 
       - name: Dispatch central initiative-driver
         # Skipped (clean no-op) ONLY on an explicit `defer` — never a cancel, never

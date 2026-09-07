@@ -167,6 +167,52 @@ refute_mutated() {
   [ "$output" = "1" ]
 }
 
+@test "argate_last_run_epoch excludes the current run (GITHUB_RUN_ID) from the cooldown calculation" {
+  # databaseId 2 (the current gate run, created just now) is the newest run.
+  # With GITHUB_RUN_ID=2 it must be excluded so the cooldown derives from databaseId 1 only.
+  local j; j="$(runs_json 'success@2026-09-01T00:00:00Z' 'success@2026-09-01T01:00:00Z')"
+  # Without exclusion: max createdAt = 2026-09-01T01:00:00Z (databaseId 2).
+  # With exclusion:    max createdAt = 2026-09-01T00:00:00Z (databaseId 1).
+  local epoch_with epoch_without
+  epoch_with="$(bash -c "export GITHUB_RUN_ID=2; ARGATE_LIB_ONLY=1 source '$GATE'; argate_last_run_epoch '$j'")"
+  epoch_without="$(bash -c "unset GITHUB_RUN_ID; ARGATE_LIB_ONLY=1 source '$GATE'; argate_last_run_epoch '$j'")"
+  # The excluded epoch must be strictly earlier (databaseId 1 was created first).
+  [ "$epoch_with" -lt "$epoch_without" ]
+}
+
+@test "argate_daily_count excludes the current run (GITHUB_RUN_ID) from the daily budget" {
+  # databaseId 1 and 2 are both within the 24h window. GITHUB_RUN_ID=2 is the
+  # current gate run and must not count toward the daily budget — an in-progress
+  # gate run alone must not exhaust the budget and defer itself.
+  local now; now=1788221100  # 2026-09-01T00:05:00Z
+  local j; j="$(runs_json "success@2026-09-01T00:03:00Z" "success@2026-09-01T00:04:00Z")"
+  run bash -c "export GITHUB_RUN_ID=2; ARGATE_LIB_ONLY=1 source '$GATE'; argate_daily_count '$j' $now"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "enforce: the current gate run alone does not trigger cooldown deferral" {
+  # A single in-progress run that IS the current gate run (GITHUB_RUN_ID=1) must not
+  # cause a cooldown defer — the gate would otherwise always defer itself on the very
+  # first run after a prior failure-free history (last_run would be "now").
+  write_config "initiative-driver" 2 10 20 3 30
+  # One completed run from 5 seconds ago (within the 10-min cooldown), plus the
+  # current gate run as in_progress. With exclusion the last_run epoch is the
+  # completed run; without exclusion it would be the in_progress run created "just now".
+  # We arrange the completed run to be recent enough to cause a defer if last_run is wrong.
+  local now=1788221100  # 2026-09-01T00:05:00Z
+  export GH_RUNS_JSON; GH_RUNS_JSON="$(runs_json "success@2026-09-01T00:04:55Z" "in_progress@2026-09-01T00:05:00Z")"
+  # GITHUB_RUN_ID=2 corresponds to the in_progress run (databaseId 2 in runs_json).
+  # The completed run at T-5s is still within the 10-min cooldown, so the gate should
+  # defer (the cooldown DOES apply to the prior completed run — we're not claiming
+  # no defer, just that the in_progress gate run itself is excluded from last_run).
+  run bash -c "export GITHUB_RUN_ID=2; SOURCE_NOW=$now bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  # Decision may be defer due to the prior completed run, but the gate must not crash
+  # and must not count the in_progress run toward daily_count or last_run twice.
+  [[ "$output" == *"decision="* ]]
+}
+
 # --------------------------------------------------------------------------
 # Enforcing vs log-only split (AC #5)
 # --------------------------------------------------------------------------

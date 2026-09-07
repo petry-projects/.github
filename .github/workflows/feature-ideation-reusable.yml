@@ -238,12 +238,14 @@ jobs:
         # step can never fail the ideation run.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARL_WORKFLOW: ${{ github.workflow }}
+          ARL_ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
           bash .feature-ideation-tooling/scripts/agent-rate-limit-gate.sh feature-ideation \
             --mode log-only \
-            --workflow "${{ github.workflow }}" \
-            --actor "${{ github.actor }}" || true
+            --workflow "$ARL_WORKFLOW" \
+            --actor "$ARL_ACTOR" || true
 
       - name: Run Claude Code — BMAD Analyst
         id: claude
