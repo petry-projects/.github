@@ -271,9 +271,10 @@ refs/tags/dev-lead/v1-stable"
   export GH_EXISTING_TAGS="dev-lead/v1-stable"   # v1-ring1 absent
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow dev-lead.yml
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -qi 'does not resolve'
-  ! echo "$output" | grep -qi 'Would open PR'
+  run grep -qi 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ── #1088: a NEWLY ring-managed agent is refused when its channel tag is absent ──
@@ -292,10 +293,11 @@ refs/tags/dev-lead/v1-stable"
   export GH_EXISTING_TAGS="apply-repo-settings/v1-stable"   # v1-ring1 absent
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo bmad-bgreat-suite --workflow apply-repo-settings.yml
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -qi 'does not resolve'
   echo "$output" | grep -qF '@apply-repo-settings/v1-ring1'
-  ! echo "$output" | grep -qi 'Would open PR'
+  run grep -qi 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ── #878: marker injection for meta-repo consumer stubs prevents infinite churn ──

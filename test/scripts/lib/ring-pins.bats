@@ -48,7 +48,7 @@ setup() {
 @test "RING_REUSABLES equals the canary-rings.json agent registry (#1088)" {
   local reusables_sorted registry_sorted
   reusables_sorted="$(printf '%s\n' "${RING_REUSABLES[@]}" | sort -u)"
-  registry_sorted="$(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json" | sort -u)"
+  registry_sorted="$(jq -r '(.agents // {}) | keys[]?' "${REPO_ROOT}/standards/canary-rings.json" | sort -u)"
   [ -n "$reusables_sorted" ]
   [ "$reusables_sorted" = "$registry_sorted" ]
 }
@@ -158,6 +158,21 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"dev-lead-reusable.yml@dev-lead/v4-ring1"* ]]
   [[ "$output" == *"agent_ref: dev-lead/v4-ring1"* ]]
+}
+
+# The apply-repo-settings stub forwards a checkout_ref input that MUST stay in
+# lockstep with the uses: channel pin (the reusable checks out .github at that
+# ref). Re-pinning uses: without also re-pinning checkout_ref would run the
+# ring-tier reusable while checking out the stable scripts — a version mismatch.
+@test "ring_repin_uses: also rewrites a matching checkout_ref in lockstep, preserving the trailing comment" {
+  local stub="    uses: petry-projects/.github/.github/workflows/apply-repo-settings-reusable.yml@apply-repo-settings/v1-stable  # NOSONAR keep
+    with:
+      checkout_ref: apply-repo-settings/v1-stable  # keep in lockstep with the uses: channel pin"
+  run bash -c 'source "'"$REPO_ROOT"'/scripts/lib/ring-pins.sh"; ring_repin_uses apply-repo-settings apply-repo-settings/v1-ring1 <<<"$1"' _ "$stub"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apply-repo-settings-reusable.yml@apply-repo-settings/v1-ring1  # NOSONAR keep"* ]]
+  [[ "$output" == *"checkout_ref: apply-repo-settings/v1-ring1  # keep in lockstep with the uses: channel pin"* ]]
+  [[ "$output" != *"apply-repo-settings/v1-stable"* ]]
 }
 
 @test "ring_vform_tier_aligned: true only for the repo's tier v-form (any major)" {
