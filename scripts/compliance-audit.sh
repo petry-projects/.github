@@ -49,6 +49,24 @@ FINDING_LABEL_DESC="Machine-owned: created and auto-closed by the compliance aud
 # close_resolved_issues() requires it (or the legacy generated-by footer) as
 # evidence THIS TOOL created an issue before closing it (issue #1036, AC1b).
 AUDIT_GENERATED_MARKER="<!-- compliance-audit:generated -->"
+# dev-lead actor routing (issue #1093, decision #1037). Compliance findings about
+# GitHub *configuration* — the `rulesets` category — are labelled
+# DEV_LEAD_HANDS_OFF_LABEL instead of DEV_LEAD_LABEL: dev-lead cannot read or write
+# ruleset state, so every dispatch against such a finding is wasted or harmful.
+# hands-off removes the actor WITHOUT resolving the finding; the audit keeps
+# creating, updating, and re-reporting it so it stays visible until
+# apply-rulesets.sh reaches the fleet (#1045). Every other category keeps
+# DEV_LEAD_LABEL. See category_actor_label().
+DEV_LEAD_LABEL="dev-lead"
+DEV_LEAD_LABEL_DESC="For dev-lead agent pickup"
+DEV_LEAD_LABEL_COLOR="8B5CF6"
+DEV_LEAD_HANDS_OFF_LABEL="dev-lead:hands-off"
+DEV_LEAD_HANDS_OFF_DESC="Exclude from dev-lead agent automation"
+# Grey — the persona opt-out label family colour (standards/github-settings.md
+# "Derived family — persona opt-out labels"). apply-repo-settings.sh provisions
+# this label from the persona manifest; the audit ensures it locally too so a
+# finding issue can carry it on a repo the applier has not yet reconciled.
+DEV_LEAD_HANDS_OFF_COLOR="ededed"
 REPORT_DIR="${REPORT_DIR:-$(mktemp -d)}"
 DRY_RUN="${DRY_RUN:-false}"
 CREATE_ISSUES="${CREATE_ISSUES:-true}"
@@ -192,6 +210,19 @@ issue_has_generated_marker() {
     *"automatically created by the [weekly compliance audit]"*) return 0 ;;
   esac
   return 1
+}
+
+# category_actor_label <category>: the dev-lead actor label a finding of this
+# category should carry (issue #1093, decision #1037). A `rulesets` finding routes
+# to `dev-lead:hands-off` because dev-lead cannot read or write ruleset
+# configuration — the reconciler (apply-rulesets.sh, #1045) converges it, not a
+# code-change agent. Every other category routes to `dev-lead` as before. Pure:
+# input in, label out, no side effects.
+category_actor_label() {
+  case "$1" in
+    rulesets) printf '%s\n' "$DEV_LEAD_HANDS_OFF_LABEL" ;;
+    *)        printf '%s\n' "$DEV_LEAD_LABEL" ;;
+  esac
 }
 
 # escape_ere escapes ERE metacharacters in a string for literal matching in grep -E.
@@ -2382,10 +2413,18 @@ ensure_audit_label() {
     --description "$FINDING_LABEL_DESC" \
     --color "$FINDING_LABEL_COLOR" \
     --force 2>/dev/null || true
-  gh label create "dev-lead" \
+  gh label create "$DEV_LEAD_LABEL" \
     --repo "$ORG/$repo" \
-    --description "For dev-lead agent pickup" \
-    --color "8B5CF6" \
+    --description "$DEV_LEAD_LABEL_DESC" \
+    --color "$DEV_LEAD_LABEL_COLOR" \
+    --force 2>/dev/null || true
+  # dev-lead:hands-off — the actor label `rulesets` findings carry instead of
+  # dev-lead (issue #1093 / #1037). Ensure it exists so create_issue_for_finding
+  # can attach it even on a repo apply-repo-settings.sh has not yet reconciled.
+  gh label create "$DEV_LEAD_HANDS_OFF_LABEL" \
+    --repo "$ORG/$repo" \
+    --description "$DEV_LEAD_HANDS_OFF_DESC" \
+    --color "$DEV_LEAD_HANDS_OFF_COLOR" \
     --force 2>/dev/null || true
 }
 
@@ -2411,6 +2450,35 @@ ensure_required_labels() {
       --color "$color" \
       --force 2>/dev/null || true
   done
+}
+
+# swap_rulesets_finding_to_hands_off <repo> <issue>: on an existing open
+# `rulesets` finding, remove the `dev-lead` actor label (if present) and add
+# `dev-lead:hands-off` (issue #1093, decision #1037). Idempotent and safe to
+# repeat: the add and remove are independent gh calls so a remove of an
+# already-absent label never blocks the add. Honours DRY_RUN. This removes the
+# actor only — it neither closes nor resolves the finding (AC3).
+swap_rulesets_finding_to_hands_off() {
+  local repo="$1" issue="$2"
+
+  if [ "$DRY_RUN" = "true" ]; then
+    info "[dry-run] would swap \`dev-lead\` -> \`dev-lead:hands-off\` on $ORG/$repo#$issue (ruleset finding)"
+    return 0
+  fi
+
+  # Add hands-off first so the issue is never momentarily without an actor label,
+  # then drop dev-lead. Track both edits: a genuine API failure on either must be
+  # surfaced rather than silently reported as success, or the issue is left
+  # incorrectly routed with no signal. `gh issue edit` computes the label set, so
+  # removing an already-absent dev-lead label (idempotent rerun) still succeeds.
+  local swap_ok=true
+  gh issue edit "$issue" --repo "$ORG/$repo" --add-label "$DEV_LEAD_HANDS_OFF_LABEL" 2>/dev/null || swap_ok=false
+  gh issue edit "$issue" --repo "$ORG/$repo" --remove-label "$DEV_LEAD_LABEL" 2>/dev/null || swap_ok=false
+  if [ "$swap_ok" != "true" ]; then
+    warn "Failed to fully route ruleset finding #$issue in $repo to \`dev-lead:hands-off\` (label add/remove failed — issue may be incorrectly routed)"
+    return 1
+  fi
+  info "Routed ruleset finding #$issue in $repo to \`dev-lead:hands-off\` (dev-lead removed; finding kept open)"
 }
 
 create_issue_for_finding() {
@@ -2453,7 +2521,23 @@ This finding is still open.
       warn "Failed to update existing issue #$existing in $repo for: $check"
     fi
 
-    # Re-engage dev-lead on findings that PERSIST across audits.
+    # Route `rulesets` findings away from dev-lead (issue #1093, decision #1037).
+    # dev-lead cannot read or write ruleset state, so instead of re-triggering it
+    # we swap the actor label to dev-lead:hands-off. The comment update above
+    # already re-reported the finding (AC3) — hands-off removes the actor without
+    # resolving the finding; convergence happens via apply-rulesets.sh (#1045).
+    if [ "$category" = "rulesets" ]; then
+      # Only drop the active dev-lead route once the re-report comment above
+      # actually landed. If the update failed (update_ok=false), swapping to
+      # hands-off would remove dev-lead without a successful re-report, leaving
+      # the finding with no active route; keep dev-lead in place so the next
+      # audit retries.
+      if [ "$update_ok" = "true" ]; then
+        swap_rulesets_finding_to_hands_off "$repo" "$existing"
+      else
+        warn "Skipped routing ruleset finding #$existing in $repo to hands-off — re-report comment failed; leaving dev-lead in place for retry"
+      fi
+    # Re-engage dev-lead on non-rulesets findings that PERSIST across audits.
     #
     # dev-lead listens on issues:labeled and fires only once per label
     # application. The `dev-lead` label is already present on a pre-existing
@@ -2462,7 +2546,7 @@ This finding is still open.
     # cycle the label (remove + re-add) — UNLESS dev-lead is already working
     # this issue (open dev-lead PR or `in-progress` label), in which case we
     # leave it alone (the label is already present, so no action is needed).
-    if dl_dev_lead_active "$ORG" "$repo" "$existing"; then
+    elif dl_dev_lead_active "$ORG" "$repo" "$existing"; then
       info "Existing issue #$existing in $repo — dev-lead already active, not re-triggering"
     elif dl_cycle_trigger_label "$ORG" "$repo" "$existing" "dev-lead" "$DRY_RUN"; then
       info "Re-triggered dev-lead on persistent issue #$existing in $repo for: $check"
@@ -2547,12 +2631,16 @@ ${AUDIT_GENERATED_MARKER}"
 
   local issue_url
   # Finding issues carry: compliance-finding (machine-owned closer key, AC1c),
-  # compliance-audit (human-facing triage label), and dev-lead (agent pickup).
+  # compliance-audit (human-facing triage label), and the dev-lead actor label
+  # for this category (issue #1093 / #1037): dev-lead for code-change findings,
+  # dev-lead:hands-off for `rulesets` findings dev-lead cannot act on.
+  local actor_label
+  actor_label=$(category_actor_label "$category")
   issue_url=$(gh issue create --repo "$ORG/$repo" \
     --title "$search_title" \
     --label "$FINDING_LABEL" \
     --label "$AUDIT_LABEL" \
-    --label "dev-lead" \
+    --label "$actor_label" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
