@@ -121,12 +121,14 @@ _cif() {
   grep -q -- '--remove-label dev-lead' "$MOCK_ARGS_LOG"
   # AC3 — hands-off removes the actor, it does not resolve: no close, no relabel cycle
   [ ! -s "$MOCK_CLOSED_FILE" ]
-  ! grep -q -- '-X POST' "$MOCK_ARGS_LOG"
+  run grep -q -- '-X POST' "$MOCK_ARGS_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "AC4: existing non-rulesets finding keeps the dev-lead retrigger and no hands-off" {
   _cif broodly settings has_wiki warning "Wiki should be disabled" standards/github-settings.md 540
-  ! grep -q 'dev-lead:hands-off' "$MOCK_ARGS_LOG"
+  run grep -q 'dev-lead:hands-off' "$MOCK_ARGS_LOG"
+  [ "$status" -eq 1 ]
   # dl_cycle_trigger_label re-adds the dev-lead label via a POST — the retrigger fired
   grep -q -- '-X POST' "$MOCK_ARGS_LOG"
 }
