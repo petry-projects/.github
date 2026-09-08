@@ -71,8 +71,11 @@ drift_count=0
 declare -A SEEN_VERSION   # "agent\tversion" -> 1 (for the fan-out summary)
 
 for repo in "${REPOS[@]}"; do
-  tier="$(ring_tier_for_repo "$repo")"
   for agent in "${REUSABLES[@]}"; do
+    # Ring membership is per-agent (#1092): the same repo can sit in different tiers
+    # for different agents (e.g. markets is ring1 for apply-repo-settings, stable
+    # elsewhere), so resolve the tier per (agent, repo), not once per repo.
+    tier="$(ring_tier_for_repo "$agent" "$repo")"
     # Caller stubs are conventionally named after the reusable (minus -reusable).
     stub=".github/workflows/${agent}.yml"
     content="$(gh api "repos/$ORG/$repo/contents/$stub" --jq '.content // empty' 2>/dev/null | base64 -d 2>/dev/null || true)"
