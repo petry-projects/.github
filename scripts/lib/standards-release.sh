@@ -105,9 +105,9 @@ sr_semver_gt() {
   b="${b#*.}"
   b_minor="${b%%.*}"
   b_patch="${b#*.}"
-  (( 10#a_major != 10#b_major )) && { (( 10#a_major > 10#b_major )); return; }
-  (( 10#a_minor != 10#b_minor )) && { (( 10#a_minor > 10#b_minor )); return; }
-  (( 10#a_patch > 10#b_patch ))
+  (( 10#${a_major} != 10#${b_major} )) && { (( 10#${a_major} > 10#${b_major} )); return; }
+  (( 10#${a_minor} != 10#${b_minor} )) && { (( 10#${a_minor} > 10#${b_minor} )); return; }
+  (( 10#${a_patch} > 10#${b_patch} ))
 }
 
 # sr_max_version <version...> — echo the highest strict MAJOR.MINOR.PATCH among
