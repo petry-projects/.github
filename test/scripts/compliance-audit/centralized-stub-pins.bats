@@ -209,33 +209,43 @@ stub_check() {  # <workflow-yaml> — run the check for a stable-tier repo (mark
 }
 
 # ---------------------------------------------------------------------------
-# ring_tier_for_repo() — maps a repo to its canary-ring tier (epic #495).
+# ring_tier_for_repo() — maps a (repo) to its canary-ring tier for a given AGENT
+# (epic #495; agent-aware since #1092). The tier is derived from the agent's
+# rings[] in canary-rings.json, so it takes the agent as its first argument.
 # ---------------------------------------------------------------------------
-tier() {
-  run bash -c 'source "$1" >/dev/null 2>&1; ring_tier_for_repo "$2"' _ "$SCRIPT" "$1"
+tier() {  # <agent> <repo>
+  run bash -c 'source "$1" >/dev/null 2>&1; ring_tier_for_repo "$2" "$3"' _ "$SCRIPT" "$1" "$2"
 }
 
 @test "ring tier: .github-private is next" {
-  tier ".github-private"
+  tier "agent-shield" ".github-private"
   [ "$status" -eq 0 ]
   [ "$output" = "next" ]
 }
 
 @test "ring tier: .github is ring0 (dogfood)" {
-  tier ".github"
+  tier "agent-shield" ".github"
   [ "$output" = "ring0" ]
 }
 
 @test "ring tier: TalkTerm and bmad-bgreat-suite are ring1" {
-  tier "TalkTerm"
+  tier "agent-shield" "TalkTerm"
   [ "$output" = "ring1" ]
-  tier "bmad-bgreat-suite"
+  tier "agent-shield" "bmad-bgreat-suite"
   [ "$output" = "ring1" ]
 }
 
 @test "ring tier: any other repo defaults to stable" {
-  tier "markets"
+  tier "agent-shield" "markets"
   [ "$output" = "stable" ]
-  tier "broodly"
+  tier "agent-shield" "broodly"
+  [ "$output" = "stable" ]
+}
+
+# #1092: markets is ring1 for apply-repo-settings ONLY, stable for everyone else.
+@test "ring tier: markets is ring1 for apply-repo-settings, stable otherwise (#1092)" {
+  tier "apply-repo-settings" "markets"
+  [ "$output" = "ring1" ]
+  tier "dev-lead" "markets"
   [ "$output" = "stable" ]
 }
