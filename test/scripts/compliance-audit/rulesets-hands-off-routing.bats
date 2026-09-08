@@ -43,6 +43,16 @@ setup() {
   cat > "$MOCK_BIN/gh" << 'GH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOCK_ARGS_LOG"
+# Optional failure injection (default: all calls succeed):
+#   MOCK_FAIL_COMMENT — `gh issue comment` exits non-zero (re-report fails)
+#   MOCK_FAIL_LABEL   — `gh issue edit --add/--remove-label` exits non-zero
+case "$1 $2" in
+  "issue comment") [ -n "${MOCK_FAIL_COMMENT:-}" ] && exit 1 ;;
+  "issue edit")
+    case "$*" in
+      *--add-label*|*--remove-label*) [ -n "${MOCK_FAIL_LABEL:-}" ] && exit 1 ;;
+    esac ;;
+esac
 case "$1 $2" in
   "issue list")   printf '%s' "${MOCK_EXISTING:-}" ;;
   "issue create") echo "https://github.com/petry-projects/demo/issues/4242" ;;
@@ -67,9 +77,10 @@ teardown() { rm -rf "$TEST_TMP"; }
 _cif() {
   local existing="${7:-}"
   MOCK_EXISTING="$existing" MOCK_ARGS_LOG="$MOCK_ARGS_LOG" MOCK_CLOSED_FILE="$MOCK_CLOSED_FILE" \
+  MOCK_FAIL_COMMENT="${MOCK_FAIL_COMMENT:-}" MOCK_FAIL_LABEL="${MOCK_FAIL_LABEL:-}" \
   PATH="$MOCK_BIN:$PATH" REPORT_DIR="$TEST_TMP" bash -c '
     set -uo pipefail
-    export MOCK_EXISTING MOCK_ARGS_LOG MOCK_CLOSED_FILE
+    export MOCK_EXISTING MOCK_ARGS_LOG MOCK_CLOSED_FILE MOCK_FAIL_COMMENT MOCK_FAIL_LABEL
     echo "[]" > "'"$TEST_TMP"'/findings.json"
     # shellcheck disable=SC1090
     source "'"$REPO_ROOT"'/scripts/compliance-audit.sh"
@@ -131,6 +142,30 @@ _cif() {
   [ "$status" -eq 1 ]
   # dl_cycle_trigger_label re-adds the dev-lead label via a POST — the retrigger fired
   grep -q -- '-X POST' "$MOCK_ARGS_LOG"
+}
+
+@test "failure: existing rulesets finding with a failed re-report keeps dev-lead (no swap)" {
+  # If the re-report comment fails, the dev-lead route must NOT be dropped, or the
+  # finding loses its active route without being successfully re-reported (#1095).
+  MOCK_FAIL_COMMENT=1 _cif broodly rulesets ruleset-bypass error "bypass missing" standards/github-settings.md 511
+  grep -q '^issue comment 511' "$MOCK_ARGS_LOG"
+  run grep -q -- '--add-label dev-lead:hands-off' "$MOCK_ARGS_LOG"
+  [ "$status" -eq 1 ]
+  run grep -q -- '--remove-label dev-lead' "$MOCK_ARGS_LOG"
+  [ "$status" -eq 1 ]
+}
+
+@test "failure: swap_rulesets_finding_to_hands_off signals failure when a label edit fails" {
+  # A failed add/remove must be surfaced (non-zero) instead of reporting success.
+  run env MOCK_FAIL_LABEL=1 MOCK_ARGS_LOG="$MOCK_ARGS_LOG" PATH="$MOCK_BIN:$PATH" \
+    REPORT_DIR="$TEST_TMP" bash -c '
+      set -uo pipefail
+      export MOCK_FAIL_LABEL MOCK_ARGS_LOG
+      # shellcheck disable=SC1090
+      source "'"$REPO_ROOT"'/scripts/compliance-audit.sh"
+      DRY_RUN=false swap_rulesets_finding_to_hands_off broodly 511
+    '
+  [ "$status" -ne 0 ]
 }
 
 @test "label: ensure_audit_label provisions the dev-lead:hands-off label" {

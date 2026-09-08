@@ -2462,10 +2462,17 @@ swap_rulesets_finding_to_hands_off() {
   fi
 
   # Add hands-off first so the issue is never momentarily without an actor label,
-  # then drop dev-lead. Both guarded: a missing dev-lead label (already swapped on
-  # a prior run) must not fail the run.
-  gh issue edit "$issue" --repo "$ORG/$repo" --add-label "$DEV_LEAD_HANDS_OFF_LABEL" 2>/dev/null || true
-  gh issue edit "$issue" --repo "$ORG/$repo" --remove-label "$DEV_LEAD_LABEL" 2>/dev/null || true
+  # then drop dev-lead. Track both edits: a genuine API failure on either must be
+  # surfaced rather than silently reported as success, or the issue is left
+  # incorrectly routed with no signal. `gh issue edit` computes the label set, so
+  # removing an already-absent dev-lead label (idempotent rerun) still succeeds.
+  local swap_ok=true
+  gh issue edit "$issue" --repo "$ORG/$repo" --add-label "$DEV_LEAD_HANDS_OFF_LABEL" 2>/dev/null || swap_ok=false
+  gh issue edit "$issue" --repo "$ORG/$repo" --remove-label "$DEV_LEAD_LABEL" 2>/dev/null || swap_ok=false
+  if [ "$swap_ok" != "true" ]; then
+    warn "Failed to fully route ruleset finding #$issue in $repo to \`dev-lead:hands-off\` (label add/remove failed — issue may be incorrectly routed)"
+    return 1
+  fi
   info "Routed ruleset finding #$issue in $repo to \`dev-lead:hands-off\` (dev-lead removed; finding kept open)"
 }
 
@@ -2515,7 +2522,16 @@ This finding is still open.
     # already re-reported the finding (AC3) — hands-off removes the actor without
     # resolving the finding; convergence happens via apply-rulesets.sh (#1045).
     if [ "$category" = "rulesets" ]; then
-      swap_rulesets_finding_to_hands_off "$repo" "$existing"
+      # Only drop the active dev-lead route once the re-report comment above
+      # actually landed. If the update failed (update_ok=false), swapping to
+      # hands-off would remove dev-lead without a successful re-report, leaving
+      # the finding with no active route; keep dev-lead in place so the next
+      # audit retries.
+      if [ "$update_ok" = "true" ]; then
+        swap_rulesets_finding_to_hands_off "$repo" "$existing"
+      else
+        warn "Skipped routing ruleset finding #$existing in $repo to hands-off — re-report comment failed; leaving dev-lead in place for retry"
+      fi
     # Re-engage dev-lead on non-rulesets findings that PERSIST across audits.
     #
     # dev-lead listens on issues:labeled and fires only once per label
