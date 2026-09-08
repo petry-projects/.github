@@ -10,13 +10,102 @@ setup() {
   source "${REPO_ROOT}/scripts/lib/ring-pins.sh"
 }
 
-@test "ring_tier_for_repo maps each tier" {
-  [ "$(ring_tier_for_repo .github-private)" = "next" ]
-  [ "$(ring_tier_for_repo .github)" = "ring0" ]
-  [ "$(ring_tier_for_repo TalkTerm)" = "ring1" ]
-  [ "$(ring_tier_for_repo bmad-bgreat-suite)" = "ring1" ]
-  [ "$(ring_tier_for_repo markets)" = "stable" ]
-  [ "$(ring_tier_for_repo anything-else)" = "stable" ]
+# #1092: ring_tier_for_repo is now agent-aware and derived from canary-rings.json.
+# The tier is resolved from the given agent's rings[], falling back to the ring
+# whose members contain "*" (today: stable). The meta-repo tiers are identical for
+# every agent (next/ring0 are host-relative in the registry), so a representative
+# agent exercises them.
+@test "ring_tier_for_repo maps each tier (agent-aware, #1092)" {
+  [ "$(ring_tier_for_repo agent-shield .github-private)" = "next" ]
+  [ "$(ring_tier_for_repo agent-shield .github)" = "ring0" ]
+  [ "$(ring_tier_for_repo agent-shield TalkTerm)" = "ring1" ]
+  [ "$(ring_tier_for_repo agent-shield bmad-bgreat-suite)" = "ring1" ]
+  [ "$(ring_tier_for_repo agent-shield markets)" = "stable" ]
+  [ "$(ring_tier_for_repo agent-shield anything-else)" = "stable" ]
+}
+
+# #1092 AC4 — the point cases the issue enumerates verbatim.
+@test "ring_tier_for_repo: markets is ring1 ONLY for apply-repo-settings (#1092 AC4)" {
+  [ "$(ring_tier_for_repo apply-repo-settings markets)" = "ring1" ]
+  [ "$(ring_tier_for_repo dev-lead markets)" = "stable" ]
+  # markets is stable for every other agent, too.
+  [ "$(ring_tier_for_repo auto-rebase markets)" = "stable" ]
+  [ "$(ring_tier_for_repo pr-auto-review markets)" = "stable" ]
+}
+
+@test "ring_tier_for_repo: TalkTerm/.github/.github-private are agent-invariant (#1092 AC4)" {
+  local a
+  for a in $(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json"); do
+    [ "$(ring_tier_for_repo "$a" TalkTerm)" = "ring1" ]
+    [ "$(ring_tier_for_repo "$a" .github)" = "ring0" ]
+    [ "$(ring_tier_for_repo "$a" .github-private)" = "next" ]
+  done
+}
+
+# #1092 AC2 — the whole risk of the change: every agent EXCEPT apply-repo-settings
+# must resolve identically to the old agent-agnostic hardcoded logic, for every
+# repo. The old logic is inlined here as an independent oracle (NOT the impl).
+@test "ring_tier_for_repo: no behaviour change for the other 15 agents (#1092 AC2)" {
+  old_tier() {  # the pre-#1092 hardcoded case statement, verbatim
+    case "$1" in
+      .github-private)              printf 'next'  ;;
+      .github)                      printf 'ring0' ;;
+      TalkTerm | bmad-bgreat-suite) printf 'ring1' ;;
+      *)                            printf 'stable' ;;
+    esac
+  }
+  local a repo
+  local -a repos=(.github-private .github TalkTerm bmad-bgreat-suite markets
+                  broodly ContentTwin google-app-scripts some-unlisted-repo)
+  for a in $(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json"); do
+    [ "$a" = "apply-repo-settings" ] && continue
+    for repo in "${repos[@]}"; do
+      [ "$(ring_tier_for_repo "$a" "$repo")" = "$(old_tier "$repo")" ] \
+        || { echo "drift: $a $repo -> $(ring_tier_for_repo "$a" "$repo") (old: $(old_tier "$repo"))"; false; }
+    done
+  done
+  # apply-repo-settings is the ONE intended difference: markets moves to ring1.
+  [ "$(ring_tier_for_repo apply-repo-settings markets)" != "$(old_tier markets)" ]
+  [ "$(ring_tier_for_repo apply-repo-settings markets)" = "ring1" ]
+}
+
+# #1092 AC4 — the registry-conformance regression (analogue of #1088's
+# "RING_REUSABLES equals the registry"): for every (agent, repo) pair the resolved
+# tier equals an INDEPENDENT derivation straight from canary-rings.json.
+@test "ring_tier_for_repo equals the canary-rings.json derivation for every pair (#1092 AC4)" {
+  local rings="${REPO_ROOT}/standards/canary-rings.json"
+  # Independent oracle: expand $host/$org_infra tokens, return the first ring
+  # (registry order = tier order) whose members contain the repo basename, else
+  # the ring whose members contain "*".
+  expected_tier() {
+    jq -r --arg a "$1" --arg repo "${2##*/}" '
+      .agents[$a] as $ag
+      | ($ag.host | sub(".*/";"")) as $host
+      | ([.org_infra_repos[]? | sub(".*/";"")] - [$host]) as $orginfra
+      | ( $ag.rings
+          | map({ channel,
+                  m: (reduce (.members[]?) as $x ([];
+                        if   $x == "$host"      then . + [$host]
+                        elif $x == "$org_infra" then . + $orginfra
+                        else . + [($x | sub(".*/";""))] end)) }) ) as $r
+      | ( ([$r[] | select(.m | index($repo)) | .channel][0])
+          // ([$r[] | select(.m | index("*")) | .channel][0]) )' "$rings"
+  }
+  # The repo universe: every explicitly-named member plus the meta-repos and a
+  # couple of fleet repos not named in any ring.
+  local -a repos
+  mapfile -t repos < <(
+    { jq -r '.agents[].rings[].members[] | select(startswith("$")|not) | select(. != "*") | sub(".*/";"")' "$rings"
+      printf '%s\n' .github .github-private markets broodly some-unlisted-repo
+    } | sort -u)
+  local a repo want got
+  for a in $(jq -r '.agents | keys[]' "$rings"); do
+    for repo in "${repos[@]}"; do
+      want="$(expected_tier "$a" "$repo")"
+      got="$(ring_tier_for_repo "$a" "$repo")"
+      [ "$got" = "$want" ] || { echo "mismatch: $a $repo -> got=$got want=$want"; false; }
+    done
+  done
 }
 
 @test "ring_is_ring_reusable recognises the ring set (incl. dev-lead)" {
@@ -64,6 +153,15 @@ setup() {
   [ "$(ring_canonical_ref agent-shield TalkTerm)" = "agent-shield/ring1" ]
   [ "$(ring_canonical_ref agent-shield markets)" = "agent-shield/stable" ]
   [ "$(ring_canonical_ref dev-lead .github-private)" = "dev-lead/next" ]
+}
+
+# #1092 — end-to-end: because the tier is now agent-aware, ring_canonical_ref (and
+# thus the deploy/audit that consume it) computes markets as apply-repo-settings's
+# ring1 channel, but every other agent still gets markets/stable.
+@test "ring_canonical_ref: apply-repo-settings markets resolves to ring1, others to stable (#1092)" {
+  [ "$(ring_canonical_ref apply-repo-settings markets)" = "apply-repo-settings/ring1" ]
+  [ "$(ring_canonical_ref apply-repo-settings markets 1)" = "apply-repo-settings/v1-ring1" ]
+  [ "$(ring_canonical_ref auto-rebase markets)" = "auto-rebase/stable" ]
 }
 
 @test "ring_canonical_ref: major-aware form yields <agent>/v<major>-<tier> (#657 F3)" {
