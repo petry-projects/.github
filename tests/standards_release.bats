@@ -71,6 +71,16 @@ setup() {
   [ "$(sr_max_version 1.0.0 1.10.0 1.2.0 notaversion)" = "1.10.0" ]
   [ -z "$(sr_max_version onlyjunk 1.x)" ]
 }
+@test "leading-zero fields are rejected (no octal misread in (( )) )" {
+  run sr_valid_version 1.08.0
+  [ "$status" -eq 1 ]
+  run sr_is_release_suffix v1.08.0
+  [ "$status" -eq 1 ]
+  # a non-leading-zero version still parses and compares safely
+  [ "$(sr_major 1.8.0)" = "1" ]
+  run sr_semver_gt 1.8.0 1.10.0
+  [ "$status" -eq 1 ]
+}
 
 # ── N-1 resolvability (AC #4) ──────────────────────────────────────────────────
 @test "sr_current_and_previous: two highest distinct versions" {
@@ -130,7 +140,9 @@ case "$*" in
   *"-X PATCH"*|*"-X POST"*|*"--method PATCH"*|*"--method POST"*)
     echo "gh WRITE attempted during --dry-run: $*" >&2; exit 99 ;;
 esac
-# read of a nonexistent ref → nonzero, empty (no existing standards/v1.0.0 tag)
+# read of a nonexistent ref → nonzero with a 404 (as real gh does), so
+# _gh_tag_commit treats it as ABSENT rather than as an unavailable-tag error.
+echo "gh: Not Found (HTTP 404)" >&2
 exit 1
 EOF
   chmod +x "$STUBDIR/git" "$STUBDIR/gh"
@@ -164,6 +176,77 @@ EOF
   run bash "$ORCH" cut v1.0.0 --commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSE"* || "$output" == *"refus"* ]]
+}
+
+@test "cut: a non-404 read error aborts (an unavailable tag is not treated as absent)" {
+  _stub_bin
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "dddddddddddddddddddddddddddddddddddddddd" ;;
+  *) : ;;
+esac
+EOF
+  # gh read of the release ref fails with a 5xx (NOT a 404): the existing tag is
+  # unavailable, not proven absent, so the cut must abort rather than CREATE.
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"-X PATCH"*|*"-X POST"*) echo "gh WRITE attempted after unavailable read: $*" >&2; exit 99 ;;
+esac
+if [[ "$*" == *"git/ref/tags/standards/v1.0.0"* ]]; then
+  echo "gh: Internal Server Error (HTTP 500)" >&2
+  exit 1
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.0.0 --commit dddddddddddddddddddddddddddddddddddddddd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unavailable"* || "$output" == *"could not resolve"* ]]
+}
+
+@test "cut: does not move the channel backward when a newer release already exists" {
+  _stub_bin
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "2222222222222222222222222222222222222222" ;;
+  "config --get remote.origin.url") echo "https://github.com/petry-projects/.github.git" ;;
+  *) : ;;
+esac
+EOF
+  # Cutting v1.2.0 while v1.3.0 is already published on the same major. The
+  # immutable v1.2.0 tag is absent (CREATE succeeds), but the channel move must
+  # be SKIPPED — a PATCH here would drag standards/v1-stable backward.
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+if [[ "$args" == *"-X PATCH"* ]]; then
+  echo "gh PATCH (channel move) attempted despite newer release: $args" >&2
+  exit 99
+fi
+if [[ "$args" == *"git/ref/tags/standards/v1.2.0"* ]]; then
+  echo "gh: Not Found (HTTP 404)" >&2; exit 1
+fi
+if [[ "$args" == *"-X POST"* && "$args" == *"git/tags"* ]]; then
+  echo "1111111111111111111111111111111111111111"; exit 0
+fi
+if [[ "$args" == *"-X POST"* && "$args" == *"git/refs"* ]]; then
+  echo "{}"; exit 0
+fi
+if [[ "$args" == *"matching-refs/tags/standards/v"* ]]; then
+  echo "refs/tags/standards/v1.2.0"
+  echo "refs/tags/standards/v1.3.0"
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.2.0 --commit 2222222222222222222222222222222222222222
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"standards/v1.3.0"* ]]
+  [[ "$output" == *"skipping backward move"* ]]
 }
 
 @test "orchestrator: usage on no args, nonzero exit" {

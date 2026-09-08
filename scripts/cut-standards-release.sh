@@ -75,12 +75,24 @@ _normalize_version() {
 }
 
 # _gh_tag_commit <repo> <tag> — echo the COMMIT sha <tag> resolves to on <repo>
-# via the GitHub API, dereferencing an annotated tag object. Empty on any error
-# or absent tag (mirrors canary-rollout.sh's _gh_tag_commit). Never fails the caller.
+# via the GitHub API, dereferencing an annotated tag object. Echoes empty for a
+# genuinely ABSENT tag (HTTP 404) and returns 0. For any OTHER failure (network,
+# 5xx, auth) it returns non-zero WITHOUT echoing, so a transient error is never
+# silently read as "tag absent" and mis-routed onto the CREATE path (#1091
+# review): the caller's `existing="$(_gh_tag_commit ...)"` under `set -e` aborts.
 _gh_tag_commit() {
-  local repo="$1" tag="$2" ref_info obj type
+  local repo="$1" tag="$2" ref_info obj type err rc
+  err="$(mktemp)"
   ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" \
-    --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>/dev/null)" || return 0
+    --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>"$err")"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if grep -qiE 'HTTP 404|not found|does not exist' "$err"; then
+      rm -f "$err"; return 0   # tag genuinely absent → empty
+    fi
+    echo "::error::_gh_tag_commit: could not resolve $tag on $repo (treating as unavailable, not absent): $(tr '\n' ' ' <"$err")" >&2
+    rm -f "$err"; return 1
+  fi
+  rm -f "$err"
   [ -z "$ref_info" ] && return 0
   IFS=$'\t' read -r obj type <<< "$ref_info"
   if [ "$type" = "tag" ]; then
@@ -90,16 +102,49 @@ _gh_tag_commit() {
   fi
 }
 
-# _published_versions — list published standards/vX.Y.Z versions on the local
-# checkout (this repo owns the tags), highest first. Channel tags are dropped by
-# sr_version_from_tag.
-_published_versions() {
-  local ref v out=()
+# _local_repo_slug — echo the owner/name of the local checkout's origin remote
+# (falls back to $GITHUB_REPOSITORY, else empty). Used to decide whether SR_REPO
+# names THIS checkout (enumerate local git tags) or another repo (query its tags
+# via the API), so reported tags always come from the repo cut reads/writes.
+_local_repo_slug() {
+  local url; url="$(git config --get remote.origin.url 2>/dev/null || true)"
+  if [ -z "$url" ]; then printf '%s' "${GITHUB_REPOSITORY:-}"; return 0; fi
+  url="${url%.git}"
+  url="${url#*github.com}"   # strip scheme+host: leaves ":owner/name" or "/owner/name"
+  url="${url#[:/]}"          # strip the leading ":" or "/"
+  printf '%s' "$url"
+}
+
+# _gh_release_versions <repo> — echo the bare X.Y.Z of every published
+# standards/vX.Y.Z release tag on <repo>, via the GitHub API. Channel tags are
+# dropped by sr_version_from_tag. Empty (rc 0) on any API error — a read used
+# only to enumerate; the callers tolerate a transient empty list.
+_gh_release_versions() {
+  local repo="$1" ref v
   while IFS= read -r ref; do
     [ -z "$ref" ] && continue
-    v="$(sr_version_from_tag "$ref")"
-    [ -n "$v" ] && out+=("$v")
-  done < <(git for-each-ref --format='%(refname:short)' 'refs/tags/standards/v*' 2>/dev/null || true)
+    v="$(sr_version_from_tag "${ref#refs/tags/}")"
+    [ -n "$v" ] && printf '%s\n' "$v"
+  done < <(gh api "repos/$repo/git/matching-refs/tags/standards/v" --jq '.[].ref' 2>/dev/null || true)
+}
+
+# _published_versions — list published standards/vX.Y.Z versions, highest first,
+# from the repo cut reads/writes (SR_REPO): local git tags when SR_REPO is this
+# checkout, otherwise the SR_REPO GitHub API so versions/resolve never report the
+# local repo's tags for a different SR_REPO (#1091 review). Channel tags dropped
+# by sr_version_from_tag.
+_published_versions() {
+  local ref v out=() local_slug
+  local_slug="$(_local_repo_slug)"
+  if [ -n "$local_slug" ] && [ "$SR_REPO" != "$local_slug" ]; then
+    while IFS= read -r v; do [ -n "$v" ] && out+=("$v"); done < <(_gh_release_versions "$SR_REPO")
+  else
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      v="$(sr_version_from_tag "$ref")"
+      [ -n "$v" ] && out+=("$v")
+    done < <(git for-each-ref --format='%(refname:short)' 'refs/tags/standards/v*' 2>/dev/null || true)
+  fi
   # Numeric-desc sort via the pure comparator (repeatedly extract the max).
   local remaining=("${out[@]+"${out[@]}"}") max
   while [ "${#remaining[@]}" -gt 0 ]; do
@@ -196,6 +241,28 @@ _cmd_cut() {
   if [ "$decision" = "CREATE" ]; then
     echo "creating immutable release $release_tag at ${commit:0:12}..."
     _gh_create_annotated_tag "$SR_REPO" "$release_tag" "$commit" "standards release $version"
+  fi
+
+  # Race guard (#1091 review): two concurrent cuts of DIFFERENT versions on the
+  # same major both pass refuse-to-clobber (distinct immutable tags) and then race
+  # to move the shared channel; the one that writes last would win, letting an
+  # OLDER cut drag the channel backward off a newer release. Re-enumerate the
+  # published releases (now including this cut's own, just created above) right
+  # before the move and only advance the channel when THIS version is the highest
+  # on its major. A lower concurrent cut sees the newer release and skips the move
+  # instead of regressing the channel; the highest cut always converges it forward.
+  local major highest v
+  major="$(sr_major "$version")"
+  local -a same_major=("$version")
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    if [ "$(sr_major "$v" || true)" = "$major" ]; then same_major+=("$v"); fi
+  done < <(_gh_release_versions "$SR_REPO")
+  highest="$(sr_max_version "${same_major[@]}")"
+  if [ "$highest" != "$version" ]; then
+    echo "channel $channel_tag: a newer release standards/v$highest is already published on the v$major line; leaving the channel on the newer release (skipping backward move)."
+    echo "done."
+    return 0
   fi
 
   echo "moving channel $channel_tag onto ${commit:0:12}..."

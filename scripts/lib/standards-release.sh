@@ -32,13 +32,19 @@ _STANDARDS_RELEASE_SOURCED=1
 # form and the channel form can never drift apart.
 SR_TAG_PREFIX="standards"
 
-# sr_valid_version <version> — return 0 iff <version> is a strict MAJOR.MINOR.PATCH.
-sr_valid_version() { [[ "${1:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+# A single strict-SemVer numeric field: 0, or a leading-1..9 run with no leading
+# zeros. Leading-zero fields (e.g. 08) are rejected everywhere so no downstream
+# `(( ... ))` step can misread them as invalid octal (#1091 review).
+_SR_NUM='(0|[1-9][0-9]*)'
+
+# sr_valid_version <version> — return 0 iff <version> is a strict MAJOR.MINOR.PATCH
+# with no leading-zero fields.
+sr_valid_version() { [[ "${1:-}" =~ ^${_SR_NUM}\.${_SR_NUM}\.${_SR_NUM}$ ]]; }
 
 # sr_major <version> — echo the MAJOR of a strict MAJOR.MINOR.PATCH; empty (rc 1)
 # for anything else.
 sr_major() {
-  if [[ "${1:-}" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${1:-}" =~ ^${_SR_NUM}\.${_SR_NUM}\.${_SR_NUM}$ ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
   else
     return 1
@@ -74,7 +80,7 @@ sr_channel_for() {
 # the moving channel suffix "v<major>-stable" (which sorts adjacent to the
 # releases) out of the version math — the same shadowing hazard the canary
 # engine guards with _is_release_tag_suffix (#1046).
-sr_is_release_suffix() { [[ "${1:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+sr_is_release_suffix() { [[ "${1:-}" =~ ^v${_SR_NUM}\.${_SR_NUM}\.${_SR_NUM}$ ]]; }
 
 # sr_version_from_tag <tag> — echo the bare X.Y.Z of a standards release tag
 # (standards/vX.Y.Z). Emits nothing for a channel tag or any non-release ref, so
