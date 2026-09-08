@@ -48,20 +48,83 @@ readonly RING_REUSABLES=(
   pr-review-mention
 )
 
-# ring_tier_for_repo <repo> -> next|ring0|ring1|stable
-# Map a repo to its canary-ring tier (epic #495 topology):
-#   next   — .github-private  (candidate / first soak)
-#   ring0  — .github          (dogfood; self-hosts via @main, so the stub check
-#                              skips it — this mapping is informational there)
-#   ring1  — TalkTerm, bmad-bgreat-suite  (early fleet canary)
-#   stable — everything else  (broad fleet)
+# Path to the ring registry (single source of truth). Overridable via CANARY_RINGS
+# for tests, mirroring canary-rollout.sh / migrate-major-channels.sh; defaults to
+# standards/canary-rings.json relative to this lib. Resolved at source time so it
+# is correct no matter which script sources ring-pins.sh (#1092).
+RING_PINS_REGISTRY="${CANARY_RINGS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/standards/canary-rings.json}"
+
+# ring_tier_for_repo <agent> <repo> -> next|ring0|ring1|stable
+# Resolve a repo's canary-ring tier FOR A GIVEN AGENT (epic #495 topology),
+# derived from that agent's rings[] in standards/canary-rings.json — the single
+# source of truth (#1092). Ring membership is per-agent: the tier a repo sits in
+# can differ between agents (e.g. `markets` is ring1 for apply-repo-settings but
+# stable for every other agent), which a single agent-agnostic map cannot express.
+#
+# The repo is matched by basename, so callers may pass a bare name (`markets`) or a
+# full `petry-projects/<repo>`. The `$host` and `$org_infra` member tokens are
+# expanded (host = the agent's own host repo → next; org_infra = the other infra
+# repo → ring0), and the first ring (registry order = tier order) whose members
+# contain the repo wins. Repos in no explicit ring fall back to the ring whose
+# members contain the `"*"` fleet wildcard (today: stable). An unknown agent (not
+# in the registry) also falls back to `stable`.
 ring_tier_for_repo() {
-  case "$1" in
-    .github-private)              printf 'next' ;;
-    .github)                      printf 'ring0' ;;
-    TalkTerm | bmad-bgreat-suite) printf 'ring1' ;;
-    *)                            printf 'stable' ;;
-  esac
+  local agent="$1" repo="$2"
+  if [ -z "$agent" ]; then
+    echo "ring_tier_for_repo: missing agent argument (signature is <agent> <repo>)" >&2
+    return 2
+  fi
+  local repo_name="${repo##*/}"
+  # Self-initializing per-process cache: within one run the registry is immutable, so
+  # (agent, repo-basename) -> tier is a pure function. Cache it to avoid re-parsing the
+  # registry with jq on every call — the audit (pinned-version-report.sh) and deploy
+  # sweeps invoke this inside nested loops over every repo × agent (#1096). Same
+  # pattern as _RING_TAG_EXISTS_CACHE below.
+  declare -g -A _RING_TIER_CACHE 2>/dev/null || true
+  local cache_key="${agent},${repo_name}"
+  if [[ -n "${_RING_TIER_CACHE[$cache_key]+isset}" ]]; then
+    printf '%s' "${_RING_TIER_CACHE[$cache_key]}"
+    return 0
+  fi
+  local tier status
+  # Resolve tiers in the registry's `order` sequence (not array position) so a
+  # reordered registry can never make pin resolution disagree with the rollout
+  # promotion order that canary-rollout.sh drives off the same `order` field (#1096).
+  tier="$(jq -r --arg a "$agent" --arg repo "$repo_name" '
+    .agents[$a] as $ag
+    | if $ag == null then "" else
+        ($ag.host | sub(".*/";"")) as $host
+        | ([.org_infra_repos[]? | sub(".*/";"")] - [$host]) as $orginfra
+        | ( $ag.rings
+            | sort_by(.order)
+            | map({ channel,
+                    m: (reduce (.members[]?) as $x ([];
+                          if   $x == "$host"      then . + [$host]
+                          elif $x == "$org_infra" then . + $orginfra
+                          else . + [($x | sub(".*/";""))] end)) }) ) as $r
+        | ( ([$r[] | select(.m | index($repo)) | .channel][0])
+            // ([$r[] | select(.m | index("*"))  | .channel][0])
+            // "" )
+      end
+  ' "$RING_PINS_REGISTRY" 2>/dev/null)"
+  status=$?
+  # Fail CLOSED on a registry read/parse error (missing or corrupt file, or a jq
+  # failure): silently returning `stable` when the source of truth is unavailable
+  # would let the audit accept — and the deploy emit — incorrect stable pins,
+  # masking real ring drift (#1096). Mirrors ring_host_current_channel_major's
+  # fail-closed probe (#870). A read error is NOT cached, so a transient failure
+  # does not poison later lookups.
+  if [ "$status" -ne 0 ]; then
+    echo "ring_tier_for_repo: failed to read ring registry '$RING_PINS_REGISTRY' (agent=$agent repo=$repo_name)" >&2
+    return 3
+  fi
+  # jq succeeded: an empty result is a genuine no-match — an unknown agent (not in
+  # the registry) or a repo in no explicit ring — so fall back to the broad-fleet
+  # tier (the `*` ring is `stable` fleet-wide today). This is distinct from the
+  # infra read error above and IS a valid, cacheable answer.
+  [ -n "$tier" ] || tier="stable"
+  _RING_TIER_CACHE[$cache_key]="$tier"
+  printf '%s' "$tier"
   return 0
 }
 
@@ -85,7 +148,7 @@ ring_is_ring_reusable() {
 # F5, so the no-major call site behavior is unchanged.
 ring_canonical_ref() {
   local name="$1" repo="$2" major="${3:-}"
-  local tier; tier="$(ring_tier_for_repo "$repo")"
+  local tier; tier="$(ring_tier_for_repo "$name" "$repo")"
   if [ -n "$major" ]; then
     printf '%s/v%s-%s' "$name" "$major" "$tier"
   else
@@ -268,7 +331,7 @@ ring_repin_uses() {
 # aligned. Pure.
 ring_vform_tier_aligned() {
   local ref="$1" base="$2" repo="$3" tier
-  tier="$(ring_tier_for_repo "$repo")"
+  tier="$(ring_tier_for_repo "$base" "$repo")"
   [[ "$ref" =~ ^${base}/v[0-9]+-${tier}$ ]]
 }
 

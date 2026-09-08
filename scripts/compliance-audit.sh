@@ -1713,7 +1713,7 @@ check_centralized_workflow_stubs() {
     # (major-agnostic on tier, #657 F5); non-ring keeps the fixed canonical ref.
     local esc_reusable why expected_pin="$canonical"
     esc_reusable=$(escape_ere "$reusable")
-    [ "$is_ring" = 1 ] && expected_pin="${chan}/v<M>-$(ring_tier_for_repo "$repo")"
+    [ "$is_ring" = 1 ] && expected_pin="${chan}/v<M>-$(ring_tier_for_repo "$chan" "$repo")"
     if echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to the major-scoped channel \`@${expected_pin}\` (org standard — a bare \`@${canonical}\` tier pin is drift)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
