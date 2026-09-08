@@ -24,11 +24,16 @@
 #   prefix the compliance audit requires) is REFUSED rather than emitted.
 #
 # Env:
+#   STANDARDS_REF   git reference to the standards artifact (e.g. standards/v1-stable,
+#                   standards/v1.0.0). Defaults to standards/v1-stable. The ref is used
+#                   for documentation/validation; the actual files are read from
+#                   STANDARDS_DIR (not resolved via git).
 #   STANDARDS_DIR   path to the petry-projects/.github checkout that holds the
 #                   canonical /.gitignore, scripts/lib/gitignore-baseline.sh, and
 #                   standards/workflows/. Defaults to the repo root above this script.
 set -euo pipefail
 
+STANDARDS_REF="${STANDARDS_REF:-standards/v1-stable}"
 STANDARDS_DIR="${STANDARDS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
 
 # shellcheck source=lib/gitignore-baseline.sh

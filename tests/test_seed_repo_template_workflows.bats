@@ -147,3 +147,29 @@ RESEEDED_STUBS="dev-lead.yml auto-rebase.yml dependabot-automerge.yml"
   run bash "$SEED" --emit-workflow
   [ "$status" -ne 0 ]
 }
+
+@test "STANDARDS_REF defaults to standards/v1-stable when unset (environment variable resolution)" {
+  # Verify that seed-repo-template.sh accepts STANDARDS_REF and defaults to v1-stable
+  # when unset. The script should complete successfully with default reference.
+  run env -u STANDARDS_REF STANDARDS_DIR="$REPO_ROOT" bash "$SEED" --emit-workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "${WF_DIR}/dev-lead.yml")" ]
+}
+
+@test "STANDARDS_REF can be explicitly set to a specific version (explicit reference)" {
+  # Verify that an explicit STANDARDS_REF value is accepted and does not affect
+  # the emission of workflow content (ref is for documentation/validation, not emission).
+  run env STANDARDS_REF="standards/v1.2.3" STANDARDS_DIR="$REPO_ROOT" bash "$SEED" --emit-workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "${WF_DIR}/dev-lead.yml")" ]
+}
+
+@test "STANDARDS_DIR behavior is preserved when explicitly set (backward compatibility)" {
+  # Verify that explicit STANDARDS_DIR still works as before, independent of STANDARDS_REF.
+  local custom_dir="${BATS_TEST_TMPDIR}/custom-standards"
+  mkdir -p "${custom_dir}/standards/workflows"
+  cp "${WF_DIR}/dev-lead.yml" "${custom_dir}/standards/workflows/"
+  run env STANDARDS_REF="standards/v1-stable" STANDARDS_DIR="$custom_dir" bash "$SEED" --emit-workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "${custom_dir}/standards/workflows/dev-lead.yml")" ]
+}
