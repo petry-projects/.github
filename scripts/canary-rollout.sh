@@ -2521,11 +2521,11 @@ _drift_scaffold() {
 # gap the promotion bootstrap trap (AC1′) could leave: a stub deploy keys the pin on the channel
 # major and would pin a nonexistent `<agent>/v<M>-<tier>`, a fleet-wide startup_failure.
 _channel_tag_major_gaps() {
-  local agent="$1" major tier chan_array=()
+  local agent="$1" major tier channels
   major="$(_agent_current_major "$agent")"
   _agent_has_channel_major "$agent" "$major" || return 0
-  IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
-  for tier in "${chan_array[@]}"; do
+  channels="$(ordered_channels "$agent")"
+  for tier in ${channels//,/ }; do
     [ -z "$tier" ] && continue
     [ -n "$(_channel_tag_commit "$agent" "$tier")" ] || continue          # no bare tier tag → nothing to pair
     [ -z "$(_channel_tag_commit "$agent" "v${major}-${tier}")" ] && printf '%s\n' "$tier"
@@ -2683,12 +2683,12 @@ cmd_drift() {
     ct_major="$(_agent_current_major "$ct_agent")"
     ct_gaps="$(_channel_tag_major_gaps "$ct_agent")"
     [ -z "$ct_gaps" ] && continue
-    while IFS= read -r ct_tier; do
+    for ct_tier in $ct_gaps; do
       [ -z "$ct_tier" ] && continue
       echo "::warning::DRIFT[channel-tag] $ct_agent: has /$ct_tier but NO v${ct_major}-$ct_tier (a stub deploy to this tier would pin a nonexistent @$ct_agent/v${ct_major}-$ct_tier)"
       ct_rows+="| \`$ct_agent\` | \`$ct_tier\` | \`$ct_agent/v${ct_major}-$ct_tier\` | bare tier tag exists but its v-scoped counterpart is missing — a stub deploy pins a nonexistent ref (maintainer backfill) |"$'\n'
       ct_total=$((ct_total + 1))
-    done <<< "$ct_gaps"
+    done
   done <<< "$agents"
   echo "channel-tag drift summary: $ct_total tier(s) missing a v<M>-<tier> counterpart"
 

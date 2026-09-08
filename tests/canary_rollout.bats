@@ -3860,10 +3860,13 @@ GITEOF
   # the v-scoped tier tag is CREATED (PATCH 422 → POST create) at the candidate
   grep -q "ref=refs/tags/dev-lead/v1-ring0" "$MOVE_LOG"
   # resolution NEVER falls back to the bare tier: no write targets the bare ring0
-  ! grep -q "git/refs/tags/dev-lead/ring0" "$MOVE_LOG"
-  ! grep -q "ref=refs/tags/dev-lead/ring0" "$MOVE_LOG"
+  run grep -q "git/refs/tags/dev-lead/ring0" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
+  run grep -q "ref=refs/tags/dev-lead/ring0" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
   # a promotion moves exactly one frontier tag — it never touches the next anchor
-  ! grep -q "v1-next" "$MOVE_LOG"
+  run grep -q "v1-next" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
   # promoted_ring stays the logical tier, not the major-scoped tag name
   grep -q "promoted_ring=ring0" "$out"
 }
@@ -3877,7 +3880,8 @@ GITEOF
   [[ "$output" != *"v1-ring0"* ]]
   grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/ring0 " "$MOVE_LOG"
   # a release major alone (no v-line seeded) must NOT sprout a v-scoped tag
-  ! grep -q "v1-" "$MOVE_LOG"
+  run grep -q "v1-" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
   grep -q "promoted_ring=ring0" "$out"
 }
 
