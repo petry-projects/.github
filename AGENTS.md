@@ -564,9 +564,9 @@ This org enforces branch protection via **classic branch protection rules** and 
 |---------|-------|
 | **Required approving reviews** | 1 |
 | **Required review thread resolution** | **Yes** — all review comment threads must be marked Resolved before merge |
-| **Dismiss stale reviews on push** | No |
-| **Require code owner review** | No |
-| **Require last push approval** | No |
+| **Dismiss stale reviews on push** | **Yes** — prevents merging unreviewed code after approval |
+| **Require code owner review** | **Yes** — requires approval from a CODEOWNERS-defined owner |
+| **Require last push approval** | **Yes** — ensures a different person reviews substantive changes; the Dependabot rebase workflow re-approves after branch updates to keep approval valid |
 | **Allowed merge methods** | Squash only |
 
 > **google-app-scripts** has an additional ruleset (`protect-branches`) with CodeQL code scanning enforcement and stricter review settings.
