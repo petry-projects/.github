@@ -298,17 +298,35 @@ _channel_tag_commit() {
   echo "$commit"
 }
 
+# _agent_has_channel_major <agent> <major> — return 0 iff the agent's v-scoped channel line
+# for <major> has been ESTABLISHED, signalled by the presence of its anchor tag
+# `<agent>/v<M>-next`. A major line is always seeded at `next` (autocut opens `v<M>-next` on a
+# major bump, #657 F4) and then extended tier-by-tier by promotion, so `v<M>-next` existing is
+# the "has a channel major" test — distinct from merely having a vX.Y.Z RELEASE (the legacy
+# bare-only fleet has releases but no v-scoped channel tags). Non-zero when the anchor is absent
+# or <major> is empty, so resolution for such agents stays byte-identical to pre-F4.
+_agent_has_channel_major() {
+  local agent="$1" major="$2"
+  [ -n "$major" ] || return 1
+  _looks_like_oid "$(_channel_tag_commit "$agent" "v${major}-next")"
+}
+
 # _resolved_channel <agent> <tier> — echo "<tag>\t<commit>" for the channel <agent> uses on
-# <tier>, fall-back-safe (major-scoped-channels epic #657, Phase F4): PREFER the v-scoped
-# `<agent>/v<M>-<tier>` when it exists (its commit is a real oid), else the legacy bare
-# `<agent>/<tier>`. On today's bare-tier fleet (no v-tags) this is byte-identical to pre-F4.
+# <tier> (major-scoped-channels epic #657, Phase F4). When the agent has an ESTABLISHED channel
+# major (its `v<M>-next` anchor exists) the v-scoped `<agent>/v<M>-<tier>` line is AUTHORITATIVE:
+# resolve to it and DO NOT fall back to the bare tier when this tier's v-scoped tag is absent —
+# its commit is simply empty, which makes the frontier treat the tier as not-yet-reached and a
+# promotion CREATE the tag (#1065 AC1′). The old fallback stranded the v-line at the tier it was
+# first seeded at, silently masking the gap until a stub deploy pinned a nonexistent ref. An
+# agent with no channel major at all (the legacy bare-only fleet, which may still carry a vX.Y.Z
+# release) keeps using the bare tier tag — byte-identical to pre-F4.
 _resolved_channel() {
-  local agent="$1" tier="$2" major tag suffix commit
+  local agent="$1" tier="$2" major tag suffix
   major="$(_agent_current_major "$agent")"
-  if [ -n "$major" ]; then
+  if _agent_has_channel_major "$agent" "$major"; then
     tag="$(channel_tag "$agent" "$tier" "$major")"; suffix="${tag#"$agent"/}"
-    commit="$(_channel_tag_commit "$agent" "$suffix")"
-    if _looks_like_oid "$commit"; then printf '%s\t%s\n' "$tag" "$commit"; return 0; fi
+    printf '%s\t%s\n' "$tag" "$(_channel_tag_commit "$agent" "$suffix")"
+    return 0
   fi
   tag="$(channel_tag "$agent" "$tier")"; suffix="${tag#"$agent"/}"
   printf '%s\t%s\n' "$tag" "$(_channel_tag_commit "$agent" "$suffix")"
@@ -2496,6 +2514,24 @@ _drift_scaffold() {
         | (.gate.benign_failure_classes) = []) }'
 }
 
+# _channel_tag_major_gaps <agent> — for an agent that has an ESTABLISHED channel major, echo one
+# tier per line whose BARE channel tag `<agent>/<tier>` exists but whose v-scoped counterpart
+# `<agent>/v<M>-<tier>` does NOT (the #1065 AC3 drift class). Empty for the legacy bare-only fleet
+# (no channel major) — such an agent legitimately carries only bare tier tags. This is exactly the
+# gap the promotion bootstrap trap (AC1′) could leave: a stub deploy keys the pin on the channel
+# major and would pin a nonexistent `<agent>/v<M>-<tier>`, a fleet-wide startup_failure.
+_channel_tag_major_gaps() {
+  local agent="$1" major tier chan_array=()
+  major="$(_agent_current_major "$agent")"
+  _agent_has_channel_major "$agent" "$major" || return 0
+  IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
+  for tier in "${chan_array[@]}"; do
+    [ -z "$tier" ] && continue
+    [ -n "$(_channel_tag_commit "$agent" "$tier")" ] || continue          # no bare tier tag → nothing to pair
+    [ -z "$(_channel_tag_commit "$agent" "v${major}-${tier}")" ] && printf '%s\n' "$tier"
+  done
+}
+
 # cmd_drift [--emit-stub] — the read-only registry/host drift audit. Exits 0 (report-only);
 # each finding is a ::warning:: annotation and a job-summary row. --emit-stub additionally
 # prints a scaffold .agents[<name>] block per unregistered reusable.
@@ -2629,6 +2665,38 @@ cmd_drift() {
     smd="$(printf '# Canary Rollout — ship-drift (merged but not shipped)\n\nLast updated: `%s` · %s agent(s) whose `next` channel lags host main across agent_ref-consumed paths.\n\n| agent | host | changed paths | note |\n|---|---|---|---|\n%s\n> autocut (#1069) should cut a new candidate on the next tick; a persistent row means autocut is disabled or blocked.\n' "$ts" "$unshipped_total" "${ship_rows%$'\n'}")"
     printf '\n%s\n' "$smd" >> "$GITHUB_STEP_SUMMARY" \
       || echo "::warning::could not write the ship-drift job summary"
+  fi
+
+  # ── channel-tag drift: a bare tier tag lacking its v<M>-<tier> counterpart (#1065 AC3) ──
+  # For every agent with an established channel major, a bare `<agent>/<tier>` must have its
+  # v-scoped `<agent>/v<M>-<tier>` counterpart. The promotion bootstrap trap (AC1′) could strand
+  # the v-line at whatever tier it was first seeded at, leaving a bare-only tier that resolution
+  # silently masked but a stub deploy — which keys the pin on the channel major — would pin to a
+  # NONEXISTENT ref, a fleet-wide startup_failure. This sweep surfaces the gap in one read-only
+  # pass so it never again needs a hand-run audit. Backfilling the missing tag is a maintainer
+  # action (it creates a channel tag); drift only reports.
+  echo "----"
+  echo "== channel-tag drift: bare tier tag without its v<M>-<tier> counterpart (#1065) =="
+  local ct_agent ct_major ct_gaps ct_tier ct_total=0 ct_rows=""
+  while IFS= read -r ct_agent; do
+    [ -z "$ct_agent" ] && continue
+    ct_major="$(_agent_current_major "$ct_agent")"
+    ct_gaps="$(_channel_tag_major_gaps "$ct_agent")"
+    [ -z "$ct_gaps" ] && continue
+    while IFS= read -r ct_tier; do
+      [ -z "$ct_tier" ] && continue
+      echo "::warning::DRIFT[channel-tag] $ct_agent: has /$ct_tier but NO v${ct_major}-$ct_tier (a stub deploy to this tier would pin a nonexistent @$ct_agent/v${ct_major}-$ct_tier)"
+      ct_rows+="| \`$ct_agent\` | \`$ct_tier\` | \`$ct_agent/v${ct_major}-$ct_tier\` | bare tier tag exists but its v-scoped counterpart is missing — a stub deploy pins a nonexistent ref (maintainer backfill) |"$'\n'
+      ct_total=$((ct_total + 1))
+    done <<< "$ct_gaps"
+  done <<< "$agents"
+  echo "channel-tag drift summary: $ct_total tier(s) missing a v<M>-<tier> counterpart"
+
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "$ct_total" -gt 0 ]; then
+    local ctmd
+    ctmd="$(printf '# Canary Rollout — channel-tag drift (missing v<M>-<tier>)\n\nLast updated: `%s` · %s tier(s) with a bare channel tag lacking its v-scoped counterpart.\n\n| agent | tier | missing ref | note |\n|---|---|---|---|\n%s\n> A ring-promotion bootstrap gap (#1065). A stub deploy keyed on the channel major pins `<agent>/v<M>-<tier>`; if it does not exist the fleet fails at startup. A maintainer backfills the tag at its bare counterpart'"'"'s commit.\n' "$ts" "$ct_total" "${ct_rows%$'\n'}")"
+    printf '\n%s\n' "$ctmd" >> "$GITHUB_STEP_SUMMARY" \
+      || echo "::warning::could not write the channel-tag drift job summary"
   fi
   return 0
 }
