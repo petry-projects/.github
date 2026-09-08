@@ -49,7 +49,7 @@ jobs:
   dependabot-rebase:
     permissions:
       contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      pull-requests: write  # update-branch and merge-PR API calls
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@dependabot-rebase/v2-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
