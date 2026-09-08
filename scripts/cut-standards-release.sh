@@ -102,19 +102,6 @@ _gh_tag_commit() {
   fi
 }
 
-# _local_repo_slug — echo the owner/name of the local checkout's origin remote
-# (falls back to $GITHUB_REPOSITORY, else empty). Used to decide whether SR_REPO
-# names THIS checkout (enumerate local git tags) or another repo (query its tags
-# via the API), so reported tags always come from the repo cut reads/writes.
-_local_repo_slug() {
-  local url; url="$(git config --get remote.origin.url 2>/dev/null || true)"
-  if [ -z "$url" ]; then printf '%s' "${GITHUB_REPOSITORY:-}"; return 0; fi
-  url="${url%.git}"
-  url="${url#*github.com}"   # strip scheme+host: leaves ":owner/name" or "/owner/name"
-  url="${url#[:/]}"          # strip the leading ":" or "/"
-  printf '%s' "$url"
-}
-
 # _gh_release_versions <repo> — echo the bare X.Y.Z of every published
 # standards/vX.Y.Z release tag on <repo>, via the GitHub API. Channel tags are
 # dropped by sr_version_from_tag. Empty (rc 0) on any API error — a read used
@@ -129,22 +116,12 @@ _gh_release_versions() {
 }
 
 # _published_versions — list published standards/vX.Y.Z versions, highest first,
-# from the repo cut reads/writes (SR_REPO): local git tags when SR_REPO is this
-# checkout, otherwise the SR_REPO GitHub API so versions/resolve never report the
-# local repo's tags for a different SR_REPO (#1091 review). Channel tags dropped
-# by sr_version_from_tag.
+# from the repo cut reads/writes (SR_REPO) via the GitHub API. Always queries
+# the API to ensure reported tags correspond to SR_REPO and are not stale local
+# refs (#1091 review). Channel tags dropped by sr_version_from_tag.
 _published_versions() {
-  local ref v out=() local_slug
-  local_slug="$(_local_repo_slug)"
-  if [ "$SR_REPO" = "$local_slug" ]; then
-    while IFS= read -r ref; do
-      [ -z "$ref" ] && continue
-      v="$(sr_version_from_tag "$ref")"
-      [ -n "$v" ] && out+=("$v")
-    done < <(git for-each-ref --format='%(refname:short)' 'refs/tags/standards/v*' 2>/dev/null || true)
-  else
-    while IFS= read -r v; do [ -n "$v" ] && out+=("$v"); done < <(_gh_release_versions "$SR_REPO")
-  fi
+  local v out=()
+  while IFS= read -r v; do [ -n "$v" ] && out+=("$v"); done < <(_gh_release_versions "$SR_REPO")
   # Numeric-desc sort via the pure comparator (repeatedly extract the max).
   local remaining=("${out[@]+"${out[@]}"}") max
   while [ "${#remaining[@]}" -gt 0 ]; do

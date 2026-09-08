@@ -36,9 +36,6 @@ set -euo pipefail
 STANDARDS_REF="${STANDARDS_REF:-standards/v1-stable}"
 STANDARDS_DIR="${STANDARDS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
 
-# shellcheck source=lib/gitignore-baseline.sh
-source "${STANDARDS_DIR}/scripts/lib/gitignore-baseline.sh"
-
 _usage() {
   echo "Usage: $0 --emit-baseline <file> | --emit-workflow <name.yml>" >&2
   echo "  --emit-baseline supported files: .gitignore" >&2
@@ -117,6 +114,8 @@ file="$2"
 case "$file" in
   .gitignore)
     # L1 — marker-wrapped org secrets baseline (org-managed, byte-identical).
+    # shellcheck source=lib/gitignore-baseline.sh
+    source "${STANDARDS_DIR}/scripts/lib/gitignore-baseline.sh"
     gib_extract_baseline_block "${STANDARDS_DIR}/.gitignore"
 
     # L2 — ecosystem / OS build artifacts (per-repo; edit freely below this line).

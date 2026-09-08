@@ -98,6 +98,7 @@ sr_version_from_tag() {
 # sr_semver_gt <a> <b> — return 0 iff version a > version b, comparing MAJOR,
 # MINOR, PATCH numerically (so 1.10.0 > 1.9.0, which a lexical sort gets wrong).
 # A non-semver operand is never "greater".
+# Compares by component length first (longer decimal = larger), then lexically.
 sr_semver_gt() {
   sr_valid_version "${1:-}" || return 1
   sr_valid_version "${2:-}" || return 1
@@ -111,9 +112,28 @@ sr_semver_gt() {
   b="${b#*.}"
   b_minor="${b%%.*}"
   b_patch="${b#*.}"
-  (( 10#${a_major} != 10#${b_major} )) && { (( 10#${a_major} > 10#${b_major} )); return; }
-  (( 10#${a_minor} != 10#${b_minor} )) && { (( 10#${a_minor} > 10#${b_minor} )); return; }
-  (( 10#${a_patch} > 10#${b_patch} ))
+
+  # Compare major: by length first, then lexically
+  if [ ${#a_major} -ne ${#b_major} ]; then
+    [ ${#a_major} -gt ${#b_major} ]; return
+  fi
+  if [[ "$a_major" != "$b_major" ]]; then
+    [[ "$a_major" > "$b_major" ]]; return
+  fi
+
+  # Compare minor: by length first, then lexically
+  if [ ${#a_minor} -ne ${#b_minor} ]; then
+    [ ${#a_minor} -gt ${#b_minor} ]; return
+  fi
+  if [[ "$a_minor" != "$b_minor" ]]; then
+    [[ "$a_minor" > "$b_minor" ]]; return
+  fi
+
+  # Compare patch: by length first, then lexically
+  if [ ${#a_patch} -ne ${#b_patch} ]; then
+    [ ${#a_patch} -gt ${#b_patch} ]; return
+  fi
+  [[ "$a_patch" > "$b_patch" ]]
 }
 
 # sr_max_version <version...> — echo the highest strict MAJOR.MINOR.PATCH among
