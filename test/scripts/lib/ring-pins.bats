@@ -35,7 +35,7 @@ setup() {
 
 @test "ring_tier_for_repo: TalkTerm/.github/.github-private are agent-invariant (#1092 AC4)" {
   local a
-  for a in $(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json"); do
+  for a in $(jq -r '(.agents // {}) | keys[]?' "${REPO_ROOT}/standards/canary-rings.json"); do
     [ "$(ring_tier_for_repo "$a" TalkTerm)" = "ring1" ]
     [ "$(ring_tier_for_repo "$a" .github)" = "ring0" ]
     [ "$(ring_tier_for_repo "$a" .github-private)" = "next" ]
@@ -57,7 +57,7 @@ setup() {
   local a repo
   local -a repos=(.github-private .github TalkTerm bmad-bgreat-suite markets
                   broodly ContentTwin google-app-scripts some-unlisted-repo)
-  for a in $(jq -r '.agents | keys[]' "${REPO_ROOT}/standards/canary-rings.json"); do
+  for a in $(jq -r '(.agents // {}) | keys[]?' "${REPO_ROOT}/standards/canary-rings.json"); do
     [ "$a" = "apply-repo-settings" ] && continue
     for repo in "${repos[@]}"; do
       [ "$(ring_tier_for_repo "$a" "$repo")" = "$(old_tier "$repo")" ] \
@@ -99,13 +99,34 @@ setup() {
       printf '%s\n' .github .github-private markets broodly some-unlisted-repo
     } | sort -u)
   local a repo want got
-  for a in $(jq -r '.agents | keys[]' "$rings"); do
+  for a in $(jq -r '(.agents // {}) | keys[]?' "$rings"); do
     for repo in "${repos[@]}"; do
       want="$(expected_tier "$a" "$repo")"
       got="$(ring_tier_for_repo "$a" "$repo")"
       [ "$got" = "$want" ] || { echo "mismatch: $a $repo -> got=$got want=$want"; false; }
     done
   done
+}
+
+# #1096 — fail CLOSED on an unreadable/corrupt registry rather than silently
+# returning `stable`. A missing or unparseable source of truth must surface as an
+# error (non-zero) so the audit/deploy cannot accept or emit incorrect stable pins
+# during an infra outage — mirroring ring_host_current_channel_major's fail-closed
+# probe (#870). A genuine no-match on a READABLE registry still falls back to stable.
+@test "ring_tier_for_repo: fails closed on an unreadable/corrupt registry (#1096)" {
+  RING_PINS_REGISTRY="${BATS_TEST_TMPDIR}/does-not-exist.json" \
+    run ring_tier_for_repo agent-shield markets
+  [ "$status" -eq 3 ]
+  [[ "$output" != "stable" ]]
+  printf 'not-json{' > "${BATS_TEST_TMPDIR}/corrupt.json"
+  RING_PINS_REGISTRY="${BATS_TEST_TMPDIR}/corrupt.json" \
+    run ring_tier_for_repo agent-shield markets
+  [ "$status" -eq 3 ]
+  [[ "$output" != "stable" ]]
+  # a readable registry with a genuine no-match (unknown agent) still returns stable
+  run ring_tier_for_repo not-a-real-agent markets
+  [ "$status" -eq 0 ]
+  [ "$output" = "stable" ]
 }
 
 @test "ring_is_ring_reusable recognises the ring set (incl. dev-lead)" {

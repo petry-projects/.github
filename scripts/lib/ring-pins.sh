@@ -74,13 +74,29 @@ ring_tier_for_repo() {
     echo "ring_tier_for_repo: missing agent argument (signature is <agent> <repo>)" >&2
     return 2
   fi
-  local tier
-  tier="$(jq -r --arg a "$agent" --arg repo "${repo##*/}" '
+  local repo_name="${repo##*/}"
+  # Self-initializing per-process cache: within one run the registry is immutable, so
+  # (agent, repo-basename) -> tier is a pure function. Cache it to avoid re-parsing the
+  # registry with jq on every call — the audit (pinned-version-report.sh) and deploy
+  # sweeps invoke this inside nested loops over every repo × agent (#1096). Same
+  # pattern as _RING_TAG_EXISTS_CACHE below.
+  declare -g -A _RING_TIER_CACHE 2>/dev/null || true
+  local cache_key="${agent},${repo_name}"
+  if [[ -n "${_RING_TIER_CACHE[$cache_key]+isset}" ]]; then
+    printf '%s' "${_RING_TIER_CACHE[$cache_key]}"
+    return 0
+  fi
+  local tier status
+  # Resolve tiers in the registry's `order` sequence (not array position) so a
+  # reordered registry can never make pin resolution disagree with the rollout
+  # promotion order that canary-rollout.sh drives off the same `order` field (#1096).
+  tier="$(jq -r --arg a "$agent" --arg repo "$repo_name" '
     .agents[$a] as $ag
     | if $ag == null then "" else
         ($ag.host | sub(".*/";"")) as $host
         | ([.org_infra_repos[]? | sub(".*/";"")] - [$host]) as $orginfra
         | ( $ag.rings
+            | sort_by(.order)
             | map({ channel,
                     m: (reduce (.members[]?) as $x ([];
                           if   $x == "$host"      then . + [$host]
@@ -91,9 +107,23 @@ ring_tier_for_repo() {
             // "" )
       end
   ' "$RING_PINS_REGISTRY" 2>/dev/null)"
-  # Fall back to the broad-fleet tier for an unknown agent or a registry read error
-  # (the `*` ring is `stable` fleet-wide today).
+  status=$?
+  # Fail CLOSED on a registry read/parse error (missing or corrupt file, or a jq
+  # failure): silently returning `stable` when the source of truth is unavailable
+  # would let the audit accept — and the deploy emit — incorrect stable pins,
+  # masking real ring drift (#1096). Mirrors ring_host_current_channel_major's
+  # fail-closed probe (#870). A read error is NOT cached, so a transient failure
+  # does not poison later lookups.
+  if [ "$status" -ne 0 ]; then
+    echo "ring_tier_for_repo: failed to read ring registry '$RING_PINS_REGISTRY' (agent=$agent repo=$repo_name)" >&2
+    return 3
+  fi
+  # jq succeeded: an empty result is a genuine no-match — an unknown agent (not in
+  # the registry) or a repo in no explicit ring — so fall back to the broad-fleet
+  # tier (the `*` ring is `stable` fleet-wide today). This is distinct from the
+  # infra read error above and IS a valid, cacheable answer.
   [ -n "$tier" ] || tier="stable"
+  _RING_TIER_CACHE[$cache_key]="$tier"
   printf '%s' "$tier"
   return 0
 }
