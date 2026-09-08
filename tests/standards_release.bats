@@ -25,11 +25,11 @@ setup() {
 }
 @test "sr_release_tag: rejects a non-semver version" {
   run sr_release_tag v1.0.0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run sr_release_tag 1.0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run sr_release_tag ""
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "sr_channel_tag: builds the major-scoped moving channel" {
   [ "$(sr_channel_tag 1)" = "standards/v1-stable" ]
@@ -47,7 +47,7 @@ setup() {
 }
 @test "sr_is_release_suffix: rejects the moving channel suffix" {
   run sr_is_release_suffix v1-stable
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "sr_version_from_tag: extracts a bare version from a release tag" {
   [ "$(sr_version_from_tag standards/v1.2.3)" = "1.2.3" ]
@@ -61,11 +61,11 @@ setup() {
   run sr_semver_gt 1.10.0 1.9.0
   [ "$status" -eq 0 ]
   run sr_semver_gt 1.9.0 1.10.0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "sr_semver_gt: equal is not greater" {
   run sr_semver_gt 1.0.0 1.0.0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "sr_max_version: highest among mixed/invalid tokens" {
   [ "$(sr_max_version 1.0.0 1.10.0 1.2.0 notaversion)" = "1.10.0" ]
@@ -162,12 +162,12 @@ exit 0
 EOF
   chmod +x "$STUBDIR/git" "$STUBDIR/gh"
   run bash "$ORCH" cut v1.0.0 --commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSE"* || "$output" == *"refus"* ]]
 }
 
 @test "orchestrator: usage on no args, nonzero exit" {
   run bash "$ORCH"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"Usage"* || "$output" == *"usage"* ]]
 }

@@ -96,11 +96,18 @@ sr_semver_gt() {
   sr_valid_version "${1:-}" || return 1
   sr_valid_version "${2:-}" || return 1
   local a_major a_minor a_patch b_major b_minor b_patch
-  IFS=. read -r a_major a_minor a_patch <<< "$1"
-  IFS=. read -r b_major b_minor b_patch <<< "$2"
-  (( a_major != b_major )) && { (( a_major > b_major )); return; }
-  (( a_minor != b_minor )) && { (( a_minor > b_minor )); return; }
-  (( a_patch > b_patch ))
+  local a="$1" b="$2"
+  a_major="${a%%.*}"
+  a="${a#*.}"
+  a_minor="${a%%.*}"
+  a_patch="${a#*.}"
+  b_major="${b%%.*}"
+  b="${b#*.}"
+  b_minor="${b%%.*}"
+  b_patch="${b#*.}"
+  (( 10#a_major != 10#b_major )) && { (( 10#a_major > 10#b_major )); return; }
+  (( 10#a_minor != 10#b_minor )) && { (( 10#a_minor > 10#b_minor )); return; }
+  (( 10#a_patch > 10#b_patch ))
 }
 
 # sr_max_version <version...> — echo the highest strict MAJOR.MINOR.PATCH among
