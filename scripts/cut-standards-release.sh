@@ -136,14 +136,14 @@ _gh_release_versions() {
 _published_versions() {
   local ref v out=() local_slug
   local_slug="$(_local_repo_slug)"
-  if [ -n "$local_slug" ] && [ "$SR_REPO" != "$local_slug" ]; then
-    while IFS= read -r v; do [ -n "$v" ] && out+=("$v"); done < <(_gh_release_versions "$SR_REPO")
-  else
+  if [ "$SR_REPO" = "$local_slug" ]; then
     while IFS= read -r ref; do
       [ -z "$ref" ] && continue
       v="$(sr_version_from_tag "$ref")"
       [ -n "$v" ] && out+=("$v")
     done < <(git for-each-ref --format='%(refname:short)' 'refs/tags/standards/v*' 2>/dev/null || true)
+  else
+    while IFS= read -r v; do [ -n "$v" ] && out+=("$v"); done < <(_gh_release_versions "$SR_REPO")
   fi
   # Numeric-desc sort via the pure comparator (repeatedly extract the max).
   local remaining=("${out[@]+"${out[@]}"}") max
