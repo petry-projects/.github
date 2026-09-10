@@ -5,8 +5,11 @@
 # Triggered on any PR (and main push) that touches:
 #   - scripts/lib/agents-md-rules.json
 #   - scripts/agents-md-lint.sh
+#   - scripts/agents-md-cycle-log.sh
+#   - docs/initiatives/agents-md-validation-cycle-log.md
 #   - tests/test_agents_md_rules_config.bats
 #   - tests/agents_md_lint.bats
+#   - tests/agents_md_cycle_log.bats
 #   - tests/fixtures/agents-md/**
 #   - .github/workflows/agents-md-rules-tests.yml
 #
@@ -19,7 +22,11 @@
 # a source + date, and the informational->blocking promotion gate encodes two
 # clean cycles plus maintainer sign-off. It also runs tests/agents_md_lint.bats,
 # which exercises the Phase-2 linter's pure helpers over synthetic fixtures (a
-# valid AGENTS.md plus one per failure mode) with no network.
+# valid AGENTS.md plus one per failure mode) with no network, and
+# tests/agents_md_cycle_log.bats, which exercises the Phase-4 (#647) append-only
+# cycle-log reader/validator (scripts/agents-md-cycle-log.sh): every recorded
+# determination names a maintainer, and the clean-cycle precondition is reported
+# without ever promoting.
 #
 # Context: reference doc docs/initiatives/agents-md-validation.md (#643 Phase 1,
 # #644 Phase 2 of epic #642). Phase 1 delivered the data file; Phase 2 adds the
@@ -34,8 +41,11 @@ on:
     paths:
       - 'scripts/lib/agents-md-rules.json'
       - 'scripts/agents-md-lint.sh'
+      - 'scripts/agents-md-cycle-log.sh'
+      - 'docs/initiatives/agents-md-validation-cycle-log.md'
       - 'tests/test_agents_md_rules_config.bats'
       - 'tests/agents_md_lint.bats'
+      - 'tests/agents_md_cycle_log.bats'
       - 'tests/fixtures/agents-md/**'
       - '.github/workflows/agents-md-rules-tests.yml'
   push:
@@ -44,8 +54,11 @@ on:
     paths:
       - 'scripts/lib/agents-md-rules.json'
       - 'scripts/agents-md-lint.sh'
+      - 'scripts/agents-md-cycle-log.sh'
+      - 'docs/initiatives/agents-md-validation-cycle-log.md'
       - 'tests/test_agents_md_rules_config.bats'
       - 'tests/agents_md_lint.bats'
+      - 'tests/agents_md_cycle_log.bats'
       - 'tests/fixtures/agents-md/**'
       - '.github/workflows/agents-md-rules-tests.yml'
 
@@ -79,4 +92,5 @@ jobs:
         run: |
           bats --print-output-on-failure \
             tests/test_agents_md_rules_config.bats \
-            tests/agents_md_lint.bats
+            tests/agents_md_lint.bats \
+            tests/agents_md_cycle_log.bats
