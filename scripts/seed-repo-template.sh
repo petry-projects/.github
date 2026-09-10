@@ -24,15 +24,17 @@
 #   prefix the compliance audit requires) is REFUSED rather than emitted.
 #
 # Env:
+#   STANDARDS_REF   git reference to the standards artifact (e.g. standards/v1-stable,
+#                   standards/v1.0.0). Defaults to standards/v1-stable. The ref is used
+#                   for documentation/validation; the actual files are read from
+#                   STANDARDS_DIR (not resolved via git).
 #   STANDARDS_DIR   path to the petry-projects/.github checkout that holds the
 #                   canonical /.gitignore, scripts/lib/gitignore-baseline.sh, and
 #                   standards/workflows/. Defaults to the repo root above this script.
 set -euo pipefail
 
+STANDARDS_REF="${STANDARDS_REF:-standards/v1-stable}"
 STANDARDS_DIR="${STANDARDS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
-
-# shellcheck source=lib/gitignore-baseline.sh
-source "${STANDARDS_DIR}/scripts/lib/gitignore-baseline.sh"
 
 _usage() {
   echo "Usage: $0 --emit-baseline <file> | --emit-workflow <name.yml>" >&2
@@ -112,6 +114,8 @@ file="$2"
 case "$file" in
   .gitignore)
     # L1 — marker-wrapped org secrets baseline (org-managed, byte-identical).
+    # shellcheck source=lib/gitignore-baseline.sh
+    source "${STANDARDS_DIR}/scripts/lib/gitignore-baseline.sh"
     gib_extract_baseline_block "${STANDARDS_DIR}/.gitignore"
 
     # L2 — ecosystem / OS build artifacts (per-repo; edit freely below this line).

@@ -175,6 +175,15 @@ that reusable. The reference implementation and the full rationale live in the
 release-strategy initiative
 (`petry-projects/.github-private/docs/initiatives/agentic-release-strategy.md`).
 
+#### The same model for the `standards/` artifact
+
+The `standards/` directory is itself consumed by other repos as a versioned
+artifact, and it is published with the **same channel-tag vocabulary** as a
+reusable workflow — an immutable `standards/vX.Y.Z` release and a moving
+`standards/v<major>-stable` channel — but per-repo, so there are no concentric
+rings. See [`standards/standards-versioning.md`](./standards-versioning.md) for
+the cut script, the N-1 policy, and who moves the tags.
+
 #### Caller-stub input forwarding across channel pins
 
 **Rule.** Never add or modify a `with:` forward on a channel-pinned caller stub
