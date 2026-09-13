@@ -243,7 +243,15 @@ _cmd_cut() {
   fi
 
   echo "moving channel $channel_tag onto ${commit:0:12}..."
-  _gh_move_tag "$SR_REPO" "$channel_tag" "$commit"
+  # A cut is not atomic: the immutable release is created first, the channel moved
+  # second. If the move fails, the release is already published but consumers
+  # pinning the channel cannot reach it (#1119). Fail LOUDLY and name the exact
+  # recovery — the release is NOOP-safe, so re-running the same cut converges the
+  # channel without re-creating (or clobbering) the release.
+  if ! _gh_move_tag "$SR_REPO" "$channel_tag" "$commit"; then
+    echo "::error::partial cut: $release_tag is published at ${commit:0:12} but the channel $channel_tag could NOT be moved onto it — consumers pinning $channel_tag will not see this release. Re-run 'cut $version --commit $commit' to converge the channel (the release stays NOOP; it is never re-created or clobbered)." >&2
+    return 1
+  fi
   echo "done."
 }
 
@@ -272,7 +280,11 @@ _gh_move_tag() {
   local repo="$1" tag="$2" sha="$3" out low
   out="$(gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
       -f sha="$sha" -F force=true 2>&1)" && return 0
-  low="${out,,}"
+  # Portable lowercase for the case-insensitive "not found" match below. A bash-4
+  # case-modification expansion (the double-comma parameter form) is a fatal "bad
+  # substitution" on the macOS system bash 3.2 — this script is operator-run from a
+  # workstation, so that is a real execution environment (#1119). tr is POSIX.
+  low="$(printf '%s' "$out" | tr '[:upper:]' '[:lower:]')"
   if [[ "$low" != *"not found"* && "$low" != *"http 404"* && "$low" != *"reference does not exist"* ]]; then
     echo "::error::_gh_move_tag: could not move refs/tags/$tag -> ${sha:0:12} on $repo: ${out//$'\n'/ }" >&2
     return 1
