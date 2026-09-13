@@ -1026,7 +1026,8 @@ GITEOF
   cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 case "$*" in
-  *"matching-refs/tags/dev-lead/v"*)     echo "refs/tags/dev-lead/v139.8.0" ;;         # → current major = 139
+  *"matching-refs/tags/dev-lead/v"*)     printf 'refs/tags/dev-lead/v139-next\nrefs/tags/dev-lead/v139.8.0\n' ;;  # channel anchor + latest release
+  *"git/ref/tags/dev-lead/v139-next"*)   echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # channel anchor exists → major=139
   *"git/ref/tags/dev-lead/v139-stable"*) echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # the pinned channel tag
   *"git/ref/tags/dev-lead/v139.8.0"*)    echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # the release --to target
   *"git/ref/tags/dev-lead/stable"*)      echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef commit" ;;  # bare tier — must NOT be targeted
@@ -1053,7 +1054,8 @@ GHEOF
   cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 case "$*" in
-  *"matching-refs/tags/dev-lead/v"*)  echo "refs/tags/dev-lead/v139.8.0" ;;            # → current major = 139
+  *"matching-refs/tags/dev-lead/v"*)  printf 'refs/tags/dev-lead/v139-next\nrefs/tags/dev-lead/v139.8.0\n' ;;  # channel anchor + release
+  *"git/ref/tags/dev-lead/v139-next"*) echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # channel anchor exists → major=139
   *"git/ref/tags/dev-lead/v139.8.0"*) echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # release --to resolves
   *) echo "" ;;                                                                        # every channel tag is absent
 esac
@@ -1078,7 +1080,8 @@ GHEOF
   cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 case "$*" in
-  *"matching-refs/tags/dev-lead/v"*)     echo "refs/tags/dev-lead/v139.8.0" ;;         # → current major = 139
+  *"matching-refs/tags/dev-lead/v"*)     printf 'refs/tags/dev-lead/v139-next\nrefs/tags/dev-lead/v139.8.0\n' ;;  # channel anchor + release
+  *"git/ref/tags/dev-lead/v139-next"*)   echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # channel anchor exists → major=139
   *"git/ref/tags/dev-lead/v139.8.0"*)    echo "90dcc01ca854d7acd65044bb8defcc32789a8335 commit" ;;  # release --to target
   *"git/ref/tags/dev-lead/v139-stable"*) echo "" ;;                                    # v-scoped channel tag ABSENT
   *"git/ref/tags/dev-lead/stable"*)      echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef commit" ;;  # bare channel tag present
