@@ -75,21 +75,25 @@ resolve_cancel() {
 
 @test "stub: check_suite branch reads github.event.check_suite.pull_requests[0].number" {
   run yq -r '.concurrency.group' "$STUB"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"github.event.check_suite.pull_requests[0].number"* ]]
 }
 
 @test "stub: workflow_run branch reads github.event.workflow_run.pull_requests[0].number" {
   run yq -r '.concurrency.group' "$STUB"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"github.event.workflow_run.pull_requests[0].number"* ]]
 }
 
 @test "stub: fallback group is unique per run (github.run_id)" {
   run yq -r '.concurrency.group' "$STUB"
+  [ "$status" -eq 0 ]
   [[ "$output" == *"format('pr-auto-review-ready-check-unique-{0}', github.run_id)"* ]]
 }
 
 @test "stub: PR-context events are NOT keyed on a pull_request number (they hit the unique fallback)" {
   run yq -r '.concurrency.group' "$STUB"
+  [ "$status" -eq 0 ]
   # neither pull_request nor pull_request_review appear in the group expression,
   # so both fall through to the unique-per-run fallback.
   [[ "$output" != *"pull_request.number"* ]]
