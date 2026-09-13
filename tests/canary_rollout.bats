@@ -862,6 +862,34 @@ GHEOF
   [ "$status" -eq 0 ]
 }
 
+@test "canary-rings.json: pr-review onboarded (cross-repo host, standard rings, grandfathered filename, #1106)" {
+  # AC4: cross-repo agent — its reusable lives in .github-private, so releases/tags host there.
+  run jq -e '.agents["pr-review"].host == "petry-projects/.github-private"' "$RINGS"
+  [ "$status" -eq 0 ]
+  # AC4: the reusable is the grandfathered non-`-reusable.yml` engine (petry-projects/.github-private#1127) —
+  # exactly why the *-reusable.yml drift scan never caught the gap this issue closes.
+  run jq -e '.agents["pr-review"].reusable == ".github/workflows/pr-review.yml"' "$RINGS"
+  [ "$status" -eq 0 ]
+  # run_workflow is the trigger stub's name (the run history the gate reads), mirroring pr-review-mention.
+  run jq -e '.agents["pr-review"].run_workflow == "PR Review Agent — Trigger"' "$RINGS"
+  [ "$status" -eq 0 ]
+  # AC1: standard 4-ring topology — .github-private self-hosts on next (the v1-next dogfood), fleet on stable.
+  run bash -c "jq -r '.agents[\"pr-review\"].rings | sort_by(.order) | map(.channel) | join(\",\")' '$RINGS'"
+  [ "$output" = "next,ring0,ring1,stable" ]
+  # next = the host dogfood ($host); stable = the whole fleet (*)
+  run jq -e '.agents["pr-review"].rings[] | select(.channel=="next") | .members == ["$host"]' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["pr-review"].rings[] | select(.channel=="stable") | (.members | index("*")) != null' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["pr-review"].rings[] | select(.channel=="ring1") | (.members|index("petry-projects/TalkTerm")) and (.members|index("petry-projects/bmad-bgreat-suite"))' "$RINGS"
+  [ "$status" -eq 0 ]
+  # standard #548 gate + organic-traffic model (no synthetic-canary fields)
+  run jq -e '.agents["pr-review"].gate.transitions["ring1->stable"].sample_min == 1' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["pr-review"] | (has("next_tier_health_signal")|not) and (has("soak_start_ring")|not)' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
 @test "canary-rings.json: valid JSON + dev-lead host + ordered rings" {
   run jq -e '.agents["dev-lead"].host == "petry-projects/.github-private"' "$RINGS"
   [ "$status" -eq 0 ]
@@ -2222,6 +2250,121 @@ _drift_rings_one_agent() {
   [ "$status" -eq 0 ]
   grep -q "Canary Rollout — reusable drift" "$summ"
   grep -q "foo-reusable.yml" "$summ"
+}
+
+# ── registry COMPLETENESS: a channel-tagged agent absent from the registry (#1106) ────────────
+# Registry SELF-CONSISTENCY (RING_REUSABLES == .agents == the dispatch enum) is asserted by unit
+# tests, but it says nothing about COMPLETENESS: an agent can be fully deployed — carrying
+# <agent>/v<M>-<tier> channel tags on its host — yet be MISSING from .agents{}, so nothing cuts,
+# soaks, gates, or ships it. That is exactly how pr-review ran an 82-day-old build unnoticed. This
+# sweep inventories both infra repos' channel tags and flags any agent that has a v-scoped channel
+# tag but no registry entry (excluding reserved non-agent namespaces like `standards`).
+
+# _completeness_stub <priv_tags_json> [priv_contents_json] — stub gh so .github-private's
+# matching-refs/tags returns <priv_tags_json> (a JSON array of {"ref":...}) and its workflows dir
+# returns <priv_contents_json> (default []); .github returns empty tags + empty workflows so only
+# the injected private-host tags drive the completeness verdict. git is a no-op.
+_completeness_stub() {
+  local priv_tags="$1" priv_contents="${2:-[]}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *".github-private/git/matching-refs/tags"*) cat <<'JSON'
+$priv_tags
+JSON
+    ;;
+  *"git/matching-refs/tags"*) echo '[]' ;;
+  *".github-private/contents/.github/workflows"*) cat <<'JSON'
+$priv_contents
+JSON
+    ;;
+  *"contents/.github/workflows"*) echo '[]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # completeness never touches git
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: drift completeness flags a channel-tagged agent absent from the registry (#1106)" {
+  # Registry knows only dev-lead; standards is a reserved (non-agent) tag namespace.
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-rings.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$COMP_RINGS"
+  _completeness_stub '[
+    {"ref":"refs/tags/pr-review/v1-next"},
+    {"ref":"refs/tags/pr-review/v1-stable"},
+    {"ref":"refs/tags/pr-review/v1.8.0"},
+    {"ref":"refs/tags/dev-lead/v1-next"},
+    {"ref":"refs/tags/standards/v1-stable"}
+  ]'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  # pr-review has channel tags on the host but no registry entry → flagged.
+  [[ "$output" == *"DRIFT[registry-incomplete]"* ]]
+  [[ "$output" == *"pr-review"* ]]
+  # a registered agent (dev-lead) and the reserved `standards` namespace are NOT flagged;
+  # a release tag (pr-review/v1.8.0) is not a channel tag and never drives this verdict.
+  [[ "$output" != *"registry-incomplete] petry-projects/.github-private: 'dev-lead'"* ]]
+  [[ "$output" != *"registry-incomplete] petry-projects/.github-private: 'standards'"* ]]
+  # exactly one completeness finding (pr-review), counted once across both repos.
+  [[ "$output" == *"registry-completeness summary: 1"* ]]
+}
+
+@test "orchestrator: drift completeness is clean once every channel-tagged agent is registered (#1106)" {
+  # Both dev-lead and pr-review are registered; standards is reserved → no completeness gap.
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-clean-rings.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"], "pr-review": .agents["pr-review"]}}' "$RINGS" > "$COMP_RINGS"
+  # workflows dir lists the registered reusables so the reusable-drift pass stays clean too.
+  _completeness_stub '[
+    {"ref":"refs/tags/pr-review/v1-next"},
+    {"ref":"refs/tags/pr-review/v1-stable"},
+    {"ref":"refs/tags/dev-lead/v1-next"},
+    {"ref":"refs/tags/standards/v1-stable"}
+  ]' '[
+    {"type":"file","name":"pr-review.yml","path":".github/workflows/pr-review.yml"},
+    {"type":"file","name":"dev-lead-reusable.yml","path":".github/workflows/dev-lead-reusable.yml"}
+  ]'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"registry-completeness summary: 0"* ]]
+  [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
+}
+
+@test "orchestrator: drift completeness skips an infra repo it cannot enumerate (no false gap) (#1106)" {
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-noaccess.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$COMP_RINGS"
+  # matching-refs returns a non-array error body for .github-private → the repo is skipped,
+  # NOT read as "no channel tags" (which would silently miss a real completeness gap).
+  _completeness_stub '{"message":"Not Found"}'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not enumerate channel tags"* ]]
+  [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
+}
+
+@test "orchestrator: drift does not false-flag a registered non-reusable-suffixed reusable as missing-file (#1106)" {
+  # pr-review's reusable is the grandfathered pr-review.yml (no -reusable.yml suffix). It is
+  # PRESENT on the host, so the missing-file check must recognise it — not report it as deleted.
+  MF_RINGS="$BATS_TEST_TMPDIR/mf-rings.json"
+  jq '{version, description, org_infra_repos, member_tokens,
+       agents: {"pr-review": (.agents["dev-lead"] + {reusable: ".github/workflows/pr-review.yml"})}}' \
+    "$RINGS" > "$MF_RINGS"
+  _drift_stub '[
+    {"type":"file","name":"pr-review.yml","path":".github/workflows/pr-review.yml"},
+    {"type":"file","name":"pr-review-trigger.yml","path":".github/workflows/pr-review-trigger.yml"}
+  ]' '[]'
+  run env CANARY_RINGS="$MF_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"DRIFT[missing-file]"* ]]
+  [[ "$output" == *"0 missing-file"* ]]
 }
 
 # ── differs-aware benign classes: version_independent (#668) ────────────────────
@@ -4689,6 +4832,12 @@ GHEOF
   [ -n "$enum_sorted" ]
   registry_sorted="$(jq -r '.agents|keys[]' "$RINGS" | sort -u)"
   [ "$enum_sorted" = "$registry_sorted" ]
+}
+
+@test "canary-rollout.yml: pr-review is a hand-dispatchable agent (#1106 AC3)" {
+  local wf="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
+  run grep -Eq '^          - pr-review$' "$wf"
+  [ "$status" -eq 0 ]
 }
 
 # ── drift: per-agent "merged but not shipped" signal (#1019) ──

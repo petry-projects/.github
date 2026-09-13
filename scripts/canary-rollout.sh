@@ -2501,6 +2501,46 @@ _gh_list_reusables() {
   return 0
 }
 
+# _gh_list_workflow_files <repo> — ALL workflow file paths (any *.yml / *.yaml) under the repo's
+# .github/workflows (one per line). Same enumerate-or-fail contract as _gh_list_reusables (non-zero
+# when the listing could NOT be read). Used ONLY for the missing-file check: a registered reusable
+# that does not carry the `-reusable.yml` suffix (the grandfathered pr-review.yml engine, #1106)
+# is present on the host but absent from the `-reusable.yml`-filtered set, so checking `missing`
+# against that filtered set would false-flag it as a deleted/stale registry entry.
+_gh_list_workflow_files() {
+  local repo="$1" json
+  json="$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null)" || return 1
+  jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
+  jq -r '[.[]? | select(.type=="file") | select((.name // "") | test("\\.ya?ml$")) | .path] | .[]' \
+    2>/dev/null <<< "$json" || true
+  return 0
+}
+
+# _reserved_tag_namespaces — tag prefixes that carry `<name>/v<M>-<tier>` channel tags on an infra
+# repo but are NOT canary-managed agents (e.g. `standards`, the standards-versioning release channel
+# #1091). Read from the registry's optional `.reserved_tag_namespaces` list so the allowlist is data,
+# not code, and the completeness sweep (#1106) never false-flags a non-agent namespace. One per line.
+_reserved_tag_namespaces() {
+  _jq -r '(.reserved_tag_namespaces // []) | .[]'
+}
+
+# _gh_list_channel_tag_agents <repo> — the distinct agent names that own a v-scoped channel tag
+# `<name>/v<M>-<tier>` (tier = next|ring<N>|stable) on <repo>, one per line, sorted. This is the
+# COMPLETENESS signal (#1106): a channel tag is the fingerprint of a deployed, release-managed
+# agent, so any name here that is absent from the registry is deployed-but-unmanaged. Same
+# enumerate-or-fail contract as _gh_list_reusables — non-zero when the tag listing could NOT be
+# read, so the caller does not mistake an API outage for "no channel tags". A release tag
+# `<name>/vX.Y.Z` is not a channel tag and is ignored.
+_gh_list_channel_tag_agents() {
+  local repo="$1" json
+  json="$(gh api "repos/$repo/git/matching-refs/tags" --paginate 2>/dev/null)" || return 1
+  jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
+  jq -r '.[]? | .ref // empty' 2>/dev/null <<< "$json" \
+    | sed -n -E 's#^refs/tags/(.+)/v[0-9]+-(next|ring[0-9]+|stable)$#\1#p' \
+    | sort -u
+  return 0
+}
+
 # _registered_reusables_for_host <host> — the reusable paths registered to <host> (one
 # per line, deduped).
 _registered_reusables_for_host() {
@@ -2605,8 +2645,14 @@ cmd_drift() {
       u_total=$((u_total + 1))
       if [ "$emit_stub" = true ]; then stubs+="$(_drift_scaffold "$host" "$p")"$'\n'; fi
     done <<< "$unregistered"
-    # missing-file = registered in the registry but the file is gone from the host.
-    missing="$(set_difference "$registered" "$present")"
+    # missing-file = registered in the registry but the file is gone from the host. Checked against
+    # ALL workflow files (not just the `-reusable.yml`-filtered `present`), so a registered reusable
+    # that keeps a legacy non-`-reusable.yml` name (the grandfathered pr-review.yml engine, #1106) is
+    # recognised as present instead of being false-flagged as a deleted/stale entry. If the full
+    # listing can't be read, fall back to `present` (never invent a missing-file avalanche).
+    local present_all
+    present_all="$(_gh_list_workflow_files "$host")" || present_all="$present"
+    missing="$(set_difference "$registered" "$present_all")"
     while IFS= read -r p; do
       [ -z "$p" ] && continue
       agents="$(_agents_for_reusable "$host" "$p")"
@@ -2722,6 +2768,52 @@ cmd_drift() {
     ctmd="$(printf '# Canary Rollout — channel-tag drift (missing v<M>-<tier>)\n\nLast updated: `%s` · %s tier(s) with a bare channel tag lacking its v-scoped counterpart.\n\n| agent | tier | missing ref | note |\n|---|---|---|---|\n%s\n> A ring-promotion bootstrap gap (#1065). A stub deploy keyed on the channel major pins `<agent>/v<M>-<tier>`; if it does not exist the fleet fails at startup. A maintainer backfills the tag at its bare counterpart'"'"'s commit.\n' "$ts" "$ct_total" "${ct_rows%$'\n'}")"
     printf '\n%s\n' "$ctmd" >> "$GITHUB_STEP_SUMMARY" \
       || echo "::warning::could not write the channel-tag drift job summary"
+  fi
+
+  # ── registry completeness: a channel-tag agent absent from the registry (#1106) ──────────────
+  # Registry SELF-CONSISTENCY (RING_REUSABLES == .agents == the dispatch enum) is enforced by unit
+  # tests, but it says nothing about COMPLETENESS: an agent can be fully deployed — carrying
+  # <agent>/v<M>-<tier> channel tags on its host — yet be MISSING from .agents{}, so nothing cuts,
+  # soaks, gates, or ships it. That is exactly how pr-review ran an 82-day-old build unnoticed
+  # (#1106): the *-reusable.yml scan above never saw it (its engine keeps the legacy pr-review.yml
+  # name) and every self-consistency test passed because the three registers agreed with each other.
+  # This sweep inventories the channel tags on BOTH infra repos (tags live in the agent's host repo)
+  # and flags any channel-tag agent that has no registry entry, excluding reserved non-agent
+  # namespaces (e.g. `standards`, the standards-versioning channel #1091). Report-only — registering
+  # needs human intent (ring topology/members); the check just makes the gap impossible to miss.
+  echo "----"
+  echo "== registry completeness: channel-tag agent absent from the registry (#1106) =="
+  local infra_repos ir reserved registered_agents rc_total=0 rc_rows="" rc_seen=""
+  infra_repos="$(_jq -r '(.org_infra_repos // []) | .[]')"
+  reserved="$(_reserved_tag_namespaces)"
+  registered_agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
+  while IFS= read -r ir; do
+    [ -z "$ir" ] && continue
+    local tag_agents ta
+    if ! tag_agents="$(_gh_list_channel_tag_agents "$ir")"; then
+      # Could not read the repo's tags — skip it rather than mistake an outage for "no channel
+      # tags" (which would silently miss a real completeness gap). Read-only + best-effort.
+      echo "::warning::completeness $ir: could not enumerate channel tags (API error / no access) — skipping repo this cycle"
+      continue
+    fi
+    while IFS= read -r ta; do
+      [ -z "$ta" ] && continue
+      grep -qxF "$ta" <<< "$registered_agents" && continue           # registered → managed, fine
+      grep -qxF "$ta" <<< "$reserved" && continue                    # reserved non-agent namespace
+      grep -qxF "$ta" <<< "$rc_seen" && continue                     # already reported (tags on both repos)
+      rc_seen+="$ta"$'\n'
+      echo "::warning::DRIFT[registry-incomplete] $ir: '$ta' has <agent>/v*-<tier> channel tags but is NOT in canary-rings.json (.agents) — deployed but unmanaged (no cut/soak/gate/dashboard)"
+      rc_rows+="| \`$ta\` | \`$ir\` | channel-tagged but absent from \`.agents{}\` — register it (or add to \`reserved_tag_namespaces\` if it is not an agent) |"$'\n'
+      rc_total=$((rc_total + 1))
+    done <<< "$tag_agents"
+  done <<< "$infra_repos"
+  echo "registry-completeness summary: $rc_total channel-tag agent(s) missing from the registry"
+
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ "$rc_total" -gt 0 ]; then
+    local rcmd
+    rcmd="$(printf '# Canary Rollout — registry completeness (channel-tagged but unregistered)\n\nLast updated: `%s` · %s channel-tag agent(s) with `<agent>/v*-<tier>` tags on an infra repo but no `.agents{}` entry.\n\n| agent | host | note |\n|---|---|---|\n%s\n> Registry self-consistency is not completeness (#1106). A channel-tagged agent absent from the registry ships with ZERO staged rollout — no cut/soak/gate/dashboard — exactly how pr-review ran an 82-day-old build unnoticed. Register it, or add a genuine non-agent namespace to `reserved_tag_namespaces`.\n' "$ts" "$rc_total" "${rc_rows%$'\n'}")"
+    printf '\n%s\n' "$rcmd" >> "$GITHUB_STEP_SUMMARY" \
+      || echo "::warning::could not write the registry-completeness job summary"
   fi
   return 0
 }
