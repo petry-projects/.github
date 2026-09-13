@@ -48,8 +48,8 @@ permissions: {}
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # permission ceiling for the reusable job (update-branch may touch .github/workflows/); the update-branch call itself is made under APP_TOKEN, not GITHUB_TOKEN — GITHUB_TOKEN's recursive-trigger guard would stop CI from running
-      pull-requests: write  # permission ceiling for the update-branch and merge-PR API calls, which the reusable issues under APP_TOKEN (a distinct App identity), not the caller's GITHUB_TOKEN
+      contents: write   # permission ceiling for reusable job; update-branch uses APP_TOKEN (not GITHUB_TOKEN, which would trigger recursive-guard)
+      pull-requests: write  # permission ceiling; update-branch and merge-PR API calls use APP_TOKEN (distinct App identity)
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@dependabot-rebase/v2-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
