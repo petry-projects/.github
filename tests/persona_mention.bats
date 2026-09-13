@@ -322,3 +322,140 @@ npm test
   run pm_mention_gate_label "$m"
   [ "$output" = "qa-lead" ]
 }
+
+# --- stop markers (#1133) --------------------------------------------------
+# A human hold (needs-human-review, dev-lead:needs-human, <id>:hands-off) must
+# stop a MENTIONED persona the way it stops the event-driven surfaces. Each
+# persona declares its brakes in personas/<id>/interaction.yml; the router reads
+# them from there — no marker is ever a literal in the routing logic (AC #2).
+
+# A minimal interaction contract shaped like personas/qa-lead/interaction.yml.
+interaction() {
+  local markers="${1:-  stop_markers:
+    - qa-lead:hands-off
+    - needs-human-review
+    - dev-lead:needs-human}"
+  cat <<YAML
+schema_version: 1
+role: qa-lead
+kind: persona
+interaction:
+${markers}
+YAML
+}
+
+@test "pm_interaction_url builds the raw contract path by convention" {
+  run pm_interaction_url qa-lead
+  [ "$output" = "https://raw.githubusercontent.com/petry-projects/.github-private/main/personas/qa-lead/interaction.yml" ]
+}
+
+@test "pm_interaction_url honours PERSONA_REF for testing against a branch" {
+  PERSONA_REF=some-branch run pm_interaction_url qa-lead
+  [[ "$output" == */some-branch/personas/qa-lead/interaction.yml ]]
+}
+
+@test "pm_stop_markers reads every declared marker from the contract" {
+  run pm_stop_markers "$(interaction)"
+  [ "${lines[0]}" = "qa-lead:hands-off" ]
+  [ "${lines[1]}" = "needs-human-review" ]
+  [ "${lines[2]}" = "dev-lead:needs-human" ]
+  [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "pm_stop_markers is empty when the contract declares none" {
+  run pm_stop_markers "$(interaction '  stop_markers: []')"
+  [ -z "$output" ]
+}
+
+@test "pm_stop_markers is empty when stop_markers is absent entirely" {
+  run pm_stop_markers "$(interaction '  budget: pr-automation-budget')"
+  [ -z "$output" ]
+}
+
+@test "pm_first_stop_marker names the marker holding the item (present -> skip)" {
+  # Item carries the escalation brake -> the router must skip and log the marker.
+  run pm_first_stop_marker "$(interaction)" <<<'needs-human-review
+some-other-label'
+  [ "$output" = "needs-human-review" ]
+}
+
+@test "pm_first_stop_marker fires on dev-lead:needs-human (cross-persona hold)" {
+  run pm_first_stop_marker "$(interaction)" <<<'dev-lead:needs-human'
+  [ "$output" = "dev-lead:needs-human" ]
+}
+
+@test "pm_first_stop_marker honours the persona's own opt-out among its markers" {
+  run pm_first_stop_marker "$(interaction)" <<<'qa-lead:hands-off'
+  [ "$output" = "qa-lead:hands-off" ]
+}
+
+@test "pm_first_stop_marker returns the FIRST declared marker present, in order" {
+  # Two markers present; the contract's declaration order decides which is logged.
+  run pm_first_stop_marker "$(interaction)" <<<'dev-lead:needs-human
+needs-human-review'
+  [ "$output" = "needs-human-review" ]
+}
+
+@test "pm_first_stop_marker is empty when no marker is present (absent -> route)" {
+  run pm_first_stop_marker "$(interaction)" <<<'enhancement
+good-first-issue'
+  [ -z "$output" ]
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_first_stop_marker is empty on an empty label set" {
+  run pm_first_stop_marker "$(interaction)" <<<''
+  [ -z "$output" ]
+}
+
+@test "pm_first_stop_marker matches a marker whole-line, never as a substring" {
+  # 'needs-human-review' must not fire on a label that merely contains it.
+  run pm_first_stop_marker "$(interaction)" <<<'needs-human-review-later'
+  [ -z "$output" ]
+}
+
+@test "pm_first_stop_marker routes when the contract declares no markers" {
+  run pm_first_stop_marker "$(interaction '  stop_markers: []')" <<<'needs-human-review'
+  [ -z "$output" ]
+}
+
+@test "pm_first_stop_marker fails closed on an unparseable contract (never 'no markers')" {
+  # A 200 with a corrupt body must not be read as "not held" — it must fail the
+  # job, exactly as a 5xx does. pm_stop_markers exits non-zero on bad YAML and
+  # that propagates rather than being swallowed into an empty marker set.
+  run pm_first_stop_marker 'this: [is: not: yaml' <<<'needs-human-review'
+  [ "$status" -ne 0 ]
+}
+
+# --- interaction fetch disposition (AC #3) ---------------------------------
+# The fetch mirrors the manifest fetch EXACTLY: a 200 is the contract, a 404 is
+# a real answer ("no contract — refuse this slug"), and anything else is a
+# FAILURE to get an answer and must fail the job. Never read a fetch failure as
+# "no stop markers" — that is fail-open in the direction that matters.
+
+@test "pm_fetch_disposition treats 200 as the contract to read" {
+  run pm_fetch_disposition 200
+  [ "$output" = "read" ]
+}
+
+@test "pm_fetch_disposition treats 404 as absent (refuse this slug)" {
+  run pm_fetch_disposition 404
+  [ "$output" = "absent" ]
+}
+
+@test "pm_fetch_disposition fails closed on a 5xx" {
+  run pm_fetch_disposition 500
+  [ "$output" = "fail" ]
+  run pm_fetch_disposition 503
+  [ "$output" = "fail" ]
+}
+
+@test "pm_fetch_disposition fails closed on a curl transport error (000)" {
+  run pm_fetch_disposition 000
+  [ "$output" = "fail" ]
+}
+
+@test "pm_fetch_disposition fails closed on any other status" {
+  run pm_fetch_disposition 403
+  [ "$output" = "fail" ]
+}

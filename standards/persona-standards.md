@@ -177,7 +177,21 @@ on**. Fill one row per surface; anything unlisted falls back to `default_mode`.
    (this is the same trust boundary the PR-review and dev-lead paths already
    apply).
 4. **Every persona defines an `opt_out_label`** (`<id>:hands-off`) that removes
-   an item from its automation entirely.
+   an item from its automation entirely. Beyond the opt-out, a persona declares
+   its **human-hold brakes** as `stop_markers` in its interaction contract
+   (`personas/<id>/interaction.yml`) — e.g. `needs-human-review`,
+   `dev-lead:needs-human`, `<id>:hands-off`. Every surface honours the full set,
+   including the **mention** router, which derives the markers from the contract
+   rather than restating them, so a human hold stops the mentioned persona
+   exactly as it stops the event-driven surfaces.
+
+   > **Discussions are the one exception, and it is not a loosening.** A
+   > discussion has no labels API surface, so neither the `opt_out_label`, the
+   > write-mode `gate_label`, nor the `stop_markers` can be evaluated there. The
+   > mention router therefore keeps discussion semantics unchanged: a read-mode
+   > (advisory) mention routes, and a write-mode mention is **refused** — its
+   > gate cannot be verified, so it fails closed. This is stated in the router's
+   > header comment as well, so the divergence is never implicit.
 5. **Most personas should be advisory on most surfaces.** The working hypothesis
    — a persona can usefully weigh in on nearly every work-item type — holds *for
    advisory participation*. Reserve `write` for the few surfaces where the
