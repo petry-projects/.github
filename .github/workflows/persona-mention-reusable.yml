@@ -284,7 +284,7 @@ jobs:
               # transient 5xx must never be read as "no stop markers" (AC #3).
               case "$(pm_fetch_disposition "$ihttp")" in
                 read)
-                  interaction="$(cat "$ibody_file")"
+                  interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; exit 1; }
                   rm -f "$ibody_file"
                   ;;
                 absent)
