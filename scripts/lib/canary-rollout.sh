@@ -16,6 +16,10 @@
 #   - ring1->stable: dwell >= 12h + >= 1 ring1 run
 #   - ALWAYS:        cumulative health = ZERO failures / ZERO startup_failures
 #                    across EVERY tier since the candidate's own first cut.
+#   - COVERAGE (#1086): dwell/sample/health count ONLY runs that EXECUTED the candidate.
+#                    A source tier whose members do not run the candidate (they pin a
+#                    different version, or the ring is registry-marked non-evidence-bearing)
+#                    reports NO_COVERAGE — a distinct state, never a satisfied soak.
 # The dwell floors and sample fractions are registry-configurable per transition
 # (see standards/canary-rings.json .gate); the numbers above are the defaults.
 
@@ -316,6 +320,36 @@ decide_graduated() {
     echo "PROMOTE"; return 0
   fi
   echo "SOAKING"
+}
+
+# decide_coverage <excluded_count> <covered_count>
+# Pure coverage gate (#1086): distinguish a source tier whose members actually EXECUTE the
+# candidate from one where runs merely OCCUR in member repos. A tier bears soak evidence
+# only when at least one member runs the candidate; otherwise its dwell/sample are vacuous
+# and must NOT read as a satisfied soak (the #1086 defect: 196 counted runs / 88h dwell
+# while no repo in the fleet was on the candidate). Echoes exactly one of:
+#   NO_COVERAGE — every member repo POSITIVELY pins a non-candidate version
+#                 (covered_count==0 && excluded_count>0): runs happen but none execute the
+#                 candidate, so they carry no information about it either way.
+#   OK          — at least one member executes the candidate OR its pin is indeterminate
+#                 (covered_count>0, so evidence is still possible), or the tier has no
+#                 members at all (excluded_count==0 too — the existing no-caller sample
+#                 waiver governs that legitimate early-soak case, unchanged).
+# covered_count = members whose pin resolves to the candidate OR is indeterminate (the set
+# whose runs the gate may still attribute to the candidate); excluded_count = members whose
+# pin POSITIVELY resolves to a different version. Fail-OPEN on an all-indeterminate tier
+# (covered_count>0), so a transient stub-read failure never fabricates a NO_COVERAGE stall.
+# The registry's per-ring `evidence_bearing: false` marker (e.g. dev-lead's structurally
+# unoccupiable `next`) is a recorded topology FACT the gate surfaces in its NO_COVERAGE
+# report; the runtime verdict itself is derived from actual per-repo occupancy — the robust
+# signal the issue calls the generally-correct fix. Pure: integer logic only.
+decide_coverage() {
+  local excluded="${1:-0}" covered="${2:-0}"
+  case "$excluded" in ''|*[!0-9]*) excluded=0 ;; esac
+  case "$covered" in ''|*[!0-9]*) covered=0 ;; esac
+  if [ "$covered" -gt 0 ]; then echo "OK"; return 0; fi
+  if [ "$excluded" -gt 0 ]; then echo "NO_COVERAGE"; return 0; fi
+  echo "OK"
 }
 
 # classify_failure <reusable_differs 0|1> <category> [suspect_match 0|1] — triage an

@@ -28,7 +28,9 @@
           "order": 0,
           "members": [
             "$host"
-          ]
+          ],
+          "evidence_bearing": false,
+          "_evidence_note": "#1086 \u2014 dev-lead's `next` ring can NEVER have an occupant, so it bears no soak evidence. Its sole member is `$host` (petry-projects/.github-private), but Safe Release SC2 (petry-projects/.github-private#1624, epic #495/#503) REQUIRES that repo's own dev-lead.yml to pin a STABLE-tier channel \u2014 a deliberately-broken in-development dev-lead must not be able to block the PR that fixes its own breakage. So `next`'s only member is forbidden from pinning `next`; the tier is structurally unoccupiable. Marked non-evidence-bearing so the gate reports `next->ring0` as NO_COVERAGE rather than a vacuous satisfied soak, recording the SC2 contradiction in the registry instead of leaving it implicit. ring0 is the first evidence-bearing tier for dev-lead. This does NOT weaken SC2 (keeping the self-host repo on stable is correct and was validated in practice)."
         },
         {
           "channel": "ring0",
@@ -55,6 +57,7 @@
       ],
       "gate": {
         "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
+        "_coverage_note": "#1086 \u2014 the gate counts ONLY runs that EXECUTED the candidate: a source tier whose members pin a non-candidate version (or a ring marked `evidence_bearing: false`) reports NO_COVERAGE, not a satisfied dwell/sample. This closes the vacuous-soak defect where 196 runs / 88h dwell were credited to a candidate no repo in the fleet was running.",
         "baseline_window_days": 14,
         "baseline_spike_cap_multiple": 3,
         "benign_failure_classes": [

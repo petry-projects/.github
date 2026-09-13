@@ -327,10 +327,84 @@ channel_commit() {
   _resolved_channel "$1" "$2" | cut -f2
 }
 
+# ── run-attribution / occupancy (#1086) ───────────────────────────────────────
+# The gate previously reasoned about repos by ring MEMBERSHIP but repos execute whatever
+# tag they PIN. A member repo that pins a non-candidate version still contributed its runs
+# to the candidate's dwell/sample/cum_fail — the vacuous-soak defect (#1086). Occupancy
+# closes that gap: a member repo EXECUTES the candidate iff its caller-stub pin for the
+# agent resolves (on the host) to the candidate commit. Only occupant (or indeterminate)
+# repos feed the gate; a repo that POSITIVELY pins another version is excluded.
+
+# Memoization: (agent:repo:cand) -> yes|no|unknown.
+declare -A _REPO_EXEC_CACHE=()
+
+# _repo_executes_candidate <agent> <repo> <cand> — does <repo>'s caller stub run the
+# candidate commit for <agent>? Echoes:
+#   yes      — the stub's reusable pin resolves (on the host) to <cand>.
+#   no       — it resolves to a DIFFERENT commit (positively pins another version).
+#   unknown  — cannot be determined: empty/wildcard repo, no stub, no parseable pin, a
+#              `./` self-hosted stub (runs the repo's own HEAD, not a channel tag — not
+#              attributable here), or an unresolvable tag. Fail-OPEN so a transient read
+#              never fabricates an exclusion (and so a NO_COVERAGE stall).
+_repo_executes_candidate() {
+  local agent="$1" repo="$2" cand="$3" key="${1}:${2}:${3}"
+  { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$cand" ]; } && { echo "unknown"; return 0; }
+  if [[ -v _REPO_EXEC_CACHE["$key"] ]]; then echo "${_REPO_EXEC_CACHE[$key]}"; return 0; fi
+  local host content ref commit result="unknown"
+  host="$(_agent_field "$agent" host)"; host="${host:-$THIS_REPO}"
+  content="$(gh api "repos/$repo/contents/.github/workflows/$agent.yml" --jq '.content // empty' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [ -n "$content" ]; then
+    if grep -qE "^[[:space:]]*uses:[[:space:]]*\./[^@[:space:]]*/${agent}-reusable\.yml" <<< "$content"; then
+      result="unknown"   # `./` self-host: runs local HEAD, not a channel tag — leave indeterminate
+    else
+      ref="$(grep -oE "uses:[[:space:]]*[^@[:space:]]*/${agent}-reusable\.yml@[^[:space:]#\"']+" <<< "$content" | head -1)"
+      ref="${ref##*@}"
+      if [ -n "$ref" ]; then
+        commit="$(_gh_tag_commit "$host" "$ref")"
+        if [ -n "$commit" ]; then
+          if [ "$commit" = "$cand" ]; then result="yes"; else result="no"; fi
+        fi
+      fi
+    fi
+  fi
+  _REPO_EXEC_CACHE["$key"]="$result"
+  echo "$result"
+}
+
+# _tier_occupancy <agent> <cand> <repo...> — classify a tier's members by candidate
+# execution. Echoes "<covered> <excluded> <covered_csv>":
+#   covered      = members that execute the candidate OR are indeterminate (yes|unknown) —
+#                  the set whose runs the gate may still attribute to the candidate.
+#   excluded     = members that POSITIVELY pin another version (no).
+#   covered_csv  = comma-joined covered repos (the counting set for sample / cum health).
+# The `*` fleet wildcard and empty entries are skipped (never occupants of a soak tier).
+_tier_occupancy() {
+  local agent="$1" cand="$2"; shift 2
+  local repo res covered=0 excluded=0
+  local keep=()
+  for repo in "$@"; do
+    { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
+    res="$(_repo_executes_candidate "$agent" "$repo" "$cand")"
+    case "$res" in
+      no) excluded=$(( excluded + 1 )) ;;
+      *)  covered=$(( covered + 1 )); keep+=("$repo") ;;
+    esac
+  done
+  local csv; csv="$(IFS=,; echo "${keep[*]:-}")"
+  echo "$covered $excluded $csv"
+}
+
 # _gate_field <agent> <field> — read .agents[a].gate.<field> (empty if absent).
 _gate_field() { _jq -r --arg a "$1" --arg f "$2" '.agents[$a].gate[$f] // empty'; }
 # _gate_knob <agent> <transition_key> <field> — read a per-transition knob (empty if absent).
 _gate_knob() { _jq -r --arg a "$1" --arg t "$2" --arg f "$3" '.agents[$a].gate.transitions[$t][$f] // empty'; }
+# _ring_field <agent> <channel> <field> — read a per-ring registry field (empty if absent),
+# e.g. `evidence_bearing` (#1086). Selects the ring by channel name. Uses `has` rather than
+# `// empty` so a boolean `false` reads as "false" (jq's `//` coalesces false to its RHS).
+_ring_field() {
+  _jq -r --arg a "$1" --arg c "$2" --arg f "$3" \
+    '.agents[$a].rings[]? | select(.channel==$c) | if has($f) then .[$f] else empty end'
+}
 
 # _iso_now_minus_days <ndays> — ISO-8601 Zulu timestamp n days ago (GNU or BSD date).
 _iso_now_minus_days() {
@@ -993,9 +1067,16 @@ _frontier_state() {
   local src_repos=() r
   while IFS= read -r r; do [ -n "$r" ] && src_repos+=("$r"); done < <(resolve_members "$agent" "$source")
 
-  # Sample on the source tier over the per-candidate window.
+  # Occupancy (#1086): only members that EXECUTE the candidate (or whose pin is
+  # indeterminate) bear soak evidence. A member that positively pins another version is
+  # excluded, so its runs never inflate the candidate's sample/dwell/cum_fail.
+  local src_covered src_excluded src_keep_csv
+  read -r src_covered src_excluded src_keep_csv < <(_tier_occupancy "$agent" "$cand" "${src_repos[@]}")
+  local src_keep=(); [ -n "$src_keep_csv" ] && IFS=, read -r -a src_keep <<< "$src_keep_csv"
+
+  # Sample on the source tier over the per-candidate window — occupant repos only.
   local sample earliest
-  read -r sample earliest < <(_tier_sample "$agent" "$cut_z" "${src_repos[@]}")
+  read -r sample earliest < <(_tier_sample "$agent" "$cut_z" "${src_keep[@]}")
 
   # Dwell is always measured from the candidate's own cut (tagger date), per #548 spec.
   local dwell_h=0
@@ -1014,14 +1095,22 @@ _frontier_state() {
   prior="$(channel_commit "$agent" "$frontier")"
   differs="$(_reusable_differs "$agent" "$cand" "$prior")"
 
-  # Cumulative health across EVERY concrete tier repo since the candidate's own cut.
+  # Cumulative health across EVERY concrete tier repo since the candidate's own cut —
+  # restricted to repos that EXECUTE the candidate (#1086). A failure in a repo that pins
+  # another version is not evidence about the candidate either way, so it is excluded from
+  # cum_fail; only occupant (or indeterminate) repos count.
   local all_repos=() ch3
   for ch3 in "${chan_array[@]}"; do
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \
       < <(resolve_members "$agent" "$ch3")
   done
+  # Only the occupant (kept) repo list matters for cumulative health; the counts are the
+  # source tier's job (above), so discard them here.
+  local all_keep_csv
+  all_keep_csv="$(_tier_occupancy "$agent" "$cand" "${all_repos[@]}" | cut -d' ' -f3-)"
+  local all_keep=(); [ -n "$all_keep_csv" ] && IFS=, read -r -a all_keep <<< "$all_keep_csv"
   local cum_fail cum_startup cum_benign cum_suspect
-  read -r cum_fail cum_startup cum_benign cum_suspect < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_repos[@]}")
+  read -r cum_fail cum_startup cum_benign cum_suspect < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_keep[@]}")
 
   # Per-transition knobs (registry-configurable; #548 defaults live in the ring SoT).
   local dwell_floor waived="false" target=0
@@ -1037,7 +1126,7 @@ _frontier_state() {
     cmin="$(_gate_knob "$agent" "$transition" sample_clamp_min)"; cmin="${cmin:-3}"
     cmax="$(_gate_knob "$agent" "$transition" sample_clamp_max)"; cmax="${cmax:-15}"
     spike_cap="$(_gate_field "$agent" baseline_spike_cap_multiple)"; spike_cap="${spike_cap:-3}"
-    daily="$(_baseline_daily "$agent" "$win" "${src_repos[@]}")"
+    daily="$(_baseline_daily "$agent" "$win" "${src_keep[@]}")"
     baseline_total=0; for c in $daily; do baseline_total=$(( baseline_total + c )); done
     if [ "$baseline_total" -eq 0 ] && [ "$(_gate_knob "$agent" "$transition" waive_sample_if_no_caller)" = "true" ]; then
       waived="true"   # dwell-only: the source tier has no caller (#548)
@@ -1047,7 +1136,23 @@ _frontier_state() {
     fi
   fi
 
-  local state; state="$(decide_graduated "$dwell_h" "$dwell_floor" "$sample" "$target" "$waived" "$cum_fail" "$cum_startup")"
+  # Coverage gate (#1086): a source tier bears soak evidence only when a member actually
+  # EXECUTES the candidate. When every member positively pins another version (or the ring
+  # is structurally unoccupiable, e.g. dev-lead's `next` — whose sole member SC2 forbids from
+  # pinning `next` — so its members resolve to a stable pin), the dwell/sample are vacuous →
+  # NO_COVERAGE, NOT a satisfied soak. Evaluated BEFORE the graduated verdict so a vacuous
+  # tier can never read PROMOTE/SOAKING/AWAITING_CONFIRMATION. cum_fail is already occupant-
+  # restricted above, so NO_COVERAGE and a real BLOCK are mutually exclusive in practice;
+  # health still wins if a covered repo failed (coverage=OK there).
+  local coverage; coverage="$(decide_coverage "$src_excluded" "$src_covered")"
+
+  local state
+  if [ "$coverage" = "NO_COVERAGE" ]; then
+    state="NO_COVERAGE"
+    echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign - - - 0 0 0 0"
+    return 0
+  fi
+  state="$(decide_graduated "$dwell_h" "$dwell_floor" "$sample" "$target" "$waived" "$cum_fail" "$cum_startup")"
 
   # Layer 2 (#668 increment 4): opt-in DECISION telemetry. When the reliability verdict is
   # PROMOTE and the agent opts into gate.correctness, tally the candidate's decision mix vs a
@@ -1165,6 +1270,13 @@ cmd_evaluate() {
       fi
     elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
       echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
+    elif [ "$state" = "NO_COVERAGE" ]; then
+      local source_tier; source_tier="${transition%%->*}"
+      if [ "$(_ring_field "$agent" "$source_tier" evidence_bearing)" = "false" ]; then
+        echo "::notice::state=NO_COVERAGE — the '$source_tier' tier is registry-marked non-evidence-bearing (#1086): its members do not execute the candidate (for dev-lead, SC2 requires its sole \`next\` member to pin a stable channel), so it bears no soak evidence. This is NOT a satisfied soak and NOT a failure; '$frontier' takes its evidence from the first evidence-bearing tier."
+      else
+        echo "::warning::state=NO_COVERAGE — no member of the '$source_tier' tier is executing candidate ${_cand:0:12} (they pin another version), so its dwell/sample carry no information about it (#1086). This reads distinctly from a satisfied soak. Repin a '$source_tier' member onto the candidate channel (or wait for the repin sweep) so the soak can accrue real evidence."
+      fi
     fi
   fi
 }
@@ -1589,7 +1701,7 @@ Last updated: \`$2\` · auto-promote armed: \`${CANARY_AUTO_PROMOTE:-unset}\` ·
 |---|---|---|---|---|---|
 $1
 
-\`PROMOTE\`/\`COMPLETE\`/\`SOAKING\` need no action. \`BLOCKED\` opens a per-agent issue (label \`canary-blocker\`) with the failing-run evidence; it auto-closes when the gate clears. \`AWAITING_CONFIRMATION\` (reliability passed, held for a human go/no-go at a \`require_confirmation\` boundary, #668 Layer 3) opens a \`canary-confirm\` issue with the diff link; confirm via \`promote <agent> --confirm\`.
+\`PROMOTE\`/\`COMPLETE\`/\`SOAKING\` need no action. \`BLOCKED\` opens a per-agent issue (label \`canary-blocker\`) with the failing-run evidence; it auto-closes when the gate clears. \`AWAITING_CONFIRMATION\` (reliability passed, held for a human go/no-go at a \`require_confirmation\` boundary, #668 Layer 3) opens a \`canary-confirm\` issue with the diff link; confirm via \`promote <agent> --confirm\`. \`NO_COVERAGE\` (#1086) means the source tier bears no soak evidence — it is registry-marked non-evidence-bearing, or no member executes the candidate (they pin another version); it is neither a satisfied soak nor a failure and opens no issue, but never auto-promotes.
 EOF
 }
 

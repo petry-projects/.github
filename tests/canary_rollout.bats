@@ -288,6 +288,28 @@ YML
   [ "$(decide_graduated 5 8 0 0 true 0 0)" = "SOAKING" ]
 }
 
+# ── decide_coverage (soak-evidence coverage gate, #1086) ───────────────────────
+# args: <excluded_count> <covered_count>
+@test "decide_coverage: at least one covered (occupant/indeterminate) member → OK" {
+  [ "$(decide_coverage 0 1)" = "OK" ]
+  [ "$(decide_coverage 3 2)" = "OK" ]
+}
+@test "decide_coverage: members present but ALL positively excluded → NO_COVERAGE (the #1086 vacuous soak)" {
+  [ "$(decide_coverage 2 0)" = "NO_COVERAGE" ]
+  [ "$(decide_coverage 1 0)" = "NO_COVERAGE" ]
+}
+@test "decide_coverage: no members at all → OK (no false stall; the no-caller sample waiver still applies)" {
+  [ "$(decide_coverage 0 0)" = "OK" ]
+}
+@test "decide_coverage: an indeterminate member (covered) fails OPEN even amid exclusions → OK" {
+  # A transient stub-read failure must never fabricate a NO_COVERAGE stall.
+  [ "$(decide_coverage 2 1)" = "OK" ]
+}
+@test "decide_coverage: non-numeric counts are treated as 0" {
+  [ "$(decide_coverage x y)" = "OK" ]             # both → 0 → no members → OK
+  [ "$(decide_coverage 2 x)" = "NO_COVERAGE" ]    # covered→0, excluded>0 → NO_COVERAGE
+}
+
 # ── classify_failure (triage: regression vs pre-existing/environmental/suspect) ─
 # args: <reusable_differs 0|1> <category> [suspect_match 0|1]
 @test "classify_failure: reusable changed + non-environmental → REGRESSION" {
@@ -1078,6 +1100,141 @@ GITEOF
   [[ "$output" == *"PRE_EXISTING"* ]]
 }
 
+# ── occupancy / coverage attribution (#1086) ──────────────────────────────────
+# A member repo EXECUTES the candidate iff its caller-stub pin resolves (on the host) to
+# the candidate commit. Only occupant (or indeterminate) repos feed the gate; a repo that
+# positively pins another version is excluded from sample / cum_fail. The gate previously
+# counted runs by ring MEMBERSHIP regardless of what the repo actually ran.
+_occ_stub_yaml() {  # a caller stub whose reusable pin is $1 (e.g. dev-lead/v1-ring1)
+  printf 'jobs:\n  run:\n    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@%s\n' "$1"
+}
+
+@test "_repo_executes_candidate: stub pin resolving to the candidate → yes (#1086)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export OCC_B64="$(_occ_stub_yaml dev-lead/v1-ring1 | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"contents/.github/workflows/dev-lead.yml"*) printf '%s' "$OCC_B64" ;;
+  *"git/ref/tags/dev-lead/v1-ring1"*) printf 'cccccccccccccccccccccccccccccccccccccccc\tcommit\n' ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _repo_executes_candidate dev-lead petry-projects/TalkTerm cccccccccccccccccccccccccccccccccccccccc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "yes" ]
+}
+
+@test "_repo_executes_candidate: stub pin resolving to another version → no (#1086)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export OCC_B64="$(_occ_stub_yaml dev-lead/v1-stable | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"contents/.github/workflows/dev-lead.yml"*) printf '%s' "$OCC_B64" ;;
+  *"git/ref/tags/dev-lead/v1-stable"*) printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tcommit\n' ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _repo_executes_candidate dev-lead petry-projects/markets cccccccccccccccccccccccccccccccccccccccc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "no" ]
+}
+
+@test "_repo_executes_candidate: unreadable stub → unknown (fail-open, no fabricated exclusion) (#1086)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho ""\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _repo_executes_candidate dev-lead petry-projects/TalkTerm cccccccccccccccccccccccccccccccccccccccc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unknown" ]
+}
+
+@test "_repo_executes_candidate: a ./ self-hosted stub → unknown (runs local HEAD, not a channel tag) (#1086)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export OCC_B64="$(printf 'jobs:\n  run:\n    uses: ./.github/workflows/dev-lead-reusable.yml\n' | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"contents/.github/workflows/dev-lead.yml"*) printf '%s' "$OCC_B64" ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _repo_executes_candidate dev-lead petry-projects/.github-private cccccccccccccccccccccccccccccccccccccccc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unknown" ]
+}
+
+@test "_tier_occupancy: mixed members are split into covered / excluded (#1086)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export OCC_RING1_B64="$(_occ_stub_yaml dev-lead/v1-ring1 | base64 | tr -d '\n')"
+  export OCC_STABLE_B64="$(_occ_stub_yaml dev-lead/v1-stable | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"repos/petry-projects/TalkTerm/contents/.github/workflows/dev-lead.yml"*) printf '%s' "$OCC_RING1_B64" ;;
+  *"repos/petry-projects/bmad-bgreat-suite/contents/.github/workflows/dev-lead.yml"*) printf '%s' "$OCC_STABLE_B64" ;;
+  *"git/ref/tags/dev-lead/v1-ring1"*)  printf 'cccccccccccccccccccccccccccccccccccccccc\tcommit\n' ;;
+  *"git/ref/tags/dev-lead/v1-stable"*) printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tcommit\n' ;;
+  *) echo "" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _tier_occupancy dev-lead cccccccccccccccccccccccccccccccccccccccc petry-projects/TalkTerm petry-projects/bmad-bgreat-suite"
+  [ "$status" -eq 0 ]
+  # covered=1 (TalkTerm on the candidate) excluded=1 (bmad on stable) keep=TalkTerm
+  [ "$output" = "1 1 petry-projects/TalkTerm" ]
+}
+
+# AC #5 regression (#1086): today's real topology — candidate on the ring1->stable frontier
+# but every ring1 member positively pins a DIFFERENT version (the pinned-version-report's
+# `v1-ring1 -> 6d362318` skew) — must report NO_COVERAGE, NOT a satisfied `dwell=88h/12h
+# sample=196/1`. The 196 member-tier runs are not attributable to the candidate and must not
+# be counted; the failures among them must not enter cum_fail either.
+@test "orchestrator: zero occupants on the source tier → NO_COVERAGE, sample=0 (not 196) (#1086 AC5)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local cut_iso run_iso
+  cut_iso="$(date -u -d '-4 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v'-4d' +%Y-%m-%dT%H:%M:%SZ)"
+  run_iso="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v'-1d' +%Y-%m-%dT%H:%M:%SZ)"
+  # Members pin v1-ring1, which resolves to bbbb (NOT the candidate cccc) → both excluded.
+  export OCC_B64="$(_occ_stub_yaml dev-lead/v1-ring1 | base64 | tr -d '\n')"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  # Frontier: next/ring0/ring1 channel tags on the candidate, stable behind → ring1->stable.
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  # Member occupancy: every ring1 member's stub pins v1-ring1, resolving to bbbb (excluded).
+  *"contents/.github/workflows/dev-lead.yml"*) printf '%s' "\$OCC_B64" ;;
+  *"git/ref/tags/dev-lead/v1-ring1"*) printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tcommit\n' ;;
+  # 196 member-tier runs exist — the count the old gate wrongly credited to the candidate.
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(196)|{conclusion:"success",createdAt:\$d}]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  printf '#!/usr/bin/env bash\n:\n' > "$STUB_BIN/git"; chmod +x "$STUB_BIN/git"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ring1->stable"* ]]
+  [[ "$output" == *"NO_COVERAGE"* ]]
+  [[ "$output" == *"sample=0/"* ]]
+  [[ "$output" != *"sample=196"* ]]
+  [[ "$output" != *"AWAITING_CONFIRMATION"* ]]   # never a satisfied soak held for confirm
+  [[ "$output" == *"cum_fail=0"* ]]
+}
+
 # ── benign_match (per-reusable known-benign failure-class matcher, #1025 P2) ────
 # args: <workflow_name> <failure_signature> <workflow_regex> <step_regex>
 @test "benign_match: workflow + step signature both match → yes" {
@@ -1103,6 +1260,20 @@ GITEOF
   run jq -e '.agents["dev-lead"].gate.benign_failure_classes | all(has("id") and has("reason") and has("step"))' "$RINGS"
   [ "$status" -eq 0 ]
   run jq -e '.agents["dev-lead"].gate.control | has("allow_pre_existing")' "$RINGS"
+  [ "$status" -eq 0 ]
+}
+
+# ── canary-rings.json: dev-lead `next` recorded non-evidence-bearing (#1086 AC4) ──
+# The SC2 contradiction — dev-lead's `next` ring can never have an occupant because its
+# sole member (`$host`) is required by Safe Release SC2 to pin a stable-tier channel — must
+# be RECORDED in the registry rather than left implicit.
+@test "canary-rings.json: dev-lead's next ring is marked non-evidence-bearing with a note (#1086)" {
+  run jq -e '.agents["dev-lead"].rings[] | select(.channel=="next") | .evidence_bearing == false' "$RINGS"
+  [ "$status" -eq 0 ]
+  run jq -e '.agents["dev-lead"].rings[] | select(.channel=="next") | has("_evidence_note")' "$RINGS"
+  [ "$status" -eq 0 ]
+  # No OTHER ring (any agent) accidentally inherited the marker — it is dev-lead/next only.
+  run jq -e '[.agents[].rings[] | select(.evidence_bearing == false)] | length == 1' "$RINGS"
   [ "$status" -eq 0 ]
 }
 
