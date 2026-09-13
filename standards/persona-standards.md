@@ -430,6 +430,11 @@ A persona is "done" (ready for `stable`) when all of the following are true:
 - [ ] `triggers` fills one row per surface the persona acts on; `default_mode`
       is `advisory`/`off`; every `write` surface has a `gate_label`; an
       `opt_out_label` is defined.
+- [ ] `personas/<id>/interaction.yml` exists and declares the persona's
+      **human-hold brakes** as a valid `stop_markers` list — an array of
+      non-empty strings (§4 rule 4). Every surface, including the mention router,
+      derives its brakes from this contract, so a persona without it cannot be
+      routed by label-backed mentions.
 - [ ] If the `mention` surface is enabled: `address.handle` is an **org team**
       whose slug equals `id`; the team exists, is `privacy: closed`, and sets
       `notification_setting: notifications_disabled`; the handle and every alias

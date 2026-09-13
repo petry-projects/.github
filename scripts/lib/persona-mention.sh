@@ -305,9 +305,30 @@ pm_persona_id() {
 # line (empty when none is declared or the block is absent). Reads the contract
 # on stdin so it stays pure and testable — fetching is the caller's job, exactly
 # like the manifest decisions above.
+#
+# A DECLARED stop_markers value must be an array of non-empty strings; anything
+# else — an object, a boolean (`false`), an empty string, or a non-string entry
+# — is a malformed contract and returns non-zero so pm_first_stop_marker fails
+# CLOSED rather than reading the item as "not held" (#1134). The value is
+# selected with `has` before any fallback so `//` can never quietly rewrite a
+# declared `false`/`null` into "absent" — only a genuinely missing key (and an
+# explicit `null`) is treated as "no markers declared".
 pm_stop_markers() {
   # shellcheck disable=SC2016  # jq filter, not a shell expansion
-  printf '%s' "$1" | pm_manifest_query '(.interaction.stop_markers // .stop_markers // [])[]'
+  printf '%s' "$1" | pm_manifest_query '
+    ((.interaction // {}) as $i
+     | if (($i | type) == "object") and ($i | has("stop_markers")) then $i.stop_markers
+       elif ((type == "object") and has("stop_markers")) then .stop_markers
+       else [] end) as $m
+    | if $m == null then empty
+      elif ($m | type) != "array" then
+        error("persona-mention: stop_markers must be an array of non-empty strings, got \($m | type)")
+      else
+        $m[] | if (type != "string") or (. == "") then
+          error("persona-mention: stop_markers entries must be non-empty strings")
+        else . end
+      end
+  '
 }
 
 # pm_first_stop_marker <interaction-yaml> — read the item's labels from stdin

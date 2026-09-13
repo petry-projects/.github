@@ -372,6 +372,40 @@ YAML
   [ -z "$output" ]
 }
 
+@test "pm_stop_markers rejects a boolean stop_markers (false is not 'absent')" {
+  # `false` must not be quietly rewritten into "no markers" by a `//` fallback —
+  # a malformed contract fails closed so the router never routes onto a held item.
+  run pm_stop_markers "$(interaction '  stop_markers: false')"
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_stop_markers rejects an object stop_markers" {
+  run pm_stop_markers "$(interaction '  stop_markers:
+    needs-human-review: true')"
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_stop_markers rejects an empty-string marker entry" {
+  run pm_stop_markers "$(interaction '  stop_markers:
+    - ""
+    - needs-human-review')"
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_stop_markers rejects a non-string marker entry" {
+  run pm_stop_markers "$(interaction '  stop_markers:
+    - 42
+    - needs-human-review')"
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_first_stop_marker fails closed on a boolean stop_markers (never 'no markers')" {
+  # An item carrying a hold label must NOT be read as routable just because the
+  # contract's stop_markers is a malformed `false`.
+  run pm_first_stop_marker "$(interaction '  stop_markers: false')" <<<'needs-human-review'
+  [ "$status" -eq 2 ]
+}
+
 @test "pm_first_stop_marker names the marker holding the item (present -> skip)" {
   # Item carries the escalation brake -> the router must skip and log the marker.
   run pm_first_stop_marker "$(interaction)" <<<'needs-human-review
@@ -424,7 +458,7 @@ good-first-issue'
   # job, exactly as a 5xx does. pm_stop_markers exits non-zero on bad YAML and
   # that propagates rather than being swallowed into an empty marker set.
   run pm_first_stop_marker 'this: [is: not: yaml' <<<'needs-human-review'
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
 }
 
 # --- interaction fetch disposition (AC #3) ---------------------------------
