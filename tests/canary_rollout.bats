@@ -3740,7 +3740,11 @@ case "\$*" in
   *"git/ref/tags/dev-lead/ring0"*)  echo "$bare commit" ;;
   *"git/ref/tags/dev-lead/ring1"*)  echo "$bare commit" ;;
   *"git/ref/tags/dev-lead/stable"*) echo "$bare commit" ;;
-  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  # _gh_candidate_cut_date reads the 3-col @tsv shape; _host_release_versions reads plain .ref.
+  # The established v2 line means its v2-next anchor is a tag under <agent>/v, so it appears in
+  # the .ref listing too — that is how _agent_current_channel_major reads the channel major (#1065).
+  *"matching-refs/tags/dev-lead/v"*"@tsv"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\nrefs/tags/dev-lead/v2-next\n' ;;
   *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
   *"ref=cccc"*) echo "reuseAAAA" ;;
   *"ref=bbbb"*) echo "reuseAAAA" ;;
@@ -3796,6 +3800,167 @@ GITEOF
   [[ "$output" == *"PROMOTE"* ]]
 }
 
+# ══ AC1′ / AC3 / AC4′ (#1065): the v-scoped line must BOOTSTRAP into a new tier ═══════
+# Once an agent has an ESTABLISHED channel major (its `<agent>/v<M>-next` anchor exists), a
+# promotion into a tier whose `<agent>/v<M>-<tier>` does not yet exist must CREATE that tag —
+# not fall back to the bare tier. The old fallback stranded the v-line at whatever tier it was
+# first seeded at (apply-repo-settings needed a hand-cut v1-ring1; persona-mention is stuck at
+# ring0/ring1), and a stub deploy keyed on the channel major then pinned a nonexistent ref.
+#
+# Fixture: dev-lead (cross-repo). `established=1` seeds v1-next at the candidate (cccc) but
+# leaves v1-ring0/ring1/stable ABSENT; the bare tiers point elsewhere (bbbb) so a test can prove
+# resolution NEVER falls back to them. `established=0` leaves v1-next absent (a v1 release exists,
+# but no v-line was ever seeded — the legacy bare-only case), so the bare next carries the
+# candidate. Every ref write is captured in MOVE_LOG; a nonexistent v-tag PATCH returns 422 so the
+# create-if-missing POST path is exercised (the real bootstrap).
+_ac1_stub() {
+  local established="$1" cut_days="${2:-3}" run_days_ago="${3:-2}" conclusion="${4:-success}"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export MOVE_LOG="$STUB_BIN/move.log"; : > "$MOVE_LOG"
+  local cand="cccccccccccccccccccccccccccccccccccccccc"
+  local old="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  local v1next="$cand" barenext="$old"
+  if [ "$established" = 0 ]; then v1next=""; barenext="$cand"; fi   # no v-line → bare next IS the candidate
+  local cut_iso run_iso
+  cut_iso="$(date -u -d "-${cut_days} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${cut_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-${run_days_ago} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-${run_days_ago}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"-X PATCH"*"git/refs/tags/dev-lead/v1-ring"*|*"-X PATCH"*"git/refs/tags/dev-lead/v1-stable"*)
+    echo "\$*" >> "$MOVE_LOG"; echo "gh: Reference does not exist (HTTP 422)" >&2; exit 1 ;;
+  *"-X PATCH"*"git/refs/tags/"*) echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
+  *"-X POST"*"git/refs"*)        echo "\$*" >> "$MOVE_LOG"; echo "{}"; exit 0 ;;
+  *"git/ref/tags/dev-lead/v1-next"*)   [ -n "$v1next" ] && echo "$v1next commit" || printf '\n' ;;
+  *"git/ref/tags/dev-lead/v1-ring0"*)  printf '\n' ;;
+  *"git/ref/tags/dev-lead/v1-ring1"*)  printf '\n' ;;
+  *"git/ref/tags/dev-lead/v1-stable"*) printf '\n' ;;
+  *"git/ref/tags/dev-lead/next"*)   echo "$barenext commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "$old commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "$old commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "$old commit" ;;
+  # _gh_candidate_cut_date reads the 3-col @tsv shape; _host_release_versions reads plain .ref.
+  # When the v1 line is established its v1-next anchor is a tag under <agent>/v, so it surfaces in
+  # the .ref listing — how _agent_current_channel_major derives the channel major (#1065).
+  *"matching-refs/tags/dev-lead/v"*"@tsv"*) printf 'refs/tags/dev-lead/v1.0.0\ttagobj\ttag\n' ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v1.0.0\n'; [ -n "$v1next" ] && printf 'refs/tags/dev-lead/v1-next\n' || true ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" --arg c "$conclusion" '[range(20)|{conclusion:\$c,createdAt:\$d}]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: promote BOOTSTRAPS the v-scoped tier tag — creates dev-lead/v1-ring0, never moves the bare ring0 (#1065 AC1′/AC4′)" {
+  _ac1_stub 1
+  local out="$BATS_TEST_TMPDIR/gh_output"; : > "$out"
+  run env CANARY_RINGS="$RINGS" GITHUB_OUTPUT="$out" bash "$ORCH" promote dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promoted dev-lead/v1-ring0"* ]]
+  # the v-scoped tier tag is CREATED (PATCH 422 → POST create) at the candidate
+  grep -q "ref=refs/tags/dev-lead/v1-ring0" "$MOVE_LOG"
+  # resolution NEVER falls back to the bare tier: no write targets the bare ring0
+  run grep -q "git/refs/tags/dev-lead/ring0" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
+  run grep -q "ref=refs/tags/dev-lead/ring0" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
+  # a promotion moves exactly one frontier tag — it never touches the next anchor
+  run grep -q "v1-next" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
+  # promoted_ring stays the logical tier, not the major-scoped tag name
+  grep -q "promoted_ring=ring0" "$out"
+}
+
+@test "orchestrator: promote of an agent with NO channel major still moves the bare tier tag and creates no v-scoped tag (#1065 AC4′ inverse)" {
+  _ac1_stub 0
+  local out="$BATS_TEST_TMPDIR/gh_output"; : > "$out"
+  run env CANARY_RINGS="$RINGS" GITHUB_OUTPUT="$out" bash "$ORCH" promote dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promoted dev-lead/ring0"* ]]
+  [[ "$output" != *"v1-ring0"* ]]
+  grep -q "PATCH repos/petry-projects/.github-private/git/refs/tags/dev-lead/ring0 " "$MOVE_LOG"
+  # a release major alone (no v-line seeded) must NOT sprout a v-scoped tag
+  run grep -q "v1-" "$MOVE_LOG"
+  [ "$status" -eq 1 ]
+  grep -q "promoted_ring=ring0" "$out"
+}
+
+# ── AC3: the drift audit flags a bare tier tag lacking its v<M>-<tier> counterpart ──
+@test "_channel_tag_major_gaps: flags every tier whose bare tag exists but v<M>-<tier> is missing (#1065 AC3)" {
+  _ac1_stub 1
+  run bash -c "source '$ORCH' && CANARY_RINGS='$RINGS' _channel_tag_major_gaps dev-lead"
+  [ "$status" -eq 0 ]
+  # v1-next is present (no gap); ring0/ring1/stable have a bare tag but no v-scoped counterpart.
+  [[ "$output" == *"ring0"* ]]
+  [[ "$output" == *"ring1"* ]]
+  [[ "$output" == *"stable"* ]]
+  [[ "$output" != *"next"* ]]
+}
+
+@test "_channel_tag_major_gaps: an agent with NO channel major reports no gaps (legacy bare-only) (#1065 AC3)" {
+  _ac1_stub 0
+  run bash -c "source '$ORCH' && CANARY_RINGS='$RINGS' _channel_tag_major_gaps dev-lead"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# A single-agent registry mirroring the issue: persona-mention has an established v1 channel
+# major (v1-next) but only bare ring0/ring1 — v1-ring0/v1-ring1 are missing.
+_channeldrift_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local main="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  local old="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"contents/.github/workflows"*) echo '[{"type":"file","name":"persona-mention-reusable.yml","path":".github/workflows/persona-mention-reusable.yml"}]' ;;
+  *".default_branch"*) echo "main" ;;
+  *"/commits/"*) echo "$main" ;;
+  *"git/ref/tags/persona-mention/v1-next"*)   printf '%s\tcommit\n' "$main" ;;
+  *"git/ref/tags/persona-mention/v1-ring0"*)  printf '\n' ;;
+  *"git/ref/tags/persona-mention/v1-ring1"*)  printf '\n' ;;
+  *"git/ref/tags/persona-mention/v1-stable"*) printf '\n' ;;
+  *"git/ref/tags/persona-mention/next"*)   printf '%s\tcommit\n' "$main" ;;
+  *"git/ref/tags/persona-mention/ring0"*)  printf '%s\tcommit\n' "$old" ;;
+  *"git/ref/tags/persona-mention/ring1"*)  printf '%s\tcommit\n' "$old" ;;
+  *"git/ref/tags/persona-mention/stable"*) printf '\n' ;;
+  *"matching-refs/tags/persona-mention/v"*) printf 'refs/tags/persona-mention/v1.0.0\nrefs/tags/persona-mention/v1-next\n' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # cross-repo agent resolves channel tags via gh api, not git
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  CHANNELDRIFT_RINGS="$BATS_TEST_TMPDIR/channeldrift-rings.json"
+  jq '{version, description, agents: {("persona-mention"): .agents["persona-mention"]}}' \
+    "$RINGS" > "$CHANNELDRIFT_RINGS"
+}
+
+@test "orchestrator: drift reports a bare channel tag lacking its v<M>-<tier> counterpart (#1065 AC3)" {
+  _channeldrift_stub
+  # Force THIS_REPO=.github-private so persona-mention (host=.github) is cross-repo and resolves
+  # its channel tags via gh api (the stub), not local git.
+  run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$CHANNELDRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT[channel-tag]"* ]]
+  [[ "$output" == *"persona-mention"* ]]
+  [[ "$output" == *"v1-ring0"* ]]
+  [[ "$output" == *"v1-ring1"* ]]
+  # next has its v-scoped anchor and stable has no bare tag → neither is flagged.
+  [[ "$output" == *"channel-tag drift summary: 2"* ]]
+}
+
 # ── autocut on the major dimension: a MAJOR bump seeds a fresh v<newmajor>-next line; a minor/
 #    patch bump advances the CURRENT major's v<M>-next (falling back to bare next on today's fleet).
 #    args: agent host reusable main_blob next_blob mainsha nextsha versions bump [v2next_sha]
@@ -3806,7 +3971,10 @@ _f4_autocut_stub() {
   local refs="" v
   for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
   local v2next_resp=""
-  [ -n "$V2NEXT" ] && v2next_resp="${V2NEXT}"$'\t'"commit"
+  # When the v2 channel line exists its `v2-next` anchor is a tag under `<agent>/v`, so it
+  # surfaces in matching-refs alongside the releases (that is how _agent_current_channel_major
+  # reads the channel major, #1065). Model that here too, not just the individual ref endpoint.
+  [ -n "$V2NEXT" ] && { v2next_resp="${V2NEXT}"$'\t'"commit"; refs+="refs/tags/$agent/v2-next"$'\n'; }
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
 case "\$*" in
@@ -4599,4 +4767,50 @@ JSON
   [[ "$output" == *"scripts/"* ]]
   [[ "$output" == *"prompts/"* ]]
   [[ "$output" == *"personas/"* ]]
+}
+
+# ══ #1065: channel resolution must key on the CHANNEL major, not the RELEASE major ═══════
+# A release-v14 / channel-v1 agent (v14 release line not yet migrated to channel tags) has only
+# v1-* channel tags. `_agent_current_major` (the RELEASE major) is 14, but resolution must target
+# the tags that EXIST — `<agent>/v1-<tier>` — never a tagless `v14-<tier>` line and never the bare
+# tier. Fixture: dev-lead (cross-repo) with release tag v14.0.0 but channel anchors only v1-next /
+# v1-ring0; the bare ring0 points elsewhere so a fallback would be detectable.
+_divergent_major_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local v1next="a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+  local v1ring0="d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+  local barering0="b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v14.0.0\nrefs/tags/dev-lead/v1-next\nrefs/tags/dev-lead/v1-ring0\n' ;;
+  *"git/ref/tags/dev-lead/v1-next"*)   echo "$v1next commit" ;;
+  *"git/ref/tags/dev-lead/v1-ring0"*)  echo "$v1ring0 commit" ;;
+  *"git/ref/tags/dev-lead/v14-"*)      printf '\n' ;;
+  *"git/ref/tags/dev-lead/ring0"*)     echo "$barering0 commit" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "_resolved_channel: release-major≠channel-major resolves to v1-ring0, never v14-ring0 nor bare ring0 (#1065)" {
+  _divergent_major_stub
+  # cross-repo (host=.github-private, THIS_REPO=.github) so channel tags resolve via gh api.
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _resolved_channel_tag dev-lead ring0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "dev-lead/v1-ring0" ]
+  [ "$output" != "dev-lead/v14-ring0" ]
+  [ "$output" != "dev-lead/ring0" ]
+  # the resolved commit is the v1-ring0 tag's, never the bare ring0's (no fallback).
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _resolved_channel dev-lead ring0 | cut -f2"
+  [ "$output" = "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1" ]
+  [ "$output" != "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0" ]
 }
