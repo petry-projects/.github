@@ -93,6 +93,11 @@ INCONCLUSIVE_REPOS_FILE="$REPORT_DIR/inconclusive-repos.txt"
 STRUCTURAL_FINDINGS_FILE="$REPORT_DIR/agents-md-structural.tsv"
 # Rule-set / promotion-gate reference the informational summary section links to.
 AGENTS_MD_RULESET_DOC="docs/initiatives/agents-md-validation.md"
+# Append-only, committed per-cycle log (issue #647, Phase 4). The audit summary
+# records THIS cycle's structural finding count and points a maintainer here to
+# log the false-positive determination durably — an editable summary issue alone
+# could be silently rewritten to fake a "two clean cycles" claim.
+AGENTS_MD_CYCLE_LOG="docs/initiatives/agents-md-validation-cycle-log.md"
 
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
@@ -3111,16 +3116,40 @@ HEREDOC
 # ---------------------------------------------------------------------------
 # Informational AGENTS.md structural-findings summary section
 # ---------------------------------------------------------------------------
+# structural_finding_count <tsv-file> — number of recorded structural findings
+# (one per line) in the informational accumulator; 0 for an empty/missing file.
+# Pure. This per-cycle count is what makes "two consecutive clean cycles"
+# observable from the audit issue history (issue #647, AC #1).
+structural_finding_count() {
+  local file="$1"
+  [ -s "$file" ] || { printf '0'; return 0; }
+  # grep -c exits non-zero on zero matches; guard so pipefail/set -e in the
+  # caller cannot abort the run counting a finding-free cycle.
+  local n
+  n="$(grep -c . "$file" 2>/dev/null || true)"
+  printf '%s' "${n:-0}"
+}
+
 # Append the structural-linter findings collected in STRUCTURAL_FINDINGS_FILE to
 # the run summary as a clearly-labelled INFORMATIONAL (non-blocking) section that
 # links to the rule-set / promotion-gate doc. These findings never opened issues
 # and never affected the exit code — this section is their only surface.
 append_structural_findings_summary() {
   local doc_link="https://github.com/$ORG/.github/blob/main/$AGENTS_MD_RULESET_DOC"
+  local cycle_log_link="https://github.com/$ORG/.github/blob/main/$AGENTS_MD_CYCLE_LOG"
+  local count
+  count="$(structural_finding_count "$STRUCTURAL_FINDINGS_FILE")"
   {
     printf '\n## AGENTS.md Structural Findings (informational)\n\n'
     printf '_Non-blocking: these structural-linter findings are advisory only — they open no issues and never fail the audit. Rule set and informational → blocking promotion gate: [%s](%s)._\n\n' \
       "$AGENTS_MD_RULESET_DOC" "$doc_link"
+    # Per-cycle record (issue #647, AC #1): the machine-counted number of
+    # structural findings this cycle, plus the durable, tamper-evident home for
+    # the maintainer's confirmed-false-positive determination. The audit cannot
+    # itself confirm false positives (that is a human review), so it records the
+    # count and points at the append-only committed cycle log.
+    printf '**Structural findings this cycle: %s.** Confirmed false positives are a maintainer determination — record this cycle'\''s count and any confirmed false positive (naming the maintainer) in the append-only [cycle log](%s). Two consecutive cycles with zero confirmed false positives **and** explicit maintainer sign-off are required before the check may be promoted to blocking; promotion is never automatic.\n\n' \
+      "$count" "$cycle_log_link"
   } >> "$SUMMARY_FILE"
 
   if [ ! -s "$STRUCTURAL_FINDINGS_FILE" ]; then
