@@ -5,6 +5,10 @@
     "petry-projects/.github",
     "petry-projects/.github-private"
   ],
+  "_reserved_tag_namespaces_note": "#1106 — tag prefixes that carry `<name>/v<M>-<tier>` channel tags on an infra repo but are NOT canary-managed agents, so the registry-completeness drift check (cmd_drift) must not flag them as missing agents. Today only `standards` (the standards-versioning release channel `standards/v1-stable`, #1091) — a single artifact with one moving channel, not a ringed agent.",
+  "reserved_tag_namespaces": [
+    "standards"
+  ],
   "member_tokens": {
     "$host": "the agent's host repo (the repo that owns the reusable)",
     "$org_infra": "org_infra_repos minus the host (the host is already in `next`)",
@@ -515,6 +519,70 @@
           "order": 1,
           "members": [
             "petry-projects/.github"
+          ]
+        },
+        {
+          "channel": "ring1",
+          "order": 2,
+          "members": [
+            "petry-projects/TalkTerm",
+            "petry-projects/bmad-bgreat-suite"
+          ]
+        },
+        {
+          "channel": "stable",
+          "order": 3,
+          "members": [
+            "*"
+          ]
+        }
+      ],
+      "gate": {
+        "_standard": "petry-projects/.github#548 \u2014 graduated dwell/sample gate over a per-candidate cumulative window. These are registry-configurable per-transition knobs; the values below are the #548 defaults.",
+        "baseline_window_days": 14,
+        "baseline_spike_cap_multiple": 3,
+        "benign_failure_classes": [],
+        "control": {
+          "allow_pre_existing": false
+        },
+        "_benign_note": "benign_failure_classes (#1025 P2): per-reusable allowlist matched against a failed run's workflow name (`workflow` ERE) + failed-step signature (`step` ERE, matched via `gh run view`). Matches are excluded from cum_fail \u2014 but ONLY when the candidate's reusable is byte-identical to the prior channel (differs=0), so the allowlist can never mask a candidate-introduced regression. Exception (#668): a class marked `version_independent: true` fails before/independent of the candidate's own code (e.g. a Dependabot-context secrets failure at startup) and can NEVER be candidate-caused, so it is excluded even when differs=1 \u2014 reserve the flag for classes where that is provable from the failure mechanism, not merely likely. `control.allow_pre_existing`, or `promote --allow-pre-existing`, advances a BLOCKED+PRE_EXISTING frontier (never REGRESSION).",
+        "transitions": {
+          "next->ring0": {
+            "dwell_hours": 4,
+            "sample_fraction_permille": 250,
+            "sample_clamp_min": 3,
+            "sample_clamp_max": 15,
+            "waive_sample_if_no_caller": true
+          },
+          "ring0->ring1": {
+            "dwell_hours": 8,
+            "waive_sample": true
+          },
+          "ring1->stable": {
+            "dwell_hours": 12,
+            "sample_min": 1
+          }
+        }
+      }
+    },
+    "pr-review": {
+      "_note": "#1106 \u2014 the PR-review agent (approves/auto-merges every PR). Cross-repo hosted: its reusable is the grandfathered `pr-review.yml` ENGINE (workflow_call-only, non-`-reusable.yml` name kept until petry-projects/.github-private#1127 renames it in lockstep with its caller path + release-channel tags). It self-hosts on `next` via `pr-review-trigger.yml` pinned to `pr-review/v1-next` (the ring-0 dogfood); `run_workflow` is that trigger stub's name (the run history the gate reads), mirroring pr-review-mention. Standard 4-ring topology + #548 gate, matching ci-failure-analyst (the other .github-private-hosted agent).",
+      "host": "petry-projects/.github-private",
+      "reusable": ".github/workflows/pr-review.yml",
+      "run_workflow": "PR Review Agent \u2014 Trigger",
+      "rings": [
+        {
+          "channel": "next",
+          "order": 0,
+          "members": [
+            "$host"
+          ]
+        },
+        {
+          "channel": "ring0",
+          "order": 1,
+          "members": [
+            "$org_infra"
           ]
         },
         {
