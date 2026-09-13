@@ -3740,7 +3740,11 @@ case "\$*" in
   *"git/ref/tags/dev-lead/ring0"*)  echo "$bare commit" ;;
   *"git/ref/tags/dev-lead/ring1"*)  echo "$bare commit" ;;
   *"git/ref/tags/dev-lead/stable"*) echo "$bare commit" ;;
-  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  # _gh_candidate_cut_date reads the 3-col @tsv shape; _host_release_versions reads plain .ref.
+  # The established v2 line means its v2-next anchor is a tag under <agent>/v, so it appears in
+  # the .ref listing too — that is how _agent_current_channel_major reads the channel major (#1065).
+  *"matching-refs/tags/dev-lead/v"*"@tsv"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\nrefs/tags/dev-lead/v2-next\n' ;;
   *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
   *"ref=cccc"*) echo "reuseAAAA" ;;
   *"ref=bbbb"*) echo "reuseAAAA" ;;
@@ -3835,7 +3839,11 @@ case "\$*" in
   *"git/ref/tags/dev-lead/ring0"*)  echo "$old commit" ;;
   *"git/ref/tags/dev-lead/ring1"*)  echo "$old commit" ;;
   *"git/ref/tags/dev-lead/stable"*) echo "$old commit" ;;
-  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v1.0.0\ttagobj\ttag\n' ;;
+  # _gh_candidate_cut_date reads the 3-col @tsv shape; _host_release_versions reads plain .ref.
+  # When the v1 line is established its v1-next anchor is a tag under <agent>/v, so it surfaces in
+  # the .ref listing — how _agent_current_channel_major derives the channel major (#1065).
+  *"matching-refs/tags/dev-lead/v"*"@tsv"*) printf 'refs/tags/dev-lead/v1.0.0\ttagobj\ttag\n' ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v1.0.0\n'; [ -n "$v1next" ] && printf 'refs/tags/dev-lead/v1-next\n' || true ;;
   *"git/tags/tagobj"*) printf '%s\t%s\n' "$cand" "$cut_iso" ;;
   *"ref=cccc"*) echo "reuseAAAA" ;;
   *"ref=bbbb"*) echo "reuseAAAA" ;;
@@ -3924,7 +3932,7 @@ case "\$*" in
   *"git/ref/tags/persona-mention/ring0"*)  printf '%s\tcommit\n' "$old" ;;
   *"git/ref/tags/persona-mention/ring1"*)  printf '%s\tcommit\n' "$old" ;;
   *"git/ref/tags/persona-mention/stable"*) printf '\n' ;;
-  *"matching-refs/tags/persona-mention/v"*) printf 'refs/tags/persona-mention/v1.0.0\ttagobj\ttag\n' ;;
+  *"matching-refs/tags/persona-mention/v"*) printf 'refs/tags/persona-mention/v1.0.0\nrefs/tags/persona-mention/v1-next\n' ;;
   *) echo "{}" ;;
 esac
 GHEOF
@@ -3963,7 +3971,10 @@ _f4_autocut_stub() {
   local refs="" v
   for v in $versions; do refs+="refs/tags/$agent/v$v"$'\n'; done
   local v2next_resp=""
-  [ -n "$V2NEXT" ] && v2next_resp="${V2NEXT}"$'\t'"commit"
+  # When the v2 channel line exists its `v2-next` anchor is a tag under `<agent>/v`, so it
+  # surfaces in matching-refs alongside the releases (that is how _agent_current_channel_major
+  # reads the channel major, #1065). Model that here too, not just the individual ref endpoint.
+  [ -n "$V2NEXT" ] && { v2next_resp="${V2NEXT}"$'\t'"commit"; refs+="refs/tags/$agent/v2-next"$'\n'; }
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
 case "\$*" in
@@ -4756,4 +4767,50 @@ JSON
   [[ "$output" == *"scripts/"* ]]
   [[ "$output" == *"prompts/"* ]]
   [[ "$output" == *"personas/"* ]]
+}
+
+# ══ #1065: channel resolution must key on the CHANNEL major, not the RELEASE major ═══════
+# A release-v14 / channel-v1 agent (v14 release line not yet migrated to channel tags) has only
+# v1-* channel tags. `_agent_current_major` (the RELEASE major) is 14, but resolution must target
+# the tags that EXIST — `<agent>/v1-<tier>` — never a tagless `v14-<tier>` line and never the bare
+# tier. Fixture: dev-lead (cross-repo) with release tag v14.0.0 but channel anchors only v1-next /
+# v1-ring0; the bare ring0 points elsewhere so a fallback would be detectable.
+_divergent_major_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  local v1next="a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+  local v1ring0="d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+  local barering0="b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v14.0.0\nrefs/tags/dev-lead/v1-next\nrefs/tags/dev-lead/v1-ring0\n' ;;
+  *"git/ref/tags/dev-lead/v1-next"*)   echo "$v1next commit" ;;
+  *"git/ref/tags/dev-lead/v1-ring0"*)  echo "$v1ring0 commit" ;;
+  *"git/ref/tags/dev-lead/v14-"*)      printf '\n' ;;
+  *"git/ref/tags/dev-lead/ring0"*)     echo "$barering0 commit" ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag resolution goes via gh api above
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "_resolved_channel: release-major≠channel-major resolves to v1-ring0, never v14-ring0 nor bare ring0 (#1065)" {
+  _divergent_major_stub
+  # cross-repo (host=.github-private, THIS_REPO=.github) so channel tags resolve via gh api.
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _resolved_channel_tag dev-lead ring0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "dev-lead/v1-ring0" ]
+  [ "$output" != "dev-lead/v14-ring0" ]
+  [ "$output" != "dev-lead/ring0" ]
+  # the resolved commit is the v1-ring0 tag's, never the bare ring0's (no fallback).
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
+    bash -c "source '$ORCH' && _resolved_channel dev-lead ring0 | cut -f2"
+  [ "$output" = "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1" ]
+  [ "$output" != "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0" ]
 }

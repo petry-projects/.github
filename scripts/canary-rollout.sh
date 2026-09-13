@@ -256,6 +256,9 @@ _gh_create_annotated_tag() {
 # host, empty if none (major-scoped-channels epic #657, Phase F4). This is the "current
 # major line" a v-scoped channel tag is derived against; there is no new registry field —
 # it is derived from the release tags already present (mirrors _next_release_version).
+# This is the RELEASE major and MUST NOT be used to resolve channel-scoped tags: a
+# release-v14 / channel-v1 agent (v14 line not yet migrated to channel tags) would key on a
+# nonexistent `v14-<tier>` line. Use _agent_current_channel_major for channel resolution (#1065).
 declare -A _AGENT_MAJOR_CACHE=()
 
 _agent_current_major() {
@@ -311,6 +314,28 @@ _agent_has_channel_major() {
   _looks_like_oid "$(_channel_tag_commit "$agent" "v${major}-next")"
 }
 
+# _agent_current_channel_major <agent> — the highest MAJOR M for which the agent's v-scoped
+# channel line has been ESTABLISHED, i.e. the `<agent>/v<M>-next` anchor exists; empty for the
+# legacy bare-only fleet (no anchor). This is the CHANNEL major, distinct from _agent_current_major
+# (the RELEASE major): a release-v14 / channel-v1 agent resolves to 1 here, so channel resolution
+# targets the tags that actually exist (`v1-<tier>`) and never keys on a tagless `v14-<tier>` line
+# (#1065). Derived from the same anchors _agent_has_channel_major probes: _host_release_versions
+# strips `refs/tags/<agent>/v`, emitting `1-next` alongside `1.0.0`, so the `v<M>-next` anchors
+# surface as `<M>-next` lines here.
+declare -A _AGENT_CHANNEL_MAJOR_CACHE=()
+
+_agent_current_channel_major() {
+  local agent="$1"
+  if [[ -v _AGENT_CHANNEL_MAJOR_CACHE["$agent"] ]]; then
+    echo "${_AGENT_CHANNEL_MAJOR_CACHE["$agent"]}"
+    return 0
+  fi
+  local major
+  major="$(_host_release_versions "$agent" | sed -n 's/^\([0-9][0-9]*\)-next$/\1/p' | sort -n | tail -1)"
+  _AGENT_CHANNEL_MAJOR_CACHE["$agent"]="$major"
+  echo "$major"
+}
+
 # _resolved_channel <agent> <tier> — echo "<tag>\t<commit>" for the channel <agent> uses on
 # <tier> (major-scoped-channels epic #657, Phase F4). When the agent has an ESTABLISHED channel
 # major (its `v<M>-next` anchor exists) the v-scoped `<agent>/v<M>-<tier>` line is AUTHORITATIVE:
@@ -322,7 +347,7 @@ _agent_has_channel_major() {
 # release) keeps using the bare tier tag — byte-identical to pre-F4.
 _resolved_channel() {
   local agent="$1" tier="$2" major tag suffix
-  major="$(_agent_current_major "$agent")"
+  major="$(_agent_current_channel_major "$agent")"
   if _agent_has_channel_major "$agent" "$major"; then
     tag="$(channel_tag "$agent" "$tier" "$major")"; suffix="${tag#"$agent"/}"
     printf '%s\t%s\n' "$tag" "$(_channel_tag_commit "$agent" "$suffix")"
@@ -2522,7 +2547,7 @@ _drift_scaffold() {
 # major and would pin a nonexistent `<agent>/v<M>-<tier>`, a fleet-wide startup_failure.
 _channel_tag_major_gaps() {
   local agent="$1" major tier channels
-  major="$(_agent_current_major "$agent")"
+  major="$(_agent_current_channel_major "$agent")"
   _agent_has_channel_major "$agent" "$major" || return 0
   channels="$(ordered_channels "$agent")"
   for tier in ${channels//,/ }; do
@@ -2680,7 +2705,7 @@ cmd_drift() {
   local ct_agent ct_major ct_gaps ct_tier ct_total=0 ct_rows=""
   while IFS= read -r ct_agent; do
     [ -z "$ct_agent" ] && continue
-    ct_major="$(_agent_current_major "$ct_agent")"
+    ct_major="$(_agent_current_channel_major "$ct_agent")"
     ct_gaps="$(_channel_tag_major_gaps "$ct_agent")"
     [ -z "$ct_gaps" ] && continue
     for ct_tier in $ct_gaps; do
