@@ -117,6 +117,7 @@ DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
   dev-lead.yml
   agent-shield.yml
+  apply-repo-settings.yml
   auto-rebase.yml
   dependabot-automerge.yml
   dependabot-rebase.yml
