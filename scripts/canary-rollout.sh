@@ -997,34 +997,17 @@ _decision_mix_table() {
   ' 2>/dev/null || return 0
 }
 
-# _frontier_state <agent> — compute the rollout frontier and graduated gate, echoing:
-#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift> <downgrade> <dg_cand_rate> <dg_cand_sample> <dg_base_rate> <dg_base_sample>"
-# frontier = first ring (after next) not yet on the candidate commit; triage is "-"
-# unless state is BLOCKED (then REGRESSION | PRE_EXISTING | SUSPECT). mix_shift is "SHIFT"
-# when a gate.correctness decision-mix shift is holding the promotion (#668 L2), else "-".
-# downgrade is "DOWNGRADE" when a SUSPECT was auto-downgraded to PRE_EXISTING (#668 inc6) —
-# then triage already reads PRE_EXISTING and dg_* carry the candidate-vs-baseline permille
-# rates + sample sizes that drove it; "-"/0 otherwise.
-_frontier_state() {
-  local agent="$1"
-  local cand chans frontier=""
-  cand="$(channel_commit "$agent" next)"
-  chans="$(ordered_channels "$agent")"
-
-  local chan_array=()
-  IFS=, read -r -a chan_array <<< "$chans"
-  local ch
-  for ch in "${chan_array[@]}"; do
-    local c; c="$(channel_commit "$agent" "$ch")"
-    if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
-  done
-  if [ -z "$frontier" ]; then
-    echo "$cand - - COMPLETE 0 0 0 0 0 0 0 - -"; return 0
-  fi
-
-  local transition source cut_z now_epoch
-  transition="$(transition_key "$frontier" "$chans")"
-  source="${transition%%->*}"
+# _pair_state <agent> <source> <frontier> <cand> <transition> — evaluate the graduated gate for
+# ONE ring transition (#1118). The candidate is the commit CURRENTLY ON <source> (not always
+# `next`); the gate measures dwell from THAT candidate's own cut, samples on the <source> tier,
+# and scopes cumulative health to every tier EXCEPT a ring strictly BELOW <source> that runs a
+# DIFFERENT (newer) candidate — so a newer candidate churning on a lower tier can never block an
+# older, independently-clean candidate on a higher pair. Echoes the same 18-field line documented
+# on _frontier_state. triage/mix_shift/downgrade semantics are unchanged from the single-frontier
+# implementation this was extracted from.
+_pair_state() {
+  local agent="$1" source="$2" frontier="$3" cand="$4" transition="$5"
+  local cut_z now_epoch
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   if [ -z "$cut_z" ]; then
     # Cannot determine the per-candidate window start — fail closed to prevent unbounded history queries.
@@ -1057,9 +1040,22 @@ _frontier_state() {
   prior="$(channel_commit "$agent" "$frontier")"
   differs="$(_reusable_differs "$agent" "$cand" "$prior")"
 
-  # Cumulative health across EVERY concrete tier repo since the candidate's own cut.
-  local all_repos=() ch3
-  for ch3 in "${chan_array[@]}"; do
+  # Cumulative health since this candidate's own cut, across every concrete tier EXCEPT a ring
+  # strictly BELOW the source that runs a DIFFERENT (newer) candidate (#1118 AC5): that ring's
+  # failures belong to the newer candidate's own gate, so counting them here would let a churning
+  # lower candidate block an older, independently-clean higher pair. In a single-candidate rollout
+  # no ring is below the source with a different commit, so this is byte-identical to the prior
+  # all-tiers scope; it diverges only when a newer candidate is soaking further down the pipeline.
+  local all_repos=() ch3 chan_array=() idx src_idx=-1
+  IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
+  for idx in "${!chan_array[@]}"; do
+    [ "${chan_array[$idx]}" = "$source" ] && { src_idx="$idx"; break; }
+  done
+  for idx in "${!chan_array[@]}"; do
+    ch3="${chan_array[$idx]}"
+    if [ "$idx" -lt "$src_idx" ] && [ "$(channel_commit "$agent" "$ch3")" != "$cand" ]; then
+      continue
+    fi
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \
       < <(resolve_members "$agent" "$ch3")
   done
@@ -1170,6 +1166,44 @@ _frontier_state() {
   echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift $downgrade $dg_cand_rate $dg_cand_sample $dg_base_rate $dg_base_sample"
 }
 
+# _frontier_state <agent> — evaluate EVERY ring transition INDEPENDENTLY and echo ONE line per
+# PENDING pair (#1118), each with the fields:
+#   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift> <downgrade> <dg_cand_rate> <dg_cand_sample> <dg_base_rate> <dg_base_sample>"
+# For each adjacent src->dst, the candidate is channel_commit(src); the pair is PENDING (and a
+# line emitted, computed by _pair_state) iff dst is not already on that candidate. Several pairs
+# may be in flight at once — e.g. a newer candidate soaking at next->ring0 while an older one
+# holds at ring1->stable, the exact case that used to be dropped when only next's candidate was
+# evaluated. A ring only ever advances to the commit on the ring directly below it (channel_commit
+# of the source), so no tier can be skipped. When no pair is pending the agent is fully rolled out
+# and a single COMPLETE line is emitted (frontier="-"), preserving the shape every consumer keys
+# off. triage is "-" unless a pair's state is BLOCKED (then REGRESSION | PRE_EXISTING | SUSPECT);
+# mix_shift is "SHIFT" for a gate.correctness decision-mix hold (#668 L2); downgrade is
+# "DOWNGRADE" when a SUSPECT auto-downgraded to PRE_EXISTING (#668 inc6).
+_frontier_state() {
+  local agent="$1" chans
+  chans="$(ordered_channels "$agent")"
+  local chan_array=()
+  IFS=, read -r -a chan_array <<< "$chans"
+  local prev="" ch cand dstc transition emitted=0
+  for ch in "${chan_array[@]}"; do
+    if [ -n "$prev" ]; then
+      cand="$(channel_commit "$agent" "$prev")"
+      if [ -n "$cand" ]; then
+        dstc="$(channel_commit "$agent" "$ch")"
+        if [ "$dstc" != "$cand" ]; then
+          transition="${prev}->${ch}"
+          _pair_state "$agent" "$prev" "$ch" "$cand" "$transition"
+          emitted=1
+        fi
+      fi
+    fi
+    prev="$ch"
+  done
+  if [ "$emitted" -eq 0 ]; then
+    echo "$(channel_commit "$agent" next) - - COMPLETE 0 0 0 0 0 0 0 - -"
+  fi
+}
+
 cmd_evaluate() {
   local agent="$1"
   echo "== canary-rollout evaluate: $agent (gate standard: .github#548) =="
@@ -1185,11 +1219,18 @@ cmd_evaluate() {
     local mark="  "; [ -n "$cand" ] && [ "$c" = "$cand" ] && mark="* "
     printf '  %s%-7s -> %s\n' "$mark" "${ch_tag#"$agent"/}" "${c:0:12}"
   done
-  read -r _cand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample < <(_frontier_state "$agent")
   echo "----"
-  if [ "$frontier" = "-" ]; then
-    echo "frontier: none — fully rolled out (all rings on candidate)."
-  else
+  # Report EVERY pending pair independently (#1118): several transitions can be in flight at once.
+  local frontier transition state dwell floor sample target cum_fail cum_startup cum_benign
+  local triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample _pcand
+  local any=0
+  while read -r _pcand frontier transition state dwell floor sample target cum_fail cum_startup cum_benign triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample; do
+    [ -z "$frontier" ] && continue
+    if [ "$frontier" = "-" ]; then
+      echo "frontier: none — fully rolled out (all rings on candidate)."
+      any=1; continue
+    fi
+    any=1
     gate_summary_line "$transition" "$state" "$dwell" "$floor" "$sample" "$target" "$cum_fail" "$cum_startup" "$cum_benign"
     echo "decision for next ring '$frontier' [$transition]: $state"
     if [ "$state" = "BLOCKED" ]; then
@@ -1209,6 +1250,9 @@ cmd_evaluate() {
     elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
       echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
     fi
+  done < <(_frontier_state "$agent")
+  if [ "$any" -eq 0 ]; then
+    echo "frontier: none — fully rolled out (all rings on candidate)."
   fi
 }
 
@@ -1243,88 +1287,91 @@ cmd_promote() {
       *) echo "::error::unknown promote flag: $1" >&2; return 2 ;;
     esac; shift
   done
-  read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift _dg _dgcr _dgcs _dgbr _dgbs < <(_frontier_state "$agent")
-  if [ "$frontier" = "-" ]; then
-    echo "nothing to promote — $agent is fully rolled out."; return 0
-  fi
-  # allow_pre: advance a BLOCKED frontier ONLY when triage=PRE_EXISTING (never REGRESSION).
-  # Sourced from the per-reusable control block or the --allow-pre-existing flag (#1025 P2).
+  # Snapshot EVERY pending pair up front (#1118): each dst advances to the commit that was on its
+  # src BEFORE any move this run, so a ring can never skip a tier even when several pairs advance
+  # in one sweep, and pairs are decided INDEPENDENTLY — a BLOCKED lower pair never blocks a clean
+  # higher pair, and `--confirm` clears only an AWAITING_CONFIRMATION pair.
+  local -a _pairs=()
+  mapfile -t _pairs < <(_frontier_state "$agent")
+  # allow_pre: advance a BLOCKED pair ONLY when triage=PRE_EXISTING (never REGRESSION). Sourced
+  # from the per-reusable control block or the --allow-pre-existing flag (#1025 P2). Computed once.
   local allow_pre
   allow_pre="$(_jq -r --arg a "$agent" '.agents[$a].gate?.control?.allow_pre_existing // false')"
   [ "$allow_pre_flag" = true ] && allow_pre=true
-  # REGRESSION and SUSPECT both HALT + need a human: neither advances without --override,
-  # and --allow-pre-existing (which only unblocks PRE_EXISTING) never advances them. For a
-  # SUSPECT the human answers the class's discriminating question first — `--override` when
-  # the timeout is unrelated to the diff, or roll back when the candidate got materially
-  # slower (#668 increment 2).
-  if [ "$state" = "BLOCKED" ] && { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && [ "$override" != true ]; then
-    echo "::error::gate=BLOCKED (triage=$triage) for '$frontier' [$transition] — candidate regression suspected; not promoting. Investigate + rollback, do not --override blindly."
-    return 0
-  fi
-  local advance=false
-  [ "$state" = "PROMOTE" ] && advance=true
-  [ "$override" = true ] && advance=true
-  [ "$state" = "BLOCKED" ] && [ "$triage" = "PRE_EXISTING" ] && [ "$allow_pre" = true ] && advance=true
-  # Layer 3 (#668 increment 3): a human --confirm advances an AWAITING_CONFIRMATION frontier
-  # (reliability is already PROMOTE — the state is only ever set from an otherwise-PROMOTE
-  # verdict). --confirm is NOT --override: it clears ONLY this state and can never advance a
-  # BLOCKED gate, so it cannot bypass reliability.
-  [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ] && advance=true
-  if [ "$advance" != true ]; then
-    if [ "$state" = "AWAITING_CONFIRMATION" ]; then
-      echo "gate=AWAITING_CONFIRMATION for ring '$frontier' [$transition] — reliability PASSED; holding for an opt-in human go/no-go. Review the canary-confirm issue, then dispatch: promote $agent --confirm  (--confirm advances ONLY this reliability-clean state; it is NOT --override)."
-    else
-      echo "gate=$state for ring '$frontier' [$transition] (cum_fail=$cum_fail, triage=$triage) — not promoting. (use --override, or --allow-pre-existing for a PRE_EXISTING triage, after investigating)"
-    fi
-    return 0
-  fi
-  if [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ]; then
-    echo "::notice::human confirmation received (--confirm) — advancing $agent/$frontier [$transition] past the confirmation go/no-go (reliability was already PROMOTE)."
-  elif [ "$state" != "PROMOTE" ]; then
-    echo "::warning::advancing $agent/$frontier despite gate state '$state' (triage=$triage)"
-  fi
-  # Consistent move (#1076): EVERY agent moves its channel tag via `gh api` on its HOST
-  # repo — never a local `git push`. A local force-push is NOT granted the release-manager
-  # App's ruleset bypass for a tag UPDATE, so it 013s on a protected channel tag such as
-  # dev-lead/next; the API path (same App token) IS honored as a bypass actor. host
-  # defaults to THIS_REPO for an agent whose registry entry omits it.
+  # Consistent move (#1076): EVERY agent moves its channel tag via `gh api` on its HOST repo —
+  # never a local `git push`. host defaults to THIS_REPO when the registry entry omits it.
   local host
   host="$(_jq -r --arg a "$agent" '.agents[$a].host // "" | tostring')"
   host="${host:-$THIS_REPO}"
-  # Move the RESOLVED frontier tag (major-scoped-channels epic #657, F4): advance the
-  # v-scoped `<agent>/v<M>-<tier>` within its major line when it exists, else the legacy
-  # bare `<agent>/<tier>`. A v2 promotion never touches a v1 tag. The logical tier
-  # ($frontier) is unchanged — it still drives the gate + is reported as promoted_ring.
-  local frontier_tag; frontier_tag="$(_resolved_channel_tag "$agent" "$frontier")"
-  echo "advancing $frontier_tag -> ${cand:0:12} on $host"
-  if [ "$dry" = true ]; then
-    echo "[DRY-RUN] would: gh api PATCH repos/$host/git/refs/tags/$frontier_tag sha=$cand (force)"
-    return 0
-  fi
-  _gh_move_tag "$host" "$frontier_tag" "$cand" \
-    || { echo "::error::failed to move $frontier_tag -> ${cand:0:12} on $host" >&2
-         # Persist this FAILED tag write (#1023 defect 2). It is UNEXPECTED — a permission/API
-         # rejection on the WRITE — distinct from an expected gate-block, which returns above
-         # before ever reaching the move. sync-promotion-failures turns a repeatedly-failing
-         # write into a durable, escalating blocker issue instead of a scrolling log line.
-         _log_promotion_failure "$agent" "$frontier" "$cand" "$host" "tag write rejected ($frontier_tag on $host)"
-         return 1; }
-  echo "promoted $frontier_tag -> ${cand:0:12}"
-  # Expose the move for the workflow's GitHub Deployment (traceability, #502). The
-  # deployment must be created on the repo that OWNS the moved commit: a cross-repo agent's
-  # candidate SHA lives on its host, NOT on THIS_REPO — creating the deployment against
-  # GITHUB_REPOSITORY 422s with "No ref found" (#1059). So emit the owning repo too.
-  local deploy_repo="$host"   # the repo that OWNS the moved commit (#1059); host==THIS_REPO for this-repo agents
-  # GITHUB_OUTPUT is single-valued (last write wins), fine for a single `promote`. For
-  # `promote-all` (many promotions per run) the workflow reads CANARY_PROMOTIONS_LOG — one
-  # TSV line per promotion — so it can record a deployment for EVERY move, not just the last.
-  if [ -n "${GITHUB_OUTPUT:-}" ]; then
-    { echo "promoted_agent=$agent"; echo "promoted_ring=$frontier"
-      echo "promoted_sha=$cand";   echo "promoted_host=$deploy_repo"; } >> "$GITHUB_OUTPUT"
-  fi
-  if [ -n "${CANARY_PROMOTIONS_LOG:-}" ]; then
-    printf '%s\t%s\t%s\t%s\n' "$agent" "$frontier" "$cand" "$deploy_repo" >> "$CANARY_PROMOTIONS_LOG"
-  fi
+  local rc=0 pending=0 line
+  local cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift _dg _dgcr _dgcs _dgbr _dgbs
+  for line in "${_pairs[@]}"; do
+    read -r cand frontier transition state _dwell _floor _sample _target cum_fail _cum_startup _cum_benign triage _mix_shift _dg _dgcr _dgcs _dgbr _dgbs <<< "$line"
+    { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
+    pending=1
+    # REGRESSION and SUSPECT both HALT + need a human: neither advances without --override, and
+    # --allow-pre-existing (which only unblocks PRE_EXISTING) never advances them. For a SUSPECT
+    # the human answers the class's discriminating question first (#668 increment 2).
+    if [ "$state" = "BLOCKED" ] && { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && [ "$override" != true ]; then
+      echo "::error::gate=BLOCKED (triage=$triage) for '$frontier' [$transition] — candidate regression suspected; not promoting. Investigate + rollback, do not --override blindly."
+      continue
+    fi
+    local advance=false
+    [ "$state" = "PROMOTE" ] && advance=true
+    [ "$override" = true ] && advance=true
+    [ "$state" = "BLOCKED" ] && [ "$triage" = "PRE_EXISTING" ] && [ "$allow_pre" = true ] && advance=true
+    # Layer 3 (#668 increment 3): a human --confirm advances an AWAITING_CONFIRMATION pair
+    # (reliability is already PROMOTE — the state is only ever set from an otherwise-PROMOTE
+    # verdict). --confirm is NOT --override: it clears ONLY this state and can never advance a
+    # BLOCKED gate, so it cannot bypass reliability.
+    [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ] && advance=true
+    if [ "$advance" != true ]; then
+      if [ "$state" = "AWAITING_CONFIRMATION" ]; then
+        echo "gate=AWAITING_CONFIRMATION for ring '$frontier' [$transition] — reliability PASSED; holding for an opt-in human go/no-go. Review the canary-confirm issue, then dispatch: promote $agent --confirm  (--confirm advances ONLY this reliability-clean state; it is NOT --override)."
+      else
+        echo "gate=$state for ring '$frontier' [$transition] (cum_fail=$cum_fail, triage=$triage) — not promoting. (use --override, or --allow-pre-existing for a PRE_EXISTING triage, after investigating)"
+      fi
+      continue
+    fi
+    if [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$confirm" = true ]; then
+      echo "::notice::human confirmation received (--confirm) — advancing $agent/$frontier [$transition] past the confirmation go/no-go (reliability was already PROMOTE)."
+    elif [ "$state" != "PROMOTE" ]; then
+      echo "::warning::advancing $agent/$frontier despite gate state '$state' (triage=$triage)"
+    fi
+    # Move the RESOLVED frontier tag (major-scoped-channels epic #657, F4): advance the v-scoped
+    # `<agent>/v<M>-<tier>` within its major line when it exists, else the legacy bare
+    # `<agent>/<tier>`. The logical tier ($frontier) is unchanged — it still drives the gate + is
+    # reported as promoted_ring.
+    local frontier_tag; frontier_tag="$(_resolved_channel_tag "$agent" "$frontier")"
+    echo "advancing $frontier_tag -> ${cand:0:12} on $host"
+    if [ "$dry" = true ]; then
+      echo "[DRY-RUN] would: gh api PATCH repos/$host/git/refs/tags/$frontier_tag sha=$cand (force)"
+      continue
+    fi
+    if ! _gh_move_tag "$host" "$frontier_tag" "$cand"; then
+      echo "::error::failed to move $frontier_tag -> ${cand:0:12} on $host" >&2
+      # Persist this FAILED tag write (#1023 defect 2). It is UNEXPECTED — a permission/API
+      # rejection on the WRITE — distinct from an expected gate-block, which never reaches the move.
+      _log_promotion_failure "$agent" "$frontier" "$cand" "$host" "tag write rejected ($frontier_tag on $host)"
+      rc=1
+      continue
+    fi
+    echo "promoted $frontier_tag -> ${cand:0:12}"
+    # Expose the move for the workflow's GitHub Deployment (traceability, #502). The deployment must
+    # be created on the repo that OWNS the moved commit (#1059). GITHUB_OUTPUT is single-valued
+    # (last write wins); the workflow reads CANARY_PROMOTIONS_LOG — one TSV line per move — to
+    # record a deployment for EVERY promotion (a run may now advance several rings, #1118).
+    local deploy_repo="$host"
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+      { echo "promoted_agent=$agent"; echo "promoted_ring=$frontier"
+        echo "promoted_sha=$cand";   echo "promoted_host=$deploy_repo"; } >> "$GITHUB_OUTPUT"
+    fi
+    if [ -n "${CANARY_PROMOTIONS_LOG:-}" ]; then
+      printf '%s\t%s\t%s\t%s\n' "$agent" "$frontier" "$cand" "$deploy_repo" >> "$CANARY_PROMOTIONS_LOG"
+    fi
+  done
+  [ "$pending" -eq 0 ] && echo "nothing to promote — $agent is fully rolled out."
+  return "$rc"
 }
 
 # _log_promotion_failure <agent> <ring> <cand> <host> <reason> — append a FAILED tag-write to the
@@ -1572,8 +1619,11 @@ EOF
 # _confirm_body <agent> <transition> <cand> <prior> <host> <sample> <target> — the body of the
 # evidence-carrying human-confirmation issue for an AWAITING_CONFIRMATION frontier (#668 Layer 3).
 # Reliability has PASSED; a human confirms the candidate is behaving CORRECTLY (not merely exiting
-# green) before it reaches the stable tier (all consumers). Marker-keyed (canary-confirm:<agent>)
-# so sync-issues upserts it idempotently and auto-closes it on promote/candidate change.
+# green) before it reaches the stable tier (all consumers). Marker-keyed on the AGENT AND the
+# ring1 CANDIDATE (canary-confirm:<agent>:<cand>) so sync-issues upserts it idempotently, keeps it
+# open across newer cuts landing on next/ring0 (the candidate is unchanged), and closes it only
+# when stable advances or the ring1 candidate itself changes — a recut ring1 candidate never
+# silently inherits a human's pending go/no-go for a different commit (#1118 AC3).
 _confirm_body() {
   local agent="$1" transition="$2" cand="$3" prior="$4" host="$5" sample="$6" target="$7"
   local suspect; suspect="$(_suspect_guidance "$agent")"
@@ -1591,7 +1641,7 @@ $suspect"
   local display_prior="${prior:0:12}"
   display_prior="${display_prior:-none}"
   cat <<EOF
-<!-- canary-confirm:$agent -->
+<!-- canary-confirm:$agent:$cand -->
 **Canary rollout — human confirmation requested (\`$transition\`).**
 
 The release gate holds \`$agent\` in **AWAITING_CONFIRMATION**: reliability has PASSED (dwell + sample + cumulative health all clean), but this transition is flagged \`require_confirmation\` (#668 Layer 3), so a human confirms the candidate is behaving *correctly* — not merely exiting green — before it reaches the stable tier (all consumers). Filed + maintained by the Canary Rollout workflow; **regenerated each run and auto-closes** when the promotion is confirmed or the candidate changes — do not edit by hand.
@@ -1648,7 +1698,9 @@ EOF
 # FAIL CLOSED to BLOCKED so the tracked issue is upserted (never a green no-op). Emits the 18
 # _frontier_state fields PLUS a trailing DATA-GAP flag (0=normal state resolved, 1=partial
 # run-history). Returns NON-ZERO only when even the candidate/frontier cannot be resolved — a
-# TOTAL inability stays a hard error, surfaced by the caller.
+# TOTAL inability stays a hard error, surfaced by the caller. Since #1118 _frontier_state emits
+# one line per PENDING pair, so the wrapper appends the datagap flag to EACH line and, on a data
+# gap, reconstructs one BLOCKED line per pending pair.
 _frontier_state_resilient() {
   local agent="$1" out="" rc=0 fetch_failed=0
   # Arm a file flag that _run_json appends to on a sustained fetch failure. A file (not a shell
@@ -1668,9 +1720,13 @@ _frontier_state_resilient() {
     [ -s "$flag" ] && fetch_failed=1
     rm -f "$flag"
   fi
-  # Normal path (no fetch failure, a state line was produced): transparent pass-through, datagap=0.
+  # Normal path (no fetch failure, state lines produced): transparent pass-through, datagap=0
+  # appended to EVERY pending-pair line (#1118).
   if [ "$fetch_failed" -eq 0 ] && [ -n "$out" ] && [ "$rc" -eq 0 ]; then
-    printf '%s 0\n' "$out"
+    local line
+    while IFS= read -r line; do
+      [ -n "$line" ] && printf '%s 0\n' "$line"
+    done <<< "$out"
     return 0
   fi
   # Non-data-gap _frontier_state failure: the fetch succeeded but _frontier_state still failed —
@@ -1679,28 +1735,52 @@ _frontier_state_resilient() {
     [ "$rc" -ne 0 ] && return "$rc"
     return 1
   fi
-  # Data gap: the run-history fetch failed — reconstruct the tag-only facts (none read run history).
-  local cand chans frontier="" ch c transition prior differs triage
-  cand="$(channel_commit "$agent" next || true)"
-  chans="$(ordered_channels "$agent" || true)"
+  # Data gap: the run-history fetch failed — reconstruct the tag-only facts for EVERY pending pair
+  # (none read run history). Each is failed CLOSED to BLOCKED so its tracked issue is upserted.
+  local chans; chans="$(ordered_channels "$agent" || true)"
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$chans"
+  local prev="" ch cand dstc transition prior differs triage emitted=0
   for ch in "${chan_array[@]}"; do
-    c="$(channel_commit "$agent" "$ch" || true)"
-    if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
+    if [ -n "$prev" ]; then
+      cand="$(channel_commit "$agent" "$prev" || true)"
+      if [ -n "$cand" ]; then
+        dstc="$(channel_commit "$agent" "$ch" || true)"
+        if [ "$dstc" != "$cand" ]; then
+          transition="${prev}->${ch}"
+          prior="$dstc"
+          differs="$(_reusable_differs "$agent" "$cand" "$prior")"
+          # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
+          # (fail closed — a changed reusable with UNREADABLE health is a suspected regression that
+          # needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot be a
+          # candidate regression). Either verdict still tracks the pair as BLOCKED.
+          triage="$(classify_failure "$differs" unknown 0)"
+          echo "$cand $ch $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
+          emitted=1
+        fi
+      fi
+    fi
+    prev="$ch"
   done
-  # Total inability: cannot resolve even the candidate or a pending frontier → hard error.
-  # Fail closed (never a silent green); the caller surfaces ::error:: and ends non-zero.
-  { [ -z "$cand" ] || [ -z "$frontier" ]; } && return 1
-  transition="$(transition_key "$frontier" "$chans")"
-  prior="$(channel_commit "$agent" "$frontier" || true)"
-  differs="$(_reusable_differs "$agent" "$cand" "$prior")"
-  # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
-  # (fail closed — a changed reusable with UNREADABLE health is treated as a suspected
-  # regression that needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot
-  # be a candidate regression). Either verdict still tracks the agent as BLOCKED.
-  triage="$(classify_failure "$differs" unknown 0)"
-  echo "$cand $frontier $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
+  # Total inability: cannot resolve even one pending pair → hard error. Fail closed (never a silent
+  # green); the caller surfaces ::error:: and ends non-zero.
+  [ "$emitted" -eq 0 ] && return 1
+  return 0
+}
+
+# _confirm_issues_for_agent <agent> — "<number>\t<STATE>" per canary-confirm issue whose marker
+# belongs to <agent>, matching BOTH the legacy agent-only marker (`canary-confirm:<agent>`) and
+# the #1118 agent:candidate marker (`canary-confirm:<agent>:<cand>`). Used to close any confirm
+# issue that is no longer the current ring1 candidate's — so a recut ring1 candidate (or a
+# no-longer-awaiting agent) never leaves a stale go/no-go issue open. Empty if none.
+_confirm_issues_for_agent() {
+  local agent="$1"
+  gh issue list --repo "$ISSUE_REPO" --label canary-confirm --state all -L 100 \
+      --json number,state,body 2>/dev/null \
+    | jq -r --arg a "$agent" \
+        '.[] | select((.body // "") | test("<!-- canary-confirm:" + $a + "(:[^ ]+)? -->"))
+         | [(.number|tostring), (.state|ascii_upcase)] | @tsv' 2>/dev/null \
+    || echo ""
 }
 
 # cmd_sync_issues [--dry-run] — upsert one blocker issue per BLOCKED agent, and render the
@@ -1731,121 +1811,158 @@ cmd_sync_issues() {
   local rows="" agent hard_fail=0
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
-    local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift host
-    local downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap
-    # Resilient read (#820): the wrapper fails closed to a BLOCKED+datagap line on a run-history
-    # fetch outage, and returns non-zero (no output) only on a TOTAL inability to determine
-    # state. A failed `read` there means we could not even resolve the candidate/frontier —
-    # fail closed rather than report a false all-clear (a green no-op could mask a regression).
-    if ! read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap < <(_frontier_state_resilient "$agent"); then
+    # Resilient read (#820), now per PENDING pair (#1118): the wrapper fails closed to a
+    # BLOCKED+datagap line per pending pair on a run-history fetch outage, and returns non-zero
+    # (no output) only on a TOTAL inability to determine state. A non-zero here means we could not
+    # resolve even one pair — fail closed rather than report a false all-clear (a green no-op could
+    # mask a regression).
+    local pairs_out pairs_rc=0
+    pairs_out="$(_frontier_state_resilient "$agent")" || pairs_rc=$?
+    if [ "$pairs_rc" -ne 0 ]; then
       echo "::error::sync-issues: cannot determine canary state for '$agent' (run-history AND tag resolution unavailable) — failing closed rather than reporting a false all-clear." >&2
       hard_fail=1
       rows+="| \`$agent\` | UNKNOWN | \`-\` | ? | ? | ⚠️ data unavailable (fail-closed) |"$'\n'
       continue
     fi
-    host="$(_agent_field "$agent" host)"
-    local blk="—" num_state num istate
-    # Best-effort (#1081): these substitutions call gh/jq. Under `set -euo pipefail`
-    # a bare assignment propagates a non-zero exit and would abort the whole step —
-    # before the fleet dashboard renders and before the intended fallback warnings
-    # below. `|| true` keeps sync-issues degrading gracefully (empty → handled).
+    local host; host="$(_agent_field "$agent" host)"
+    local cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift
+    local downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap
+    # Pass 1: select the blocker pair (first BLOCKED) and the confirm pair (first AWAITING). The two
+    # concerns are independent (#1118 AC5), so a BLOCKED lower pair and an AWAITING higher pair are
+    # tracked by SEPARATE issues in the same tick.
+    local have_blocked=0 bl_cand="" bl_transition="" bl_triage="-" bl_cum_fail=0 bl_cum_startup=0
+    local bl_mix_shift="-" bl_downgrade="-" bl_dgcr=0 bl_dgcs=0 bl_dgbr=0 bl_dgbs=0 bl_datagap=0
+    local have_awaiting=0 cf_cand="" cf_transition="" cf_sample=0 cf_target=0
+    while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
+      { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
+      if [ "$state" = "BLOCKED" ] && [ "$have_blocked" -eq 0 ]; then
+        have_blocked=1
+        bl_cand="$cand"; bl_transition="$transition"; bl_triage="$triage"
+        bl_cum_fail="$cum_fail"; bl_cum_startup="$cum_startup"; bl_mix_shift="$mix_shift"
+        bl_downgrade="$downgrade"; bl_dgcr="$dg_cand_rate"; bl_dgcs="$dg_cand_sample"
+        bl_dgbr="$dg_base_rate"; bl_dgbs="$dg_base_sample"; bl_datagap="${datagap:-0}"
+      fi
+      if [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$have_awaiting" -eq 0 ]; then
+        have_awaiting=1
+        cf_cand="$cand"; cf_transition="$transition"; cf_sample="$_s"; cf_target="$_t"
+      fi
+    done <<< "$pairs_out"
+
+    # Blocker issue (per agent, keyed canary-blocker:<agent>). Driven by the selected BLOCKED pair.
+    local bl_link="—" num_state num istate
     num_state="$(_issue_find canary-blocker "<!-- canary-blocker:$agent -->" || true)"
     num="${num_state%%$'\t'*}"; istate="${num_state##*$'\t'}"
-    if [ "$state" = "BLOCKED" ]; then
+    if [ "$have_blocked" -eq 1 ]; then
       local evidence body title mix_table=""
-      if [ "${datagap:-0}" = "1" ]; then
-        # Run history was unreadable this tick — there are no listable failing runs to cite.
+      if [ "$bl_datagap" = "1" ]; then
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
       else
-        evidence="$(_blocker_evidence "$agent" "$cand" || true)"
+        evidence="$(_blocker_evidence "$agent" "$bl_cand" || true)"
       fi
-      [ "$mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$cand" || true)"
-      body="$(_blocker_body "$agent" "$transition" "$cand" "$cum_fail" "$cum_startup" "$triage" "$host" "$evidence" "$mix_shift" "$mix_table" "$downgrade" "$dg_cand_rate" "$dg_cand_sample" "$dg_base_rate" "$dg_base_sample" "${datagap:-0}")"
-      if [ "$mix_shift" = "SHIFT" ]; then
-        title="Canary blocker: $agent $transition (decision-mix shift, SUSPECT)"
-      elif [ "${datagap:-0}" = "1" ]; then
-        title="Canary blocker: $agent $transition ($triage, partial run-history — fail-closed)"
+      [ "$bl_mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$bl_cand" || true)"
+      body="$(_blocker_body "$agent" "$bl_transition" "$bl_cand" "$bl_cum_fail" "$bl_cum_startup" "$bl_triage" "$host" "$evidence" "$bl_mix_shift" "$mix_table" "$bl_downgrade" "$bl_dgcr" "$bl_dgcs" "$bl_dgbr" "$bl_dgbs" "$bl_datagap")"
+      if [ "$bl_mix_shift" = "SHIFT" ]; then
+        title="Canary blocker: $agent $bl_transition (decision-mix shift, SUSPECT)"
+      elif [ "$bl_datagap" = "1" ]; then
+        title="Canary blocker: $agent $bl_transition ($bl_triage, partial run-history — fail-closed)"
       else
-        title="Canary blocker: $agent $transition (cum_fail=$cum_fail, $triage)"
+        title="Canary blocker: $agent $bl_transition (cum_fail=$bl_cum_fail, $bl_triage)"
       fi
       if [ -z "$num" ]; then
-        if [ "$dry" = true ]; then echo "  [DRY] would OPEN blocker issue for $agent ($triage)"; blk="(new)"; else
+        if [ "$dry" = true ]; then echo "  [DRY] would OPEN blocker issue for $agent ($bl_triage)"; bl_link="(new)"; else
           num="$(_gh_issue_create "$title" "$body" "canary-blocker" || true)"
           if [ -n "$num" ]; then
             gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-            { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
-            echo "  opened blocker issue #$num for $agent"; blk="#$num"
+            { [ "$bl_triage" = "REGRESSION" ] || [ "$bl_triage" = "SUSPECT" ]; } && gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
+            echo "  opened blocker issue #$num for $agent"; bl_link="#$num"
           else echo "::warning::could not open blocker issue for $agent (Issues:write on the App?)"; fi
         fi
       else
-        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE blocker issue #$num for $agent"; blk="#$num"; else
+        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE blocker issue #$num for $agent"; bl_link="#$num"; else
           [ "$istate" = "OPEN" ] || gh issue reopen "$num" --repo "$ISSUE_REPO" >/dev/null 2>&1 || true
           gh issue edit "$num" --repo "$ISSUE_REPO" --title "$title" --body "$body" >/dev/null 2>&1 \
             || echo "::warning::could not update blocker issue #$num for $agent"
           gh issue edit "$num" --repo "$ISSUE_REPO" --add-label dev-lead >/dev/null 2>&1 || true
-          if [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; then
+          if [ "$bl_triage" = "REGRESSION" ] || [ "$bl_triage" = "SUSPECT" ]; then
             gh issue edit "$num" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
           else
             gh issue edit "$num" --repo "$ISSUE_REPO" --remove-label needs-human >/dev/null 2>&1 || true
           fi
-          echo "  updated blocker issue #$num for $agent"; blk="#$num"
+          echo "  updated blocker issue #$num for $agent"; bl_link="#$num"
         fi
       fi
     else
-      # Not blocked — close a stale open blocker issue (the gate cleared).
+      # No BLOCKED pair — close a stale open blocker issue (the gate cleared).
       if [ -n "$num" ] && [ "$istate" = "OPEN" ]; then
-        if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared blocker issue #$num for $agent ($state)"; else
+        if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared blocker issue #$num for $agent"; else
           gh issue close "$num" --repo "$ISSUE_REPO" \
-            --comment "✅ Gate cleared — \`$agent\` is now \`$state\`. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
+            --comment "✅ Gate cleared — \`$agent\` is no longer BLOCKED. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
           echo "  closed cleared blocker issue #$num for $agent"
         fi
-        blk="#$num (closed)"
+        bl_link="#$num (closed)"
       fi
     fi
 
-    # Layer 3 (#668 increment 3): the human go/no-go issue for an AWAITING_CONFIRMATION frontier.
-    # A SEPARATE marker/label from the blocker issue (the two concerns are independent), upserted
-    # idempotently and auto-closed once the agent is no longer awaiting confirmation (promoted,
-    # rolled back, or a new candidate cut). Labelled needs-human — a human confirms, dev-lead does
-    # not action it. Best-effort under set -e, like the blocker path (`|| true`).
-    local cnum_state cnum cistate
-    cnum_state="$(_issue_find canary-confirm "<!-- canary-confirm:$agent -->" || true)"
-    cnum="${cnum_state%%$'\t'*}"; cistate="${cnum_state##*$'\t'}"
-    if [ "$state" = "AWAITING_CONFIRMATION" ]; then
-      local prior cbody ctitle
-      prior="$(channel_commit "$agent" "$frontier" || true)"
-      cbody="$(_confirm_body "$agent" "$transition" "$cand" "$prior" "$host" "$_s" "$_t" || true)"
-      ctitle="Canary confirm: $agent $transition — human go/no-go before stable"
+    # Layer 3 (#668 increment 3, #1118 AC3): the human go/no-go issue for an AWAITING_CONFIRMATION
+    # pair, keyed on the AGENT and the ring1 CANDIDATE (canary-confirm:<agent>:<cand>). Keyed on the
+    # candidate so it PERSISTS across newer cuts landing on next/ring0 (the candidate is unchanged)
+    # and closes only when stable advances or the ring1 candidate itself changes. Labelled
+    # needs-human — a human confirms; dev-lead does not action it.
+    local cf_link="—" cnum_state cnum cistate keep_num=""
+    if [ "$have_awaiting" -eq 1 ]; then
+      local cf_dst prior cbody ctitle
+      cf_dst="${cf_transition##*->}"
+      prior="$(channel_commit "$agent" "$cf_dst" || true)"
+      cbody="$(_confirm_body "$agent" "$cf_transition" "$cf_cand" "$prior" "$host" "$cf_sample" "$cf_target" || true)"
+      ctitle="Canary confirm: $agent $cf_transition — human go/no-go before stable"
+      cnum_state="$(_issue_find canary-confirm "<!-- canary-confirm:$agent:$cf_cand -->" || true)"
+      cnum="${cnum_state%%$'\t'*}"; cistate="${cnum_state##*$'\t'}"
       if [ -z "$cnum" ]; then
-        if [ "$dry" = true ]; then echo "  [DRY] would OPEN confirm issue for $agent"; blk="(new confirm)"; else
+        if [ "$dry" = true ]; then echo "  [DRY] would OPEN confirm issue for $agent"; cf_link="(new confirm)"; else
           cnum="$(_gh_issue_create "$ctitle" "$cbody" "canary-confirm" || true)"
           if [ -n "$cnum" ]; then
             gh issue edit "$cnum" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
-            echo "  opened confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"
+            echo "  opened confirm issue #$cnum for $agent"; cf_link="#$cnum (confirm)"
           else echo "::warning::could not open confirm issue for $agent (Issues:write on the App?)"; fi
         fi
       else
-        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"; else
+        if [ "$dry" = true ]; then echo "  [DRY] would UPDATE confirm issue #$cnum for $agent"; cf_link="#$cnum (confirm)"; else
           [ "$cistate" = "OPEN" ] || gh issue reopen "$cnum" --repo "$ISSUE_REPO" >/dev/null 2>&1 || true
           gh issue edit "$cnum" --repo "$ISSUE_REPO" --title "$ctitle" --body "$cbody" >/dev/null 2>&1 \
             || echo "::warning::could not update confirm issue #$cnum for $agent"
           gh issue edit "$cnum" --repo "$ISSUE_REPO" --add-label needs-human >/dev/null 2>&1 || true
-          echo "  updated confirm issue #$cnum for $agent"; blk="#$cnum (confirm)"
+          echo "  updated confirm issue #$cnum for $agent"; cf_link="#$cnum (confirm)"
         fi
       fi
-    else
-      # No longer awaiting — close a stale open confirm issue (confirmed, rolled back, or recut).
-      if [ -n "$cnum" ] && [ "$cistate" = "OPEN" ]; then
-        if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared confirm issue #$cnum for $agent ($state)"; else
-          gh issue close "$cnum" --repo "$ISSUE_REPO" \
-            --comment "✅ No longer awaiting confirmation — \`$agent\` is now \`$state\`. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
-          echo "  closed cleared confirm issue #$cnum for $agent"
-        fi
-        blk="#$cnum (confirm closed)"
-      fi
+      keep_num="$cnum"
     fi
+    # Close any confirm issue for this agent that is NOT the current ring1 candidate's (a recut
+    # ring1 candidate, or an agent no longer awaiting at all) — a stale go/no-go must never linger.
+    local ci_num ci_state
+    while IFS=$'\t' read -r ci_num ci_state; do
+      [ -z "$ci_num" ] && continue
+      [ -n "$keep_num" ] && [ "$ci_num" = "$keep_num" ] && continue
+      [ "$ci_state" = "OPEN" ] || continue
+      if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared confirm issue #$ci_num for $agent"; else
+        gh issue close "$ci_num" --repo "$ISSUE_REPO" \
+          --comment "✅ No longer awaiting confirmation for this candidate — \`$agent\` go/no-go is stale. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
+        echo "  closed cleared confirm issue #$ci_num for $agent"
+      fi
+      [ "$cf_link" = "—" ] && cf_link="#$ci_num (confirm closed)"
+    done < <(_confirm_issues_for_agent "$agent")
 
-    rows+="| \`$agent\` | $state | \`$transition\` | $cum_fail | $triage | $blk |"$'\n'
+    # Pass 2: one dashboard row per pending pair (a COMPLETE agent gets a single COMPLETE row).
+    local rendered=0 disp_tr link
+    while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
+      [ -z "$state" ] && continue
+      disp_tr="$transition"; [ "$frontier" = "-" ] && disp_tr="-"
+      link="—"
+      [ "$state" = "BLOCKED" ] && [ "$transition" = "$bl_transition" ] && link="$bl_link"
+      [ "$state" = "AWAITING_CONFIRMATION" ] && [ "$transition" = "$cf_transition" ] && link="$cf_link"
+      rows+="| \`$agent\` | $state | \`$disp_tr\` | ${cum_fail:-0} | ${triage:--} | $link |"$'\n'
+      rendered=1
+    done <<< "$pairs_out"
+    [ "$rendered" -eq 0 ] && rows+="| \`$agent\` | COMPLETE | \`-\` | 0 | - | — |"$'\n'
   done <<< "$agents"
 
   # Render the fleet-status table into the run's job summary (a read-only snapshot, not a
