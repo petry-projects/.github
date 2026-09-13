@@ -249,7 +249,7 @@ _cmd_cut() {
   # recovery — the release is NOOP-safe, so re-running the same cut converges the
   # channel without re-creating (or clobbering) the release.
   if ! _gh_move_tag "$SR_REPO" "$channel_tag" "$commit"; then
-    echo "::error::partial cut: $release_tag is published at ${commit:0:12} but the channel $channel_tag could NOT be moved onto it — consumers pinning $channel_tag will not see this release. Re-run 'cut $version --commit $commit' to converge the channel (the release stays NOOP; it is never re-created or clobbered)." >&2
+    echo "::error::partial cut: $release_tag is published at ${commit:0:12} but the channel $channel_tag could NOT be moved onto it — consumers pinning $channel_tag will not see this release. Re-run '\"$0\" cut $version --commit $commit' to converge the channel (the release stays NOOP; it is never re-created or clobbered)." >&2
     return 1
   fi
   echo "done."

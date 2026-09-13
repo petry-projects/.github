@@ -269,16 +269,17 @@ EOF
   for f in "$ORCH" "$LIB"; do
     # ${var,,} / ${var,} / ${var^^} / ${var^} — bash 4 case modification.
     run grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*[,^]' "$f"
-    [ "$status" -ne 0 ] || { echo "bash-4 case-modification (\${x,,}/\${x^^}) in $f:"; echo "$output"; false; }
+    [ "$status" -eq 1 ] || { echo "bash-4 case-modification (\${x,,}/\${x^^}) in $f:"; echo "$output"; false; }
     # declare -A / local -A — associative arrays are bash 4 only.
     run grep -nE '(declare|local|typeset)[[:space:]]+-[A-Za-z]*A' "$f"
-    [ "$status" -ne 0 ] || { echo "associative array (declare -A) in $f:"; echo "$output"; false; }
-    # mapfile / readarray — bash 4 only.
-    run grep -nE '\b(mapfile|readarray)\b' "$f"
-    [ "$status" -ne 0 ] || { echo "mapfile/readarray in $f:"; echo "$output"; false; }
+    [ "$status" -eq 1 ] || { echo "associative array (declare -A) in $f:"; echo "$output"; false; }
+    # mapfile / readarray — bash 4 only. \b is unreliable on BSD grep (macOS),
+    # so match word boundaries with explicit non-word-char / anchor classes (ERE, portable).
+    run grep -nE '(^|[^[:alnum:]_])(mapfile|readarray)([^[:alnum:]_]|$)' "$f"
+    [ "$status" -eq 1 ] || { echo "mapfile/readarray in $f:"; echo "$output"; false; }
     # &>> — append-both redirect is bash 4 only.
     run grep -nF '&>>' "$f"
-    [ "$status" -ne 0 ] || { echo "&>> append-both redirect in $f:"; echo "$output"; false; }
+    [ "$status" -eq 1 ] || { echo "&>> append-both redirect in $f:"; echo "$output"; false; }
   done
 }
 
@@ -373,10 +374,60 @@ EOF
   run bash "$ORCH" cut v1.0.0 --commit 5555555555555555555555555555555555555555
   [ "$status" -eq 0 ]
   [[ "$output" == *"NOOP"* ]]
-  [[ "$output" == *"creating immutable release"* ]] && false || true
+  [[ "$output" != *"creating immutable release"* ]] || { echo "release creation output on NOOP" >&2; return 1; }
   [[ "$output" == *"moving channel standards/v1-stable"* ]]
   [[ "$output" == *"done."* ]]
   # The channel was converged via a force-move PATCH; no release re-create happened.
   grep -q "PATCH .*git/refs/tags/standards/v1-stable" "$GH_CALLS"
-  grep -q "git/tags" "$GH_CALLS" && false || true
+  ! grep -q -e "-X POST .*git/tags" "$GH_CALLS" || { echo "release re-create request on NOOP" >&2; return 1; }
+}
+
+# A partial cut — immutable release published, channel move persistently failing —
+# must exit NONZERO and print the exact rerun recovery guidance (#1119). The
+# fresh-cut and idempotency scenarios only exercise a SUCCEEDING move (PATCH miss
+# → POST fallback, and PATCH hit); neither reaches _gh_move_tag's nonzero branch,
+# so this asserts the failure status and the operator-facing recovery message.
+@test "cut: a persistent channel-move failure returns nonzero and prints the rerun recovery guidance" {
+  _stub_bin
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "6666666666666666666666666666666666666666" ;;
+  *) : ;;
+esac
+EOF
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+# release tag read → genuinely absent (HTTP 404) → CREATE path
+if [[ "$args" == *"git/ref/tags/standards/v1.0.0"* ]]; then
+  echo "gh: Not Found (HTTP 404)" >&2; exit 1
+fi
+# create the immutable annotated tag object (release IS published)
+if [[ "$args" == *"-X POST"* && "$args" == *"git/tags"* ]]; then
+  echo "1111111111111111111111111111111111111111"; exit 0
+fi
+# publish the release ref → succeeds (so the immutable release exists)
+if [[ "$args" == *"-X POST"* && "$args" == *"git/refs"* ]]; then
+  echo "{}"; exit 0
+fi
+# channel move PATCH → persistent NON-404 failure: _gh_move_tag cannot recover
+# (it does not fall back to POST on a non-"not found" error) → the cut is partial
+if [[ "$args" == *"-X PATCH"* && "$args" == *"git/refs/tags/standards/v1-stable"* ]]; then
+  echo "gh: Internal Server Error (HTTP 500)" >&2; exit 1
+fi
+# this cut is the highest on the v1 line (so the move is attempted, not skipped)
+if [[ "$args" == *"matching-refs/tags/standards/v"* ]]; then
+  echo "refs/tags/standards/v1.0.0"; exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.0.0 --commit 6666666666666666666666666666666666666666
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"partial cut"* ]]
+  [[ "$output" == *"could NOT be moved"* ]]
+  # the recovery guidance names the current script ($0) and the exact rerun command
+  [[ "$output" == *"Re-run"* ]]
+  [[ "$output" == *"cut 1.0.0 --commit 6666666666666666666666666666666666666666"* ]]
 }
