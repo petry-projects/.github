@@ -1062,7 +1062,7 @@ GHEOF
 
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" \
     bash "$ORCH" rollback dev-lead stable --to v139.8.0 --dry-run
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"::error::"* ]]
   # The resolution falls back to the bare tier (v-scoped absent), so the loud error names the
   # resolved-but-absent tag and refuses — never a "[DRY-RUN] would … (force)" success line.
