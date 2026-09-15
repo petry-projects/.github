@@ -243,6 +243,20 @@ _cmd_cut() {
   fi
 
   echo "moving channel $channel_tag onto ${commit:0:12}..."
+  # Re-check before moving to close the race window (#1119): a concurrent higher cut
+  # could have published since the prior rescan. If so, skip the move to avoid
+  # regressing the channel to an older version; the higher cut will move it forward.
+  local -a check_major=("$version")
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    if [ "$(sr_major "$v" || true)" = "$major" ]; then check_major+=("$v"); fi
+  done < <(_gh_release_versions "$SR_REPO")
+  local check_highest
+  check_highest="$(sr_max_version "${check_major[@]}")"
+  if [ "$check_highest" != "$version" ]; then
+    echo "channel $channel_tag: release standards/v$check_highest is now published; leaving the channel on that newer release (skipping backward move)."
+    return 0
+  fi
   # A cut is not atomic: the immutable release is created first, the channel moved
   # second. If the move fails, the release is already published but consumers
   # pinning the channel cannot reach it (#1119). Fail LOUDLY and name the exact
