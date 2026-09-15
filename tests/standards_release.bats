@@ -334,7 +334,7 @@ EOF
   # The channel ref was actually created in the same run (no stranded release),
   # and it points at THIS cut's commit — assert the SHA too, not just the ref
   # name, so a wrong-commit POST cannot pass this same-commit test.
-  grep -q "git/refs .*refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
+  grep -q "POST .*git/refs .*refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
 }
 
 # Re-running the exact same cut must stay NOOP on the immutable release (never
@@ -380,7 +380,7 @@ EOF
   [[ "$output" == *"moving channel standards/v1-stable"* ]]
   [[ "$output" == *"done."* ]]
   # The channel was converged via a force-move PATCH; no release re-create happened.
-  grep -q "PATCH .*git/refs/tags/standards/v1-stable" "$GH_CALLS"
+  grep -q "PATCH .*git/refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
   ! grep -q -e "-X POST .*git/tags" "$GH_CALLS" || { echo "release re-create request on NOOP" >&2; return 1; }
 }
 
@@ -430,6 +430,6 @@ EOF
   [[ "$output" == *"partial cut"* ]]
   [[ "$output" == *"could NOT be moved"* ]]
   # the recovery guidance names the current script ($0) and the exact rerun command
-  [[ "$output" == *"Re-run"* ]]
-  [[ "$output" == *"cut 1.0.0 --commit 6666666666666666666666666666666666666666"* ]]
+  # as a complete quoted shell token without outer apostrophes
+  [[ "$output" == *'Re-run "$0" cut 1.0.0 --commit 6666666666666666666666666666666666666666'* ]]
 }
