@@ -331,8 +331,10 @@ EOF
   [[ "$output" == *"creating immutable release standards/v1.0.0"* ]]
   [[ "$output" == *"moving channel standards/v1-stable"* ]]
   [[ "$output" == *"done."* ]]
-  # The channel ref was actually created in the same run (no stranded release).
-  grep -q "git/refs .*refs/tags/standards/v1-stable" "$GH_CALLS"
+  # The channel ref was actually created in the same run (no stranded release),
+  # and it points at THIS cut's commit — assert the SHA too, not just the ref
+  # name, so a wrong-commit POST cannot pass this same-commit test.
+  grep -q "git/refs .*refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
 }
 
 # Re-running the exact same cut must stay NOOP on the immutable release (never
