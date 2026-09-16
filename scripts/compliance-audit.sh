@@ -118,16 +118,11 @@ REQUIRED_WORKFLOWS=(ci.yml sonarcloud.yml dev-lead.yml dependabot-automerge.yml 
 # function below verifies the API state and treats stray codeql.yml files
 # as drift to be removed. See standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup.
 
-# name:hex-color:description (color without leading #)
-REQUIRED_LABEL_SPECS=(
-  "security:d93f0b:Security-related PRs and issues"
-  "dependencies:0075ca:Dependency update PRs"
-  "scorecard:d93f0b:OpenSSF Scorecard findings (auto-created)"
-  "bug:d73a4a:Bug reports"
-  "enhancement:a2eeef:Feature requests"
-  "documentation:0075ca:Documentation changes"
-  "in-progress:fbca04:An agent is actively working this issue"
-)
+# The fixed label set (STANDARD_LABEL_SPECS) and the derived <id>:hands-off
+# persona opt-out family (persona_opt_out_label_configs) live in
+# scripts/lib/labels.sh, the single source of truth shared with
+# apply-repo-settings.sh and compliance-remediate.sh (issue #1139). Sourced below,
+# after warn() is defined. check_labels() consumes both.
 
 # App IDs whose auto_trigger_checks must be disabled org-wide.
 # 1236702 = Claude (anthropics/claude-code-action)
@@ -262,6 +257,12 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
+
+# Shared label source of truth — STANDARD_LABEL_SPECS (fixed set) and
+# persona_opt_out_label_configs (derived <id>:hands-off family). Sourced after
+# warn() is defined so the library uses this script's logging helper (issue #1139).
+# shellcheck source=lib/labels.sh
+. "$SCRIPT_DIR/lib/labels.sh"
 
 # Shared dev-lead retrigger helpers — dl_dev_lead_active() and
 # dl_cycle_trigger_label(). Used to re-engage dev-lead on persistent findings.
@@ -644,32 +645,72 @@ check_labels() {
   local existing_labels
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
-  for spec in "${REQUIRED_LABEL_SPECS[@]}"; do
-    IFS=':' read -r label color description <<< "$spec"
-    if ! echo "$existing_labels" | grep -qx "$label"; then
-      # Read-only (or dry-run) never mutates: file the finding instead of
-      # auto-creating the label (issue #1036, AC4).
-      if ! mutations_enabled; then
-        add_finding "$repo" "labels" "missing-label-$label" "warning" \
-          "Required label \`$label\` is missing" \
-          "standards/github-settings.md#labels--standard-set"
-      else
-        info "Auto-creating missing label '$label' on $repo"
-        if gh label create "$label" \
-            --repo "$ORG/$repo" \
-            --color "$color" \
-            --description "$description" \
-            --force 2>/dev/null; then
-          info "Label '$label' created successfully on $repo"
-        else
-          warn "Failed to create label '$label' on $repo — filing finding for manual remediation"
-          add_finding "$repo" "labels" "missing-label-$label" "warning" \
-            "Required label \`$label\` is missing and could not be auto-created" \
-            "standards/github-settings.md#labels--standard-set"
-        fi
-      fi
-    fi
+  # --- Fixed set (STANDARD_LABEL_SPECS, from scripts/lib/labels.sh) -----------
+  local spec label color description rest
+  for spec in "${STANDARD_LABEL_SPECS[@]}"; do
+    label="${spec%%|*}"
+    rest="${spec#*|}"
+    color="${rest%%|*}"
+    description="${rest#*|}"
+    _check_or_create_label "$repo" "$label" "$color" "$description" "$existing_labels"
   done
+
+  # --- Derived <id>:hands-off persona opt-out family --------------------------
+  # Derived from the persona manifests EXACTLY as apply-repo-settings.sh's
+  # apply_labels does (persona_opt_out_label_configs), so adding a persona
+  # requires no edit to any label list here (#756, issue #1139 AC#1).
+  #
+  # Fail closed (#755, AC#3): if the family cannot be derived faithfully — the
+  # manifest listing is unreadable, or a manifest could not be read and its label
+  # had to be guessed — emit a finding. An unreadable manifest list must NEVER be
+  # read as "no persona labels required"; that is the systemic bug the applier
+  # already guards against, mirrored here.
+  local persona_out persona_rc=0
+  persona_out=$(persona_opt_out_label_configs) || persona_rc=$?
+  if [ "$persona_rc" -ne 0 ]; then
+    add_finding "$repo" "labels" "persona-opt-out-derivation-failed" "error" \
+      "Could not derive the \`<id>:hands-off\` persona opt-out label family from the persona manifests (\`$PERSONA_MANIFEST_REPO\`). Failing closed: an unreadable or incomplete manifest list is NOT treated as \"no persona labels required\" — run \`scripts/apply-repo-settings.sh $repo\` once the manifests are readable to provision the family." \
+      "standards/github-settings.md#derived-family--persona-opt-out-labels-idhands-off"
+  fi
+  # Still check whatever WAS derived: a partial derivation emits its best guess,
+  # and even on the happy path this is the per-persona missing-label check.
+  while IFS='|' read -r label color description; do
+    [ -z "$label" ] && continue
+    _check_or_create_label "$repo" "$label" "$color" "$description" "$existing_labels"
+  done <<< "$persona_out"
+}
+
+# _check_or_create_label <repo> <label> <color> <description> <existing_labels>
+# If <label> is absent from the newline-separated <existing_labels>: file a
+# missing-label finding in the read-only default, or (when mutations are enabled)
+# create it idempotently and file a finding only if creation fails. Shared by the
+# fixed set and the derived persona family so both honour the read-only default
+# (issue #1036, AC4) and both auto-create under --apply.
+_check_or_create_label() {
+  local repo="$1" label="$2" color="$3" description="$4" existing_labels="$5"
+
+  echo "$existing_labels" | grep -qxF -- "$label" && return 0
+
+  if ! mutations_enabled; then
+    add_finding "$repo" "labels" "missing-label-$label" "warning" \
+      "Required label \`$label\` is missing" \
+      "standards/github-settings.md#labels--standard-set"
+    return 0
+  fi
+
+  info "Auto-creating missing label '$label' on $repo"
+  if gh label create "$label" \
+      --repo "$ORG/$repo" \
+      --color "$color" \
+      --description "$description" \
+      --force 2>/dev/null; then
+    info "Label '$label' created successfully on $repo"
+  else
+    warn "Failed to create label '$label' on $repo — filing finding for manual remediation"
+    add_finding "$repo" "labels" "missing-label-$label" "warning" \
+      "Required label \`$label\` is missing and could not be auto-created" \
+      "standards/github-settings.md#labels--standard-set"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -2432,15 +2473,7 @@ ensure_audit_label() {
 ensure_required_labels() {
   local repo="$1"
   # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
-    "in-progress|fbca04|An agent is actively working this issue"
-  )
+  local label_configs=("${STANDARD_LABEL_SPECS[@]}")
 
   for config in "${label_configs[@]}"; do
     IFS='|' read -r name color description <<< "$config"
