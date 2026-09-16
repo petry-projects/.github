@@ -36,6 +36,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/gitignore-baseline.sh"
 # shellcheck source=scripts/lib/standards-deploy.sh
 source "$SCRIPT_DIR/lib/standards-deploy.sh"
+# Shared label source of truth — STANDARD_LABEL_SPECS (fixed set),
+# persona_opt_out_label_configs (derived <id>:hands-off family), and the
+# std_label_spec() lookup remediate_label uses to resolve colour+description for
+# BOTH the fixed set and the derived family (issue #1139, AC#2/AC#4).
+# shellcheck source=scripts/lib/labels.sh
+source "$SCRIPT_DIR/lib/labels.sh"
 
 ORG="petry-projects"
 FINDINGS_FILE="${FINDINGS_FILE:-}"
@@ -49,28 +55,10 @@ GITIGNORE_CANONICAL="${GITIGNORE_CANONICAL:-$(cd "$SCRIPT_DIR/.." && pwd)/.gitig
 REMEDIATION_REPORT="$REPORT_DIR/remediation-report.md"
 SKIPPED_REPORT="$REPORT_DIR/skipped.md"
 
-# ---------------------------------------------------------------------------
-# Label definitions — from standards/github-settings.md#labels--standard-set
-# ---------------------------------------------------------------------------
-declare -A LABEL_COLORS=(
-  [security]="d93f0b"
-  [dependencies]="0075ca"
-  [scorecard]="d93f0b"
-  [bug]="d73a4a"
-  [enhancement]="a2eeef"
-  [documentation]="0075ca"
-  [in-progress]="fbca04"
-)
-
-declare -A LABEL_DESCS=(
-  [security]="Security-related PRs and issues"
-  [dependencies]="Dependency update PRs"
-  [scorecard]="OpenSSF Scorecard findings"
-  [bug]="Bug reports"
-  [enhancement]="Feature requests"
-  [documentation]="Documentation changes"
-  [in-progress]="An agent is actively working this issue"
-)
+# Label colours/descriptions come from the shared std_label_spec() (scripts/lib/
+# labels.sh) — the SAME source of truth the audit and applier use — so the
+# remediator no longer holds its own copy of the fixed-label table and can also
+# resolve the derived <id>:hands-off persona family (issue #1139, AC#2/AC#4).
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -245,8 +233,14 @@ remediate_check_suite_auto_trigger() {
 remediate_label() {
   local repo="$1" label="$2"
 
-  local color="${LABEL_COLORS[$label]:-e4e669}"
-  local desc="${LABEL_DESCS[$label]:-}"
+  # Resolve colour+description from the shared source of truth — the fixed set
+  # AND the derived <id>:hands-off persona family (scripts/lib/labels.sh). A
+  # label outside the standard set falls back to a neutral default so an
+  # unexpected finding still produces a usable label.
+  local color="e4e669" desc="" spec
+  if spec=$(std_label_spec "$label"); then
+    IFS='|' read -r _ color desc <<< "$spec"
+  fi
 
   if [ "$DRY_RUN" = "true" ]; then
     skip "[DRY] Would create label '$label' in $ORG/$repo"
