@@ -2468,15 +2468,7 @@ ensure_audit_label() {
 ensure_required_labels() {
   local repo="$1"
   # Format: "name|color|description" (pipe-delimited to avoid colon conflicts)
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
-    "in-progress|fbca04|An agent is actively working this issue"
-  )
+  local label_configs=("${STANDARD_LABEL_SPECS[@]}")
 
   for config in "${label_configs[@]}"; do
     IFS='|' read -r name color description <<< "$config"
