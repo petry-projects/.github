@@ -31,18 +31,11 @@ fi
 ORG="petry-projects"
 DRY_RUN="${DRY_RUN:-false}"
 
-# Source of the persona manifests that the <id>:hands-off opt-out label family is
-# derived from. `.github-private` is PUBLIC (private:false, verified) despite its
-# name, so these reads work over the token already required by this script and need
-# no extra auth. See standards/persona-standards.md §1.1 (the manifest is the
-# index-of-record) and §4 rule 4 (every persona defines an opt_out_label).
-PERSONA_MANIFEST_REPO="${PERSONA_MANIFEST_REPO:-petry-projects/.github-private}"
-PERSONA_MANIFEST_REF="${PERSONA_MANIFEST_REF:-main}"
-
-# One consistent color for the entire opt-out family — neutral grey, deliberately
-# distinct from the functional labels (security/bug red, dependency/docs blue,
-# in-progress yellow). Documented in standards/github-settings.md#labels--standard-set.
-PERSONA_OPT_OUT_COLOR="ededed"
+# The standard label set — the fixed set (STANDARD_LABEL_SPECS), the persona
+# manifest source, the opt-out family colour, and persona_opt_out_label_configs
+# — all live in scripts/lib/labels.sh, the single source of truth shared with
+# compliance-audit.sh and compliance-remediate.sh (issue #1139). Sourced below,
+# after the logging helpers it relies on are defined.
 
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[OK]    $*"; }
@@ -62,6 +55,13 @@ CHECK_SUITE_APP_IDS=(1236702 347564)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/push-protection.sh
 . "$SCRIPT_DIR/lib/push-protection.sh"
+
+# Shared label source of truth — STANDARD_LABEL_SPECS (fixed set),
+# persona_opt_out_label_configs (derived <id>:hands-off family), the persona
+# manifest config, and PERSONA_OPT_OUT_COLOR. Sourced after warn() is defined
+# so the library uses this script's logging helper (issue #1139).
+# shellcheck source=lib/labels.sh
+. "$SCRIPT_DIR/lib/labels.sh"
 
 usage() {
   echo "Usage: $0 <repo-name>"
@@ -90,76 +90,14 @@ _PERSONA_OPT_OUT_CONFIGS_CACHED=false
 # systemic bug this framework already had four instances of; this is not the fifth.
 _PERSONA_OPT_OUT_SYNC_FAILED=false
 
-# persona_opt_out_label_configs — emit one "name|color|description" line per persona,
-# deriving the <id>:hands-off opt-out label from the persona manifests rather than a
-# hand-maintained list. Adding a persona therefore needs NO edit here: the family
-# follows from personas/<id>/persona.yml, the index-of-record (persona-standards.md
-# §1.1). Draft personas are included — being able to say "hands-off" is exactly what
-# a draft needs.
-#
-# Returns non-zero if the family could not be derived faithfully. It still emits
-# whatever it resolved (so a hiccup never blocks the STATIC label set — that
-# resilience is deliberate), but the caller records the failure and the run exits
-# non-zero rather than claiming success. Emitting nothing and returning 0 would
-# make "labels applied ✅" indistinguishable from "the opt-out hatch is missing".
-persona_opt_out_label_configs() {
-  local ids id opt_out opt_out_raw rc=0
-  ids=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas?ref=$PERSONA_MANIFEST_REF" 2>/dev/null \
-        | jq -r '.[]? | select(.type == "dir") | .name' 2>/dev/null) || {
-    warn "  Could not list persona manifests from $PERSONA_MANIFEST_REPO — opt-out labels NOT applied"
-    return 1
-  }
-
-  while IFS= read -r id; do
-    [ -z "$id" ] && continue
-    # Prefer the manifest's declared opt_out_label; fall back to the <id>:hands-off
-    # convention (persona-standards.md §4 rule 4) when the field cannot be read.
-    if opt_out_raw=$(gh api "repos/$PERSONA_MANIFEST_REPO/contents/personas/$id/persona.yml?ref=$PERSONA_MANIFEST_REF" \
-                       -H "Accept: application/vnd.github.raw" 2>/dev/null); then
-      # `opt_out_label` is a free-form string in the schema, and GitHub label names
-      # may contain spaces — so this must NOT truncate at the first word (an
-      # `awk '{print $1}'` here would provision "needs" for a label named
-      # "needs human review", leaving the real opt-out absent and the hatch broken).
-      # Take the whole scalar, then strip: trailing YAML comment (which requires
-      # leading whitespace), trailing space, and surrounding quotes.
-      opt_out=$(printf '%s' "$opt_out_raw" \
-                | sed -n 's/^[[:space:]]*opt_out_label:[[:space:]]*//p' | head -1 \
-                | tr -d '\r' \
-                | sed -e 's/[[:space:]]\{1,\}#.*$//' \
-                      -e 's/[[:space:]]*$//' \
-                      -e 's/^"\(.*\)"$/\1/' \
-                      -e "s/^'\(.*\)'$/\1/")
-    else
-      # The convention fallback below is a GUESS. §4 rule 4 makes <id>:hands-off
-      # only a convention — the schema lets a persona declare any opt_out_label —
-      # so if the manifest is unreadable we may create a label nobody uses while
-      # the real one stays absent, leaving opt-out silently broken. Emit it (it is
-      # the best guess) but do not call the run a success.
-      warn "  Could not read personas/$id/persona.yml — guessing '$id:hands-off' from the convention"
-      opt_out=""
-      rc=1
-    fi
-    [ -z "$opt_out" ] && opt_out="$id:hands-off"
-    printf '%s|%s|Opt an item out of the %s persona automation entirely\n' \
-      "$opt_out" "$PERSONA_OPT_OUT_COLOR" "$id"
-  done <<< "$ids"
-  return "$rc"
-}
-
 apply_labels() {
   local repo="$1"
   info "Applying standard labels to $ORG/$repo ..."
 
-  # Format: "name|color|description" — matches standards/github-settings.md#labels--standard-set
-  local label_configs=(
-    "security|d93f0b|Security-related PRs and issues"
-    "dependencies|0075ca|Dependency update PRs"
-    "scorecard|d93f0b|OpenSSF Scorecard findings"
-    "bug|d73a4a|Bug reports"
-    "enhancement|a2eeef|Feature requests"
-    "documentation|0075ca|Documentation changes"
-    "in-progress|fbca04|An agent is actively working this issue"
-  )
+  # The fixed set is the shared source of truth (scripts/lib/labels.sh); the
+  # persona <id>:hands-off family is appended below via persona_opt_out_label_configs
+  # from that same library. Format: "name|color|description".
+  local label_configs=("${STANDARD_LABEL_SPECS[@]}")
 
   # Append the derived persona opt-out family (<id>:hands-off, one per persona).
   # Cache on first call so --all mode doesn't re-fetch all manifests per repo.
