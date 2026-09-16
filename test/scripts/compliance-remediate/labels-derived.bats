@@ -119,3 +119,16 @@ _source_lib() {
   [ "$status" -ne 0 ]
   [[ "$output" != *":hands-off"* ]]
 }
+
+@test "persona_opt_out_label_configs rejects an opt_out_label containing the pipe delimiter" {
+  # opt_out_label is free-form and a GitHub label name may contain '|', the field
+  # delimiter of the emitted name|color|description spec. Such a name must NOT be
+  # emitted (it would shift the color/description fields and corrupt downstream
+  # parsers); it is skipped and the derivation fails closed.
+  printf 'triggers:\n  opt_out_label: "dev-lead|hands-off"\n' > "$MANIFEST_DIR/dev-lead.yml"
+  run _source_lib 'persona_opt_out_label_configs'
+  [ "$status" -ne 0 ]
+  # The corrupt record is never emitted: no line carries the injected pipe as a
+  # name field (the only pipes present are the two legitimate spec delimiters).
+  [[ "$output" != *"dev-lead|hands-off|"* ]]
+}

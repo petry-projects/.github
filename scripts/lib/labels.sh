@@ -113,6 +113,17 @@ persona_opt_out_label_configs() {
       rc=1
     fi
     [ -z "$opt_out" ] && opt_out="$id:hands-off"
+    # The label name is the FIRST pipe-delimited field of the emitted spec, so a
+    # name that itself contains '|' (opt_out_label is free-form, and GitHub label
+    # names may contain a pipe) would shift the color/description fields and
+    # corrupt every downstream parser (std_label_spec's `${spec%%|*}`, the audit/
+    # applier splits). We cannot represent such a name in this format, so reject
+    # it: warn, skip it, and fail the derivation — never emit a corrupt record.
+    if [ "${opt_out#*|}" != "$opt_out" ]; then
+      warn "  personas/$id opt_out_label '$opt_out' contains '|' (the field delimiter) — skipping; opt-out label NOT applied"
+      rc=1
+      continue
+    fi
     printf '%s|%s|Opt an item out of the %s persona automation entirely\n' \
       "$opt_out" "$PERSONA_OPT_OUT_COLOR" "$id"
   done <<< "$ids"
