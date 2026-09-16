@@ -641,9 +641,12 @@ check_labels() {
   existing_labels=$(gh_api "repos/$ORG/$repo/labels" --jq '.[].name' --paginate 2>/dev/null || echo "")
 
   # --- Fixed set (STANDARD_LABEL_SPECS, from scripts/lib/labels.sh) -----------
-  local spec label color description
+  local spec label color description rest
   for spec in "${STANDARD_LABEL_SPECS[@]}"; do
-    IFS='|' read -r label color description <<< "$spec"
+    label="${spec%%|*}"
+    rest="${spec#*|}"
+    color="${rest%%|*}"
+    description="${rest#*|}"
     _check_or_create_label "$repo" "$label" "$color" "$description" "$existing_labels"
   done
 
@@ -681,7 +684,7 @@ check_labels() {
 _check_or_create_label() {
   local repo="$1" label="$2" color="$3" description="$4" existing_labels="$5"
 
-  echo "$existing_labels" | grep -qx "$label" && return 0
+  echo "$existing_labels" | grep -qxF -- "$label" && return 0
 
   if ! mutations_enabled; then
     add_finding "$repo" "labels" "missing-label-$label" "warning" \

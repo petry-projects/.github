@@ -135,7 +135,7 @@ persona_opt_out_label_configs() {
 std_label_spec() {
   local want="$1" spec name
   for spec in "${STANDARD_LABEL_SPECS[@]}"; do
-    IFS='|' read -r name _ _ <<< "$spec"
+    name="${spec%%|*}"
     if [ "$name" = "$want" ]; then
       printf '%s\n' "$spec"
       return 0
@@ -145,7 +145,7 @@ std_label_spec() {
   derived=$(persona_opt_out_label_configs 2>/dev/null) || true
   while IFS= read -r spec; do
     [ -z "$spec" ] && continue
-    IFS='|' read -r name _ _ <<< "$spec"
+    name="${spec%%|*}"
     if [ "$name" = "$want" ]; then
       printf '%s\n' "$spec"
       return 0
