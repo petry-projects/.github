@@ -97,6 +97,14 @@
     "clean_cycles_required": 2,
     "maintainer_sign_off_required": true,
     "criteria": "The structural check ships INFORMATIONAL (non-blocking): findings are reported in the Standards Sync audit summary and annotated on canonical-AGENTS.md PRs, but never fail a run. It is promoted to BLOCKING only after (1) two consecutive Standards Sync audit cycles with zero confirmed false positives AND (2) explicit maintainer sign-off. Promotion is a deliberate, human-gated flip of default_severity to 'blocking' — mirroring the human sign-off gate used for the pr-limits and agent-rate-limits configs — not an automatic transition.",
-    "note": "A recommended-level rule is never blocking even after the overall check is promoted; only required-level rules can fail a blocking run. Promotion changes the check's severity, not any rule's level."
+    "note": "A recommended-level rule is never blocking even after the overall check is promoted; only required-level rules can fail a blocking run. Promotion changes the check's severity, not any rule's level.",
+    "cycle_log": "docs/initiatives/agents-md-validation-cycle-log.md",
+    "cycle_log_note": "The append-only, committed per-cycle log is the durable, tamper-evident, independently-auditable source of truth for the 'two consecutive clean cycles' precondition (issue #647, AC #5) — NOT the editable audit summary issue. Each cycle records the structural finding count and every confirmed false positive, each attributed to a named maintainer. Read/validate it with scripts/agents-md-cycle-log.sh (it reports the clean-cycle precondition but NEVER promotes).",
+    "toggle": {
+      "enabled": false,
+      "note": "The discrete, reviewable blocking-mode flip. This story (#647) delivers the mechanism and leaves it DISABLED (enabled=false); the actual flip is a separate, human-gated decision recorded against the criteria above (issue #647, AC #3 and #4). Two independent points must be armed to enforce, and neither is armed here.",
+      "linter_flag": "scripts/agents-md-lint.sh --mode failing (Phase 2 toggle point): exits non-zero on a required-level finding instead of report-only. The compliance audit invokes the linter informational-only today.",
+      "required_status_check": "The local canonical-AGENTS.md CI self-check becomes a REQUIRED status check on main via branch protection (documented in standards/github-settings.md); this story applies no branch-protection change."
+    }
   }
 }
