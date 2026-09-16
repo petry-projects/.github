@@ -243,7 +243,29 @@ _cmd_cut() {
   fi
 
   echo "moving channel $channel_tag onto ${commit:0:12}..."
-  _gh_move_tag "$SR_REPO" "$channel_tag" "$commit"
+  # Re-check before moving to close the race window (#1119): a concurrent higher cut
+  # could have published since the prior rescan. If so, skip the move to avoid
+  # regressing the channel to an older version; the higher cut will move it forward.
+  local -a check_major=("$version")
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    if [ "$(sr_major "$v" || true)" = "$major" ]; then check_major+=("$v"); fi
+  done < <(_gh_release_versions "$SR_REPO")
+  local check_highest
+  check_highest="$(sr_max_version "${check_major[@]}")"
+  if [ "$check_highest" != "$version" ]; then
+    echo "channel $channel_tag: release standards/v$check_highest is now published; leaving the channel on that newer release (skipping backward move)."
+    return 0
+  fi
+  # A cut is not atomic: the immutable release is created first, the channel moved
+  # second. If the move fails, the release is already published but consumers
+  # pinning the channel cannot reach it (#1119). Fail LOUDLY and name the exact
+  # recovery — the release is NOOP-safe, so re-running the same cut converges the
+  # channel without re-creating (or clobbering) the release.
+  if ! _gh_move_tag "$SR_REPO" "$channel_tag" "$commit"; then
+    echo "::error::partial cut: $release_tag is published at ${commit:0:12} but the channel $channel_tag could NOT be moved onto it — consumers pinning $channel_tag will not see this release. Re-run \"\$0\" cut $version --commit $commit to converge the channel (the release stays NOOP; it is never re-created or clobbered)." >&2
+    return 1
+  fi
   echo "done."
 }
 
@@ -272,7 +294,11 @@ _gh_move_tag() {
   local repo="$1" tag="$2" sha="$3" out low
   out="$(gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
       -f sha="$sha" -F force=true 2>&1)" && return 0
-  low="${out,,}"
+  # Portable lowercase for the case-insensitive "not found" match below. A bash-4
+  # case-modification expansion (the double-comma parameter form) is a fatal "bad
+  # substitution" on the macOS system bash 3.2 — this script is operator-run from a
+  # workstation, so that is a real execution environment (#1119). tr is POSIX.
+  low="$(printf '%s' "$out" | tr '[:upper:]' '[:lower:]')"
   if [[ "$low" != *"not found"* && "$low" != *"http 404"* && "$low" != *"reference does not exist"* ]]; then
     echo "::error::_gh_move_tag: could not move refs/tags/$tag -> ${sha:0:12} on $repo: ${out//$'\n'/ }" >&2
     return 1
