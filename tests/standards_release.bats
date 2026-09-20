@@ -430,7 +430,6 @@ EOF
   [[ "$output" == *"partial cut"* ]]
   [[ "$output" == *"could NOT be moved"* ]]
   # The recovery guidance must emit the complete rerun command with the exact version
-  # and commit as a shell-executable token: Re-run "$0" cut 1.0.0 --commit ... with
-  # the $0 quoted for shell expansion and NO outer apostrophes around the command.
-  grep -q 'Re-run "$0" cut 1.0.0 --commit 6666666666666666666666666666666666666666' <<< "$output"
+  # and commit as a shell-executable token with the actual script path quoted.
+  grep -q "Re-run \"$ORCH\" cut 1.0.0 --commit 6666666666666666666666666666666666666666" <<< "$output"
 }
