@@ -132,6 +132,41 @@ pm_manifest_url() {
     "$repo" "$ref" "$1"
 }
 
+# pm_interaction_url <slug> — the raw URL of that persona's interaction contract
+# (personas/<slug>/interaction.yml). Built by the SAME convention and by the same
+# unauthenticated raw.githubusercontent pattern as pm_manifest_url — the repo is
+# PUBLIC, so no token is used and none should be (see the fetch note in the
+# router). The contract is where each persona declares its stop_markers, so the
+# router derives the human-hold brakes from it rather than restating them (#1133).
+pm_interaction_url() {
+  local repo="${PERSONA_REPO:-petry-projects/.github-private}"
+  local ref="${PERSONA_REF:-main}"
+  printf 'https://raw.githubusercontent.com/%s/%s/personas/%s/interaction.yml\n' \
+    "$repo" "$ref" "$1"
+}
+
+# pm_fetch_disposition <http_code> — classify a raw.githubusercontent fetch into
+# what the caller should DO, mirroring the manifest fetch's status handling
+# exactly (#1133 AC #3):
+#
+#   200        -> "read"    the body is the answer
+#   404        -> "absent"  a real ANSWER — the resource is not there
+#   any other  -> "fail"    a FAILURE to get an answer (5xx, a 000 curl transport
+#                           error, an unexpected 4xx) — never read as "absent"
+#
+# For the interaction contract this is fail-closed in the direction that matters:
+# a transient 5xx must NEVER be mistaken for "this persona declares no stop
+# markers" and let a mention through on a held item. Pure and side-effect-free so
+# the disposition is unit-tested (tests/persona_mention.bats) rather than only
+# exercisable by triggering the workflow.
+pm_fetch_disposition() {
+  case "$1" in
+    200) printf 'read\n' ;;
+    404) printf 'absent\n' ;;
+    *)   printf 'fail\n' ;;
+  esac
+}
+
 # pm_trust_ok <author_association> <floor...> — 0 if the association clears the
 # floor. The floor is a set, not a ladder: GitHub's author_association has no
 # total order we should invent (CONTRIBUTOR vs COLLABORATOR is not a rank), so
@@ -252,4 +287,76 @@ pm_mention_gate_label() {
 # the caller should refuse rather than guess.
 pm_persona_id() {
   printf '%s' "$1" | pm_manifest_query '.id // ""'
+}
+
+# ----------------------------------------------------------------------------
+# Stop markers — the human hold, honoured on the mention surface (#1133)
+# ----------------------------------------------------------------------------
+# A persona declares its brakes in personas/<id>/interaction.yml as
+# `interaction.stop_markers` — e.g. needs-human-review, dev-lead:needs-human,
+# <id>:hands-off. The event-driven surfaces already honour all of them (the
+# .github-private pull_request advisory gate; hold-gate.sh). The mention router
+# honoured only the opt-out label, so a mention on a HELD item still dispatched
+# the persona — fail-open in the direction that matters. These functions let the
+# router honour the persona's OWN declared markers, read from the contract, so no
+# marker is ever a literal in the routing logic (#1133 AC #2).
+
+# pm_stop_markers <interaction-yaml> — emit each declared stop marker, one per
+# line (empty when none is declared or the block is absent). Reads the contract
+# on stdin so it stays pure and testable — fetching is the caller's job, exactly
+# like the manifest decisions above.
+#
+# A DECLARED stop_markers value must be an array of non-empty strings; anything
+# else — an object, a boolean (`false`), an empty string, or a non-string entry
+# — is a malformed contract and returns non-zero so pm_first_stop_marker fails
+# CLOSED rather than reading the item as "not held" (#1134). The value is
+# selected with `has` before any fallback so `//` can never quietly rewrite a
+# declared `false`/`null` into "absent" — only a genuinely missing key (and an
+# explicit `null`) is treated as "no markers declared".
+pm_stop_markers() {
+  # shellcheck disable=SC2016  # jq filter, not a shell expansion
+  printf '%s' "$1" | pm_manifest_query '
+    ((.interaction // {}) as $i
+     | if (($i | type) == "object") and ($i | has("stop_markers")) then $i.stop_markers
+       elif ((type == "object") and has("stop_markers")) then .stop_markers
+       else [] end) as $m
+    | if $m == null then empty
+      elif ($m | type) != "array" then
+        error("persona-mention: stop_markers must be an array of non-empty strings, got \($m | type)")
+      else
+        $m[] | if (type != "string") or (. == "") then
+          error("persona-mention: stop_markers entries must be non-empty strings")
+        else . end
+      end
+  '
+}
+
+# pm_first_stop_marker <interaction-yaml> — read the item's labels from stdin
+# (one per line) and emit the first declared stop_marker present among them, or
+# nothing. Empty output (with exit 0) means "not held — routing may proceed"; a
+# non-empty line is the brake the router should name in its skip log.
+#
+# Matching is whole-line, newline-delimited on both sides — mirroring
+# hold-gate.sh's hold_gate_first_match — so a label or marker containing spaces
+# is compared as a whole (GitHub label names may contain spaces) and
+# `needs-human-review` never matches `needs-human-review-later`. Declaration
+# order in the contract decides which marker is reported when several are
+# present.
+#
+# The markers are captured before the scan (not streamed via a process
+# substitution) so an unparseable contract — pm_stop_markers exits non-zero —
+# PROPAGATES as return 2 rather than being swallowed into "no markers". A 200
+# with a corrupt body must never be read as "not held" any more than a 5xx must;
+# the router runs `set -euo pipefail`, so a 2 here fails the job (fail-closed).
+pm_first_stop_marker() {
+  local interaction="$1" labels markers marker
+  labels="$(cat)"
+  markers="$(pm_stop_markers "$interaction")" || return 2
+  while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    case $'\n'"${labels}"$'\n' in
+      *$'\n'"${marker}"$'\n'*) printf '%s\n' "$marker"; return 0 ;;
+    esac
+  done <<<"$markers"
+  return 0
 }
