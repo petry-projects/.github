@@ -18,6 +18,19 @@
 #   whether the mention surface is enabled, in what mode, behind which trust
 #   floor, and under which opt-out label. This router restates none of it.
 #
+# Human holds (stop_markers) — and why discussions are the exception:
+#   Each persona declares its human-hold brakes in
+#   personas/<id>/interaction.yml as stop_markers (needs-human-review,
+#   dev-lead:needs-human, <id>:hands-off, ...). This router honours ALL of them
+#   on a mention — derived from the contract, never restated — so a human hold
+#   stops the mentioned persona exactly as it stops the event-driven surfaces
+#   (#1133). Like the opt-out and the write-mode gate, this check needs the
+#   item's labels. A DISCUSSION has no labels API surface (LABELS_KNOWN=false),
+#   so stop markers cannot be evaluated there — exactly as the opt-out cannot.
+#   Discussion semantics are therefore UNCHANGED: a read-mode advisory mention
+#   still routes, and a write-mode mention is already refused because its gate
+#   cannot be verified. See standards/persona-standards.md §4 (rule 4).
+#
 # Requires:
 #   GH_PAT_WORKFLOWS — org secret, classic PAT (repo scope) for API calls and dispatch
 name: Persona Mention Router (Reusable)
@@ -241,6 +254,58 @@ jobs:
               echo "Item carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
               echo "::endgroup::"
               continue
+            fi
+
+            # Honour the persona's declared human-hold brakes (#1133). Each
+            # persona lists them in personas/<slug>/interaction.yml as
+            # stop_markers (needs-human-review, dev-lead:needs-human,
+            # <slug>:hands-off, ...). The event-driven surfaces already stop on
+            # ALL of them (the .github-private pull_request advisory gate;
+            # hold-gate.sh); the mention router honoured only the opt-out above,
+            # so a mention on a HELD item still dispatched — fail-open in exactly
+            # the direction that matters. The markers are DERIVED from the
+            # contract, never restated here (AC #2).
+            #
+            # Only evaluable where labels are readable. On a discussion
+            # (LABELS_KNOWN=false) the markers cannot be checked, exactly as the
+            # opt-out above cannot — see the discussion note in this file's
+            # header. Existing discussion semantics are preserved: a read-mode
+            # advisory mention still routes; a write-mode mention is already
+            # refused below because its gate cannot be verified there.
+            if [ "$LABELS_KNOWN" = "true" ]; then
+              interaction_url="$(pm_interaction_url "$slug")"
+              ibody_file="$(mktemp)"
+              # NO Authorization header — the SAME public-repo reasoning as the
+              # manifest fetch above; a token only adds a silent-death path.
+              ihttp="$(curl -sSL --max-time 20 -o "$ibody_file" -w '%{http_code}' "$interaction_url" || echo 000)"
+              # Fetch dispositions mirror the manifest fetch EXACTLY: 200 is the
+              # contract, 404 is a real answer ("no contract — refuse this slug"),
+              # anything else is a FAILURE to get an answer and fails the job. A
+              # transient 5xx must never be read as "no stop markers" (AC #3).
+              case "$(pm_fetch_disposition "$ihttp")" in
+                read)
+                  interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; exit 1; }
+                  rm -f "$ibody_file"
+                  ;;
+                absent)
+                  rm -f "$ibody_file"
+                  echo "::warning::no interaction contract for '${slug}' at ${interaction_url} — a persona with a manifest must declare its stop markers; refusing to route on the opt-out alone"
+                  echo "::endgroup::"
+                  continue
+                  ;;
+                *)  # fail
+                  rm -f "$ibody_file"
+                  echo "::error::fetching ${interaction_url} returned HTTP ${ihttp} — refusing to treat a fetch failure as 'no stop markers'"
+                  exit 1
+                  ;;
+              esac
+
+              held_marker="$(printf '%s\n' "$LABELS" | pm_first_stop_marker "$interaction")"
+              if [ -n "$held_marker" ]; then
+                echo "Item carries stop marker '${held_marker}' — a human hold; persona '${slug}' honours it like the event-driven surfaces. Skipping."
+                echo "::endgroup::"
+                continue
+              fi
             fi
 
             # A write-mode mention must be ARMED. §4 rule 2 makes gate_label
