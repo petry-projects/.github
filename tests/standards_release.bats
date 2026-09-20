@@ -254,3 +254,182 @@ EOF
   [ "$status" -eq 2 ]
   [[ "$output" == *"Usage"* || "$output" == *"usage"* ]]
 }
+
+# ── bash 3.2 portability (AC #1, #3 — #1119) ───────────────────────────────────
+# This script is operator-run from a workstation, and the likely execution
+# environment is macOS whose system bash is 3.2. "CI uses a newer bash" is NOT
+# sufficient coverage: the original defect (`${out,,}` in _gh_move_tag) is a
+# bash-4 case-modification expansion that runs fine on the bats runner's bash but
+# is a fatal "bad substitution" on bash 3.2 — which aborted the cut *after* the
+# immutable release was created but *before* the channel moved. Guard both the
+# orchestrator and the pure core against bash 4+ constructs so the regression
+# cannot re-enter under a newer CI bash.
+@test "operator scripts are free of bash 4+ constructs (must run on macOS bash 3.2)" {
+  local f
+  for f in "$ORCH" "$LIB"; do
+    # ${var,,} / ${var,} / ${var^^} / ${var^} — bash 4 case modification.
+    run grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*[,^]' "$f"
+    [ "$status" -eq 1 ] || { echo "bash-4 case-modification (\${x,,}/\${x^^}) in $f:"; echo "$output"; false; }
+    # declare -A / local -A — associative arrays are bash 4 only.
+    run grep -nE '(declare|local|typeset)[[:space:]]+-[A-Za-z]*A' "$f"
+    [ "$status" -eq 1 ] || { echo "associative array (declare -A) in $f:"; echo "$output"; false; }
+    # mapfile / readarray — bash 4 only. \b is unreliable on BSD grep (macOS),
+    # so match word boundaries with explicit non-word-char / anchor classes (ERE, portable).
+    run grep -nE '(^|[^[:alnum:]_])(mapfile|readarray)([^[:alnum:]_]|$)' "$f"
+    [ "$status" -eq 1 ] || { echo "mapfile/readarray in $f:"; echo "$output"; false; }
+    # &>> — append-both redirect is bash 4 only.
+    run grep -nF '&>>' "$f"
+    [ "$status" -eq 1 ] || { echo "&>> append-both redirect in $f:"; echo "$output"; false; }
+  done
+}
+
+# ── atomic cut: no release published without its channel (AC #2, #5) ────────────
+# A fresh cut must CREATE the immutable release AND move the moving channel onto
+# the same commit. The bash-3.2 defect left the release created and the channel
+# absent; this asserts the channel is created (PATCH miss → POST fallback) in the
+# same run, so no consumer is left pinning a channel that 404s.
+@test "cut: a fresh cut creates the release and moves the channel onto the same commit" {
+  _stub_bin
+  export GH_CALLS="$STUBDIR/gh-calls.log"
+  : > "$GH_CALLS"
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "5555555555555555555555555555555555555555" ;;
+  *) : ;;
+esac
+EOF
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "$GH_CALLS"
+# release tag read → genuinely absent (HTTP 404) → CREATE path
+if [[ "$args" == *"git/ref/tags/standards/v1.0.0"* ]]; then
+  echo "gh: Not Found (HTTP 404)" >&2; exit 1
+fi
+# create the immutable annotated tag object
+if [[ "$args" == *"-X POST"* && "$args" == *"git/tags"* ]]; then
+  echo "1111111111111111111111111111111111111111"; exit 0
+fi
+# channel PATCH → the channel ref does not exist yet → _gh_move_tag falls back to POST
+if [[ "$args" == *"-X PATCH"* && "$args" == *"git/refs/tags/standards/v1-stable"* ]]; then
+  echo "gh: Reference does not exist (HTTP 404)" >&2; exit 1
+fi
+# publish any ref (release ref + channel ref create)
+if [[ "$args" == *"-X POST"* && "$args" == *"git/refs"* ]]; then
+  echo "{}"; exit 0
+fi
+# enumerate published releases: only v1.0.0, so this cut is the highest on v1
+if [[ "$args" == *"matching-refs/tags/standards/v"* ]]; then
+  echo "refs/tags/standards/v1.0.0"; exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.0.0 --commit 5555555555555555555555555555555555555555
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"creating immutable release standards/v1.0.0"* ]]
+  [[ "$output" == *"moving channel standards/v1-stable"* ]]
+  [[ "$output" == *"done."* ]]
+  # The channel ref was actually created in the same run (no stranded release),
+  # and it points at THIS cut's commit — assert the SHA too, not just the ref
+  # name, so a wrong-commit POST cannot pass this same-commit test.
+  grep -q "POST .*git/refs .*refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
+}
+
+# Re-running the exact same cut must stay NOOP on the immutable release (never
+# re-create / clobber it) yet still converge the channel (AC #5 idempotency +
+# the recoverability contract that makes a partial cut self-healing on re-run).
+@test "cut: re-running at the same commit is NOOP on the release and still converges the channel" {
+  _stub_bin
+  export GH_CALLS="$STUBDIR/gh-calls.log"
+  : > "$GH_CALLS"
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "5555555555555555555555555555555555555555" ;;
+  *) : ;;
+esac
+EOF
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+echo "$args" >> "$GH_CALLS"
+# release tag already resolves to the requested commit → NOOP
+if [[ "$args" == *"git/ref/tags/standards/v1.0.0"* ]]; then
+  echo "5555555555555555555555555555555555555555"; exit 0
+fi
+# a POST to git/tags would mean the immutable release is being re-created — forbid it
+if [[ "$args" == *"-X POST"* && "$args" == *"git/tags"* ]]; then
+  echo "release re-create attempted on NOOP: $args" >&2; exit 99
+fi
+# channel already exists → PATCH force-move succeeds
+if [[ "$args" == *"-X PATCH"* && "$args" == *"git/refs/tags/standards/v1-stable"* ]]; then
+  echo "{}"; exit 0
+fi
+if [[ "$args" == *"matching-refs/tags/standards/v"* ]]; then
+  echo "refs/tags/standards/v1.0.0"; exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.0.0 --commit 5555555555555555555555555555555555555555
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NOOP"* ]]
+  [[ "$output" != *"creating immutable release"* ]] || { echo "release creation output on NOOP" >&2; return 1; }
+  [[ "$output" == *"moving channel standards/v1-stable"* ]]
+  [[ "$output" == *"done."* ]]
+  # The channel was converged via a force-move PATCH; no release re-create happened.
+  grep -q "PATCH .*git/refs/tags/standards/v1-stable.*sha=5555555555555555555555555555555555555555" "$GH_CALLS"
+  ! grep -q -e "-X POST .*git/tags" "$GH_CALLS" || { echo "release re-create request on NOOP" >&2; return 1; }
+}
+
+# A partial cut — immutable release published, channel move persistently failing —
+# must exit NONZERO and print the exact rerun recovery guidance (#1119). The
+# fresh-cut and idempotency scenarios only exercise a SUCCEEDING move (PATCH miss
+# → POST fallback, and PATCH hit); neither reaches _gh_move_tag's nonzero branch,
+# so this asserts the failure status and the operator-facing recovery message.
+@test "cut: a persistent channel-move failure returns nonzero and prints the rerun recovery guidance" {
+  _stub_bin
+  cat > "$STUBDIR/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse HEAD") echo "6666666666666666666666666666666666666666" ;;
+  *) : ;;
+esac
+EOF
+  cat > "$STUBDIR/gh" <<'EOF'
+#!/usr/bin/env bash
+args="$*"
+# release tag read → genuinely absent (HTTP 404) → CREATE path
+if [[ "$args" == *"git/ref/tags/standards/v1.0.0"* ]]; then
+  echo "gh: Not Found (HTTP 404)" >&2; exit 1
+fi
+# create the immutable annotated tag object (release IS published)
+if [[ "$args" == *"-X POST"* && "$args" == *"git/tags"* ]]; then
+  echo "1111111111111111111111111111111111111111"; exit 0
+fi
+# publish the release ref → succeeds (so the immutable release exists)
+if [[ "$args" == *"-X POST"* && "$args" == *"git/refs"* ]]; then
+  echo "{}"; exit 0
+fi
+# channel move PATCH → persistent NON-404 failure: _gh_move_tag cannot recover
+# (it does not fall back to POST on a non-"not found" error) → the cut is partial
+if [[ "$args" == *"-X PATCH"* && "$args" == *"git/refs/tags/standards/v1-stable"* ]]; then
+  echo "gh: Internal Server Error (HTTP 500)" >&2; exit 1
+fi
+# this cut is the highest on the v1 line (so the move is attempted, not skipped)
+if [[ "$args" == *"matching-refs/tags/standards/v"* ]]; then
+  echo "refs/tags/standards/v1.0.0"; exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUBDIR/git" "$STUBDIR/gh"
+  run bash "$ORCH" cut v1.0.0 --commit 6666666666666666666666666666666666666666
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"partial cut"* ]]
+  [[ "$output" == *"could NOT be moved"* ]]
+  # The recovery guidance must emit the complete rerun command with the exact version
+  # and commit as a shell-executable token with the actual script path quoted.
+  grep -q "Re-run \"$ORCH\" cut 1.0.0 --commit 6666666666666666666666666666666666666666" <<< "$output"
+}
