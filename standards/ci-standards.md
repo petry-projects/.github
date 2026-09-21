@@ -46,6 +46,34 @@ against the reusable (or a standards PR that updates the template here) and let
 the channel tag promote the change centrally; never edit a caller to adjust its
 trigger, permission, or concurrency surface.
 
+**Required-check stubs must support `merge_group`.** Any org-standard stub that
+provides a **required status check** (e.g. `agent-shield.yml` →
+`agent-shield / AgentShield`, `dependency-audit.yml` →
+`dependency-audit / Detect ecosystems`) MUST include the **`merge_group`** event
+in its `on:` trigger set, alongside `push`/`pull_request`:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+```
+
+This is a property of the standard, not a per-repo patch. A GitHub **merge
+queue** only merges a PR once its required checks report on the queue's temporary
+`gh-readonly-queue/*` ref, and a workflow reports there only if it triggers on
+`merge_group`. Because these stubs forbid consumers from editing trigger events
+(the job name is a required-check context that must stay verbatim), a consumer
+cannot add `merge_group` itself — so it lives in the template here and every
+adopter inherits it verbatim. Any repo adopting a merge queue then needs **no
+cross-repo change**. The reusables themselves are `workflow_call` and are
+indifferent to the outer event, so they need no change. Do not strip
+`merge_group` on a stub sync and do not flag it as trigger drift — the `on:`
+surface-drift checks compare against this template, so the merge-queue trigger set
+is the compliant baseline.
+
 ### Reusable workflow versioning — the `stable` channel
 
 **Standard.** Every reusable workflow is versioned by a **moving `stable`
