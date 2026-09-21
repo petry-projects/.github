@@ -25,10 +25,23 @@ REQUIRED_CHECK_STUBS=(
   "dependency-audit.yml:dependency-audit"
 )
 
-# Print the top-level `merge_group` trigger key lines (a real YAML key at the
-# `on:` block's child indentation), never a `#` comment or prose mention.
+# Print the top-level `merge_group` trigger key line ONLY when it is a direct
+# child of the top-level `on:` block (at that block's own child indentation) —
+# never a key nested under another trigger, a `#` comment, or a prose mention.
+# A bare `grep` for `merge_group:` at any indentation/location would falsely
+# pass on such a nested key even when `on:` lacks the event (#1157).
 merge_group_lines() {
-  grep -nE '^[[:space:]]+merge_group:' "$1" || true
+  awk '
+    /^on:[[:space:]]*$/       { in_on = 1; child = 0; next }
+    /^[^[:space:]#]/          { in_on = 0 }
+    in_on && /^[[:space:]]*#/ { next }
+    in_on && /^[ ]+[^[:space:]]/ {
+      match($0, /^[ ]+/); ind = RLENGTH
+      if (child == 0) child = ind
+      if (ind == child && $0 ~ /^[ ]+merge_group:[[:space:]]*$/)
+        print FNR ":" $0
+    }
+  ' "$1"
 }
 
 # Print `jobs.<id>:` header lines for the given job id at jobs-child indentation.
@@ -73,6 +86,19 @@ job_header_lines() {
     printf 'required-check job name drift -> %s\n' "${violations[@]}"
     return 1
   fi
+}
+
+@test "merge_group_lines ignores a nested merge_group and requires a real on: child" {
+  # Negative control: a `merge_group:` nested under another trigger (not a direct
+  # child of the top-level `on:` block) must NOT count as the required trigger.
+  local nested pos
+  nested="$(mktemp)"
+  pos="$(mktemp)"
+  printf 'on:\n  push:\n    branches: [main]\n    merge_group:\njobs:\n  x:\n    runs-on: ubuntu-latest\n' > "$nested"
+  printf 'on:\n  push:\n    branches: [main]\n  merge_group:\njobs:\n  x:\n    runs-on: ubuntu-latest\n' > "$pos"
+  [ -z "$(merge_group_lines "$nested")" ] || { echo "nested merge_group wrongly matched"; rm -f "$nested" "$pos"; return 1; }
+  [ -n "$(merge_group_lines "$pos")" ]    || { echo "top-level merge_group not matched"; rm -f "$nested" "$pos"; return 1; }
+  rm -f "$nested" "$pos"
 }
 
 @test "the guard actually inspects the required-check stub templates" {
