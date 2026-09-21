@@ -47,7 +47,7 @@ merge_group_lines() {
 # Print `jobs.<id>:` header lines for the given job id at jobs-child indentation.
 job_header_lines() {
   local file="$1" job="$2"
-  grep -nE "^[[:space:]]+${job}:[[:space:]]*$" "$file" || true
+  grep -E "^[[:space:]]+${job}:[[:space:]]*$" "$file" || true
 }
 
 @test "every required-check stub template triggers on merge_group" {
