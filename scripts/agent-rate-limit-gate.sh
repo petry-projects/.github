@@ -35,6 +35,16 @@
 # dispatch step on it. DRY_RUN / DEV_LEAD_DRY_RUN log every intended decision and
 # mutate nothing (AC #7).
 #
+# Org-wide token-budget breaker (#1155): in addition to the per-agent-type checks
+# above, the orchestrator also consults the org-wide Claude token-budget breaker
+# (the `session` 5-hour and `weekly_all` 7-day account windows; `weekly_scoped` is
+# never consulted — ADR §2.5). A `defer` from EITHER half defers the dispatch. The
+# whole consultation is behind AGENT_TOKEN_BUDGET_ENABLED: unset (the default) ⇒
+# skipped entirely, so the output is byte-identical to before this change; it is
+# inert until a maintainer arms the flag AND wires the private telemetry seam
+# (petry-projects/.github-private#1565). Even armed, the weekly glide half stays
+# inert until org_wide.token_budget.limits.weekly_all.enabled is flipped in config.
+#
 # Usage:
 #   agent-rate-limit-gate.sh <agent_type> [options]
 #     --mode enforce|log-only   default: log-only (only initiative-driver enforces)
@@ -48,7 +58,10 @@
 #
 # Env: SOURCE_NOW (epoch override, testability), DRY_RUN / DEV_LEAD_DRY_RUN,
 #      AGENT_RATE_LIMITS_CONFIG (library override), ARGATE_LIB_ONLY (source
-#      without running main — for unit tests).
+#      without running main — for unit tests), AGENT_TOKEN_BUDGET_ENABLED (arm the
+#      org-wide token-budget consultation; unset ⇒ skipped entirely),
+#      AGENT_TOKEN_BUDGET_TELEMETRY_CMD / AGENT_TOKEN_BUDGET_TELEMETRY_FILE (the
+#      private telemetry adapter seam the library reads the usage envelope from).
 
 # Source the co-located pure gate library.
 _ARGATE_HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -242,6 +255,62 @@ argate_escalate() {
 }
 
 # ---------------------------------------------------------------------------
+# argate_token_budget — consult the org-wide token-budget breaker across the two
+# pause-worthy account-wide windows and echo `allow` or `defer` on stdout (#1155).
+#
+# The telemetry envelope is fetched ONCE (through the library's private adapter
+# seam) and fed to BOTH library gates: arl_token_budget_gate for the 5-hour
+# `session` window and arl_token_weekly_glide_gate for the 7-day `weekly_all`
+# window. `weekly_scoped` is deliberately NOT consulted — per-model exhaustion is
+# the engine's model-fallback chain, never a fleet pause (ADR §2.5, AC #4).
+#
+# Observability (AC #5): every window read, its percent, and its threshold are
+# logged, and — critically — whether telemetry was ACTUALLY obtained (a 200
+# envelope) is logged distinctly, so a fail-open on absent/degraded telemetry is
+# visibly different from a genuine under-threshold allow. On a trip the window's
+# human-clearable escalation marker is logged too.
+#
+# Guard-only: reads telemetry, never mutates. Returns 0 always (the decision
+# rides on stdout).
+# ---------------------------------------------------------------------------
+argate_token_budget() {
+  local envelope status body decision="allow"
+  envelope="$(arl_token_fetch_envelope)"
+  status="$(arl_sanitize_int "$(jq -r '.status? // 0' <<<"$envelope" 2>/dev/null || printf '0')")"
+
+  if [ "$status" -eq 200 ]; then
+    argate_log "token-budget: telemetry OBTAINED (status=200) — evaluating pause-worthy account windows (session, weekly_all)"
+  else
+    argate_log "token-budget: telemetry NOT obtained (status=${status}) — the breaker fails open; any allow below is DEGRADED, not a genuine under-threshold allow"
+  fi
+  body="$(jq -c '.body? // {}' <<<"$envelope" 2>/dev/null || printf '{}')"
+
+  # session (5-hour, static config threshold).
+  local s_percent s_threshold s_decision
+  s_percent="$(arl_token_extract_percent "$body" session)"
+  s_threshold="$(arl_token_pause_threshold session)"
+  argate_log "token-budget[session]: percent=${s_percent:-<none>} threshold=${s_threshold:-<none>}%"
+  s_decision="$(arl_token_budget_gate session "$envelope")" || true
+  if [ "$s_decision" = "decision=defer" ]; then
+    decision="defer"
+    argate_log "token-budget[session] TRIP — escalation marker: $(arl_token_breaker_marker session)"
+  fi
+
+  # weekly_all (7-day, time-varying glide-path threshold). Inert until
+  # weekly_all.enabled is set in config, even when the env flag is armed.
+  local w_percent w_decision
+  w_percent="$(arl_token_extract_percent "$body" weekly_all)"
+  argate_log "token-budget[weekly_all]: percent=${w_percent:-<none>} threshold=glide-path (config-enabled=$(arl_token_glide_enabled))"
+  w_decision="$(arl_token_weekly_glide_gate "$envelope")" || true
+  if [ "$w_decision" = "decision=defer" ]; then
+    decision="defer"
+    argate_log "token-budget[weekly_all] TRIP — escalation marker: $(arl_token_breaker_marker weekly_all)"
+  fi
+
+  printf '%s' "$decision"
+}
+
+# ---------------------------------------------------------------------------
 # argate_emit <decision> — print `decision=<decision>` to stdout and, when
 # running under GitHub Actions, append it to $GITHUB_OUTPUT so the caller can
 # gate its dispatch step (`if: steps.gate.outputs.decision == 'allow'`).
@@ -341,6 +410,22 @@ argate_gate() {
   if [ "$decision" = "allow" ]; then
     admission="$(arl_admission_decision "$agent_type" "$concurrent" "$last_run" "$daily_count" "$now")" || true
     [ "$admission" != "decision=allow" ] && decision="defer"
+  fi
+
+  # Org-wide token-budget breaker (#1155). INERT unless AGENT_TOKEN_BUDGET_ENABLED
+  # is set: unset ⇒ this block is skipped entirely, so the output stays
+  # byte-identical to the pre-#1155 per-agent-only behaviour (AC #2/#6). When
+  # armed, a `defer` from the token-budget half defers dispatch in addition to the
+  # per-agent-type checks above — the account-wide budget is consulted regardless
+  # of whether a per-agent limit already deferred, so the observability log always
+  # records the budget state (AC #1/#5).
+  if [ "${AGENT_TOKEN_BUDGET_ENABLED:-false}" = "true" ]; then
+    local token_decision
+    token_decision="$(argate_token_budget)"
+    if [ "$token_decision" = "defer" ]; then
+      argate_log "token-budget breaker deferred dispatch for '${agent_type}' (org-wide account budget over threshold)"
+      decision="defer"
+    fi
   fi
 
   # DRY_RUN: log the intended decision, mutate nothing, do not block (AC #7).

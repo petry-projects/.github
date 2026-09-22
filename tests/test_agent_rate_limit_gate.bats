@@ -77,6 +77,55 @@ STUB
       }' >"$AGENT_RATE_LIMITS_CONFIG"
   }
 
+  # A config carrying the org_wide.token_budget block (session threshold +
+  # weekly_all glide keys + the non-pause-worthy weekly_scoped) plus one agent
+  # type, for the token-budget wiring tests (#1155). weekly_all.enabled is left
+  # unset (defaults false) so the glide breaker stays inert until a maintainer
+  # arms it in config — arming it is deliberately out of scope.
+  write_token_gate_config() {
+    local agent="$1" threshold="${2:-90}"
+    export AGENT_RATE_LIMITS_CONFIG="$TMP/agent-rate-limits.json"
+    jq -n --arg agent "$agent" --argjson threshold "$threshold" '{
+      status: "signed-off", _schema_version: 1,
+      agent_types: { ($agent): {
+        max_concurrent_runs: 3, max_runtime_minutes: 30,
+        cooldown_minutes: 0, daily_run_budget: 50,
+        circuit_breaker: { consecutive_failure_threshold: 3, backoff_minutes: 30 }
+      } },
+      org_wide: { token_budget: {
+        claude_priority: true,
+        limits: {
+          session:       { kind: "session", window_hours: 5, pause_worthy: true, pause_threshold_pct: $threshold },
+          weekly_all:    { kind: "weekly_all", window_days: 7, pause_worthy: true, reserve_pct_per_day: 2, floor_pct: 86, ceiling_pct: 100 },
+          weekly_scoped: { kind: "weekly_scoped", pause_worthy: false }
+        }
+      } },
+      exempt_actors: ["dependabot[bot]", "@petry-projects/org-leads"],
+      exempt_labels: ["security"]
+    }' >"$AGENT_RATE_LIMITS_CONFIG"
+  }
+
+  # Point the telemetry adapter seam at a fixture file holding the normalized
+  # envelope JSON the private poller would emit.
+  write_telemetry() {
+    export AGENT_TOKEN_BUDGET_TELEMETRY_FILE="$TMP/telemetry.json"
+    printf '%s' "$1" >"$AGENT_TOKEN_BUDGET_TELEMETRY_FILE"
+  }
+
+  # A 200 envelope whose body carries a limits[] array with the given session /
+  # weekly_all percentages (weekly_scoped pinned at 100 to prove it is ignored).
+  envelope_limits() {
+    local session_pct="$1" weekly_pct="${2:-40}"
+    jq -nc --argjson s "$session_pct" --argjson w "$weekly_pct" '{
+      status: 200,
+      body: { limits: [
+        { kind: "session",       percent: $s, resets_at: "2026-08-31T12:00:00Z", is_active: true },
+        { kind: "weekly_all",    percent: $w, resets_at: "2026-09-02T15:59:59Z", is_active: true },
+        { kind: "weekly_scoped", percent: 100, resets_at: "2026-09-02T15:59:59Z", is_active: true }
+      ] }
+    }'
+  }
+
   # Build a run-history JSON array. Each argument is "conclusion@ISO8601"; a
   # status of in_progress/queued is expressed as "in_progress@ISO" (empty
   # conclusion). Runs are emitted as gh's `run list --json` shape.
@@ -375,4 +424,95 @@ refute_mutated() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=allow"* ]]
   refute_mutated
+}
+
+# ==========================================================================
+# Org-wide token-budget breaker wiring (#1155)
+#
+# The orchestrator must consult the org-wide token-budget breaker (session +
+# weekly_all) in its decision path, in addition to the per-agent-type checks —
+# but only when AGENT_TOKEN_BUDGET_ENABLED is set. A defer from the token-budget
+# half defers dispatch; with the flag unset the behaviour is byte-identical to
+# before this change. `weekly_scoped` is never consulted (ADR §2.5).
+# ==========================================================================
+
+@test "token-budget: armed + over-threshold session envelope defers under enforce (AC #6)" {
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  # Admission is clean (no run history, cooldown 0), so the ONLY reason to defer
+  # is the org-wide token budget being over threshold.
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+@test "token-budget: with the flag unset an over-threshold envelope has no effect (AC #2/#6 inert)" {
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  # No token-budget code path runs at all when the flag is unset.
+  [[ "$output" != *"token-budget"* ]]
+}
+
+@test "token-budget: with the flag unset output is byte-identical whether or not telemetry is present (AC #6)" {
+  write_token_gate_config "initiative-driver" 90
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  local with_tel without_tel
+  write_telemetry "$(envelope_limits 95 40)"
+  with_tel="$(SOURCE_NOW=1893456000 bash "$GATE" initiative-driver --mode enforce --actor donpetry-bot 2>&1)"
+  unset AGENT_TOKEN_BUDGET_TELEMETRY_FILE
+  rm -f "$TMP/telemetry.json"
+  without_tel="$(SOURCE_NOW=1893456000 bash "$GATE" initiative-driver --mode enforce --actor donpetry-bot 2>&1)"
+  [ "$with_tel" = "$without_tel" ]
+}
+
+@test "token-budget: armed + over-threshold under log-only emits allow but logs the would-be defer and percent (AC #3)" {
+  write_token_gate_config "feature-ideation" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' feature-ideation --mode log-only --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  # Observability: the computed defer and the session percent are logged even
+  # though nothing is acted on (canary discipline).
+  [[ "$output" == *"defer"* ]]
+  [[ "$output" == *"95"* ]]
+  refute_mutated
+}
+
+@test "token-budget: weekly_scoped at 100% never defers when session is under threshold (scope guard, AC #4)" {
+  write_token_gate_config "initiative-driver" 90
+  # session 50 (under), weekly_all 40 (under + glide disarmed), weekly_scoped 100.
+  write_telemetry "$(envelope_limits 50 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "token-budget: absent telemetry allows but logs a DEGRADED fail-open distinct from a healthy allow (AC #5)" {
+  write_token_gate_config "initiative-driver" 90
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "unset AGENT_TOKEN_BUDGET_TELEMETRY_FILE AGENT_TOKEN_BUDGET_TELEMETRY_CMD; AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  # The degraded fail-open must be visibly distinct from a genuine allow (AC #5).
+  [[ "$output" == *"NOT obtained"* ]]
+}
+
+@test "token-budget: obtained under-threshold telemetry logs a genuine (non-degraded) allow (AC #5)" {
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 10 10)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"OBTAINED"* ]]
+  # Both pause-worthy windows are read and their percents surfaced (AC #5).
+  [[ "$output" == *"session"* ]]
+  [[ "$output" == *"weekly_all"* ]]
 }
