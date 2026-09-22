@@ -463,10 +463,14 @@ refute_mutated() {
   export GH_RUNS_JSON; GH_RUNS_JSON="[]"
   local with_tel without_tel
   write_telemetry "$(envelope_limits 95 40)"
-  with_tel="$(SOURCE_NOW=1893456000 bash "$GATE" initiative-driver --mode enforce --actor donpetry-bot 2>&1)"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  with_tel="$output"
   unset AGENT_TOKEN_BUDGET_TELEMETRY_FILE
   rm -f "$TMP/telemetry.json"
-  without_tel="$(SOURCE_NOW=1893456000 bash "$GATE" initiative-driver --mode enforce --actor donpetry-bot 2>&1)"
+  run bash -c "SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  without_tel="$output"
   [ "$with_tel" = "$without_tel" ]
 }
 
