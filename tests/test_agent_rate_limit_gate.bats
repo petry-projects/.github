@@ -105,6 +105,47 @@ STUB
     }' >"$AGENT_RATE_LIMITS_CONFIG"
   }
 
+  # A test-only variant of write_token_gate_config that ARMS the weekly glide
+  # breaker (weekly_all.enabled: true) so the glide half is exercised end-to-end
+  # through the orchestrator. standards/agent-rate-limits.json is never touched —
+  # this fixture lives only in $TMP for the duration of a test (#1155 review).
+  write_glide_gate_config() {
+    local agent="$1" session_threshold="${2:-90}"
+    export AGENT_RATE_LIMITS_CONFIG="$TMP/agent-rate-limits.json"
+    jq -n --arg agent "$agent" --argjson threshold "$session_threshold" '{
+      status: "signed-off", _schema_version: 1,
+      agent_types: { ($agent): {
+        max_concurrent_runs: 3, max_runtime_minutes: 30,
+        cooldown_minutes: 0, daily_run_budget: 50,
+        circuit_breaker: { consecutive_failure_threshold: 3, backoff_minutes: 30 }
+      } },
+      org_wide: { token_budget: {
+        claude_priority: true,
+        limits: {
+          session:       { kind: "session", window_hours: 5, pause_worthy: true, pause_threshold_pct: $threshold },
+          weekly_all:    { kind: "weekly_all", window_days: 7, pause_worthy: true, enabled: true, reserve_pct_per_day: 2, floor_pct: 86, ceiling_pct: 100 },
+          weekly_scoped: { kind: "weekly_scoped", pause_worthy: false }
+        }
+      } },
+      exempt_actors: ["dependabot[bot]", "@petry-projects/org-leads"],
+      exempt_labels: ["security"]
+    }' >"$AGENT_RATE_LIMITS_CONFIG"
+  }
+
+  # A 200 envelope whose weekly_all window carries the given percent and reset
+  # timestamp (session pinned under-threshold so the ONLY pause signal is the
+  # weekly glide path). Used with a matching SOURCE_NOW to fix days_until_reset.
+  envelope_weekly() {
+    local weekly_pct="$1" resets_at="$2"
+    jq -nc --argjson w "$weekly_pct" --arg r "$resets_at" '{
+      status: 200,
+      body: { limits: [
+        { kind: "session",    percent: 5, resets_at: "2026-08-31T12:00:00Z", is_active: true },
+        { kind: "weekly_all", percent: $w, resets_at: $r, is_active: true }
+      ] }
+    }'
+  }
+
   # Point the telemetry adapter seam at a fixture file holding the normalized
   # envelope JSON the private poller would emit.
   write_telemetry() {
@@ -508,6 +549,19 @@ refute_mutated() {
   [[ "$output" == *"NOT obtained"* ]]
 }
 
+@test "token-budget: a 200 with an empty body reads as DEGRADED, not OBTAINED (AC #5 precision)" {
+  write_token_gate_config "initiative-driver" 90
+  # HTTP 200 but no usable window data — both gates fail open. The headline must
+  # NOT claim OBTAINED; it must surface a degraded fail-open instead.
+  write_telemetry '{"status":200,"body":{}}'
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" == *"NO usable window data"* ]]
+  [[ "$output" != *"telemetry OBTAINED"* ]]
+}
+
 @test "token-budget: obtained under-threshold telemetry logs a genuine (non-degraded) allow (AC #5)" {
   write_token_gate_config "initiative-driver" 90
   write_telemetry "$(envelope_limits 10 10)"
@@ -519,4 +573,76 @@ refute_mutated() {
   # Both pause-worthy windows are read and their percents surfaced (AC #5).
   [[ "$output" == *"session"* ]]
   [[ "$output" == *"weekly_all"* ]]
+}
+
+# --------------------------------------------------------------------------
+# weekly_all glide path armed (weekly_all.enabled: true) — end-to-end defer/allow
+# through the orchestrator. standards/agent-rate-limits.json stays disarmed; the
+# arm lives only in the test fixture (#1155 review — weekly glide integration).
+# threshold = clamp(ceiling - reserve*days, floor, ceiling): reset 2026-09-05,
+# now 2026-09-02 => 3 days => 100 - 2*3 = 94% pause threshold.
+# --------------------------------------------------------------------------
+@test "token-budget: armed weekly_all over the glide threshold defers under enforce" {
+  write_glide_gate_config "initiative-driver" 90
+  # session under threshold (5% vs 90%); weekly_all 96% >= the 94% glide threshold.
+  write_telemetry "$(envelope_weekly 96 2026-09-05T00:00:00Z)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1788307200 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  # The pause is attributable to the weekly window, not the (under-threshold) session.
+  [[ "$output" == *"weekly_all"* ]]
+}
+
+@test "token-budget: armed weekly_all under the glide threshold allows under enforce" {
+  write_glide_gate_config "initiative-driver" 90
+  # weekly_all 90% < the 94% glide threshold, session under too => genuine allow.
+  write_telemetry "$(envelope_weekly 90 2026-09-05T00:00:00Z)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1788307200 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+# --------------------------------------------------------------------------
+# A tripped token-budget window escalates like the per-agent breaker: posts the
+# window's marker once and applies needs-human-review, deduped on the marker
+# (#1155 review — a trip must be human-clearable, not merely logged).
+# --------------------------------------------------------------------------
+@test "token-budget: an armed session trip escalates once — posts the token marker and applies the label" {
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  export GH_ISSUE_BODY="tracking issue, no token marker yet"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  run grep -c 'issue comment' "$GH_STUB_LOG"
+  [ "$output" = "1" ]
+  run grep -qE 'issue edit .*--add-label' "$GH_STUB_LOG"
+  [ "$status" -eq 0 ]
+}
+
+@test "token-budget: session-trip escalation dedups when the token marker is already present" {
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  export GH_ISSUE_BODY
+  GH_ISSUE_BODY="prior escalation $(bash -c "source '$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh'; arl_token_breaker_marker session")"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  run grep -c 'issue comment' "$GH_STUB_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "token-budget: an armed trip under log-only escalates nothing (canary discipline)" {
+  write_token_gate_config "feature-ideation" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  export GH_ISSUE_BODY="tracking issue, no token marker yet"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' feature-ideation --mode log-only --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  refute_mutated
 }

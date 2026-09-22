@@ -98,7 +98,7 @@ but the whole consultation is gated on `AGENT_TOKEN_BUDGET_ENABLED`, which stays
 per-agent-only behaviour. It is therefore **wired-but-disarmed**, not
 signed-off-and-armed: arming it is a deliberate maintainer change that must (a)
 set `AGENT_TOKEN_BUDGET_ENABLED` with the private telemetry seam wired
-([petry-projects/.github-private#1565](https://github.com/petry-projects/.github/issues/1565)),
+([petry-projects/.github-private#1565](https://github.com/petry-projects/.github-private/issues/1565)),
 and (b) flip `org_wide.token_budget.limits.weekly_all.enabled` from `false` to arm
 the weekly glide-path half — each a separate, deliberately out-of-scope change
 ([#994](https://github.com/petry-projects/.github/issues/994)). See §4.2 for the
