@@ -31,6 +31,7 @@ The `standards/` directory contains the authoritative policy documents for this 
 | [`pr-limits`](standards/pr-limits.md) | Pull request size and scope limits | What is limited, exempt actors, reconciliation with Dependabot cap, operator runbook |
 | [`push-protection`](standards/push-protection.md) | Secret push protection configuration | Layer 1 — GitHub Push Protection, Layer 2 — local pre-commit prevention, Layer 3 — CI secret scanning, incident response, compliance audit checks |
 | [`ruleset-remediation-runbook`](standards/ruleset-remediation-runbook.md) | Runbook for resolving ruleset violations | Snapshot (rollback insurance), bypass actors, legacy ruleset migration, verify, 2026-06-10 fleet remediation |
+| [`standards-versioning`](standards/standards-versioning.md) | Standards artifact versioning and release process | The two tag forms, cutting a release, N-1 resolvability, who/what moves it, opting in and staying out |
 
 ## Reporting & Dashboards
 

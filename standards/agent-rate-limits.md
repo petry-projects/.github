@@ -86,11 +86,23 @@ the gate, mirroring the PR-Limits sign-off exactly (ADR §7,
 Phase-4 orchestrator
 [`scripts/agent-rate-limit-gate.sh`](../scripts/agent-rate-limit-gate.sh)
 ([#640](https://github.com/petry-projects/.github/issues/640)), which wraps the
-pure gate library. The org-wide token-budget breaker (§4) stays out of the live
-path — `AGENT_TOKEN_BUDGET_ENABLED` is unset and
-`org_wide.token_budget.limits.weekly_all.enabled` stays `false` — so arming the
-weekly glide-path breaker remains a separate, deliberately out-of-scope change
-([#994](https://github.com/petry-projects/.github/issues/994)).
+pure gate library.
+
+The org-wide token-budget breaker (§4) is now **wired into that same orchestrator's
+decision path but disarmed** ([#1155](https://github.com/petry-projects/.github/issues/1155)):
+`scripts/agent-rate-limit-gate.sh` consults both account-wide windows (`session`
+and `weekly_all`; `weekly_scoped` is never consulted, ADR §2.5) alongside the
+per-agent-type checks, and a `defer` from the token-budget half defers dispatch —
+but the whole consultation is gated on `AGENT_TOKEN_BUDGET_ENABLED`, which stays
+**unset**, so the breaker is inert and the gate's output is byte-identical to the
+per-agent-only behaviour. It is therefore **wired-but-disarmed**, not
+signed-off-and-armed: arming it is a deliberate maintainer change that must (a)
+set `AGENT_TOKEN_BUDGET_ENABLED` with the private telemetry seam wired
+(petry-projects/.github-private#1565),
+and (b) flip `org_wide.token_budget.limits.weekly_all.enabled` from `false` to arm
+the weekly glide-path half — each a separate, deliberately out-of-scope change
+([#994](https://github.com/petry-projects/.github/issues/994)). See §4.2 for the
+staged rollout.
 
 ### 3.1 Canary scope — enforcing vs log-only, and the promotion path (AC #5)
 
