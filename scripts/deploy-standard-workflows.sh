@@ -115,6 +115,7 @@ declare -A SKIP_SELF_MANAGED=(
 # the tuned body from the template. See BODY_PRESERVING_WORKFLOWS below.
 DEPLOYABLE_WORKFLOWS=(
   pr-review-mention.yml
+  persona-mention.yml
   dev-lead.yml
   agent-shield.yml
   auto-rebase.yml
