@@ -3156,11 +3156,19 @@ HEREDOC
 structural_finding_count() {
   local file="$1"
   [ -s "$file" ] || { printf '0'; return 0; }
-  # grep -c exits non-zero on zero matches; guard so pipefail/set -e in the
-  # caller cannot abort the run counting a finding-free cycle.
-  local n
-  n="$(grep -c . "$file" 2>/dev/null || true)"
-  printf '%s' "${n:-0}"
+  # Branch on grep's exit status instead of discarding it. grep exits 1 on zero
+  # matches (a genuine finding-free cycle → 0) but exits >=2 on an actual error
+  # (e.g. a non-empty file that cannot be read). Swallowing the latter would
+  # report "0 findings" — a CLEAN cycle — because we could not read the evidence,
+  # which is the one failure mode this promotion-precondition counter must never
+  # have (issue #647, AC #1). Propagate it as a hard failure instead so the cycle
+  # is recorded as indeterminate, never clean.
+  local n rc
+  n="$(grep -c . "$file" 2>/dev/null)"; rc=$?
+  if [ "$rc" -eq 0 ]; then printf '%s' "$n"; return 0; fi
+  if [ "$rc" -eq 1 ]; then printf '0'; return 0; fi
+  printf '::error::structural_finding_count: cannot read %s (grep exit %s)\n' "$file" "$rc" >&2
+  return 1
 }
 
 # Append the structural-linter findings collected in STRUCTURAL_FINDINGS_FILE to

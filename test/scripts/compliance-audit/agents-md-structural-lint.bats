@@ -319,3 +319,24 @@ count_of() {
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
 }
+
+@test "structural_finding_count fails loudly on an unreadable file — never reports 0 (#647)" {
+  # A non-empty findings file that cannot be READ is NOT a clean (zero-finding)
+  # cycle. grep exits >=2 on a read error (distinct from exit 1 = no matches);
+  # the counter must propagate that as a failure rather than swallow it and print
+  # 0, or an unreadable evidence file would masquerade as a clean audit cycle and
+  # feed the promotion precondition (issue #647, AC #1).
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "running as root: chmod 000 does not block reads"
+  fi
+  local acc="$TMPDIR_TEST/structural.tsv"
+  printf 'finding-1\nfinding-2\n' > "$acc"
+  chmod 000 "$acc"
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    structural_finding_count "$2"
+  ' _ "$SCRIPT" "$acc"
+  chmod 644 "$acc"                    # restore so teardown can clean up
+  [ "$status" -ne 0 ]                 # indeterminate, not success
+  [ "$output" != "0" ]               # and crucially NOT reported as a clean cycle
+}

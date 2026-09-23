@@ -61,18 +61,45 @@ AMCL_FS=$'\037'
 amcl_data_rows() {
   local log="$1"
   [ -f "$log" ] || return 0
-  awk -F'|' -v US='\037' '
+  # Strip CR before splitting so a CRLF-saved log does not leave a trailing '\r'
+  # on the last cell (Clean?), which would break the Clean?/fps agreement check
+  # in amcl_validate_log. Returns non-zero (via awk's END exit) if a dated row is
+  # structurally malformed, so callers can treat that as a validation failure.
+  tr -d '\r' < "$log" | awk -F'|' -v US='\037' '
     function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
     {
-      # A markdown table row has an empty leading and trailing cell around 6
-      # data cells, so NF is 8 (| c1 | c2 | c3 | c4 | c5 | c6 |).
-      if (NF < 8) next
+      # A literal "\|" is the documented way to put a pipe inside a Markdown
+      # cell, but awk -F has no notion of backslash escaping and would split on
+      # it, shifting every later field. Protect escaped pipes with a sentinel
+      # (0x01) before the fields are used, then restore them in the details cell.
+      # Assigning via gsub on $0 re-splits the record on FS with the sentinel in
+      # place.
+      gsub(/\\\|/, "\001")
       cycle = trim($2)
-      if (cycle !~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) next
+      # The date field is only a row discriminator, not a real calendar
+      # validator: it bounds month (01-12) and day (01-31) so an impossible date
+      # like 2026-99-99 or 2026-13-40 cannot pass, but it deliberately still
+      # accepts e.g. 2026-02-31. A leap-year-correct check in awk would be far
+      # more code than a manually hand-typed bad date in a committed table
+      # warrants; do not add one here.
+      if (cycle !~ /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/) next
+      # It IS a data row (first cell is a date). A well-formed Markdown row has an
+      # empty leading and trailing cell around 6 data cells, so NF must be exactly
+      # 8. A remaining UNescaped literal "|" in a cell yields NF>8 and shifts the
+      # maintainer/Clean? fields; reject such a row loudly instead of parsing it
+      # with silently shifted columns.
+      if (NF != 8) {
+        printf "cycle %s: malformed table row — expected 8 pipe-delimited fields but found %d (unescaped \"|\" in a cell? escape it as \"\\|\")\n", cycle, NF > "/dev/stderr"
+        rc = 1
+        next
+      }
+      details = trim($5)
+      gsub(/\001/, "\\|", details)
       printf "%s%s%s%s%s%s%s%s%s%s%s\n", \
-        cycle, US, trim($3), US, trim($4), US, trim($5), US, trim($6), US, trim($7)
+        cycle, US, trim($3), US, trim($4), US, details, US, trim($6), US, trim($7)
     }
-  ' "$log"
+    END { exit rc }
+  '
 }
 
 # ---------------------------------------------------------------------------
@@ -91,7 +118,14 @@ amcl_is_uint() {
 # log (no data rows — the shipped baseline) is valid. Pure (reads only).
 # ---------------------------------------------------------------------------
 amcl_validate_log() {
-  local log="$1" cycle findings fps details maintainer clean rc=0
+  local log="$1" cycle findings fps details maintainer clean rc=0 rows
+  # Capture the parsed rows first so a non-zero exit from amcl_data_rows (a dated
+  # row with the wrong field count — it already printed the reason to stderr)
+  # counts as a validation failure rather than being lost in a process
+  # substitution.
+  if ! rows="$(amcl_data_rows "$log")"; then
+    rc=1
+  fi
   while IFS="$AMCL_FS" read -r cycle findings fps details maintainer clean; do
     [ -n "$cycle" ] || continue
     : "${details:-}"
@@ -115,7 +149,7 @@ amcl_validate_log() {
         "$cycle" "$clean" "$fps" "$expected_clean" >&2
       rc=1; continue
     fi
-  done < <(amcl_data_rows "$log")
+  done <<< "$rows"
   return "$rc"
 }
 
@@ -126,6 +160,17 @@ amcl_validate_log() {
 # ---------------------------------------------------------------------------
 amcl_clean_cycles_met() {
   local log="$1" required="$2"
+  # A promotion precondition must never be computed over an unvalidated log. If
+  # the log is malformed (bad field count, a Clean?/fps disagreement, an
+  # unattributed determination), the invariants amcl_validate_log enforces are
+  # absent, and a shifted or inconsistent row could otherwise be miscounted as
+  # clean. Validate first and refuse — loudly, with the reason already on stderr
+  # from amcl_validate_log — instead of duplicating the per-field checks below
+  # (#647). One copy of the invariant, in amcl_validate_log.
+  if ! amcl_validate_log "$log"; then
+    printf 'false'
+    return 0
+  fi
   local rows recent count clean=0
   rows="$(amcl_data_rows "$log")"
   count="$(printf '%s' "$rows" | grep -c . || true)"

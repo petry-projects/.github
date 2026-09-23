@@ -1,0 +1,1 @@
+cycle 2026-10-01: malformed table row — expected 8 pipe-delimited fields but found 9 (unescaped "|" in a cell? escape it as "\|")
