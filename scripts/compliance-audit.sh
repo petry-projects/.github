@@ -91,8 +91,19 @@ INCONCLUSIVE_REPOS_FILE="$REPORT_DIR/inconclusive-repos.txt"
 # join the umbrella, and never fail the run — Phase 3 ships structural
 # validation informational-only (see docs/initiatives/agents-md-validation.md).
 STRUCTURAL_FINDINGS_FILE="$REPORT_DIR/agents-md-structural.tsv"
+# A non-empty marker file here means the structural linter did NOT complete for
+# one or more repos this cycle (issue #647, AC #1). An incomplete linter leaves
+# the findings accumulator empty, which would otherwise read as a CLEAN
+# zero-finding cycle; this marker makes the summary mark the cycle INDETERMINATE
+# instead, so a suppressed linter failure can never be recorded as clean.
+STRUCTURAL_LINT_ERROR_FILE="$REPORT_DIR/agents-md-structural.err"
 # Rule-set / promotion-gate reference the informational summary section links to.
 AGENTS_MD_RULESET_DOC="docs/initiatives/agents-md-validation.md"
+# Append-only, committed per-cycle log (issue #647, Phase 4). The audit summary
+# records THIS cycle's structural finding count and points a maintainer here to
+# log the false-positive determination durably — an editable summary issue alone
+# could be silently rewritten to fake a "two clean cycles" claim.
+AGENTS_MD_CYCLE_LOG="docs/initiatives/agents-md-validation-cycle-log.md"
 
 # Issue management counters (incremented by create_issue_for_finding / close_resolved_issues)
 ISSUES_ADDED=0
@@ -2198,9 +2209,19 @@ record_agents_md_structural_findings() {
   scope="$(agents_md_lint_scope_for_repo "$repo")"
   tmp="$(mktemp)"
   printf '%s' "$decoded" > "$tmp"
+  # Capture the linter's OWN exit status (PIPESTATUS[0], not the pipeline's). A
+  # non-zero amdl_lint means it did NOT complete (e.g. an invalid/unreadable rule
+  # set) — the old `2>/dev/null | … || true` swallowed that, leaving the
+  # accumulator empty so the cycle read as a clean zero-finding cycle. Record the
+  # failure so append_structural_findings_summary marks the cycle INDETERMINATE,
+  # never clean (issue #647, AC #1).
+  local lint_rc=0
   amdl_lint "$tmp" "$AMDL_DEFAULT_RULES" "$scope" 2>/dev/null \
     | awk -v repo="$repo" -F'\t' 'BEGIN {OFS=FS} $2 != "" {print repo, $0}' \
-    >> "$STRUCTURAL_FINDINGS_FILE" || true
+    >> "$STRUCTURAL_FINDINGS_FILE" || lint_rc="${PIPESTATUS[0]}"
+  if [ "$lint_rc" -ne 0 ]; then
+    printf '%s\tamdl_lint exited %s\n' "$repo" "$lint_rc" >> "$STRUCTURAL_LINT_ERROR_FILE"
+  fi
   rm -f "$tmp"
   return 0
 }
@@ -3144,20 +3165,76 @@ HEREDOC
 # ---------------------------------------------------------------------------
 # Informational AGENTS.md structural-findings summary section
 # ---------------------------------------------------------------------------
+# structural_finding_count <tsv-file> — number of recorded structural findings
+# (one per line) in the informational accumulator; 0 for an empty/missing file.
+# Pure. This per-cycle count is what makes "two consecutive clean cycles"
+# observable from the audit issue history (issue #647, AC #1).
+structural_finding_count() {
+  local file="$1"
+  [ -s "$file" ] || { printf '0'; return 0; }
+  # Branch on grep's exit status instead of discarding it. grep exits 1 on zero
+  # matches (a genuine finding-free cycle → 0) but exits >=2 on an actual error
+  # (e.g. a non-empty file that cannot be read). Swallowing the latter would
+  # report "0 findings" — a CLEAN cycle — because we could not read the evidence,
+  # which is the one failure mode this promotion-precondition counter must never
+  # have (issue #647, AC #1). Propagate it as a hard failure instead so the cycle
+  # is recorded as indeterminate, never clean.
+  # Guard the assignment so the rc-based branching is deterministic in BOTH call
+  # contexts. `grep -c` exits 1 on zero matches; under this script's own
+  # `set -euo pipefail` a bare `n="$(grep …)"; rc=$?` exits the shell at the
+  # assignment BEFORE `rc` is read when the function is called DIRECTLY (a `$( )`
+  # caller suspends errexit and hides the bug). The `if` captures the status
+  # without tripping errexit, so the error branches below are reachable however
+  # the function is invoked — including from the bats tests that call it directly.
+  local n rc
+  if n="$(grep -c . "$file" 2>/dev/null)"; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 0 ]; then printf '%s' "$n"; return 0; fi
+  if [ "$rc" -eq 1 ]; then printf '0'; return 0; fi
+  printf '::error::structural_finding_count: cannot read %s (grep exit %s)\n' "$file" "$rc" >&2
+  return 1
+}
+
 # Append the structural-linter findings collected in STRUCTURAL_FINDINGS_FILE to
 # the run summary as a clearly-labelled INFORMATIONAL (non-blocking) section that
 # links to the rule-set / promotion-gate doc. These findings never opened issues
 # and never affected the exit code — this section is their only surface.
 append_structural_findings_summary() {
   local doc_link="https://github.com/$ORG/.github/blob/main/$AGENTS_MD_RULESET_DOC"
+  local cycle_log_link="https://github.com/$ORG/.github/blob/main/$AGENTS_MD_CYCLE_LOG"
+  local count
+  count="$(structural_finding_count "$STRUCTURAL_FINDINGS_FILE")"
+  # If the linter did not complete for one or more repos this cycle, the finding
+  # count is not trustworthy (a suppressed failure leaves the accumulator empty).
+  # Mark the cycle INDETERMINATE so it can never be recorded as a clean
+  # zero-finding cycle (issue #647, AC #1).
+  local lint_incomplete=""
+  if [ -f "$STRUCTURAL_LINT_ERROR_FILE" ] && [ -s "$STRUCTURAL_LINT_ERROR_FILE" ]; then
+    lint_incomplete="yes"
+  fi
   {
     printf '\n## AGENTS.md Structural Findings (informational)\n\n'
     printf '_Non-blocking: these structural-linter findings are advisory only — they open no issues and never fail the audit. Rule set and informational → blocking promotion gate: [%s](%s)._\n\n' \
       "$AGENTS_MD_RULESET_DOC" "$doc_link"
+    # Per-cycle record (issue #647, AC #1): the machine-counted number of
+    # structural findings this cycle, plus the durable, tamper-evident home for
+    # the maintainer's confirmed-false-positive determination. The audit cannot
+    # itself confirm false positives (that is a human review), so it records the
+    # count and points at the append-only committed cycle log.
+    if [ -n "$lint_incomplete" ]; then
+      printf '**Structural findings this cycle: INDETERMINATE.** The structural linter did not complete for one or more repositories this cycle, so the finding count is not trustworthy. **This cycle MUST NOT be recorded as clean** in the append-only [cycle log](%s) — investigate the linter failure and re-run before recording any determination. Promotion is never automatic.\n\n' \
+        "$cycle_log_link"
+    else
+      printf '**Structural findings this cycle: %s.** Confirmed false positives are a maintainer determination — record this cycle'\''s count and any confirmed false positive (naming the maintainer) in the append-only [cycle log](%s). Two consecutive cycles with zero confirmed false positives **and** explicit maintainer sign-off are required before the check may be promoted to blocking; promotion is never automatic.\n\n' \
+        "$count" "$cycle_log_link"
+    fi
   } >> "$SUMMARY_FILE"
 
   if [ ! -s "$STRUCTURAL_FINDINGS_FILE" ]; then
-    printf 'No structural findings — every scanned `AGENTS.md` is structurally valid.\n' >> "$SUMMARY_FILE"
+    if [ -n "$lint_incomplete" ]; then
+      printf 'No findings were recorded, but the structural linter did not complete for every scanned repo this cycle — see the INDETERMINATE note above. This is **not** a clean cycle.\n' >> "$SUMMARY_FILE"
+    else
+      printf 'No structural findings — every scanned `AGENTS.md` is structurally valid.\n' >> "$SUMMARY_FILE"
+    fi
     return 0
   fi
 
@@ -3216,6 +3293,7 @@ main() {
   # Informational AGENTS.md structural findings accumulate here (never in
   # FINDINGS_FILE) so they stay non-blocking (#645).
   : > "$STRUCTURAL_FINDINGS_FILE"
+  : > "$STRUCTURAL_LINT_ERROR_FILE"
 
   # Get all non-archived repos in the org
   local repos
