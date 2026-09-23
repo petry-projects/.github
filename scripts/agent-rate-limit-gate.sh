@@ -279,7 +279,10 @@ argate_token_escalate() {
   local repo_args=()
   [ -n "$tracking_repo" ] && repo_args=(--repo "$tracking_repo")
 
-  body="$(gh issue view "$tracking_issue" "${repo_args[@]}" --json body --jq '.body' 2>/dev/null || printf '')"
+  body="$(gh issue view "$tracking_issue" "${repo_args[@]}" \
+    --json body,comments \
+    --jq '[.body, (.comments[]?.body)] | join("\n")' \
+    2>/dev/null || printf '')"
   if ! arl_token_should_escalate "$body" "$window"; then
     argate_log "token-budget[${window}] breaker OPEN — marker already present on ${tracking_repo:-current}#${tracking_issue}; deduped, not re-posting"
     return 0

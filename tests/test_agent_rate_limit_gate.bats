@@ -41,7 +41,9 @@ case "$1 ${2:-}" in
     printf '%s' "${GH_RUNS_JSON:-[]}"
     ;;
   "issue view")
-    printf '{"body":%s}' "$(printf '%s' "${GH_ISSUE_BODY:-}" | jq -Rs .)"
+    printf '{"body":%s,"comments":%s}' \
+      "$(printf '%s' "${GH_ISSUE_BODY:-}" | jq -Rs .)" \
+      "${GH_ISSUE_COMMENTS_JSON:-[]}"
     ;;
   *)
     : # comment / edit / anything else: no-op, exit 0
@@ -629,6 +631,23 @@ refute_mutated() {
   export GH_RUNS_JSON; GH_RUNS_JSON="[]"
   export GH_ISSUE_BODY
   GH_ISSUE_BODY="prior escalation $(bash -c "source '$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh'; arl_token_breaker_marker session")"
+  run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=defer"* ]]
+  run grep -c 'issue comment' "$GH_STUB_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "token-budget: session-trip escalation dedups when the token marker is on a prior comment (not the body)" {
+  # argate_token_escalate posts its marker with `gh issue comment`, so the dedup
+  # read must scan the issue's comments, not only its body — otherwise a second
+  # enforce invocation would re-post the marker (#1164 review).
+  write_token_gate_config "initiative-driver" 90
+  write_telemetry "$(envelope_limits 95 40)"
+  export GH_RUNS_JSON; GH_RUNS_JSON="[]"
+  export GH_ISSUE_BODY="tracking issue, no token marker in body"
+  export GH_ISSUE_COMMENTS_JSON
+  GH_ISSUE_COMMENTS_JSON="$(jq -n --arg m "$(bash -c "source '$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agent-rate-limit.sh'; arl_token_breaker_marker session")" '[{body: ("prior escalation " + $m)}]')"
   run bash -c "AGENT_TOKEN_BUDGET_ENABLED=true SOURCE_NOW=1893456000 bash '$GATE' initiative-driver --mode enforce --actor donpetry-bot --tracking-repo petry-projects/.github --tracking-issue 636"
   [ "$status" -eq 0 ]
   [[ "$output" == *"decision=defer"* ]]
