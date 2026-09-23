@@ -90,6 +90,7 @@ on:
           - initiative-planner
           - persona-mention
           - pr-auto-review
+          - pr-review
           - pr-review-mention
         default: dev-lead
       override:
