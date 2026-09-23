@@ -2517,19 +2517,41 @@ _registered_hosts() {
           | map(select(. != "")) | unique | .[]'
 }
 
-# _gh_list_reusables <repo> — the full paths of *-reusable.yml files under the repo's
-# .github/workflows (one per line). Reads the directory listing via the contents API and
-# filters locally (mirrors _run_json: raw fetch, jq in the caller). Returns non-zero when
-# the listing could NOT be enumerated (the API errored or did not return a JSON array), so
-# the caller can distinguish "no reusables here" from "could not read the host" — the latter
-# must NOT be treated as every registered reusable having been deleted (a false missing-file
-# avalanche). A genuinely empty (but readable) workflows dir returns success with no output.
+# _gh_list_reusables <repo> [registered_paths] — the full paths of reusable workflow files
+# under the repo's .github/workflows (one per line). Reads the directory listing via the
+# contents API and filters locally (mirrors _run_json: raw fetch, jq in the caller). Returns
+# non-zero when the listing could NOT be enumerated (the API errored or did not return a JSON
+# array), so the caller can distinguish "no reusables here" from "could not read the host" —
+# the latter must NOT be treated as every registered reusable having been deleted (a false
+# missing-file avalanche). A genuinely empty (but readable) workflows dir returns success
+# with no output.
+#
+# A reusable is normally named `*-reusable.yml`. The optional newline-separated
+# `registered_paths` (the registry's reusable paths for this host) ALSO admits a present file
+# whose name is grandfathered off that convention — e.g. `pr-review.yml`, the pr-review engine
+# kept on its legacy name until #1127 — so drift does not false-flag a legitimately-registered,
+# actually-present reusable as `missing-file` (petry-projects/.github#1166). Both branches
+# require the file to be present in the host listing, so a genuinely-deleted registered
+# reusable (registered but NOT in the listing) is still reported missing.
 _gh_list_reusables() {
-  local repo="$1" json
+  local repo="$1" registered="${2:-}" json=""
+  # Strip CRs so a CRLF-terminated registered path still string-matches a host path (jq
+  # splits on "\n" and a trailing "\r" would make every comparison miss).
+  registered="${registered//$'\r'/}"
   json="$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null)" || return 1
+  # An empty (but exit-0) body is not a readable listing — treat it as an enumeration
+  # failure so the caller skips the host rather than false-flagging every reusable gone.
+  [ -n "$json" ] || return 1
   jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
-  jq -r '[.[]? | select(.type=="file") | select((.name // "") | endswith("-reusable.yml")) | .path] | .[]' \
-    2>/dev/null <<< "$json" || true
+  # The array type is validated above, so iterate with `.[]` (not `.[]?`): the optional
+  # operator would silently swallow an iteration error on a malformed element instead of
+  # surfacing it. `any(...)` is the idiomatic membership test for the registered paths.
+  jq -r --arg reg "$registered" '
+    ($reg | split("\n") | map(select(length>0))) as $regpaths
+    | [ .[] | select(.type=="file")
+        | .path as $p
+        | select(($p | endswith("-reusable.yml")) or any($regpaths[]; . == $p))
+        | $p ] | .[]' 2>/dev/null <<< "$json" || true
   return 0
 }
 
@@ -2610,13 +2632,17 @@ cmd_drift() {
     [ -z "$host" ] && continue
     echo "──────── host: $host ────────"
     local present registered unmanaged_r unregistered missing p agents
-    if ! present="$(_gh_list_reusables "$host")"; then
+    registered="$(_registered_reusables_for_host "$host")"
+    # Pass the registered paths so a present-but-grandfathered-named reusable (e.g.
+    # pr-review.yml, #1127/#1166) is recognised as present rather than false-flagged
+    # missing-file. A genuinely-deleted registered reusable is still absent from the
+    # listing and so still reported.
+    if ! present="$(_gh_list_reusables "$host" "$registered")"; then
       # Could not read the host's workflows dir — skip it rather than false-flag every
       # registered reusable as missing-file. Read-only + best-effort: a warning, not a failure.
       echo "::warning::drift $host: could not enumerate .github/workflows (API error / no access) — skipping host this cycle"
       continue
     fi
-    registered="$(_registered_reusables_for_host "$host")"
     unmanaged_r="$(_unmanaged_reusables_for_host "$host")"
     local reg_arr=() pres_arr=() um_arr=() reg_str="" pres_str="" um_str=""
     if [ -n "$registered" ]; then mapfile -t reg_arr <<< "$registered"; fi
@@ -2626,7 +2652,7 @@ cmd_drift() {
     [ "${#pres_arr[@]}" -gt 0 ] && pres_str=" ${pres_arr[*]}"
     [ "${#um_arr[@]}" -gt 0 ] && um_str=" ${um_arr[*]}"
     echo "  registered reusables (${#reg_arr[@]}):$reg_str"
-    echo "  present *-reusable.yml (${#pres_arr[@]}):$pres_str"
+    echo "  present reusables (${#pres_arr[@]}):$pres_str"
     [ "${#um_arr[@]}" -gt 0 ] && echo "  unmanaged (intentional, out of ring gate) (${#um_arr[@]}):$um_str"
     # unregistered = present on the host, minus registered agents AND intentionally-unmanaged (#651).
     unregistered="$(set_difference "$(set_difference "$present" "$registered")" "$unmanaged_r")"
