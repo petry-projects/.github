@@ -45,6 +45,7 @@ readonly RING_REUSABLES=(
   initiative-planner
   persona-mention
   pr-auto-review
+  pr-review
   pr-review-mention
 )
 
