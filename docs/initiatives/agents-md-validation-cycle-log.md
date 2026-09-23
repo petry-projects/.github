@@ -16,12 +16,14 @@
 
 1. **Append only. Never edit or delete a recorded row.** Each cycle is a permanent baseline fact. Corrections are made by
    appending a new row **that reuses the same `Cycle` date** as the row it supersedes. The `Cycle` date is the stable
-   identity of a cycle: `agents-md-cycle-log.sh` (`validate` and `eligibility`) collapses rows by `Cycle` date and counts
+   identity of a cycle: `agents-md-cycle-log.sh`'s `eligibility` function collapses rows by `Cycle` date and counts
    only the **last** row recorded for each date, so a same-date correction supersedes the earlier row and each cycle is
    counted exactly once — a correction never inflates the distinct-cycle count. (Do **not** give a correction a new date;
-   that would be counted as a separate cycle.) The original stays visible in git history, which is what makes the record
-   tamper-evident and independently auditable. Silently editing or removing a past row defeats the entire purpose of the
-   gate and will be treated as tampering.
+   that would be counted as a separate cycle.) The `validate` function, by contrast, checks every row individually — a row
+   that fails any validation invariant stays permanently invalid even after a well-formed same-date correction is appended,
+   so a validation-failing row must itself be corrected or the log remains ineligible. The original stays visible in git
+   history, which is what makes the record tamper-evident and independently auditable. Silently editing or removing a past
+   row defeats the entire purpose of the gate and will be treated as tampering.
 2. **Every determination names a maintainer.** The **Determined by** cell must name the maintainer (GitHub `@handle`) who
    reviewed the cycle and confirmed the false-positive count — including a clean (zero false positives) cycle. A row with
    no named maintainer is invalid; `agents-md-cycle-log.sh validate` fails on it. A "clean cycle" claim may never be
