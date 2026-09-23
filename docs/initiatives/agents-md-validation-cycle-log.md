@@ -15,9 +15,13 @@
 ## Rules — this file is append-only
 
 1. **Append only. Never edit or delete a recorded row.** Each cycle is a permanent baseline fact. Corrections are made by
-   appending a new dated row that supersedes the earlier one — the original stays visible in git history, which is what
-   makes the record tamper-evident and independently auditable. Silently editing or removing a past row defeats the
-   entire purpose of the gate and will be treated as tampering.
+   appending a new row **that reuses the same `Cycle` date** as the row it supersedes. The `Cycle` date is the stable
+   identity of a cycle: `agents-md-cycle-log.sh` (`validate` and `eligibility`) collapses rows by `Cycle` date and counts
+   only the **last** row recorded for each date, so a same-date correction supersedes the earlier row and each cycle is
+   counted exactly once — a correction never inflates the distinct-cycle count. (Do **not** give a correction a new date;
+   that would be counted as a separate cycle.) The original stays visible in git history, which is what makes the record
+   tamper-evident and independently auditable. Silently editing or removing a past row defeats the entire purpose of the
+   gate and will be treated as tampering.
 2. **Every determination names a maintainer.** The **Determined by** cell must name the maintainer (GitHub `@handle`) who
    reviewed the cycle and confirmed the false-positive count — including a clean (zero false positives) cycle. A row with
    no named maintainer is invalid; `agents-md-cycle-log.sh validate` fails on it. A "clean cycle" claim may never be
@@ -39,8 +43,11 @@ After each compliance-audit cycle:
 2. A maintainer reviews the listed structural findings and decides which, if any, are **confirmed false positives**
    (a finding the deterministic linter raised that is not in fact a structural defect).
 3. Append one row below with the cycle date, the finding count, the confirmed-false-positive count and details, the
-   maintainer's `@handle`, and the derived `Clean?` flag — in a pull request.
-4. `agents-md-cycle-log.sh eligibility docs/initiatives/agents-md-validation-cycle-log.md 2` then reports whether the
+   maintainer's `@handle`, and the derived `Clean?` flag — in a pull request. **Escape any literal `|` in the
+   False-positive details cell as `\|`** so it stays inside the cell and does not shift later columns; the reader restores
+   the escaped pipe when it parses the row. A nonzero false-positive count must record what was confirmed — an empty (or
+   placeholder `—`) details cell fails `validate`.
+4. `scripts/agents-md-cycle-log.sh eligibility docs/initiatives/agents-md-validation-cycle-log.md 2` then reports whether the
    clean-cycle precondition is met. Meeting it is **not** a promotion — see the gate in the reference doc.
 
 ---

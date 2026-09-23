@@ -153,7 +153,9 @@ finding count and every confirmed false-positive determination are appended to a
 
 - **Cycle log:** [`docs/initiatives/agents-md-validation-cycle-log.md`](./agents-md-validation-cycle-log.md).
 - **Reader / validator:** [`scripts/agents-md-cycle-log.sh`](../../scripts/agents-md-cycle-log.sh) — a pure, bats-tested
-  helper with two subcommands: `validate` (every recorded determination names a maintainer; counts are integers; the
+  helper with two subcommands: `validate` (every recorded determination is attributed to a GitHub `@handle` — arbitrary
+  attribution text such as `Alice` is rejected; the finding and false-positive counts are non-negative integers; the
+  false-positive count never exceeds the finding count; a nonzero false-positive count carries non-empty details; and the
   `Clean?` flag agrees with the false-positive count) and `eligibility` (reports whether the last two cycles are clean).
   **It never promotes** — it only reports the precondition.
 
@@ -164,8 +166,8 @@ The chain of custody:
 3. The maintainer appends one row to the cycle log — finding count, confirmed-false-positive count and details, their
    `@handle`, and the derived `Clean?` flag — in a reviewable pull request. **Every determination, including a clean
    cycle, names the maintainer who made it.** Rows are never edited or deleted; git history is the tamper-evidence.
-4. `agents-md-cycle-log.sh eligibility docs/initiatives/agents-md-validation-cycle-log.md 2` then reports whether the
-   clean-cycle precondition is met. **Meeting it is not a promotion** — sign-off and the discrete flip below are still required.
+4. `scripts/agents-md-cycle-log.sh eligibility docs/initiatives/agents-md-validation-cycle-log.md 2` then reports whether
+   the clean-cycle precondition is met. **Meeting it is not a promotion** — sign-off and the discrete flip below are still required.
 
 ### 4.2 The discrete blocking toggle — delivered here, armed nowhere
 

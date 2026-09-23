@@ -326,17 +326,56 @@ count_of() {
   # the counter must propagate that as a failure rather than swallow it and print
   # 0, or an unreadable evidence file would masquerade as a clean audit cycle and
   # feed the promotion precondition (issue #647, AC #1).
-  if [ "$(id -u)" -eq 0 ]; then
-    skip "running as root: chmod 000 does not block reads"
-  fi
   local acc="$TMPDIR_TEST/structural.tsv"
   printf 'finding-1\nfinding-2\n' > "$acc"
   chmod 000 "$acc"
+  # Permission-bit enforcement is absent in some environments (running as root,
+  # overlay/container mounts, some CI images), so chmod 000 does not block the
+  # read and this test's premise (an UNreadable non-empty file) does not hold.
+  # Probe with a real read and skip where the bits are not enforced, so the test
+  # runs only where the unreadable-file path actually exists.
+  if grep -q . "$acc" 2>/dev/null; then
+    chmod 644 "$acc"
+    skip "filesystem does not enforce permission bits (or running as root): chmod 000 did not block the read"
+  fi
   run bash -c '
     source "$1" >/dev/null 2>&1
     structural_finding_count "$2"
   ' _ "$SCRIPT" "$acc"
   chmod 644 "$acc"                    # restore so teardown can clean up
-  [ "$status" -ne 0 ]                 # indeterminate, not success
+  # Assert the SPECIFIC read-error branch ran (deterministic return 1 with the
+  # ::error:: message), not merely a generic non-zero: a bare `status != 0` would
+  # also pass on an unrelated failure or on errexit preemption, so it would not
+  # pin the read-error propagation this test exists to guard.
+  [ "$status" -eq 1 ]                 # deterministic hard failure (return 1)
+  [[ "$output" == *"cannot read"* ]]  # exercised the read-error branch itself
   [ "$output" != "0" ]               # and crucially NOT reported as a clean cycle
+}
+
+# ---------------------------------------------------------------------------
+# An INCOMPLETE structural lint must never be recorded as a clean zero-finding
+# cycle: a suppressed linter failure leaves the accumulator empty, so the summary
+# must mark the cycle INDETERMINATE instead of "0 findings" (issue #647, AC #1).
+# ---------------------------------------------------------------------------
+@test "an incomplete structural lint marks the cycle INDETERMINATE, never clean (#647)" {
+  local acc="$TMPDIR_TEST/structural.tsv"
+  local err="$TMPDIR_TEST/structural.err"
+  local summary="$TMPDIR_TEST/summary.md"
+  : > "$acc"                                   # empty accumulator (a failed lint wrote nothing)
+  printf 'some-app\tamdl_lint exited 2\n' > "$err"   # but the linter did not complete
+  : > "$summary"
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    STRUCTURAL_FINDINGS_FILE="$2"
+    STRUCTURAL_LINT_ERROR_FILE="$3"
+    SUMMARY_FILE="$4"
+    append_structural_findings_summary
+    cat "$4"
+  ' _ "$SCRIPT" "$acc" "$err" "$summary"
+  [ "$status" -eq 0 ]
+  grep -qi 'indeterminate' <<< "$output"
+  # Crucially, an empty accumulator + an incomplete lint must NOT read as a clean
+  # zero-finding cycle.
+  ! grep -qi 'structural findings this cycle: 0' <<< "$output"
+  ! grep -qi 'every scanned .*is structurally valid' <<< "$output"
 }

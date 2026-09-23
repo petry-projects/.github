@@ -99,6 +99,53 @@ write_log() {
   [ "$status" -eq 1 ]
 }
 
+@test "validate rejects a non-integer false-positive count" {
+  # The non-negative-integer guard must apply to the confirmed-false-positive
+  # count too, not only the structural-findings count.
+  local log
+  log="$(write_log '| 2026-10-01 | 0 | several | some detail | @alice | no |\n')"
+  run bash "$SCRIPT" validate "$log"
+  [ "$status" -eq 1 ]
+}
+
+@test "validate accepts a well-formed non-clean cycle (fps=1, Clean?=no)" {
+  # Pins the count/clean agreement invariant in the POSITIVE direction: a genuine
+  # confirmed false positive with details, a handle and Clean?=no is valid.
+  local log
+  log="$(write_log '| 2026-10-01 | 3 | 1 | anchor false alarm | @alice | no |\n')"
+  run bash "$SCRIPT" validate "$log"
+  [ "$status" -eq 0 ]
+}
+
+@test "validate rejects a maintainer that is not a GitHub @handle" {
+  # "Determined by" must be a GitHub @handle; arbitrary attribution text like
+  # "Alice" is not attribution the log can hold anyone to.
+  local log
+  log="$(write_log '| 2026-10-01 | 0 | 0 | — | Alice | yes |\n')"
+  run bash -c 'bash "$1" validate "$2" 2>&1' _ "$SCRIPT" "$log"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *handle* ]]
+}
+
+@test "validate rejects more confirmed false positives than structural findings" {
+  # False positives are selected FROM the findings, so fps > findings is malformed.
+  local log
+  log="$(write_log '| 2026-10-01 | 0 | 1 | phantom false positive | @alice | no |\n')"
+  run bash -c 'bash "$1" validate "$2" 2>&1' _ "$SCRIPT" "$log"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot exceed"* ]]
+}
+
+@test "validate rejects a nonzero false-positive count with empty details" {
+  # A confirmed false positive with no details omits what was confirmed from the
+  # committed audit record.
+  local log
+  log="$(write_log '| 2026-10-01 | 3 | 1 | — | @alice | no |\n')"
+  run bash -c 'bash "$1" validate "$2" 2>&1' _ "$SCRIPT" "$log"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *details* ]]
+}
+
 # ---------------------------------------------------------------------------
 # amcl_data_rows parsing robustness — a pipe in the free-text details cell, a
 # CRLF line ending, and an out-of-range date must not silently shift fields or
@@ -217,6 +264,28 @@ split_row() {
 @test "eligibility reports met after two consecutive clean cycles" {
   local log
   log="$(write_log '| 2026-10-01 | 3 | 0 | — | @alice | yes |\n| 2026-11-01 | 1 | 0 | — | @bob | yes |\n')"
+  run bash "$SCRIPT" eligibility "$log" 2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *clean-cycles-met=true* ]]
+}
+
+@test "eligibility counts a same-date correction once — the superseding row wins" {
+  # A correction reuses the same Cycle date; the reader collapses rows by date and
+  # counts only the last one, so a duplicate-date correction supersedes the earlier
+  # row rather than inflating the distinct-cycle count. Here 2026-10-01's first
+  # (non-clean) row is superseded by a clean correction, leaving two clean cycles.
+  local log
+  log="$(write_log '| 2026-10-01 | 3 | 1 | first pass | @alice | no |\n| 2026-10-01 | 3 | 0 | — | @alice | yes |\n| 2026-11-01 | 1 | 0 | — | @bob | yes |\n')"
+  run bash "$SCRIPT" eligibility "$log" 2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *clean-cycles-met=true* ]]
+}
+
+@test "eligibility handles out-of-order dates — the two latest distinct cycles are used" {
+  # Rows recorded out of chronological order must still be collapsed and ordered
+  # by Cycle date; the two latest distinct cycles (11-01, 12-01) are clean.
+  local log
+  log="$(write_log '| 2026-12-01 | 0 | 0 | — | @carol | yes |\n| 2026-10-01 | 2 | 1 | real fp | @alice | no |\n| 2026-11-01 | 1 | 0 | — | @bob | yes |\n')"
   run bash "$SCRIPT" eligibility "$log" 2
   [ "$status" -eq 0 ]
   [[ "$output" == *clean-cycles-met=true* ]]
