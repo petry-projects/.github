@@ -428,16 +428,25 @@ pm_surface_gate_label() {
   ' --arg surface "$2"
 }
 
-# pm_pr_should_route <actor> <author_association> <body> — 0 if a pull_request
-# event is worth acting on. The CHEAP pre-filter for the PR path, mirrored from
-# pm_should_route but WITHOUT the @-mention requirement: a PR persona is derived
-# from manifests, never addressed in the body. Both recursion axes and the
-# conservative §4 default floor still apply, so this path is no laxer than the
-# mention path's pre-filter (AC #4).
+# pm_pr_should_route <author> <actor> <author_association> <body> — 0 if a
+# pull_request event is worth acting on. The CHEAP pre-filter for the PR path,
+# mirrored from pm_should_route but WITHOUT the @-mention requirement: a PR
+# persona is derived from manifests, never addressed in the body. Both recursion
+# axes and the conservative §4 default floor still apply, so this path is no
+# laxer than the mention path's pre-filter (AC #4).
+#
+# Recursion axis 1 checks BOTH identities, not just the PR author.
+# `pull_request.user.login` is the PR's original author and never changes once
+# the PR is opened; the ACTOR of a `synchronize`/`reopened` event is whoever
+# pushed the update or reopened the PR. An agent pushing a commit to a human's
+# PR keeps a human author but is a bot actor — checking the author alone lets
+# that agent update re-trigger the router and dispatch personas again (the
+# codeant/tier-3 finding). Excluding a bot on EITHER identity closes it.
 pm_pr_should_route() {
-  local actor="$1" assoc="$2" body="$3"
+  local author="$1" actor="$2" assoc="$3" body="$4"
 
-  pm_is_bot_actor "$actor" && return 1        # axis 1: bot actor
+  pm_is_bot_actor "$author" && return 1       # axis 1a: bot PR author
+  pm_is_bot_actor "$actor" && return 1        # axis 1b: bot pusher/reopener (github.actor)
   pm_is_agent_comment "$body" && return 1     # axis 2: agent marker
   pm_trust_ok "$assoc" OWNER MEMBER COLLABORATOR || return 1
   return 0

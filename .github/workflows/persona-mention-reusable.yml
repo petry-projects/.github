@@ -391,10 +391,19 @@ jobs:
     #   2. marker    — a PR body carrying '<!-- persona:' never routes
     # There is deliberately NO '@petry-projects/' check: the PR path derives the
     # firing personas from their manifests, it does not read a handle from the body.
+    #
+    # Axis 1 excludes a bot on BOTH identities. pull_request.user.login is the
+    # PR's original author and never changes; github.actor is whoever triggered
+    # THIS event — the pusher on `synchronize`, the reopener on `reopened`. An
+    # agent pushing to a human-authored PR keeps a human author but is a bot
+    # actor, so checking the author alone lets that agent update re-arm the
+    # router (the codeant/tier-3 recursion finding). Exclude either.
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.user.login != 'donpetry-bot' &&
       github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.actor != 'donpetry-bot' &&
+      github.actor != 'github-actions[bot]' &&
       !contains(github.event.pull_request.body, '<!-- persona:') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
 
@@ -428,6 +437,10 @@ jobs:
           # interpolated inline into the run: body (script-injection vector).
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # github.actor — whoever triggered THIS event (the pusher on
+          # synchronize, the reopener on reopened). Checked alongside the author
+          # so a bot push to a human's PR cannot bypass the recursion guard.
+          PR_ACTOR: ${{ github.actor }}
           PR_ASSOC: ${{ github.event.pull_request.author_association }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SOURCE_REPO: ${{ github.repository }}
@@ -436,8 +449,8 @@ jobs:
           # shellcheck source=scripts/lib/persona-mention.sh
           source .persona-tooling/scripts/lib/persona-mention.sh
 
-          if ! pm_pr_should_route "$PR_AUTHOR" "$PR_ASSOC" "$PR_BODY"; then
-            echo "Not routable (bot actor, agent marker, or trust floor) — nothing to do."
+          if ! pm_pr_should_route "$PR_AUTHOR" "$PR_ACTOR" "$PR_ASSOC" "$PR_BODY"; then
+            echo "Not routable (bot author/actor, agent marker, or trust floor) — nothing to do."
             exit 0
           fi
 

@@ -590,22 +590,29 @@ PR_ON='    - surface: pull_request
 # become an ungated write surface, so the guards apply on this path too (AC #4).
 
 @test "pm_pr_should_route allows a trusted human's PR with no @-mention in the body" {
-  run pm_pr_should_route don-petry OWNER "Ordinary PR description, no handles."
+  run pm_pr_should_route don-petry don-petry OWNER "Ordinary PR description, no handles."
   [ "$status" -eq 0 ]
 }
 
-@test "pm_pr_should_route blocks a PR opened by an agent identity (axis 1)" {
-  run pm_pr_should_route donpetry-bot OWNER "PR body"
+@test "pm_pr_should_route blocks a PR opened by an agent identity (axis 1a: author)" {
+  run pm_pr_should_route donpetry-bot donpetry-bot OWNER "PR body"
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_pr_should_route blocks a bot push/reopen on a human-authored PR (axis 1b: actor)" {
+  # PR author is a human, but the triggering actor is an agent identity — the
+  # codeant/tier-3 recursion finding: an agent update must not re-arm the router.
+  run pm_pr_should_route don-petry github-actions[bot] OWNER "PR body"
   [ "$status" -eq 1 ]
 }
 
 @test "pm_pr_should_route blocks a PR whose body carries the agent marker (axis 2)" {
-  run pm_pr_should_route don-petry OWNER '<!-- persona:qa-lead --> automated PR'
+  run pm_pr_should_route don-petry don-petry OWNER '<!-- persona:qa-lead --> automated PR'
   [ "$status" -eq 1 ]
 }
 
 @test "pm_pr_should_route blocks a PR from an author below the default floor" {
-  run pm_pr_should_route drive-by CONTRIBUTOR "PR body"
+  run pm_pr_should_route drive-by drive-by CONTRIBUTOR "PR body"
   [ "$status" -eq 1 ]
 }
 
