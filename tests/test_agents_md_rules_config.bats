@@ -158,3 +158,13 @@ CONFIG="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/scripts/lib/agents-md-rules.json"
   [ "$status" -eq 0 ]
   [ "$output" = "informational" ]
 }
+
+@test "promotion toggle ships DISABLED (enabled=false) — the mechanism arms nothing (#647)" {
+  # The Phase-4 "arms nothing" guarantee is literally promotion.toggle.enabled=false.
+  # Pin it so a future flip to true cannot pass CI silently — mirroring the disarmed
+  # breaker assertion (weekly_all.enabled == false) in
+  # tests/test_agent_rate_limits_config.bats and the default_severity assertion above.
+  run jq -e '.promotion.toggle.enabled == false' "$CONFIG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
