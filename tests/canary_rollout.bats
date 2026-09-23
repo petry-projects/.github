@@ -2168,6 +2168,48 @@ _drift_rings_one_agent() {
   [[ "$output" == *".github/workflows/ghost-reusable.yml"* ]]
 }
 
+# #1166: a registered reusable kept on a grandfathered name (no `-reusable.yml` suffix, e.g.
+# the pr-review engine `pr-review.yml`, #1127) that IS present on the host must NOT be
+# false-flagged missing-file. Before the fix, drift's present-set was suffix-only, so
+# registering pr-review.yml raised a spurious "stale registry entry" warning every cycle.
+@test "orchestrator: drift does NOT false-flag a present grandfathered-named reusable (pr-review.yml, #1166)" {
+  DRIFT_RINGS="$BATS_TEST_TMPDIR/drift-grandfathered.json"
+  jq '{version, description, org_infra_repos, member_tokens,
+       agents: {"pr-review": (.agents["dev-lead"] + {host: "petry-projects/.github-private",
+                                                     reusable: ".github/workflows/pr-review.yml"})}}' \
+    "$RINGS" > "$DRIFT_RINGS"
+  # The host listing includes pr-review.yml (present, but not `-reusable.yml`).
+  _drift_stub '[
+    {"type":"file","name":"pr-review.yml","path":".github/workflows/pr-review.yml"},
+    {"type":"file","name":"pr-review-trigger.yml","path":".github/workflows/pr-review-trigger.yml"}
+  ]' '[]'
+  run env CANARY_RINGS="$DRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  # pr-review.yml is registered AND present → neither missing-file nor unregistered.
+  [[ "$output" != *"DRIFT[missing-file]"* ]]
+  [[ "$output" != *"DRIFT[unregistered] petry-projects/.github-private: .github/workflows/pr-review.yml"* ]]
+  [[ "$output" == *"0 unregistered, 0 missing-file"* ]]
+}
+
+# A grandfathered-named reusable that is registered but GENUINELY absent from the host
+# listing must still be reported missing — the fix admits present registered files, it does
+# not blanket-suppress the check (#1166).
+@test "orchestrator: drift still reports a registered grandfathered reusable that is truly gone (#1166)" {
+  DRIFT_RINGS="$BATS_TEST_TMPDIR/drift-grandfathered-gone.json"
+  jq '{version, description, org_infra_repos, member_tokens,
+       agents: {"pr-review": (.agents["dev-lead"] + {host: "petry-projects/.github-private",
+                                                     reusable: ".github/workflows/pr-review.yml"})}}' \
+    "$RINGS" > "$DRIFT_RINGS"
+  # Host listing does NOT contain pr-review.yml — the file is genuinely gone.
+  _drift_stub '[
+    {"type":"file","name":"dev-lead-reusable.yml","path":".github/workflows/dev-lead-reusable.yml"}
+  ]' '[]'
+  run env CANARY_RINGS="$DRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT[missing-file]"* ]]
+  [[ "$output" == *".github/workflows/pr-review.yml"* ]]
+}
+
 @test "orchestrator: drift reports NO drift when the registry and host reusables are in sync" {
   _drift_rings_one_agent
   # Host lists exactly the one registered reusable — nothing extra, nothing missing.
@@ -4689,6 +4731,37 @@ GHEOF
   [ -n "$enum_sorted" ]
   registry_sorted="$(jq -r '.agents|keys[]' "$RINGS" | sort -u)"
   [ "$enum_sorted" = "$registry_sorted" ]
+}
+
+# ── pr-review registration (#1166) ──
+# pr-review is the ring-0 self-host reviewer (#497): its engine reusable
+# `pr-review.yml` lives in .github-private, dogfooded there on `pr-review/next`.
+# It was absent from the registry, so autocut never cut/advanced its channel — a
+# merged fix sat inert on main until a human ran cut-release.sh. It must be
+# registered like the other .github-private-hosted agents (dev-lead,
+# ci-failure-analyst): host-relative rings (next = the host) so `next`+`ring0`
+# span both org-infra repos whichever hosts the agent.
+@test "pr-review is registered with its .github-private host + engine reusable (#1166)" {
+  [ "$(jq -r '.agents["pr-review"].host' "$RINGS")" = "petry-projects/.github-private" ]
+  [ "$(jq -r '.agents["pr-review"].reusable' "$RINGS")" = ".github/workflows/pr-review.yml" ]
+  # run_workflow must resolve the agent's runs for the gate's sample floor — non-empty.
+  [ -n "$(jq -r '.agents["pr-review"].run_workflow // empty' "$RINGS")" ]
+  # It MUST be the caller stub's DISPLAY NAME, not a *.yml filename. On the outer tiers
+  # (.github/TalkTerm/… which have no pr-review workflow) `gh run list --workflow <name>`
+  # returns the graceful "could not find any workflows named …" → [] (#747); a *.yml
+  # filename instead 404s and _run_json mis-triages that as a transient fetch failure and
+  # fails the gate CLOSED. Guard against regressing run_workflow back to a filename.
+  [[ "$(jq -r '.agents["pr-review"].run_workflow' "$RINGS")" != *.yml ]]
+}
+
+@test "pr-review rings are host-relative next->ring0->ring1->stable (#1166)" {
+  # Ordered channels (registry order = tier order).
+  [ "$(jq -r '.agents["pr-review"].rings | sort_by(.order) | map(.channel) | join(",")' "$RINGS")" \
+      = "next,ring0,ring1,stable" ]
+  # next dogfoods on the host itself (the $host token), matching dev-lead/ci-failure-analyst.
+  [ "$(jq -r '.agents["pr-review"].rings[] | select(.channel=="next") | .members | join(",")' "$RINGS")" = "\$host" ]
+  [ "$(jq -r '.agents["pr-review"].rings[] | select(.channel=="ring0") | .members | join(",")' "$RINGS")" = "\$org_infra" ]
+  [ "$(jq -r '.agents["pr-review"].rings[] | select(.channel=="stable") | .members | join(",")' "$RINGS")" = "*" ]
 }
 
 # ── drift: per-agent "merged but not shipped" signal (#1019) ──

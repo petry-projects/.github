@@ -389,3 +389,35 @@ dev-lead/v1-stable"
   run ring_tag_exists petry-projects/.github-private dev-lead/v1-ring0
   [ "$status" -ne 0 ]
 }
+
+# ── ring_reusable_file / ring_caller_stub — registry-derived names (#1166) ──
+# pinned-version-report.sh scans each ring agent's caller stub for the reusable it
+# pins. Both filenames are derived from the registry so a grandfathered agent that
+# breaks the `<agent>.yml` / `<agent>-reusable.yml` convention (pr-review: engine
+# `pr-review.yml` invoked by `pr-review-trigger.yml`, #1127) is matched rather than
+# silently omitted from the report.
+@test "ring_reusable_file: convention for a normally-named agent (#1166)" {
+  [ "$(ring_reusable_file dev-lead)" = "dev-lead-reusable.yml" ]
+  [ "$(ring_reusable_file pr-auto-review)" = "pr-auto-review-reusable.yml" ]
+}
+
+@test "ring_reusable_file: grandfathered engine name for pr-review (#1166)" {
+  # Must be the legacy `pr-review.yml`, NOT the conventional `pr-review-reusable.yml` —
+  # the report's `uses:` matcher keys on this, and the wrong suffix omits pr-review.
+  [ "$(ring_reusable_file pr-review)" = "pr-review.yml" ]
+}
+
+@test "ring_reusable_file: falls back to the convention for an unknown agent (#1166)" {
+  [ "$(ring_reusable_file not-an-agent)" = "not-an-agent-reusable.yml" ]
+}
+
+@test "ring_caller_stub: convention for an agent without an override (#1166)" {
+  [ "$(ring_caller_stub dev-lead)" = ".github/workflows/dev-lead.yml" ]
+  [ "$(ring_caller_stub not-an-agent)" = ".github/workflows/not-an-agent.yml" ]
+}
+
+@test "ring_caller_stub: registry caller_stub override for pr-review (#1166)" {
+  # The engine `pr-review.yml` is workflow_call-only and carries no self-referencing
+  # `uses:`; the real pinned caller is the separate `pr-review-trigger.yml` stub.
+  [ "$(ring_caller_stub pr-review)" = ".github/workflows/pr-review-trigger.yml" ]
+}
