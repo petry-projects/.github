@@ -138,6 +138,45 @@ ring_is_ring_reusable() {
   return 1
 }
 
+# ring_reusable_file <agent> -> the reusable workflow FILENAME (basename, incl. `.yml`)
+# a caller stub references in its `uses:` line for this agent. Conventionally
+# `<agent>-reusable.yml`, but the registry's `reusable` path is the single source of
+# truth, so a grandfathered legacy name (e.g. `pr-review.yml`, the pr-review engine kept
+# on its pre-convention name until #1127) is returned as-is. Without this, callers that
+# hardcode the `-reusable.yml` suffix — e.g. pinned-version-report.sh's `uses:` matcher —
+# fail to match the grandfathered reusable and silently omit it from their reports (#1166).
+# Falls back to the convention when the agent is unknown/unregistered.
+ring_reusable_file() {
+  local agent="$1" path
+  path="$(jq -r --arg a "$agent" '.agents[$a].reusable // empty' "$RING_PINS_REGISTRY" 2>/dev/null)"
+  if [ -n "$path" ]; then
+    printf '%s' "${path##*/}"
+  else
+    printf '%s-reusable.yml' "$agent"
+  fi
+  return 0
+}
+
+# ring_caller_stub <agent> -> the caller-stub workflow PATH (repo-relative) a consumer
+# pins this agent's reusable through. Conventionally `.github/workflows/<agent>.yml`, but
+# when the engine reusable is grandfathered to a name that collides with that convention
+# (the pr-review ENGINE is itself `pr-review.yml`, invoked by the SEPARATE
+# `pr-review-trigger.yml` stub — #1127), the convention would point a scanner at the engine
+# instead of the real caller. The registry's optional `caller_stub` overrides the
+# convention so pinned-version-report.sh reads the caller that carries the `@<channel>` pin
+# rather than the workflow_call-only engine (which has no self-referencing `uses:`) (#1166).
+# Falls back to the convention when the agent has no `caller_stub`.
+ring_caller_stub() {
+  local agent="$1" stub
+  stub="$(jq -r --arg a "$agent" '.agents[$a].caller_stub // empty' "$RING_PINS_REGISTRY" 2>/dev/null)"
+  if [ -n "$stub" ]; then
+    printf '%s' "$stub"
+  else
+    printf '.github/workflows/%s.yml' "$agent"
+  fi
+  return 0
+}
+
 # ring_canonical_ref <channel-base> <repo> [major] -> the org-standard ref a stub
 # in <repo> should pin: the channel tag for the repo's ring tier, e.g.
 # `agent-shield/ring1` on a ring1 repo.

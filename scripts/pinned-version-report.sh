@@ -76,12 +76,19 @@ for repo in "${REPOS[@]}"; do
     # for different agents (e.g. markets is ring1 for apply-repo-settings, stable
     # elsewhere), so resolve the tier per (agent, repo), not once per repo.
     tier="$(ring_tier_for_repo "$agent" "$repo")"
-    # Caller stubs are conventionally named after the reusable (minus -reusable).
-    stub=".github/workflows/${agent}.yml"
+    # Caller stub + reusable filename come from the registry (the single source of
+    # truth), so a grandfathered agent whose engine/stub break the `<agent>.yml` /
+    # `<agent>-reusable.yml` convention (e.g. pr-review: engine `pr-review.yml` called by
+    # `pr-review-trigger.yml`, #1127) is scanned correctly rather than silently omitted
+    # from the report (#1166). ring_caller_stub / ring_reusable_file fall back to the
+    # convention for every conventionally-named agent.
+    stub="$(ring_caller_stub "$agent")"
+    reusable_file="$(ring_reusable_file "$agent")"
+    reusable_re="${reusable_file//./\\.}"   # escape dots for the ERE below
     content="$(gh api "repos/$ORG/$repo/contents/$stub" --jq '.content // empty' 2>/dev/null | base64 -d 2>/dev/null || true)"
     [ -n "$content" ] || continue
     # Extract the reusable uses: line -> host + @ref.
-    uses_line="$(grep -oE "uses:[[:space:]]*$ORG/(\.github|\.github-private)/\.github/workflows/${agent}-reusable\.yml@[^[:space:]#]+" <<< "$content" | head -1 || true)"
+    uses_line="$(grep -oE "uses:[[:space:]]*$ORG/(\.github|\.github-private)/\.github/workflows/${reusable_re}@[^[:space:]#]+" <<< "$content" | head -1 || true)"
     [ -n "$uses_line" ] || continue
     ref="${uses_line##*@}"          # e.g. dev-lead/v1-ring1
     host=""

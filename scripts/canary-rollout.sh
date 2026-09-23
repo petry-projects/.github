@@ -2502,14 +2502,23 @@ _registered_hosts() {
 # require the file to be present in the host listing, so a genuinely-deleted registered
 # reusable (registered but NOT in the listing) is still reported missing.
 _gh_list_reusables() {
-  local repo="$1" registered="${2:-}" json
+  local repo="$1" registered="${2:-}" json=""
+  # Strip CRs so a CRLF-terminated registered path still string-matches a host path (jq
+  # splits on "\n" and a trailing "\r" would make every comparison miss).
+  registered="${registered//$'\r'/}"
   json="$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null)" || return 1
+  # An empty (but exit-0) body is not a readable listing — treat it as an enumeration
+  # failure so the caller skips the host rather than false-flagging every reusable gone.
+  [ -n "$json" ] || return 1
   jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
+  # The array type is validated above, so iterate with `.[]` (not `.[]?`): the optional
+  # operator would silently swallow an iteration error on a malformed element instead of
+  # surfacing it. `any(...)` is the idiomatic membership test for the registered paths.
   jq -r --arg reg "$registered" '
     ($reg | split("\n") | map(select(length>0))) as $regpaths
-    | [ .[]? | select(.type=="file")
+    | [ .[] | select(.type=="file")
         | .path as $p
-        | select(($p | endswith("-reusable.yml")) or (($regpaths | index($p)) != null))
+        | select(($p | endswith("-reusable.yml")) or any($regpaths[]; . == $p))
         | $p ] | .[]' 2>/dev/null <<< "$json" || true
   return 0
 }
