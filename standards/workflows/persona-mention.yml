@@ -46,11 +46,19 @@ on:
   # repository_dispatch, which is exactly the bridge the manifest declares.
   discussion_comment:
     types: [created]
-# NOTE: reviewer assignment (pull_request/review_requested) is NOT subscribed
-# here yet, even though §4 says "Reviewer-assignment counts here too". The
-# router has no path for it, and a trigger that fires into a router which
+  # The router also serves the pull_request EVENT surface (#1165): it derives
+  # which personas fire from their manifests' declared `pull_request` surfaces
+  # and dispatches each PR-advisory, binding the same stop-marker / opt-out /
+  # write-gate / trust-floor brakes as the mention path. This path activates
+  # once the reusable at the pinned channel below advances to include it —
+  # rollout is central (bump the channel, then sweep), never a stub edit.
+  pull_request:
+    types: [opened, ready_for_review, synchronize, reopened]
+# NOTE: reviewer assignment (pull_request/review_requested) is still NOT
+# subscribed here, even though §4 says "Reviewer-assignment counts here too".
+# The router has no path for it — and a trigger that fires into a router which
 # ignores it is a dead trigger that only burns runs. Tracked as finding 10 in
-# petry-projects/.github#755; the trigger lands with the routing, not before.
+# petry-projects/.github#755; that trigger lands with its routing, not before.
 
 permissions: {}
 

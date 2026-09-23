@@ -207,11 +207,17 @@ pm_should_route() {
 # nothing. These take manifest YAML on stdin so they stay pure and testable —
 # fetching is the caller's job.
 
-# pm_manifest_query <jq-filter> — run a jq filter over a YAML manifest on stdin.
-# Uses python+yaml rather than yq: the fleet's runners are guaranteed python3 +
-# PyYAML (validate-personas.py depends on both) but not yq.
+# pm_manifest_query <jq-filter> [jq-args...] — run a jq filter over a YAML
+# manifest on stdin. Uses python+yaml rather than yq: the fleet's runners are
+# guaranteed python3 + PyYAML (validate-personas.py depends on both) but not yq.
+#
+# Extra arguments after the filter are forwarded to jq verbatim, so a caller can
+# pass `--arg surface pull_request` and select a surface by variable rather than
+# baking it into the filter string. Callers that pass only a filter are
+# unaffected — `"$@"` is empty and jq sees just the filter.
 pm_manifest_query() {
   local filter="$1" json
+  shift
   # Capture rather than pipe straight into jq: a pipeline reports the LAST
   # command's status, so `python3 ... | jq` would swallow a parse failure and jq
   # would happily read empty stdin, exit 0, and emit nothing. The caller cannot
@@ -226,7 +232,7 @@ except Exception as exc:
     sys.stderr.write("persona-mention: unparseable manifest: %s\n" % exc)
     sys.exit(2)
 ')" || return 2
-  printf '%s' "$json" | jq -r "$filter"
+  printf '%s' "$json" | jq -r "$@" "$filter"
 }
 
 # pm_mention_decision <manifest-yaml> — emit "<enabled> <mode> <opt_out_label>".
@@ -358,5 +364,140 @@ pm_first_stop_marker() {
       *$'\n'"${marker}"$'\n'*) printf '%s\n' "$marker"; return 0 ;;
     esac
   done <<<"$markers"
+  return 0
+}
+
+# ----------------------------------------------------------------------------
+# Event-surface routing — serving the pull_request surface (#1165)
+# ----------------------------------------------------------------------------
+# The router also serves event surfaces (starting with pull_request), delivering
+# a persona's PR-advisory through the one published ingress path instead of a
+# second, repo-local runtime (solution-architect decision (b), ADR-0007: one
+# agent-ingress stub per repo). WHICH personas fire is DERIVED from each
+# manifest's declared surfaces (#756), so enabling another persona needs no edit
+# here. Every brake the mention path binds — stop markers, opt-out, the
+# write-mode gate, the trust floor, and the two recursion axes — binds on this
+# path too: a PR event must never become an ungated, un-held write surface.
+#
+# These functions are pure and take an EXPLICITLY declared surface. Unlike
+# pm_mention_decision they do NOT fall back to triggers.default_mode: an event
+# surface fires only when the manifest declares that surface enabled. Applying
+# default_mode here would enumerate every advisory persona onto every event —
+# the opposite of deriving from declared surfaces.
+
+# pm_surface_decision <manifest-yaml> <surface> — emit "<enabled> <mode>
+# <opt_out_label>" for the named surface. An absent surface row is "false off"
+# (not dispatched); a declared row reports its own enabled/mode.
+pm_surface_decision() {
+  # shellcheck disable=SC2016  # $surface/$t/$s/$row are jq variables, not shell
+  printf '%s' "$1" | pm_manifest_query '
+    (.triggers // {}) as $t
+    | ($t.surfaces // []) as $s
+    | ($s | map(select(.surface == $surface)) | first) as $row
+    | (if $row == null
+       then "false off"
+       else ((($row.enabled // false) | tostring) + " " + ($row.mode // "advisory"))
+       end) as $decision
+    | $decision + " " + ($t.opt_out_label // "")
+  ' --arg surface "$2"
+}
+
+# pm_surface_trust_floor <manifest-yaml> <surface> — emit the floor for the named
+# surface, space-separated. A per-surface trust_floor tightens the persona-wide
+# trust.author_association_floor; when absent, the persona-wide floor applies.
+# Emits nothing when neither is declared — pm_trust_ok then denies, the safe
+# direction.
+pm_surface_trust_floor() {
+  # shellcheck disable=SC2016  # $surface/$row are jq variables, not shell
+  printf '%s' "$1" | pm_manifest_query '
+    ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
+    | ($row.trust_floor // .trust.author_association_floor // [])
+    | join(" ")
+  ' --arg surface "$2"
+}
+
+# pm_surface_gate_label <manifest-yaml> <surface> — the label that ARMS a
+# write-mode surface, or empty. §4 rule 2 makes gate_label schema-required when
+# mode == write; the schema enforces it is DECLARED, the caller must enforce it
+# is APPLIED.
+pm_surface_gate_label() {
+  # shellcheck disable=SC2016  # $surface/$row are jq variables, not shell
+  printf '%s' "$1" | pm_manifest_query '
+    ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
+    | ($row.gate_label // "")
+  ' --arg surface "$2"
+}
+
+# pm_pr_should_route <actor> <author_association> <body> — 0 if a pull_request
+# event is worth acting on. The CHEAP pre-filter for the PR path, mirrored from
+# pm_should_route but WITHOUT the @-mention requirement: a PR persona is derived
+# from manifests, never addressed in the body. Both recursion axes and the
+# conservative §4 default floor still apply, so this path is no laxer than the
+# mention path's pre-filter (AC #4).
+pm_pr_should_route() {
+  local actor="$1" assoc="$2" body="$3"
+
+  pm_is_bot_actor "$actor" && return 1        # axis 1: bot actor
+  pm_is_agent_comment "$body" && return 1     # axis 2: agent marker
+  pm_trust_ok "$assoc" OWNER MEMBER COLLABORATOR || return 1
+  return 0
+}
+
+# pm_pr_route_verdict <manifest-yaml> <interaction-yaml> <author_association> —
+# read the item's labels from stdin (one per line) and decide the verdict for
+# ONE persona on the pull_request surface. The caller has already established
+# that the persona DECLARES the surface enabled and is not opted out (both cheap,
+# label-free / manifest-only checks); this composes the remaining, label-and-
+# contract-dependent gauntlet in the SAME precedence the mention path uses:
+#
+#   stop marker  -> "skip stop-marker <marker>"   (the human hold, AC #2)
+#   write gate   -> "skip not-armed <gate>"       (unarmed write, AC #4)
+#   trust floor  -> "skip below-floor"            (author below the persona floor)
+#   otherwise    -> "dispatch <mode>"
+#
+# Fails CLOSED (non-zero, no dispatch) rather than emitting a verdict when:
+#   - the interaction contract is unreadable/malformed — return 2. The contract
+#     is passed already-fetched; a non-200/404 fetch is the caller's to fail on
+#     (pm_fetch_disposition), but a 200 with a corrupt body surfaces here as a
+#     non-zero from pm_first_stop_marker and must PROPAGATE, never be read as
+#     "not held".
+#   - a write surface declares no gate_label — return 3. That is a schema
+#     violation validate-personas.py should have caught; dispatching it would be
+#     the ungated write AC #4 forbids.
+pm_pr_route_verdict() {
+  local manifest="$1" interaction="$2" assoc="$3"
+  local labels held mode gate floor
+
+  labels="$(cat)"
+
+  # Human hold first among the label-derived brakes. An unparseable contract
+  # makes pm_first_stop_marker exit non-zero — propagate it (fail closed).
+  held="$(printf '%s\n' "$labels" | pm_first_stop_marker "$interaction")" || return 2
+  if [ -n "$held" ]; then
+    printf 'skip stop-marker %s\n' "$held"
+    return 0
+  fi
+
+  mode="$(pm_surface_decision "$manifest" pull_request | awk '{print $2}')"
+
+  if [ "$mode" = "write" ]; then
+    gate="$(pm_surface_gate_label "$manifest" pull_request)"
+    if [ -z "$gate" ]; then
+      return 3   # write with no gate_label — schema violation; never dispatch
+    fi
+    if ! printf '%s\n' "$labels" | grep -qxF "$gate"; then
+      printf 'skip not-armed %s\n' "$gate"
+      return 0
+    fi
+  fi
+
+  floor="$(pm_surface_trust_floor "$manifest" pull_request)"
+  # shellcheck disable=SC2086  # word-splitting is the point: floor is a set
+  if ! pm_trust_ok "$assoc" $floor; then
+    printf 'skip below-floor\n'
+    return 0
+  fi
+
+  printf 'dispatch %s\n' "$mode"
   return 0
 }
