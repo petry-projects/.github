@@ -52,8 +52,16 @@ on:
   # write-gate / trust-floor brakes as the mention path. This path activates
   # once the reusable at the pinned channel below advances to include it —
   # rollout is central (bump the channel, then sweep), never a stub edit.
+  #
+  # Subscribe only the actions a persona can declare on its `pull_request`
+  # surface today: opened, ready_for_review, reopened. `synchronize` is NOT
+  # subscribed — no persona declares it (qa-lead excludes it deliberately) and
+  # the router would discard every synchronize event once the declared-events
+  # gate is in, so subscribing it only burns a runner in every repo on every
+  # push. It would be added here only if a persona declares it. (Reviewer
+  # assignment, review_requested, is still correctly omitted — see below.)
   pull_request:
-    types: [opened, ready_for_review, synchronize]
+    types: [opened, ready_for_review, reopened]
 # NOTE: reviewer assignment (pull_request/review_requested) is still NOT
 # subscribed here, even though §4 says "Reviewer-assignment counts here too".
 # The router has no path for it — and a trigger that fires into a router which

@@ -206,6 +206,18 @@ MENTION_ON='    - surface: mention
   [ "$output" = "OWNER" ]
 }
 
+@test "pm_mention_trust_floor cannot widen the persona-wide floor" {
+  # Same intersect semantics as pm_surface_trust_floor: a surface trust_floor can
+  # only tighten. CONTRIBUTOR is outside the persona-wide floor and must be
+  # dropped, so a mention resolves the floor identically to a pull_request event
+  # for the same manifest (cubic P3 — the two paths must not diverge).
+  run pm_mention_trust_floor "$(manifest '    - surface: mention
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER, CONTRIBUTOR]')"
+  [ "$output" = "OWNER" ]
+}
+
 @test "pm_persona_id reads the id the manifest claims" {
   run pm_persona_id "$(manifest "$MENTION_ON")"
   [ "$output" = "qa-lead" ]
@@ -494,6 +506,33 @@ good-first-issue'
   [ "$output" = "fail" ]
 }
 
+# --- pm_should_retry_status (bounded-retry decision) -----------------------
+# Only a transient status is worth retrying; a definitive answer must not be.
+
+@test "pm_should_retry_status retries a curl transport error (000)" {
+  run pm_should_retry_status 000
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_should_retry_status retries a 5xx" {
+  run pm_should_retry_status 500
+  [ "$status" -eq 0 ]
+  run pm_should_retry_status 503
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_should_retry_status does NOT retry a definitive 200 or 404" {
+  run pm_should_retry_status 200
+  [ "$status" -eq 1 ]
+  run pm_should_retry_status 404
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_should_retry_status does NOT retry an other 4xx" {
+  run pm_should_retry_status 403
+  [ "$status" -eq 1 ]
+}
+
 # ===========================================================================
 # The pull_request surface (#1165) — the router also serves PR events.
 # ===========================================================================
@@ -569,6 +608,20 @@ PR_ON='    - surface: pull_request
   [ "$output" = "OWNER" ]
 }
 
+@test "pm_surface_trust_floor cannot widen the persona-wide floor" {
+  # The security property: a surface floor can only tighten, never loosen. The
+  # persona-wide floor permits [OWNER, MEMBER, COLLABORATOR]; the surface floor
+  # adds CONTRIBUTOR, which is NOT in the global floor and must be dropped by the
+  # intersection. If a later change swapped intersect for surface-wins,
+  # CONTRIBUTOR would get through and this test would fail.
+  run pm_surface_trust_floor "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER, CONTRIBUTOR]')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "OWNER" ]
+}
+
 @test "pm_surface_gate_label returns the gate for a write-mode pull_request surface" {
   run pm_surface_gate_label "$(manifest '    - surface: pull_request
       enabled: true
@@ -582,6 +635,39 @@ PR_ON='    - surface: pull_request
   run pm_surface_gate_label "$(manifest "$PR_ON")" pull_request
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# --- pm_surface_declares_event (gate on declared events, not just enabled) --
+# A pull_request surface fires only on the actions it declares in `events`. A row
+# with no events list is undeclared for every action, so `synchronize` never
+# fires against a persona that only lists opened/ready_for_review (maintainer
+# review item 1).
+
+PR_EVENTS='    - surface: pull_request
+      enabled: true
+      mode: advisory
+      events: [opened, ready_for_review]'
+
+@test "pm_surface_declares_event is true for a declared action (opened)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request opened
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_surface_declares_event is true for a declared action (ready_for_review)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request ready_for_review
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_surface_declares_event is false for an undeclared action (synchronize)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request synchronize
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_surface_declares_event is false for a row that declares no events" {
+  # PR_ON declares the surface enabled but lists no events — undeclared for every
+  # action, so it does not fire even on opened.
+  run pm_surface_declares_event "$(manifest "$PR_ON")" pull_request opened
+  [ "$status" -ne 0 ]
 }
 
 # --- pm_pr_should_route (event pre-filter) ---------------------------------

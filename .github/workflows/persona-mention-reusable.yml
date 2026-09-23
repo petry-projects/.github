@@ -398,8 +398,18 @@ jobs:
     # agent pushing to a human-authored PR keeps a human author but is a bot
     # actor, so checking the author alone lets that agent update re-arm the
     # router (the codeant/tier-3 recursion finding). Exclude either.
+    #
+    # Fork heads are excluded up front: a `pull_request` run from a fork gets NO
+    # repository secrets (and `secrets: inherit` does not change that), so GH_TOKEN
+    # would be empty, the very first labels call would fail, and the job would exit
+    # 1 — a red check on every event of every fork PR, even from a trusted MEMBER,
+    # and the router could not dispatch without the PAT anyway. Requiring the head
+    # repo to be THIS repo skips them before any token-dependent step runs. Routing
+    # a fork PR would need a deliberate pull_request_target design, which this is
+    # not (#1167 cubic/coderabbit findings).
     if: |
       github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'donpetry-bot' &&
       github.event.pull_request.user.login != 'github-actions[bot]' &&
       github.actor != 'donpetry-bot' &&
@@ -443,11 +453,50 @@ jobs:
           PR_ACTOR: ${{ github.actor }}
           PR_ASSOC: ${{ github.event.pull_request.author_association }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The event action (opened / ready_for_review / reopened / ...). The
+          # router gates each persona on its surface's DECLARED events, so an
+          # action a persona did not declare is skipped rather than dispatched.
+          PR_ACTION: ${{ github.event.action }}
           SOURCE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/persona-mention.sh
           source .persona-tooling/scripts/lib/persona-mention.sh
+
+          # Bounded retries with backoff for the PR-path network calls: a single
+          # transient GitHub / raw-content failure must not make delivery flaky or
+          # halt the fan-out. Both helpers PRESERVE the visible failure after the
+          # attempts are exhausted (fail loud), so a persistently transient error
+          # still aborts the route rather than being read as "not a persona".
+
+          # raw_fetch <url> <out_file> — echo the final HTTP status. Retries only a
+          # transient status (transport error / 5xx, per pm_should_retry_status); a
+          # definitive 200/404/other-4xx returns immediately, so a 404 is never
+          # turned into wasted retries and the case-analysis below is unchanged.
+          raw_fetch() {
+            local url="$1" out="$2" attempt=1 http
+            while :; do
+              http="$(curl -sSL --max-time 20 -o "$out" -w '%{http_code}' "$url" || echo 000)"
+              if ! pm_should_retry_status "$http" || [ "$attempt" -ge 3 ]; then
+                printf '%s' "$http"; return 0
+              fi
+              sleep "$attempt"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          # gh_retry <gh-args...> — run `gh` with bounded retries, retrying on any
+          # non-zero exit (a failed GET read or a dispatch that did not go through;
+          # gh returns non-zero on an HTTP error, so a retried dispatch does not
+          # double-fire in the common case). Non-zero after the last attempt.
+          gh_retry() {
+            local attempt=1
+            until gh "$@"; do
+              if [ "$attempt" -ge 3 ]; then return 1; fi
+              sleep "$attempt"
+              attempt=$((attempt + 1))
+            done
+          }
 
           if ! pm_pr_should_route "$PR_AUTHOR" "$PR_ACTOR" "$PR_ASSOC" "$PR_BODY"; then
             echo "Not routable (bot author/actor, agent marker, or trust floor) — nothing to do."
@@ -463,7 +512,7 @@ jobs:
           # unlike a discussion), and the labels back the opt-out, the stop-marker
           # check, and the write-mode gate. An unreadable label set must NEVER be
           # read as "no opt-out, no hold, no gate" — fail closed (#755).
-          if ! LABELS="$(gh api "/repos/${SOURCE_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')"; then
+          if ! LABELS="$(gh_retry api "/repos/${SOURCE_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')"; then
             echo "::error::could not read labels for ${SOURCE_REPO}#${PR_NUMBER} — refusing to route (an unreadable label set must never be read as 'no opt-out, no hold, no gate')"
             exit 1
           fi
@@ -474,7 +523,13 @@ jobs:
           # PRs is then a manifest edit in .github-private, with no change here.
           # A listing FAILURE is fatal (fail loud); an empty list simply dispatches
           # nobody.
-          if ! personas="$(gh api /repos/petry-projects/.github-private/contents/personas --jq '.[] | select(.type == "dir") | .name')"; then
+          #
+          # List at PERSONA_REF, the SAME ref the manifests are read at below. The
+          # contents endpoint defaults to the repo's default branch, so omitting
+          # ref would list the candidate directories from main while fetching their
+          # manifests from the override ref — an end-to-end test with persona_ref
+          # set to a branch would never see a persona that exists only on it.
+          if ! personas="$(gh_retry api "/repos/petry-projects/.github-private/contents/personas?ref=${PERSONA_REF}" --jq '.[] | select(.type == "dir") | .name')"; then
             echo "::error::could not list personas in petry-projects/.github-private — refusing to route"
             exit 1
           fi
@@ -490,7 +545,7 @@ jobs:
             # expiry). 200 -> manifest; 404 -> not a persona (skip); anything else
             # -> a fetch FAILURE, never "not a persona".
             body_file="$(mktemp)"
-            http="$(curl -sSL --max-time 20 -o "$body_file" -w '%{http_code}' "$url" || echo 000)"
+            http="$(raw_fetch "$url" "$body_file")"
             case "$http" in
               200) manifest="$(cat "$body_file")" ;;
               404)
@@ -522,6 +577,18 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
+            # Gate on the surface's DECLARED events, not merely `enabled`. A row
+            # that lists events: [opened, ready_for_review] must NOT fire on the
+            # `synchronize`/`reopened` this stub also delivers — nothing downstream
+            # deduplicates across pushes, so re-advising on every push is exactly
+            # the harm. A row with no events list is undeclared for every action
+            # and is skipped (derive from what is declared). Fail closed: a
+            # manifest that will not parse here does not dispatch.
+            if ! pm_surface_declares_event "$manifest" pull_request "$PR_ACTION"; then
+              echo "Persona '${slug}': skip undeclared-event ${PR_ACTION}."
+              echo "::endgroup::"; continue
+            fi
+
             if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF -- "$opt_out"; then
               echo "PR carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
               echo "::endgroup::"; continue
@@ -538,7 +605,7 @@ jobs:
             #             the job; a transient 5xx must never read as "no markers"
             interaction_url="$(pm_interaction_url "$slug")"
             ibody_file="$(mktemp)"
-            ihttp="$(curl -sSL --max-time 20 -o "$ibody_file" -w '%{http_code}' "$interaction_url" || echo 000)"
+            ihttp="$(raw_fetch "$interaction_url" "$ibody_file")"
             case "$(pm_fetch_disposition "$ihttp")" in
               read)
                 interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; exit 1; }
@@ -571,7 +638,9 @@ jobs:
               "dispatch "*)
                 mode="${verdict#dispatch }"
                 echo "Routing to '${slug}' (mode=${mode})."
-                gh api \
+                # Forward the event action so the runner-side pre-gate
+                # (.github-private#1909) can pass it into persona-runner-reusable.yml.
+                gh_retry api \
                   --method POST \
                   --header "Accept: application/vnd.github+json" \
                   /repos/petry-projects/.github-private/dispatches \
@@ -579,6 +648,7 @@ jobs:
                   --field "client_payload[persona]=$slug" \
                   --field "client_payload[mode]=$mode" \
                   --field "client_payload[surface]=pull_request" \
+                  --field "client_payload[event_action]=$PR_ACTION" \
                   --field "client_payload[source_repo]=$SOURCE_REPO" \
                   --field "client_payload[item_number]=$PR_NUMBER" \
                   --field "client_payload[requested_by]=$PR_AUTHOR"

@@ -167,6 +167,27 @@ pm_fetch_disposition() {
   esac
 }
 
+# pm_should_retry_status <http_code> — 0 when a fetch that returned this status is
+# worth RETRYING, 1 when the status is a definitive answer that must not be
+# retried. The bounded-retry decision, kept pure here so the backoff loop in the
+# workflow is thin and the classification is unit-tested:
+#
+#   000        -> retry   a curl transport error (DNS, connect, timeout)
+#   5xx        -> retry   a transient server-side failure
+#   any other  -> stop    200 (the body), 404 ("not a persona"), or any other 4xx
+#                         is a DEFINITIVE answer — retrying it only wastes time
+#
+# This never changes the fail-loud contract: after the caller exhausts its bounded
+# attempts it still hands the final status to pm_fetch_disposition (or the router's
+# own case), so a persistently transient failure aborts the route rather than being
+# mistaken for "not a persona" / "no stop markers".
+pm_should_retry_status() {
+  case "$1" in
+    000|5[0-9][0-9]) return 0 ;;
+    *)               return 1 ;;
+  esac
+}
+
 # pm_trust_ok <author_association> <floor...> — 0 if the association clears the
 # floor. The floor is a set, not a ladder: GitHub's author_association has no
 # total order we should invent (CONTRIBUTOR vs COLLABORATOR is not a rank), so
@@ -257,13 +278,35 @@ pm_mention_decision() {
 # pm_mention_trust_floor <manifest-yaml> — emit the floor for the mention
 # surface, space-separated. A per-surface trust_floor tightens the persona-wide
 # trust.author_association_floor; when absent, the persona-wide floor applies
-# (§5). Emits nothing when neither is declared — pm_trust_ok then denies, which
-# is the safe direction.
+# (§5). When BOTH are declared, intersect them (keep only values in both) — the
+# same intersect semantics as pm_surface_trust_floor, so "tightens" means the
+# same thing on the mention and event surfaces and a surface floor can never
+# WIDEN the persona-wide floor. Emits nothing when neither is declared —
+# pm_trust_ok then denies, which is the safe direction.
 pm_mention_trust_floor() {
   # shellcheck disable=SC2016  # $m is a jq variable, not a shell expansion
   printf '%s' "$1" | pm_manifest_query '
     ((.triggers.surfaces // []) | map(select(.surface == "mention")) | first) as $m
-    | ($m.trust_floor // .trust.author_association_floor // [])
+    | .trust.author_association_floor as $global_floor
+    | $m.trust_floor as $surface_floor
+    | (
+        if ($surface_floor | type) == "array" and ($global_floor | type) == "array"
+        then
+          # Both declared: intersect them (a surface floor can only tighten)
+          ($surface_floor | map(. as $x | select($global_floor[] == $x)))
+        elif ($surface_floor | type) == "array"
+        then
+          # Only surface floor
+          $surface_floor
+        elif ($global_floor | type) == "array"
+        then
+          # Only global floor
+          $global_floor
+        else
+          # Neither
+          []
+        end
+      )
     | join(" ")
   '
 }
@@ -446,6 +489,29 @@ pm_surface_gate_label() {
     ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
     | ($row.gate_label // "")
   ' --arg surface "$2"
+}
+
+# pm_surface_declares_event <manifest-yaml> <surface> <action> — 0 only when the
+# named surface row's `events` list contains <action>, 1 otherwise.
+#
+# `enabled` says the surface is live; `events` says WHICH event actions it fires
+# on. A row that declares `events: [opened, ready_for_review]` must NOT fire on
+# the `synchronize`/`reopened` the caller stub also delivers — the router derives
+# the firing actions from the manifest, it does not fan every subscribed event
+# onto every enabled surface. A row with NO `events` list is undeclared for every
+# action and returns 1: derive from what is declared, the same fail-closed rule as
+# the no-default_mode fallback (a surface must opt IN to an action, never inherit
+# it). Returns 2 on an unparseable manifest so the caller fails closed (skip),
+# never dispatching on a manifest it could not read.
+pm_surface_declares_event() {
+  local result
+  # shellcheck disable=SC2016  # $surface/$action/$row are jq variables, not shell
+  result="$(printf '%s' "$1" | pm_manifest_query '
+    ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
+    | (($row.events // [])
+       | if (type == "array") and (index($action) != null) then "yes" else "no" end)
+  ' --arg surface "$2" --arg action "$3")" || return 2
+  [ "$result" = "yes" ]
 }
 
 # pm_pr_should_route <author> <actor> <author_association> <body> — 0 if a
