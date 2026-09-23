@@ -514,12 +514,14 @@ PR_ON='    - surface: pull_request
 
 @test "pm_surface_decision reads an explicit enabled pull_request surface" {
   run pm_surface_decision "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "true advisory qa-lead:hands-off" ]
 }
 
 @test "pm_surface_decision reports a persona that does NOT declare the surface as off (not dispatched)" {
   # The mention manifest declares no pull_request row — it must not fire on a PR.
   run pm_surface_decision "$(manifest "$MENTION_ON")" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "false off qa-lead:hands-off" ]
 }
 
@@ -529,6 +531,7 @@ PR_ON='    - surface: pull_request
   run pm_surface_decision "$(manifest '    - surface: issues
       enabled: true
       mode: advisory')" pull_request
+  [ "$status" -eq 0 ]
   [ "${output% *}" = "false off" ]
 }
 
@@ -536,6 +539,7 @@ PR_ON='    - surface: pull_request
   run pm_surface_decision "$(manifest '    - surface: pull_request
       enabled: false
       mode: advisory')" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "false advisory qa-lead:hands-off" ]
 }
 
@@ -544,6 +548,7 @@ PR_ON='    - surface: pull_request
       enabled: true
       mode: write
       gate_label: qa-lead')" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "true write qa-lead:hands-off" ]
 }
 
@@ -551,6 +556,7 @@ PR_ON='    - surface: pull_request
 
 @test "pm_surface_trust_floor defaults to the persona-wide floor for pull_request" {
   run pm_surface_trust_floor "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "OWNER MEMBER COLLABORATOR" ]
 }
 
@@ -559,6 +565,7 @@ PR_ON='    - surface: pull_request
       enabled: true
       mode: advisory
       trust_floor: [OWNER]')" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "OWNER" ]
 }
 
@@ -567,11 +574,13 @@ PR_ON='    - surface: pull_request
       enabled: true
       mode: write
       gate_label: qa-lead')" pull_request
+  [ "$status" -eq 0 ]
   [ "$output" = "qa-lead" ]
 }
 
 @test "pm_surface_gate_label is empty for an advisory pull_request surface" {
   run pm_surface_gate_label "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
@@ -587,17 +596,17 @@ PR_ON='    - surface: pull_request
 
 @test "pm_pr_should_route blocks a PR opened by an agent identity (axis 1)" {
   run pm_pr_should_route donpetry-bot OWNER "PR body"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "pm_pr_should_route blocks a PR whose body carries the agent marker (axis 2)" {
   run pm_pr_should_route don-petry OWNER '<!-- persona:qa-lead --> automated PR'
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "pm_pr_should_route blocks a PR from an author below the default floor" {
   run pm_pr_should_route drive-by CONTRIBUTOR "PR body"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # --- pm_pr_route_verdict (the composed PR gauntlet — AC #2/#4 proof) --------
@@ -620,6 +629,7 @@ PR_ON='    - surface: pull_request
 
 @test "pm_pr_route_verdict honours a cross-persona hold on the PR path" {
   run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction)" OWNER <<<'dev-lead:needs-human'
+  [ "$status" -eq 0 ]
   [ "$output" = "skip stop-marker dev-lead:needs-human" ]
 }
 
@@ -661,7 +671,7 @@ PR_ON='    - surface: pull_request
   run pm_pr_route_verdict "$(manifest '    - surface: pull_request
       enabled: true
       mode: write')" "$(interaction)" OWNER <<<'enhancement'
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 3 ]
 }
 
 @test "pm_pr_route_verdict skips a PR author below the persona floor" {

@@ -466,7 +466,7 @@ pm_pr_should_route() {
 #     the ungated write AC #4 forbids.
 pm_pr_route_verdict() {
   local manifest="$1" interaction="$2" assoc="$3"
-  local labels held mode gate floor
+  local labels held decision mode gate floor
 
   labels="$(cat)"
 
@@ -478,10 +478,14 @@ pm_pr_route_verdict() {
     return 0
   fi
 
-  mode="$(pm_surface_decision "$manifest" pull_request | awk '{print $2}')"
+  # Capture the decision first so a manifest parse/query failure propagates
+  # (fail closed) instead of being swallowed by the pipe into awk; then split
+  # the "<enabled> <mode> <gate:hold>" tuple with native read.
+  decision="$(pm_surface_decision "$manifest" pull_request)" || return 2
+  read -r _ mode _ <<<"$decision"
 
   if [ "$mode" = "write" ]; then
-    gate="$(pm_surface_gate_label "$manifest" pull_request)"
+    gate="$(pm_surface_gate_label "$manifest" pull_request)" || return 2
     if [ -z "$gate" ]; then
       return 3   # write with no gate_label — schema violation; never dispatch
     fi
@@ -491,7 +495,7 @@ pm_pr_route_verdict() {
     fi
   fi
 
-  floor="$(pm_surface_trust_floor "$manifest" pull_request)"
+  floor="$(pm_surface_trust_floor "$manifest" pull_request)" || return 2
   # shellcheck disable=SC2086  # word-splitting is the point: floor is a set
   if ! pm_trust_ok "$assoc" $floor; then
     printf 'skip below-floor\n'
