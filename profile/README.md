@@ -77,6 +77,9 @@ All repositories in this org follow shared engineering standards defined in
   for rollback insurance; bypass actor management; legacy ruleset migration; verify and rollback
   procedures.
 
+- **[Standards Versioning](https://github.com/petry-projects/.github/blob/main/standards/standards-versioning.md)** — The two tag forms; cutting a release;
+  N-1 resolvability; opting in and staying out.
+
 ---
 
 ## Reporting & Dashboards
