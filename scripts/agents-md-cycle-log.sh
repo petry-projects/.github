@@ -141,9 +141,14 @@ amcl_validate_log() {
       printf 'cycle %s: no maintainer named in "Determined by" — every determination must name a maintainer\n' "$cycle" >&2
       rc=1; continue
     fi
+    if ! [[ "$maintainer" =~ ^@[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+      printf 'cycle %s: "Determined by" must contain a valid GitHub @handle (got "%s")\n' "$cycle" "$maintainer" >&2
+      rc=1; continue
+    fi
     local expected_clean
     if [ "$fps" -eq 0 ]; then expected_clean="yes"; else expected_clean="no"; fi
-    local clean_lc="${clean,,}"
+    local clean_lc
+    clean_lc=$(printf '%s' "$clean" | tr '[:upper:]' '[:lower:]')
     if [ "$clean_lc" != "$expected_clean" ]; then
       printf 'cycle %s: Clean? is "%s" but %s confirmed false positive(s) recorded (expected "%s")\n' \
         "$cycle" "$clean" "$fps" "$expected_clean" >&2
@@ -171,14 +176,29 @@ amcl_clean_cycles_met() {
     printf 'false'
     return 0
   fi
-  local rows recent count clean=0
+  local rows deduped recent count clean=0
   rows="$(amcl_data_rows "$log")"
-  count="$(printf '%s' "$rows" | grep -c . || true)"
+  # Deduplicate by cycle date: retain only the last row for each distinct cycle
+  # date, so duplicate-date corrections count once and out-of-order rows are
+  # handled correctly. Build a map of cycle → line, then emit only the latest
+  # line for each cycle.
+  deduped=$(printf '%s' "$rows" | awk -v FS="$AMCL_FS" '
+    {
+      if (NF >= 1 && $1 != "") {
+        seen[$1] = $0
+      }
+    }
+    END {
+      for (cycle in seen) {
+        print seen[cycle]
+      }
+    }' | sort)
+  count="$(printf '%s' "$deduped" | grep -c . || true)"
   if [ "$count" -lt "$required" ]; then
     printf 'false'
     return 0
   fi
-  recent="$(printf '%s\n' "$rows" | grep . | tail -n "$required")"
+  recent="$(printf '%s' "$deduped" | tail -n "$required")"
   local cycle findings fps details maintainer cln
   while IFS="$AMCL_FS" read -r cycle findings fps details maintainer cln; do
     [ -n "$cycle" ] || continue
