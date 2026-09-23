@@ -405,13 +405,33 @@ pm_surface_decision() {
 # pm_surface_trust_floor <manifest-yaml> <surface> — emit the floor for the named
 # surface, space-separated. A per-surface trust_floor tightens the persona-wide
 # trust.author_association_floor; when absent, the persona-wide floor applies.
+# When both are declared, intersect them (keep only values in both).
 # Emits nothing when neither is declared — pm_trust_ok then denies, the safe
 # direction.
 pm_surface_trust_floor() {
   # shellcheck disable=SC2016  # $surface/$row are jq variables, not shell
   printf '%s' "$1" | pm_manifest_query '
     ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
-    | ($row.trust_floor // .trust.author_association_floor // [])
+    | .trust.author_association_floor as $global_floor
+    | $row.trust_floor as $surface_floor
+    | (
+        if ($surface_floor | type) == "array" and ($global_floor | type) == "array"
+        then
+          # Both declared: intersect them
+          ($surface_floor | map(. as $x | select($global_floor[] == $x)))
+        elif ($surface_floor | type) == "array"
+        then
+          # Only surface floor
+          $surface_floor
+        elif ($global_floor | type) == "array"
+        then
+          # Only global floor
+          $global_floor
+        else
+          # Neither
+          []
+        end
+      )
     | join(" ")
   ' --arg surface "$2"
 }
@@ -498,7 +518,7 @@ pm_pr_route_verdict() {
     if [ -z "$gate" ]; then
       return 3   # write with no gate_label — schema violation; never dispatch
     fi
-    if ! printf '%s\n' "$labels" | grep -qxF "$gate"; then
+    if ! printf '%s\n' "$labels" | grep -qxF -- "$gate"; then
       printf 'skip not-armed %s\n' "$gate"
       return 0
     fi

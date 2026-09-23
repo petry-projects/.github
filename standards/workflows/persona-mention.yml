@@ -53,7 +53,7 @@ on:
   # once the reusable at the pinned channel below advances to include it —
   # rollout is central (bump the channel, then sweep), never a stub edit.
   pull_request:
-    types: [opened, ready_for_review, synchronize, reopened]
+    types: [opened, ready_for_review, synchronize]
 # NOTE: reviewer assignment (pull_request/review_requested) is still NOT
 # subscribed here, even though §4 says "Reviewer-assignment counts here too".
 # The router has no path for it — and a trigger that fires into a router which

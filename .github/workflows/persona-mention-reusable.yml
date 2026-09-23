@@ -264,7 +264,7 @@ jobs:
               continue
             fi
 
-            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF "$opt_out"; then
+            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF -- "$opt_out"; then
               echo "Item carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
               echo "::endgroup::"
               continue
@@ -338,7 +338,7 @@ jobs:
                 echo "::endgroup::"
                 continue
               fi
-              if ! printf '%s\n' "$LABELS" | grep -qxF "$gate"; then
+              if ! printf '%s\n' "$LABELS" | grep -qxF -- "$gate"; then
                 echo "Persona '${slug}' is write-mode and NOT armed — '${gate}' absent. Skipping."
                 echo "::endgroup::"
                 continue
@@ -522,7 +522,7 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
-            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF "$opt_out"; then
+            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF -- "$opt_out"; then
               echo "PR carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
               echo "::endgroup::"; continue
             fi
