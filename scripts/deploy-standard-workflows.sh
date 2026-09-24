@@ -337,6 +337,23 @@ is_pin_compliant() {
   fi
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
+  # Distinguish a reusable-WORKFLOW call from a third-party ACTION step. A thin
+  # caller stub's first `uses:` targets a reusable workflow — `owner/repo/.github/
+  # workflows/<name>.yml@<ref>` (prefix ends in `.yml`) — and that pin IS the
+  # compliance signal. A SELF-CONTAINED verbatim stub (initiative-driver class,
+  # e.g. dismiss-stale-bot-reviews.yml, #1115) has NO reusable call; its first
+  # `uses:` is an action step like `actions/checkout@<sha>` (prefix does NOT end
+  # in `.yml`). Matching only on that checkout SHA would declare the stub
+  # compliant even after its triggers, permissions, or run step drift from the
+  # template, so later non-checkout template fixes would never propagate (#1116).
+  # Treat such a stub exactly like the no-uses verbatim case above: full-content
+  # compare (CRLF-normalized).
+  if [[ "$prefix" != *.yml ]]; then
+    local template_content normalized_existing
+    template_content=$(tr -d '\r' < "$template")
+    normalized_existing=$(printf '%s' "$existing_content" | tr -d '\r')
+    [[ "$normalized_existing" == "$template_content" ]] && return 0 || return 1
+  fi
   if [[ "$prefix" =~ /([a-z0-9-]+)-reusable\.yml$ ]]; then
     base="${BASH_REMATCH[1]}"
     # Only treat it as ring-managed if the reusable is on the ring model AND the
