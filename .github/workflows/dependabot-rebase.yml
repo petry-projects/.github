@@ -48,8 +48,8 @@ permissions: {}
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      contents: write   # GITHUB_TOKEN scope for caller; update-branch and merge-PR operations use APP_TOKEN (via APP_ID/APP_PRIVATE_KEY) to bypass recursive guard
+      pull-requests: write  # GITHUB_TOKEN scope for caller; update-branch and merge-PR operations use APP_TOKEN (via APP_ID/APP_PRIVATE_KEY) to bypass merge gates
     uses: ./.github/workflows/dependabot-rebase-reusable.yml  # local ref — always current
     secrets:
       APP_ID: ${{ secrets.APP_ID }}

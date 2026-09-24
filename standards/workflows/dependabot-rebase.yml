@@ -48,8 +48,8 @@ permissions: {}
 jobs:
   dependabot-rebase:
     permissions:
-      contents: write   # update-branch via GITHUB_TOKEN (may touch .github/workflows/)
-      pull-requests: write  # re-approve PRs after branch update
+      contents: write   # GITHUB_TOKEN scope for caller; update-branch and merge-PR operations use APP_TOKEN (via APP_ID/APP_PRIVATE_KEY) to bypass recursive guard
+      pull-requests: write  # GITHUB_TOKEN scope for caller; update-branch and merge-PR operations use APP_TOKEN (via APP_ID/APP_PRIVATE_KEY) to bypass merge gates
     uses: petry-projects/.github/.github/workflows/dependabot-rebase-reusable.yml@dependabot-rebase/v2-stable  # NOSONAR(githubactions:S7637) first-party channel ref
     secrets:
       APP_ID: ${{ secrets.APP_ID }}
