@@ -6,6 +6,18 @@
 # for every persona — personas do NOT each ship a mention workflow (§4.1); that
 # per-agent drift is exactly what the manifest exists to prevent.
 #
+# The same router also serves the `pull_request` EVENT surface (#1165). Rather
+# than resolve an addressed handle, the PR path DERIVES which personas fire from
+# each manifest's declared surfaces (#756): it lists the personas in
+# .github-private and dispatches every one that declares an enabled
+# `pull_request` surface. This is solution-architect decision (b) on
+# .github-private#1869 and the ADR-0007 consolidation — one agent-ingress path,
+# not a second published runtime per role. The PR path binds EVERY brake the
+# mention path binds (stop markers, opt-out, the write-mode gate, the trust
+# floor, and the two recursion axes), so a PR event never becomes an ungated,
+# un-held write surface. The two paths are independent jobs (`route` for
+# comments, `route-pull-request` for PRs) so neither perturbs the other.
+#
 # How a mention resolves, and why there is no index:
 #   `validate-personas.py` enforces address.handle's slug == id == the persona's
 #   directory name, so '@petry-projects/qa-lead' resolves to
@@ -71,8 +83,10 @@ permissions: {}  # no default permissions; each job grants only what it needs
 concurrency:
   # Serialise per comment, not per thread: two different personas addressed in
   # one comment are dispatched by a single run, and cancelling an in-flight route
-  # would silently drop a mention.
-  group: persona-mention-${{ github.event.comment.id || github.run_id }}
+  # would silently drop a mention. A pull_request event has no comment id, so it
+  # serialises per PR number instead (rapid `synchronize`s queue rather than race
+  # a double-dispatch); the comment key is evaluated first, unchanged.
+  group: persona-mention-${{ github.event.comment.id || github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -250,7 +264,7 @@ jobs:
               continue
             fi
 
-            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF "$opt_out"; then
+            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF -- "$opt_out"; then
               echo "Item carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
               echo "::endgroup::"
               continue
@@ -324,7 +338,7 @@ jobs:
                 echo "::endgroup::"
                 continue
               fi
-              if ! printf '%s\n' "$LABELS" | grep -qxF "$gate"; then
+              if ! printf '%s\n' "$LABELS" | grep -qxF -- "$gate"; then
                 echo "Persona '${slug}' is write-mode and NOT armed — '${gate}' absent. Skipping."
                 echo "::endgroup::"
                 continue
@@ -359,5 +373,292 @@ jobs:
             dispatched=$((dispatched + 1))
             echo "::endgroup::"
           done < <(pm_extract_slugs "$COMMENT_BODY")
+
+          echo "Dispatched ${dispatched} persona(s)."
+
+  route-pull-request:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # actions/checkout of the tooling repo
+      issues: read          # a PR's labels are read via the issues endpoint
+      pull-requests: read
+    # The CHEAP pre-filter for the PR path, mirrored from pm_pr_should_route
+    # (tests/persona_mention.bats). It runs BEFORE the job starts, so secrets are
+    # never exposed to a run a bot, a marked PR body, or an untrusted author
+    # triggered. Same two recursion axes and conservative §4 default floor as the
+    # comment path's pre-filter — a PR event is no laxer:
+    #   1. bot actor — a PR opened by an agent identity never routes
+    #   2. marker    — a PR body carrying '<!-- persona:' never routes
+    # There is deliberately NO '@petry-projects/' check: the PR path derives the
+    # firing personas from their manifests, it does not read a handle from the body.
+    #
+    # Axis 1 excludes a bot on BOTH identities. pull_request.user.login is the
+    # PR's original author and never changes; github.actor is whoever triggered
+    # THIS event — the pusher on `synchronize`, the reopener on `reopened`. An
+    # agent pushing to a human-authored PR keeps a human author but is a bot
+    # actor, so checking the author alone lets that agent update re-arm the
+    # router (the codeant/tier-3 recursion finding). Exclude either.
+    #
+    # Fork heads are excluded up front: a `pull_request` run from a fork gets NO
+    # repository secrets (and `secrets: inherit` does not change that), so GH_TOKEN
+    # would be empty, the very first labels call would fail, and the job would exit
+    # 1 — a red check on every event of every fork PR, even from a trusted MEMBER,
+    # and the router could not dispatch without the PAT anyway. Requiring the head
+    # repo to be THIS repo skips them before any token-dependent step runs. Routing
+    # a fork PR would need a deliberate pull_request_target design, which this is
+    # not (#1167 cubic/coderabbit findings).
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'donpetry-bot' &&
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.actor != 'donpetry-bot' &&
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.pull_request.body, '<!-- persona:') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+
+    steps:
+      - name: Checkout persona-mention tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: petry-projects/.github
+          # Source the library from this reusable's own commit so the routing
+          # logic always matches the pinned workflow version (#465/#528).
+          ref: ${{ inputs.tooling_ref || github.job_workflow_sha }}
+          path: .persona-tooling
+          fetch-depth: 1
+          persist-credentials: false   # the tooling checkout needs no push creds
+
+      - name: Ensure PyYAML
+        # Same rationale as the comment path: pm_manifest_query parses manifests
+        # with python3 + yaml, PyYAML is not documented as preinstalled, and this
+        # runs on the CALLER's runner. Hash- and binary-locked per the
+        # dependency-hardening gate. Cheap no-op when already present.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || \
+            pip install --quiet --require-hashes --only-binary :all: \
+              -r .persona-tooling/scripts/persona-mention-requirements.txt
+
+      - name: Route the pull_request
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+          PERSONA_REF: ${{ inputs.persona_ref }}
+          # Every attacker-controllable event field arrives via env, never
+          # interpolated inline into the run: body (script-injection vector).
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # github.actor — whoever triggered THIS event (the pusher on
+          # synchronize, the reopener on reopened). Checked alongside the author
+          # so a bot push to a human's PR cannot bypass the recursion guard.
+          PR_ACTOR: ${{ github.actor }}
+          PR_ASSOC: ${{ github.event.pull_request.author_association }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The event action (opened / ready_for_review / reopened / ...). The
+          # router gates each persona on its surface's DECLARED events, so an
+          # action a persona did not declare is skipped rather than dispatched.
+          PR_ACTION: ${{ github.event.action }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/persona-mention.sh
+          source .persona-tooling/scripts/lib/persona-mention.sh
+
+          # Bounded retries with backoff for the PR-path network calls: a single
+          # transient GitHub / raw-content failure must not make delivery flaky or
+          # halt the fan-out. Both helpers PRESERVE the visible failure after the
+          # attempts are exhausted (fail loud), so a persistently transient error
+          # still aborts the route rather than being read as "not a persona".
+
+          # raw_fetch <url> <out_file> — echo the final HTTP status. Retries only a
+          # transient status (transport error / 5xx, per pm_should_retry_status); a
+          # definitive 200/404/other-4xx returns immediately, so a 404 is never
+          # turned into wasted retries and the case-analysis below is unchanged.
+          raw_fetch() {
+            local url="$1" out="$2" attempt=1 http
+            while :; do
+              http="$(curl -sSL --max-time 20 -o "$out" -w '%{http_code}' "$url" || echo 000)"
+              if ! pm_should_retry_status "$http" || [ "$attempt" -ge 3 ]; then
+                printf '%s' "$http"; return 0
+              fi
+              sleep "$attempt"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          # gh_retry <gh-args...> — run `gh` with bounded retries, retrying on any
+          # non-zero exit (a failed GET read or a dispatch that did not go through;
+          # gh returns non-zero on an HTTP error, so a retried dispatch does not
+          # double-fire in the common case). Non-zero after the last attempt.
+          gh_retry() {
+            local attempt=1
+            until gh "$@"; do
+              if [ "$attempt" -ge 3 ]; then return 1; fi
+              sleep "$attempt"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          if ! pm_pr_should_route "$PR_AUTHOR" "$PR_ACTOR" "$PR_ASSOC" "$PR_BODY"; then
+            echo "Not routable (bot author/actor, agent marker, or trust floor) — nothing to do."
+            exit 0
+          fi
+
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "::error::no pull_request number on the event — cannot route"
+            exit 1
+          fi
+
+          # A PR always has a labels API surface (LABELS_KNOWN is always true here,
+          # unlike a discussion), and the labels back the opt-out, the stop-marker
+          # check, and the write-mode gate. An unreadable label set must NEVER be
+          # read as "no opt-out, no hold, no gate" — fail closed (#755).
+          if ! LABELS="$(gh_retry api "/repos/${SOURCE_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')"; then
+            echo "::error::could not read labels for ${SOURCE_REPO}#${PR_NUMBER} — refusing to route (an unreadable label set must never be read as 'no opt-out, no hold, no gate')"
+            exit 1
+          fi
+
+          # DERIVE the candidate personas from the fleet, never enumerate them
+          # here (#756): list the persona directories and let each manifest's
+          # declared surfaces decide whether it fires. Enabling another persona on
+          # PRs is then a manifest edit in .github-private, with no change here.
+          # A listing FAILURE is fatal (fail loud); an empty list simply dispatches
+          # nobody.
+          #
+          # List at PERSONA_REF, the SAME ref the manifests are read at below. The
+          # contents endpoint defaults to the repo's default branch, so omitting
+          # ref would list the candidate directories from main while fetching their
+          # manifests from the override ref — an end-to-end test with persona_ref
+          # set to a branch would never see a persona that exists only on it.
+          if ! personas="$(gh_retry api "/repos/petry-projects/.github-private/contents/personas?ref=${PERSONA_REF}" --jq '.[] | select(.type == "dir") | .name')"; then
+            echo "::error::could not list personas in petry-projects/.github-private — refusing to route"
+            exit 1
+          fi
+
+          dispatched=0
+          while IFS= read -r slug; do
+            [ -n "$slug" ] || continue
+            echo "::group::@petry-projects/${slug}"
+
+            url="$(pm_manifest_url "$slug")"
+            # UNAUTHENTICATED on purpose — the SAME public-repo reasoning as the
+            # comment path (a token only ADDS a silent-death path via 404 on
+            # expiry). 200 -> manifest; 404 -> not a persona (skip); anything else
+            # -> a fetch FAILURE, never "not a persona".
+            body_file="$(mktemp)"
+            http="$(raw_fetch "$url" "$body_file")"
+            case "$http" in
+              200) manifest="$(cat "$body_file")" ;;
+              404)
+                rm -f "$body_file"
+                echo "No manifest at ${url} — not a persona. Skipping."
+                echo "::endgroup::"; continue ;;
+              *)
+                rm -f "$body_file"
+                echo "::error::fetching ${url} returned HTTP ${http} — refusing to treat a fetch failure as 'not a persona'"
+                exit 1 ;;
+            esac
+            rm -f "$body_file"
+
+            # The directory name we listed must equal the id the manifest claims —
+            # the same invariant the comment path checks (validate-personas.py).
+            claimed="$(pm_persona_id "$manifest")"
+            if [ "$claimed" != "$slug" ]; then
+              echo "::warning::manifest at ${url} claims id '${claimed}' but lives in personas/${slug} — refusing to route"
+              echo "::endgroup::"; continue
+            fi
+
+            # Does this persona DECLARE the pull_request surface enabled? An
+            # unlisted or disabled surface means it simply does not fire on PRs —
+            # no default_mode fan-out (#756). This is the "not dispatched" branch,
+            # decided from the manifest alone with no contract fetch.
+            read -r enabled mode opt_out <<<"$(pm_surface_decision "$manifest" pull_request)"
+            if [ "$enabled" != "true" ]; then
+              echo "Persona '${slug}' does not declare an enabled pull_request surface (mode=${mode}). Skipping."
+              echo "::endgroup::"; continue
+            fi
+
+            # Gate on the surface's DECLARED events, not merely `enabled`. A row
+            # that lists events: [opened, ready_for_review] must NOT fire on the
+            # `synchronize`/`reopened` this stub also delivers — nothing downstream
+            # deduplicates across pushes, so re-advising on every push is exactly
+            # the harm. A row with no events list is undeclared for every action
+            # and is skipped (derive from what is declared). Fail closed: a
+            # manifest that will not parse here does not dispatch.
+            if ! pm_surface_declares_event "$manifest" pull_request "$PR_ACTION"; then
+              echo "Persona '${slug}': skip undeclared-event ${PR_ACTION}."
+              echo "::endgroup::"; continue
+            fi
+
+            if [ -n "$opt_out" ] && printf '%s\n' "$LABELS" | grep -qxF -- "$opt_out"; then
+              echo "PR carries '${opt_out}' — persona '${slug}' is opted out here. Skipping."
+              echo "::endgroup::"; continue
+            fi
+
+            # Fetch the persona's interaction contract for its declared stop
+            # markers. UNAUTHENTICATED, same public-repo reasoning as above. The
+            # fetch disposition mirrors the manifest fetch EXACTLY (AC #2/#3):
+            #   read   -> the contract is the answer
+            #   absent -> a manifested persona firing on this surface with NO
+            #             contract: refuse this slug (never route on the opt-out
+            #             alone), matching the comment path
+            #   fail   -> a non-200/404 fetch: a FAILURE to get an answer, fail
+            #             the job; a transient 5xx must never read as "no markers"
+            interaction_url="$(pm_interaction_url "$slug")"
+            ibody_file="$(mktemp)"
+            ihttp="$(raw_fetch "$interaction_url" "$ibody_file")"
+            case "$(pm_fetch_disposition "$ihttp")" in
+              read)
+                interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; exit 1; }
+                rm -f "$ibody_file" ;;
+              absent)
+                rm -f "$ibody_file"
+                echo "::warning::no interaction contract for '${slug}' at ${interaction_url} — a persona firing on pull_request must declare its stop markers; refusing to route on the opt-out alone"
+                echo "::endgroup::"; continue ;;
+              *)  # fail
+                rm -f "$ibody_file"
+                echo "::error::fetching ${interaction_url} returned HTTP ${ihttp} — refusing to treat a fetch failure as 'no stop markers'"
+                exit 1 ;;
+            esac
+
+            # The composed gauntlet (pure, unit-tested per branch): stop marker ->
+            # write gate -> trust floor -> dispatch. A non-zero status is fail
+            # CLOSED (2 = unreadable/malformed contract; 3 = write surface with no
+            # gate_label) — never a dispatch.
+            if verdict="$(printf '%s\n' "$LABELS" | pm_pr_route_verdict "$manifest" "$interaction" "$PR_ASSOC")"; then
+              :
+            else
+              case "$?" in
+                2) echo "::error::interaction contract for '${slug}' is unreadable or malformed — refusing to route (fail closed)"; exit 1 ;;
+                3) echo "::error::persona '${slug}' declares a write pull_request surface with no gate_label — refusing (schema violation: §4 rule 2)"; exit 1 ;;
+                *) echo "::error::routing verdict failed for '${slug}'"; exit 1 ;;
+              esac
+            fi
+
+            case "$verdict" in
+              "dispatch "*)
+                mode="${verdict#dispatch }"
+                echo "Routing to '${slug}' (mode=${mode})."
+                # Forward the event action so the runner-side pre-gate
+                # (.github-private#1909) can pass it into persona-runner-reusable.yml.
+                gh_retry api \
+                  --method POST \
+                  --header "Accept: application/vnd.github+json" \
+                  /repos/petry-projects/.github-private/dispatches \
+                  --field event_type=persona-mention \
+                  --field "client_payload[persona]=$slug" \
+                  --field "client_payload[mode]=$mode" \
+                  --field "client_payload[surface]=pull_request" \
+                  --field "client_payload[event_action]=$PR_ACTION" \
+                  --field "client_payload[source_repo]=$SOURCE_REPO" \
+                  --field "client_payload[item_number]=$PR_NUMBER" \
+                  --field "client_payload[requested_by]=$PR_AUTHOR"
+                dispatched=$((dispatched + 1))
+                ;;
+              *)
+                echo "Persona '${slug}': ${verdict}."
+                ;;
+            esac
+            echo "::endgroup::"
+          done <<< "$personas"
 
           echo "Dispatched ${dispatched} persona(s)."

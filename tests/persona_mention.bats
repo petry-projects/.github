@@ -206,6 +206,18 @@ MENTION_ON='    - surface: mention
   [ "$output" = "OWNER" ]
 }
 
+@test "pm_mention_trust_floor cannot widen the persona-wide floor" {
+  # Same intersect semantics as pm_surface_trust_floor: a surface trust_floor can
+  # only tighten. CONTRIBUTOR is outside the persona-wide floor and must be
+  # dropped, so a mention resolves the floor identically to a pull_request event
+  # for the same manifest (cubic P3 — the two paths must not diverge).
+  run pm_mention_trust_floor "$(manifest '    - surface: mention
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER, CONTRIBUTOR]')"
+  [ "$output" = "OWNER" ]
+}
+
 @test "pm_persona_id reads the id the manifest claims" {
   run pm_persona_id "$(manifest "$MENTION_ON")"
   [ "$output" = "qa-lead" ]
@@ -492,4 +504,274 @@ good-first-issue'
 @test "pm_fetch_disposition fails closed on any other status" {
   run pm_fetch_disposition 403
   [ "$output" = "fail" ]
+}
+
+# --- pm_should_retry_status (bounded-retry decision) -----------------------
+# Only a transient status is worth retrying; a definitive answer must not be.
+
+@test "pm_should_retry_status retries a curl transport error (000)" {
+  run pm_should_retry_status 000
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_should_retry_status retries a 5xx" {
+  run pm_should_retry_status 500
+  [ "$status" -eq 0 ]
+  run pm_should_retry_status 503
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_should_retry_status does NOT retry a definitive 200 or 404" {
+  run pm_should_retry_status 200
+  [ "$status" -eq 1 ]
+  run pm_should_retry_status 404
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_should_retry_status does NOT retry an other 4xx" {
+  run pm_should_retry_status 403
+  [ "$status" -eq 1 ]
+}
+
+# ===========================================================================
+# The pull_request surface (#1165) — the router also serves PR events.
+# ===========================================================================
+# Which personas fire on pull_request is DERIVED from each manifest's declared
+# surfaces (#756), and every brake the mention path binds — stop markers,
+# opt-out, write-mode gate, trust floor, the bot/marker recursion guards — binds
+# here too (AC #2/#4). These are pure-function tests so the new path is proven
+# per branch, not by inspection.
+
+PR_ON='    - surface: pull_request
+      enabled: true
+      mode: advisory'
+
+# --- pm_surface_decision (derive-don't-enumerate) --------------------------
+# Unlike pm_mention_decision, an EXPLICIT surface row is required: there is no
+# default_mode fallback, so a persona fires on pull_request only when it declares
+# that surface enabled.
+
+@test "pm_surface_decision reads an explicit enabled pull_request surface" {
+  run pm_surface_decision "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "true advisory qa-lead:hands-off" ]
+}
+
+@test "pm_surface_decision reports a persona that does NOT declare the surface as off (not dispatched)" {
+  # The mention manifest declares no pull_request row — it must not fire on a PR.
+  run pm_surface_decision "$(manifest "$MENTION_ON")" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "false off qa-lead:hands-off" ]
+}
+
+@test "pm_surface_decision does NOT fall back to default_mode for an unlisted surface" {
+  # A persona whose default_mode is advisory but which lists only 'issues' must
+  # still be OFF for pull_request — derive from declared surfaces, never enumerate.
+  run pm_surface_decision "$(manifest '    - surface: issues
+      enabled: true
+      mode: advisory')" pull_request
+  [ "$status" -eq 0 ]
+  [ "${output% *}" = "false off" ]
+}
+
+@test "pm_surface_decision honours an explicitly disabled pull_request surface" {
+  run pm_surface_decision "$(manifest '    - surface: pull_request
+      enabled: false
+      mode: advisory')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "false advisory qa-lead:hands-off" ]
+}
+
+@test "pm_surface_decision surfaces a write-mode pull_request surface" {
+  run pm_surface_decision "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: write
+      gate_label: qa-lead')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "true write qa-lead:hands-off" ]
+}
+
+# --- pm_surface_trust_floor / pm_surface_gate_label ------------------------
+
+@test "pm_surface_trust_floor defaults to the persona-wide floor for pull_request" {
+  run pm_surface_trust_floor "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "OWNER MEMBER COLLABORATOR" ]
+}
+
+@test "pm_surface_trust_floor lets a pull_request surface tighten the persona-wide floor" {
+  run pm_surface_trust_floor "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER]')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "OWNER" ]
+}
+
+@test "pm_surface_trust_floor cannot widen the persona-wide floor" {
+  # The security property: a surface floor can only tighten, never loosen. The
+  # persona-wide floor permits [OWNER, MEMBER, COLLABORATOR]; the surface floor
+  # adds CONTRIBUTOR, which is NOT in the global floor and must be dropped by the
+  # intersection. If a later change swapped intersect for surface-wins,
+  # CONTRIBUTOR would get through and this test would fail.
+  run pm_surface_trust_floor "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER, CONTRIBUTOR]')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "OWNER" ]
+}
+
+@test "pm_surface_gate_label returns the gate for a write-mode pull_request surface" {
+  run pm_surface_gate_label "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: write
+      gate_label: qa-lead')" pull_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "qa-lead" ]
+}
+
+@test "pm_surface_gate_label is empty for an advisory pull_request surface" {
+  run pm_surface_gate_label "$(manifest "$PR_ON")" pull_request
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# --- pm_surface_declares_event (gate on declared events, not just enabled) --
+# A pull_request surface fires only on the actions it declares in `events`. A row
+# with no events list is undeclared for every action, so `synchronize` never
+# fires against a persona that only lists opened/ready_for_review (maintainer
+# review item 1).
+
+PR_EVENTS='    - surface: pull_request
+      enabled: true
+      mode: advisory
+      events: [opened, ready_for_review]'
+
+@test "pm_surface_declares_event is true for a declared action (opened)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request opened
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_surface_declares_event is true for a declared action (ready_for_review)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request ready_for_review
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_surface_declares_event is false for an undeclared action (synchronize)" {
+  run pm_surface_declares_event "$(manifest "$PR_EVENTS")" pull_request synchronize
+  [ "$status" -ne 0 ]
+}
+
+@test "pm_surface_declares_event is false for a row that declares no events" {
+  # PR_ON declares the surface enabled but lists no events — undeclared for every
+  # action, so it does not fire even on opened.
+  run pm_surface_declares_event "$(manifest "$PR_ON")" pull_request opened
+  [ "$status" -ne 0 ]
+}
+
+# --- pm_pr_should_route (event pre-filter) ---------------------------------
+# Same two recursion axes and trust floor as pm_should_route, but WITHOUT the
+# @-mention requirement: a PR is derived, not addressed. A PR event must not
+# become an ungated write surface, so the guards apply on this path too (AC #4).
+
+@test "pm_pr_should_route allows a trusted human's PR with no @-mention in the body" {
+  run pm_pr_should_route don-petry don-petry OWNER "Ordinary PR description, no handles."
+  [ "$status" -eq 0 ]
+}
+
+@test "pm_pr_should_route blocks a PR opened by an agent identity (axis 1a: author)" {
+  run pm_pr_should_route donpetry-bot donpetry-bot OWNER "PR body"
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_pr_should_route blocks a bot push/reopen on a human-authored PR (axis 1b: actor)" {
+  # PR author is a human, but the triggering actor is an agent identity — the
+  # codeant/tier-3 recursion finding: an agent update must not re-arm the router.
+  run pm_pr_should_route don-petry github-actions[bot] OWNER "PR body"
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_pr_should_route blocks a PR whose body carries the agent marker (axis 2)" {
+  run pm_pr_should_route don-petry don-petry OWNER '<!-- persona:qa-lead --> automated PR'
+  [ "$status" -eq 1 ]
+}
+
+@test "pm_pr_should_route blocks a PR from an author below the default floor" {
+  run pm_pr_should_route drive-by drive-by CONTRIBUTOR "PR body"
+  [ "$status" -eq 1 ]
+}
+
+# --- pm_pr_route_verdict (the composed PR gauntlet — AC #2/#4 proof) --------
+# Given a manifest that DECLARES the pull_request surface enabled and its
+# interaction contract, decide the verdict for one PR: stop-marker → write-gate
+# → trust-floor → dispatch. Stop markers bind here exactly as on the mention
+# path, and an unreadable contract fails CLOSED — proven per branch below.
+
+@test "pm_pr_route_verdict dispatches when no stop marker holds the PR" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction)" OWNER <<<'enhancement'
+  [ "$status" -eq 0 ]
+  [ "$output" = "dispatch advisory" ]
+}
+
+@test "pm_pr_route_verdict skips and NAMES the marker when the PR is held" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction)" OWNER <<<'needs-human-review'
+  [ "$status" -eq 0 ]
+  [ "$output" = "skip stop-marker needs-human-review" ]
+}
+
+@test "pm_pr_route_verdict honours a cross-persona hold on the PR path" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction)" OWNER <<<'dev-lead:needs-human'
+  [ "$status" -eq 0 ]
+  [ "$output" = "skip stop-marker dev-lead:needs-human" ]
+}
+
+@test "pm_pr_route_verdict fails CLOSED on an unparseable contract (never dispatches a held PR)" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" 'this: [is: not: yaml' OWNER <<<'enhancement'
+  [ "$status" -eq 2 ]
+}
+
+@test "pm_pr_route_verdict fails CLOSED on a malformed boolean stop_markers" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction '  stop_markers: false')" OWNER <<<'enhancement'
+  [ "$status" -eq 2 ]
+}
+
+@test "pm_pr_route_verdict dispatches when the contract declares no markers" {
+  run pm_pr_route_verdict "$(manifest "$PR_ON")" "$(interaction '  stop_markers: []')" OWNER <<<'needs-human-review'
+  [ "$status" -eq 0 ]
+  [ "$output" = "dispatch advisory" ]
+}
+
+@test "pm_pr_route_verdict skips an unarmed write-mode PR (no gate label present)" {
+  run pm_pr_route_verdict "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: write
+      gate_label: qa-lead')" "$(interaction)" OWNER <<<'enhancement'
+  [ "$status" -eq 0 ]
+  [ "$output" = "skip not-armed qa-lead" ]
+}
+
+@test "pm_pr_route_verdict dispatches an armed write-mode PR" {
+  run pm_pr_route_verdict "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: write
+      gate_label: qa-lead')" "$(interaction)" OWNER <<<'qa-lead'
+  [ "$status" -eq 0 ]
+  [ "$output" = "dispatch write" ]
+}
+
+@test "pm_pr_route_verdict fails CLOSED on a write surface with no gate_label (never an ungated write)" {
+  run pm_pr_route_verdict "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: write')" "$(interaction)" OWNER <<<'enhancement'
+  [ "$status" -eq 3 ]
+}
+
+@test "pm_pr_route_verdict skips a PR author below the persona floor" {
+  run pm_pr_route_verdict "$(manifest '    - surface: pull_request
+      enabled: true
+      mode: advisory
+      trust_floor: [OWNER]')" "$(interaction)" MEMBER <<<'enhancement'
+  [ "$status" -eq 0 ]
+  [ "$output" = "skip below-floor" ]
 }
