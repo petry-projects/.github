@@ -2,19 +2,20 @@
 """Unit tests for validate-signals.py."""
 
 import sys
+import importlib.util
 from pathlib import Path
 from datetime import datetime
 
-# Add the script directory to the path so we can import validate_signals
-# This allows the test to import the validate-signals.py module
-repo_root = Path(__file__).resolve().parent.parent.parent
-script_dir = repo_root / ".github" / "scripts" / "feature-ideation"
-sys.path.insert(0, str(script_dir))
-
 import pytest
 
-# Import the function under test
-from validate_signals import _check_date_time
+# Import the function under test from validate-signals.py using importlib
+# (can't use standard import since the filename has a hyphen).
+repo_root = Path(__file__).resolve().parent.parent.parent
+script_dir = repo_root / ".github" / "scripts" / "feature-ideation"
+spec = importlib.util.spec_from_file_location("validate_signals", script_dir / "validate-signals.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+_check_date_time = module._check_date_time
 
 
 class TestCheckDateTime:
