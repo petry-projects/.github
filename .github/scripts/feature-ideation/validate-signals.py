@@ -28,6 +28,41 @@ except ImportError:
     sys.exit(2)
 
 
+def _check_date_time(instance) -> bool:  # noqa: ANN001 — jsonschema callback signature
+    """FormatChecker callback for the JSON-schema ``date-time`` format.
+
+    Accepts ISO-8601 / RFC-3339 strings via ``datetime.fromisoformat`` (Python
+    3.11+ accepts the trailing ``Z``; for older interpreters we substitute it).
+    Raises ``ValueError`` for strings that are not date-times; non-strings are
+    left to the ``type`` keyword.
+    """
+    if not isinstance(instance, str):
+        return True  # non-strings handled by `type` keyword, not format
+    # Must look like a date-time, not just any string. Require at least
+    # YYYY-MM-DDTHH:MM[:SS]
+    if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", instance):
+        raise ValueError(f"not an ISO-8601 date-time: {instance!r}")
+    # datetime.fromisoformat in Python <3.11 doesn't accept "Z"; swap it.
+    candidate = instance.replace("Z", "+00:00") if instance.endswith("Z") else instance
+    datetime.fromisoformat(candidate)
+    return True
+
+
+def _build_format_checker() -> FormatChecker:
+    """Build a FormatChecker that enforces the ``date-time`` format.
+
+    `format` keywords (e.g. "format": "date-time") are not enforced by
+    Draft202012Validator unless an explicit FormatChecker is supplied.
+    The default FormatChecker also does NOT include `date-time` — that
+    requires the optional `rfc3339-validator` dependency. Avoid pulling
+    in extra deps by registering the small inline validator above.
+    Caught by Copilot review on PR petry-projects/.github#85.
+    """
+    format_checker = FormatChecker()
+    format_checker.checks("date-time", raises=(ValueError, TypeError))(_check_date_time)
+    return format_checker
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2 or len(argv) > 3:
         sys.stderr.write(
@@ -76,30 +111,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"[validate-signals] invalid schema JSON: {exc}\n")
         return 2
 
-    # `format` keywords (e.g. "format": "date-time") are not enforced by
-    # Draft202012Validator unless an explicit FormatChecker is supplied.
-    # The default FormatChecker also does NOT include `date-time` — that
-    # requires the optional `rfc3339-validator` dependency. Avoid pulling
-    # in extra deps by registering a small inline validator that accepts
-    # ISO-8601 / RFC-3339 strings via datetime.fromisoformat (Python 3.11+
-    # accepts the trailing `Z`; for older interpreters we substitute it).
-    # Caught by Copilot review on PR petry-projects/.github#85.
-    format_checker = FormatChecker()
-
-    @format_checker.checks("date-time", raises=(ValueError, TypeError))
-    def _check_date_time(instance) -> bool:  # noqa: ANN001 — jsonschema callback signature
-        if not isinstance(instance, str):
-            return True  # non-strings handled by `type` keyword, not format
-        # Must look like a date-time, not just any string. Require at least
-        # YYYY-MM-DDTHH:MM[:SS]
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", instance):
-            raise ValueError(f"not an ISO-8601 date-time: {instance!r}")
-        # datetime.fromisoformat in Python <3.11 doesn't accept "Z"; swap it.
-        candidate = instance.replace("Z", "+00:00") if instance.endswith("Z") else instance
-        datetime.fromisoformat(candidate)
-        return True
-
-    validator = Draft202012Validator(schema, format_checker=format_checker)
+    validator = Draft202012Validator(schema, format_checker=_build_format_checker())
     errors = sorted(validator.iter_errors(signals), key=lambda e: list(e.absolute_path))
     if not errors:
         print(f"[validate-signals] OK: {signals_path}")
