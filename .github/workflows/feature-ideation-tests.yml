@@ -65,7 +65,7 @@ jobs:
         run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/feature-ideation-tests-requirements.txt'
 
       - name: Install pytest for Python unit tests
-        run: pip install --quiet pytest pytest-cov
+        run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/pytest-requirements.txt'
 
       - name: shellcheck
         run: |
