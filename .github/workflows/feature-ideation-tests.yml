@@ -64,6 +64,9 @@ jobs:
       - name: Install Python jsonschema and PyYAML
         run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/feature-ideation-tests-requirements.txt'
 
+      - name: Install pytest for Python unit tests
+        run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/pytest-requirements.txt'
+
       - name: shellcheck
         run: |
           set -euo pipefail
@@ -101,6 +104,12 @@ jobs:
                 "$fixture" .github/schemas/signals.schema.json
             fi
           done
+
+      - name: Run Python unit tests
+        run: |
+          set -euo pipefail
+          python3 -m pytest test/feature-ideation/test_validate_signals.py -v \
+            --cov --cov-report=xml:test/feature-ideation/coverage.xml
 
       - name: Run bats suite
         run: bats --print-output-on-failure test/workflows/feature-ideation/
