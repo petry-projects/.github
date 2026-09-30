@@ -23,6 +23,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Install pytest and dependencies
+        run: 'pip install --quiet --require-hashes --only-binary :all: -r scripts/pytest-requirements.txt'
+
+      - name: Generate coverage report
+        run: |
+          set -euo pipefail
+          python3 -m pytest test/feature-ideation/test_validate_signals.py \
+            --cov --cov-report=xml:test/feature-ideation/coverage.xml
+
       # First attempt. continue-on-error lets the retry step below recover from
       # transient 403/5xx responses from binaries.sonarsource.com (the scanner
       # CLI download), without failing the job on a single CDN blip.
