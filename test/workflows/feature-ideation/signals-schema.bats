@@ -69,6 +69,16 @@ FIX="${TT_FIXTURES_DIR}/expected"
   [ "$status" -eq 0 ]
 }
 
+@test "schema: RFC-3339 lowercase t/z date-time scan_date passes" {
+  # codeant-ai on PR petry-projects/.github#1194: RFC-3339 §5.6 permits a
+  # lowercase "t" separator and lowercase "z" zone designator; the checker
+  # must accept them, not just their uppercase forms.
+  good_file="${BATS_TEST_TMPDIR}/lowercase-scan-date.json"
+  jq '.scan_date = "2026-04-08t12:34:56z"' "${FIX}/empty-repo.signals.json" >"$good_file"
+  run python3 "$VALIDATOR" "$good_file" "$SCHEMA"
+  [ "$status" -eq 0 ]
+}
+
 @test "schema: malformed JSON signals file FAILS with exit code 2" {
   # Validates that the OSError/JSONDecodeError path returns 2 (file/data error)
   # not 1 (schema validation error). Caught by CodeRabbit review on PR #85.
