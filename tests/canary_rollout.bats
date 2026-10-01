@@ -1215,13 +1215,18 @@ case "\$*" in
   *"ref=bbbb"*) echo "reuseAAAA" ;;
   *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"'"$conclusion"'",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
   *"run view"*"--log"*)
+    # Mirrors real \`gh run view --log\` output: "<job><TAB><step><TAB><timestamp> <text>".
+    ts="2026-09-25T00:00:00.1234567Z"
+    U="Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1"
     if [ "$executed" = logfail ]; then exit 1
-    elif [ "$executed" = none ]; then echo "build	Set up job	nothing relevant"
-    elif [ "$executed" = collision ]; then echo "build	Set up job	Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
+    elif [ "$executed" = none ]; then printf 'build\tUNKNOWN STEP\t%s nothing relevant\n' "\$ts"
+    elif [ "$executed" = collision ]; then printf 'build\tUNKNOWN STEP\t%s Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts"
+    elif [ "$executed" = forged ]; then
+      # genuine candidate line first, then the same job echoes a forged OLD-sha line
+      printf 'build\tUNKNOWN STEP\t%s %s (cccccccccccccccccccccccccccccccccccccccc)\n' "\$ts" "\$U"
+      printf 'build\tUNKNOWN STEP\t%s %s (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts" "\$U"
     else
-      for sha in $executed; do
-        echo "build	Set up job	2026-09-25T00:00:00Z Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1 (\$sha)"
-      done
+      n=0; for sha in $executed; do n=\$((n+1)); printf 'job%s\tUNKNOWN STEP\t%s %s (%s)\n' "\$n" "\$ts" "\$U" "\$sha"; done
     fi ;;
   *"run view"*) echo '{"jobs":[{"steps":[{"name":"Compile TypeScript","conclusion":"failure"}]}]}' ;;
   *) echo "{}" ;;
@@ -1261,6 +1266,13 @@ GITEOF
 
 @test "orchestrator: a Uses: line for a different host's same-named workflow is not attributed — BLOCKS (#1176)" {
   _executed_sha_stub collision
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a forged old-SHA Uses: line echoed after the genuine one is ignored — still BLOCKS (#1176)" {
+  _executed_sha_stub forged
   run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]

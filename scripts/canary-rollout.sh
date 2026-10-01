@@ -807,9 +807,19 @@ _run_reusable_sha() {
   host="$(_agent_field "$agent" host)"; host="${host:-$THIS_REPO}"
   log="$(gh run view "$id" --repo "$repo" --log 2>/dev/null)" || log=""
   if [ -n "$reusable" ]; then
-    while IFS= read -r line; do
-      [[ "$line" == *"Uses:"* && "$line" == *"$host/$reusable@"* ]] || continue
-      [[ "$line" =~ \(([0-9a-f]{7,40})\) ]] && shas+="${BASH_REMATCH[1]}"$'\n'
+    # `gh run view --log` lines are "<job>\t<step>\t<timestamp> <text>". GitHub prints the genuine
+    # "Uses:" line while setting a job up, before any of that job's own output, so only the FIRST
+    # "Uses:" line per job is trusted: a later line a job merely echoes (a forged old SHA) is ignored.
+    # The step column is NOT used — real logs often show it as "UNKNOWN STEP" (verified).
+    local -A seen_job=()
+    local jobcol text
+    while IFS=$'\t' read -r jobcol _ text; do
+      [[ "$text" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\ (Uses:\ .*)$ ]] || continue
+      line="${BASH_REMATCH[1]}"
+      [[ -v seen_job["$jobcol"] ]] && continue
+      seen_job["$jobcol"]=1
+      [[ "$line" == "Uses: $host/$reusable@"* ]] || continue
+      [[ "$line" =~ \(([0-9a-f]{7,40})\)$ ]] && shas+="${BASH_REMATCH[1]}"$'\n'
     done <<< "$log"
     shas="$(printf '%s' "$shas" | sort -u)"
   fi
