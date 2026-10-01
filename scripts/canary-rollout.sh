@@ -829,6 +829,8 @@ _cumulative_health() {
   suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
+    # startup_failure runs never executed a job, so no release can be attributed to them (no
+    # "Uses:" log line): they always count, fail closed (#1176).
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     if [ -z "$patterns" ] && [ -z "$suspect_patterns" ] && [ "$cand" = "-" ]; then
       # No benign/suspect patterns and no candidate attribution — count all failures with one
@@ -1502,14 +1504,17 @@ _blocker_evidence() {
   for repo in "${dedup[@]}"; do
     json="$(_run_json "$repo" "$wf" "$cut_z")"
     local rid sig
-    while IFS= read -r rid; do
+    local concl
+    while IFS=$'\t' read -r rid concl; do
       [ -z "$rid" ] && continue
-      if _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi   # old release: not counted (#1176)
+      # Old release: not counted (#1176). Only `failure` runs are attributable — a startup_failure
+      # never ran a job, so it has no "Uses:" line and always counts (cum_startup), like the gate.
+      if [ "$concl" = "failure" ] && _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi
       if [ "$n" -ge 8 ]; then out+="- _(…more failing runs; truncated at 8)_"$'\n'; printf '%s' "$out"; return 0; fi
       sig="$(_run_signature "$repo" "$rid" | tr '\n' ';' | sed 's/;$//')"
       out+="- \`$repo\` — run [$rid](https://github.com/$repo/actions/runs/$rid); failed steps: ${sig:-unknown}"$'\n'
       n=$((n+1))
-    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="startup_failure")|(.databaseId|tostring)' 2>/dev/null <<< "$json")
+    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="startup_failure")|[(.databaseId|tostring),.conclusion]|@tsv' 2>/dev/null <<< "$json")
   done
   [ -z "$out" ] && out="_(no failing runs in the per-candidate window — cum_fail may be startup_failures or a transient count)_"$'\n'
   printf '%s' "$out"
