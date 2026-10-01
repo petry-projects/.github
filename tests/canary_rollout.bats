@@ -3525,7 +3525,8 @@ GHEOF
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
   [ "$status" -eq 0 ]
   grep -q "EDIT|.*901" "$ISSUE_LOG"          # the C3 confirm issue is refreshed, not closed
-  ! grep -q "CLOSE|.*901" "$ISSUE_LOG"        # the hold survived the newer next cut
+  run grep -q "CLOSE|.*901" "$ISSUE_LOG"      # the hold survived the newer next cut
+  [ "$status" -eq 1 ]                         # (exactly 1: a missing log, status 2, must not pass)
   grep -q "AWAITING_CONFIRMATION" "$summ"
 }
 

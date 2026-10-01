@@ -1083,7 +1083,7 @@ _decision_mix_table() {
 # on _frontier_state. triage/mix_shift/downgrade semantics are unchanged from the single-frontier
 # implementation this was extracted from.
 _pair_state() {
-  local agent="$1" source="$2" frontier="$3" cand="$4" transition="$5"
+  local agent="$1" source="$2" frontier="$3" cand="$4" transition="$5" chans="$6" commits_csv="$7"
   local cut_z now_epoch
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   if [ -z "$cut_z" ]; then
@@ -1113,8 +1113,18 @@ _pair_state() {
   # (#668) — inherently context-caused failures that can never be candidate-introduced —
   # and every other class is disabled, so the allowlist can never mask a candidate-introduced
   # regression (#1025 P2).
-  local prior differs
-  prior="$(channel_commit "$agent" "$frontier")"
+  # chans / commits_csv are the ring order and each ring's commit ("-" = unresolvable), resolved ONCE
+  # by _frontier_state: channel_commit runs in a subshell, so its own cache is lost between calls and
+  # every lookup would be another API round-trip.
+  local chan_array=() commit_array=() idx src_idx=-1 dst_idx=-1
+  IFS=, read -r -a chan_array <<< "$chans"
+  IFS=, read -r -a commit_array <<< "$commits_csv"
+  for idx in "${!chan_array[@]}"; do
+    [ "${chan_array[$idx]}" = "$source" ] && src_idx="$idx"
+    [ "${chan_array[$idx]}" = "$frontier" ] && dst_idx="$idx"
+  done
+  local prior="${commit_array[$dst_idx]:--}" differs
+  [ "$prior" = "-" ] && prior=""
   differs="$(_reusable_differs "$agent" "$cand" "$prior")"
 
   # Cumulative health since this candidate's own cut, across every concrete tier EXCEPT a ring
@@ -1123,16 +1133,12 @@ _pair_state() {
   # lower candidate block an older, independently-clean higher pair. In a single-candidate rollout
   # no ring is below the source with a different commit, so this is byte-identical to the prior
   # all-tiers scope; it diverges only when a newer candidate is soaking further down the pipeline.
-  local all_repos=() ch3 chan_array=() idx src_idx=-1
-  IFS=, read -r -a chan_array <<< "$(ordered_channels "$agent")"
-  for idx in "${!chan_array[@]}"; do
-    [ "${chan_array[$idx]}" = "$source" ] && { src_idx="$idx"; break; }
-  done
+  local all_repos=() ch3
   for idx in "${!chan_array[@]}"; do
     ch3="${chan_array[$idx]}"
     # Exclude a lower ring only when it PROVABLY runs a different commit. An unresolvable (empty)
     # tag is unknown, not "different": keep its failures in scope (fail closed).
-    local lc; lc="$(channel_commit "$agent" "$ch3")"
+    local lc="${commit_array[$idx]:--}"; [ "$lc" = "-" ] && lc=""
     if [ "$idx" -lt "$src_idx" ] && [ -n "$lc" ] && [ "$lc" != "$cand" ]; then
       continue
     fi
@@ -1269,24 +1275,34 @@ _frontier_state() {
   chans="$(ordered_channels "$agent")"
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$chans"
-  local prev="" ch cand dstc transition emitted=0
+  # Resolve every ring's commit ONCE (channel_commit is uncached across calls; see _pair_state).
+  local -a commits=()
+  local ch c commits_csv=""
   for ch in "${chan_array[@]}"; do
+    c="$(channel_commit "$agent" "$ch")"
+    commits+=("$c")
+    commits_csv+="${c:--},"
+  done
+  commits_csv="${commits_csv%,}"
+  local i prev="" cand dstc transition emitted=0
+  for i in "${!chan_array[@]}"; do
+    ch="${chan_array[$i]}"
     if [ -n "$prev" ]; then
       # Pending iff dst is not on src's commit. An UNRESOLVABLE src commit (empty) with a populated
       # dst is still pending and _pair_state holds it BLOCKED (fail closed, as the single-frontier
       # code did) — never silently skipped into a false COMPLETE.
-      cand="$(channel_commit "$agent" "$prev")"
-      dstc="$(channel_commit "$agent" "$ch")"
+      cand="${commits[$((i-1))]}"
+      dstc="${commits[$i]}"
       if [ "$dstc" != "$cand" ]; then
         transition="${prev}->${ch}"
-        _pair_state "$agent" "$prev" "$ch" "$cand" "$transition"
+        _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
         emitted=1
       fi
     fi
     prev="$ch"
   done
   if [ "$emitted" -eq 0 ]; then
-    echo "$(channel_commit "$agent" next) - - COMPLETE 0 0 0 0 0 0 0 - -"
+    echo "${commits[0]:-} - - COMPLETE 0 0 0 0 0 0 0 - -"
   fi
 }
 
@@ -1837,11 +1853,12 @@ _frontier_state_resilient() {
   local chans; chans="$(ordered_channels "$agent" || true)"
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$chans"
-  local prev="" ch cand dstc transition prior differs triage emitted=0
+  local prev="" prev_commit="" ch ch_commit cand dstc transition prior differs triage emitted=0
   for ch in "${chan_array[@]}"; do
+    ch_commit="$(channel_commit "$agent" "$ch" || true)"   # once per ring (uncached across calls)
     if [ -n "$prev" ]; then
-      cand="$(channel_commit "$agent" "$prev" || true)"
-      dstc="$(channel_commit "$agent" "$ch" || true)"
+      cand="$prev_commit"
+      dstc="$ch_commit"
       # Same pending rule as _frontier_state: dst not on src's commit, including an unresolvable
       # (empty) src commit, which stays tracked as BLOCKED rather than vanishing (fail closed).
       if [ "$dstc" != "$cand" ]; then
@@ -1857,7 +1874,7 @@ _frontier_state_resilient() {
         emitted=1
       fi
     fi
-    prev="$ch"
+    prev="$ch"; prev_commit="$ch_commit"
   done
   # Total inability: cannot resolve even one pending pair → hard error. Fail closed (never a silent
   # green); the caller surfaces ::error:: and ends non-zero.
