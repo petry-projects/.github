@@ -101,7 +101,9 @@ workflow sources it and calls `plg_admission_gate <source>` before opening a PR:
 1. If `<source>` is an exempt actor (§4) → **allow** (never blocked, never counted).
 2. Else it counts the open, non-draft, non-exempt automation queue org-wide via
    `gh search prs` (the enumeration lives in the gate library itself) and, if
-   the queue is at or over `org_wide.automation_open_pr_cap` → **defer**.
+   the queue is at or over the effective cap (`plg_effective_org_cap`: the
+   `PR_LIMITS_ORG_CAP` override (§2.1) if set and valid, else
+   `org_wide.automation_open_pr_cap`) → **defer**.
 3. If a per-source sub-cap is configured for `<source>` and its own queue is at
    or over it → **defer**. (No sub-caps are configured under the current
    signed-off policy; the map is intentionally empty.)
