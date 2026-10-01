@@ -1030,19 +1030,25 @@ _correctness_verdict() {
 # _correctness_verdict (the per-run classes are memoized in _RUN_DECISION_CACHE, so the second
 # pass is cache-warm). Empty when the agent has no gate.correctness or the frontier is resolved.
 _decision_mix_table() {
-  local agent="$1" cand="$2"
+  local agent="$1" cand="$2" pair_transition="${3:-}"
   local knobs; knobs="$(_jq -c --arg a "$agent" '.agents[$a].gate.correctness // ""')"
   [ -z "$knobs" ] || [ "$knobs" = '""' ] && return 0
   local chans frontier="" ch c
   chans="$(ordered_channels "$agent")"
-  local chan_array=(); IFS=, read -r -a chan_array <<< "$chans"
-  for ch in "${chan_array[@]}"; do
-    c="$(channel_commit "$agent" "$ch")"
-    if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
-  done
-  [ -z "$frontier" ] && return 0
   local transition source cut_z prefix
-  transition="$(transition_key "$frontier" "$chans")"
+  if [ -n "$pair_transition" ]; then
+    # The blocked pair is known (#1118): use ITS source tier, not one re-derived on the assumption
+    # that the candidate always sits on `next`.
+    transition="$pair_transition"
+  else
+    local chan_array=(); IFS=, read -r -a chan_array <<< "$chans"
+    for ch in "${chan_array[@]}"; do
+      c="$(channel_commit "$agent" "$ch")"
+      if [ "$ch" = "next" ] || [ "$c" = "$cand" ]; then :; else frontier="$ch"; break; fi
+    done
+    [ -z "$frontier" ] && return 0
+    transition="$(transition_key "$frontier" "$chans")"
+  fi
   source="${transition%%->*}"
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   [ -z "$cut_z" ] && return 0
@@ -1088,7 +1094,7 @@ _pair_state() {
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   if [ -z "$cut_z" ]; then
     # Cannot determine the per-candidate window start — fail closed to prevent unbounded history queries.
-    echo "$cand $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
+    echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
   fi
   now_epoch="$(date -u +%s)"
 
@@ -1254,12 +1260,14 @@ _pair_state() {
     fi
   fi
 
-  echo "$cand $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift $downgrade $dg_cand_rate $dg_cand_sample $dg_base_rate $dg_base_sample"
+  echo "${cand:--} $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift $downgrade $dg_cand_rate $dg_cand_sample $dg_base_rate $dg_base_sample"
 }
 
 # _frontier_state <agent> — evaluate EVERY ring transition INDEPENDENTLY and echo ONE line per
 # PENDING pair (#1118), each with the fields:
 #   "<cand> <frontier> <transition> <state> <dwell_h> <dwell_floor> <sample> <target> <cum_fail> <cum_startup> <cum_benign> <triage> <mix_shift> <downgrade> <dg_cand_rate> <dg_cand_sample> <dg_base_rate> <dg_base_sample>"
+# <cand> is "-" when the source ring's commit is unresolvable (a blank leading field would be collapsed
+# by `read` and shift every field); consumers must never treat "-" as a SHA.
 # For each adjacent src->dst, the candidate is channel_commit(src); the pair is PENDING (and a
 # line emitted, computed by _pair_state) iff dst is not already on that candidate. Several pairs
 # may be in flight at once — e.g. a newer candidate soaking at next->ring0 while an older one
@@ -1302,7 +1310,7 @@ _frontier_state() {
     prev="$ch"
   done
   if [ "$emitted" -eq 0 ]; then
-    echo "${commits[0]:-} - - COMPLETE 0 0 0 0 0 0 0 - -"
+    echo "${commits[0]:--} - - COMPLETE 0 0 0 0 0 0 0 - -"
   fi
 }
 
@@ -1418,6 +1426,12 @@ cmd_promote() {
     pair_override=false
     if [ "$first_pair" -eq 1 ] && [ "$override" = true ]; then pair_override=true; fi
     first_pair=0
+    # An unresolvable candidate ("-") cannot be promoted, even with --override: there is no commit to
+    # move a tag to. It stays held BLOCKED (fail closed) until the source ring's tag resolves.
+    if [ "$cand" = "-" ]; then
+      echo "::error::gate=$state for '$frontier' [$transition] — the source ring's commit is unresolvable; not promoting (even with --override). Clears once the tag resolves." >&2
+      continue
+    fi
     # REGRESSION and SUSPECT both HALT + need a human: neither advances without --override, and
     # --allow-pre-existing (which only unblocks PRE_EXISTING) never advances them. For a SUSPECT
     # the human answers the class's discriminating question first (#668 increment 2).
@@ -1870,7 +1884,7 @@ _frontier_state_resilient() {
         # needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot be a
         # candidate regression). Either verdict still tracks the pair as BLOCKED.
         triage="$(classify_failure "$differs" unknown 0)"
-        echo "$cand $ch $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
+        echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
         emitted=1
       fi
     fi
@@ -1971,9 +1985,13 @@ cmd_sync_issues() {
       if [ "$bl_datagap" = "1" ]; then
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
       else
-        evidence="$(_blocker_evidence "$agent" "$bl_cand" || true)"
+        if [ "$bl_cand" = "-" ]; then
+          evidence="_(the source ring's commit is unresolvable this tick, so there is no candidate whose failing runs can be listed. The gate FAILS CLOSED and holds this pair until the tag resolves.)_"
+        else
+          evidence="$(_blocker_evidence "$agent" "$bl_cand" || true)"
+        fi
       fi
-      [ "$bl_mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$bl_cand" || true)"
+      [ "$bl_mix_shift" = "SHIFT" ] && mix_table="$(_decision_mix_table "$agent" "$bl_cand" "$bl_transition" || true)"
       body="$(_blocker_body "$agent" "$bl_transition" "$bl_cand" "$bl_cum_fail" "$bl_cum_startup" "$bl_triage" "$host" "$evidence" "$bl_mix_shift" "$mix_table" "$bl_downgrade" "$bl_dgcr" "$bl_dgcs" "$bl_dgbr" "$bl_dgbs" "$bl_datagap")"
       if [ "$bl_mix_shift" = "SHIFT" ]; then
         title="Canary blocker: $agent $bl_transition (decision-mix shift, SUSPECT)"

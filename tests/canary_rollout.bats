@@ -3593,6 +3593,26 @@ GHEOF
   [[ "$output" != *"fully rolled out"* ]]
 }
 
+@test "#1118: an unresolvable source commit is a held pair that sync-issues SEES (sentinel, not a shifted blank field)" {
+  # next has no resolvable tag: the pair record must still parse (a leading blank field would shift
+  # every field, hiding BLOCKED), so sync-issues opens its blocker issue.
+  _multicand_stub NONE C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  local summ="$BATS_TEST_TMPDIR/mc-n.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened blocker issue"* ]]
+  grep -q "BLOCKED" "$summ"
+}
+
+@test "#1118: promote --override never acts on an unresolvable candidate (no tag is moved to a sentinel)" {
+  _multicand_stub NONE C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --override --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unresolvable"* ]]
+  [[ "$output" != *"tags/dev-lead/ring0 sha=-"* ]]
+  [[ "$output" != *"advancing dev-lead/ring0 -> -"* ]]
+}
+
 @test "#1118: a lower ring whose tag is UNRESOLVABLE stays in scope — its failures still block a higher pair (fail closed)" {
   # ring0 has no resolvable tag and its member (.github) is failing; ring1->stable must not shed
   # those failures just because ring0's commit is unknown rather than provably different.
