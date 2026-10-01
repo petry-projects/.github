@@ -106,7 +106,7 @@ run_gate() {
 @test "invalid PR_LIMITS_ORG_CAP is ignored and the config cap applies" {
   write_config 5 9
   stub_open_prs 7
-  for bad in 0 -3 abc 1.5; do
+  for bad in 0 -3 abc 1.5 99999999999999999999; do
     PR_LIMITS_ORG_CAP="$bad" run_gate "claude"
     [ "$status" -eq 1 ]
     [[ "$output" == *"decision=defer"* ]]

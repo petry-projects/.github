@@ -69,11 +69,11 @@ plg_config_path() {
 plg_effective_org_cap() {
   local config="$1" override="${PR_LIMITS_ORG_CAP:-}"
   if [ -n "$override" ]; then
-    if [[ "$override" =~ ^[1-9][0-9]*$ ]]; then
+    if [[ "$override" =~ ^[1-9][0-9]{0,8}$ ]]; then
       printf '%s' "$override"
       return 0
     fi
-    plg_log "warning: ignoring invalid PR_LIMITS_ORG_CAP='$override' (need a positive integer); using config value"
+    plg_log "warning: ignoring invalid PR_LIMITS_ORG_CAP='$override' (need a positive integer of at most 9 digits); using config value"
   fi
   jq -er '.org_wide.automation_open_pr_cap' "$config" 2>/dev/null || printf ''
 }
