@@ -56,6 +56,28 @@ The config carries its own inline `_note` fields recording the human sign-off
 rationale for the number. Consumers (the apply path in §3, and any future
 PR-creating workflow) **must** read the value from this file — never hardcode it.
 
+### 2.1 Runtime override — the org-level variable
+
+The ceiling can be changed **on the fly, with no code change or PR**, via the
+org-level Actions variable **`PR_LIMITS_ORG_CAP`** (Org → Settings → Secrets and
+variables → Actions → Variables). Consumers pass it to the gate as the
+`PR_LIMITS_ORG_CAP` environment variable (`env: PR_LIMITS_ORG_CAP: ${{ vars.PR_LIMITS_ORG_CAP }}`).
+
+- **Precedence:** a positive-integer `PR_LIMITS_ORG_CAP` wins; if it is unset,
+  empty, or invalid (zero, negative, non-integer — logged as a warning), the gate
+  falls back to `org_wide.automation_open_pr_cap` in the config. A bad value can
+  never silently disable or zero the cap.
+- The file value is the **default/fallback**; the variable is the **operational
+  lever**. Exempt actors/labels and sub-caps still come only from the config.
+- Resolution lives in one place (`plg_effective_org_cap` in the gate library) and
+  is reused by [`scripts/pr-limits-report.sh`](../scripts/pr-limits-report.sh), so
+  the gate and the daily report always agree.
+- Set or change it with `gh variable set PR_LIMITS_ORG_CAP --org petry-projects --visibility all --body <N>`.
+  Take effect on the next run of each consumer; remove it to revert to the file.
+- **Wiring:** this repo's report workflow already passes it. The PR-creation
+  engine in `petry-projects/.github-private` must add the same `env:` line to the
+  step that sources the gate for the variable to take effect there.
+
 Its contract (parseable JSON, positive-integer cap, required keys,
 `dependabot[bot]` and the `security` label present on the exempt lists) is
 guarded by [`test/scripts/pr-limits/pr-limits-config.bats`](../test/scripts/pr-limits/pr-limits-config.bats),
@@ -137,6 +159,11 @@ All changes here are edits to the single source of truth
 [`standards/pr-limits.json`](pr-limits.json), gated by the config tests. None of
 them touches a GitHub setting or ruleset — there is no such surface to apply
 (§3).
+
+### 6.0 Quick change (no PR)
+
+Set the org variable (§2.1): `gh variable set PR_LIMITS_ORG_CAP --org petry-projects --visibility all --body <N>`.
+Use §6.1 only to change the signed-off default in the file.
 
 ### 6.1 Change the limit and re-apply it
 

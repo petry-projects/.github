@@ -85,6 +85,44 @@ run_gate() {
 }
 
 # --------------------------------------------------------------------------
+# PR_LIMITS_ORG_CAP — org-variable override of the config cap
+# --------------------------------------------------------------------------
+@test "PR_LIMITS_ORG_CAP raises the cap above the config value" {
+  write_config 5 9
+  stub_open_prs 7
+  PR_LIMITS_ORG_CAP=20 run_gate "claude"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+}
+
+@test "PR_LIMITS_ORG_CAP can lower the cap below the config value" {
+  write_config 50 9
+  stub_open_prs 7
+  PR_LIMITS_ORG_CAP=7 run_gate "claude"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+@test "invalid PR_LIMITS_ORG_CAP is ignored and the config cap applies" {
+  write_config 5 9
+  stub_open_prs 7
+  for bad in 0 -3 abc 1.5; do
+    PR_LIMITS_ORG_CAP="$bad" run_gate "claude"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"decision=defer"* ]]
+    [[ "$output" == *"ignoring invalid PR_LIMITS_ORG_CAP"* ]]
+  done
+}
+
+@test "empty PR_LIMITS_ORG_CAP (unset org variable) falls back to config" {
+  write_config 5 9
+  stub_open_prs 7
+  PR_LIMITS_ORG_CAP="" run_gate "claude"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decision=defer"* ]]
+}
+
+# --------------------------------------------------------------------------
 # AC #1 — at / over the org-wide cap: defer
 # --------------------------------------------------------------------------
 @test "at the org-wide cap returns defer" {

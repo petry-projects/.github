@@ -28,6 +28,11 @@
 #   - $PR_LIMITS_CONFIG  — path to the pr-limits.json single source of truth
 #                          (default: <repo>/standards/pr-limits.json, resolved
 #                          relative to this file)
+#   - $PR_LIMITS_ORG_CAP — runtime override for org_wide.automation_open_pr_cap.
+#                          Wire it from the org-level Actions variable
+#                          (`vars.PR_LIMITS_ORG_CAP`) so the ceiling can change on
+#                          the fly with no code change. Must be a positive
+#                          integer; unset/empty/invalid falls back to the config.
 #   - $DRY_RUN / $DEV_LEAD_DRY_RUN — "true" forces an allow result with no
 #                          side effects, after printing the computed decision
 #   - `gh` CLI on PATH, `jq` on PATH
@@ -51,6 +56,26 @@ plg_log() { printf 'pr-limit-gate: %s\n' "$*" >&2; }
 # ---------------------------------------------------------------------------
 plg_config_path() {
   printf '%s' "${PR_LIMITS_CONFIG:-$PLG_DEFAULT_CONFIG}"
+}
+
+# ---------------------------------------------------------------------------
+# plg_effective_org_cap <config> — echo the org-wide cap in force.
+#
+# Precedence: $PR_LIMITS_ORG_CAP (org-level variable) when set to a positive
+# integer, else org_wide.automation_open_pr_cap from the config. An invalid
+# override is ignored with a warning (never silently disables or zeroes the cap).
+# Echoes nothing if neither source yields an integer.
+# ---------------------------------------------------------------------------
+plg_effective_org_cap() {
+  local config="$1" override="${PR_LIMITS_ORG_CAP:-}"
+  if [ -n "$override" ]; then
+    if [[ "$override" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s' "$override"
+      return 0
+    fi
+    plg_log "warning: ignoring invalid PR_LIMITS_ORG_CAP='$override' (need a positive integer); using config value"
+  fi
+  jq -er '.org_wide.automation_open_pr_cap' "$config" 2>/dev/null || printf ''
 }
 
 # ---------------------------------------------------------------------------
@@ -193,9 +218,9 @@ plg_admission_gate() {
   fi
 
   local org_cap org_count
-  org_cap="$(jq -er '.org_wide.automation_open_pr_cap' "$config" 2>/dev/null || printf '')"
+  org_cap="$(plg_effective_org_cap "$config")"
   if ! [[ "$org_cap" =~ ^[0-9]+$ ]]; then
-    plg_log "error: org_wide.automation_open_pr_cap is missing or not an integer in $config"
+    plg_log "error: org cap is missing or not an integer (PR_LIMITS_ORG_CAP / org_wide.automation_open_pr_cap in $config)"
     return 2
   fi
   org_count="$(plg_count_open_automation_prs "$config")"
