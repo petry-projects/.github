@@ -785,7 +785,7 @@ GHEOF
   printf '#!/usr/bin/env bash\necho "gh: HTTP 503: server error" >&2\nexit 1\n' > "$STUB_BIN/gh"
   chmod +x "$STUB_BIN/gh"
   run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
-    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 some/repo"
+    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 - some/repo"
   # Fail-closed path returns non-zero, but NEVER with an arithmetic syntax error.
   [[ "$output" != *"syntax error"* ]]
   [[ "$output" != *"operand expected"* ]]
@@ -1191,6 +1191,66 @@ GITEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"PRE_EXISTING"* ]]
+}
+
+# ── orchestrator: failures from runs still on the OLD release don't block (#1176) ──
+# next = candidate (cccc), every ring = prior (bbbb); all tier repos return 3 failed runs.
+# `gh run view --log` prints the resolved "Uses: …@refs/tags/<chan> (<sha>)" line, with <sha>
+# = $1 (the release the run actually executed); "none" prints a log with no Uses: line.
+_executed_sha_stub() {
+  local executed="$1" cut_iso run_iso
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-3d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-2d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"failure",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*"--log"*)
+    if [ "$executed" = none ]; then echo "build	Set up job	nothing relevant"
+    else echo "build	Set up job	2026-09-25T00:00:00Z Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1 ($executed)"; fi ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Compile TypeScript","conclusion":"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+:
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: failures from runs on the OLD release do not block the candidate (#1176)" {
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"target-ring health"* ]]
+  [[ "$output" == *"informational"* ]]
+}
+
+@test "orchestrator: failures from runs that executed the candidate SHA still BLOCK (#1176)" {
+  _executed_sha_stub cccccccccccccccccccccccccccccccccccccccc
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"target-ring health"* ]]
+}
+
+@test "orchestrator: a failure whose executed release cannot be determined fails closed and BLOCKS (#1176)" {
+  _executed_sha_stub none
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
 }
 
 # ── orchestrator: promote --allow-pre-existing (control override, #1025 P2) ─────

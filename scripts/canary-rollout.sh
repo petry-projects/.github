@@ -775,31 +775,70 @@ _failure_suspect() {
   return 1
 }
 
-# _cumulative_health <agent> <since_z> <differs 0|1> <repo...> — failures +
-# startup_failures across EVERY given tier repo since the candidate cut. Failures
+# Memoization cache for _run_reusable_sha, keyed "repo:run_id" (a run's resolved reusable is immutable).
+declare -A _RUN_SHA_CACHE=()
+
+# _run_reusable_sha <agent> <repo> <run_id> — the commit SHA the run's reusable-workflow call
+# actually resolved to, read from the "Uses: <reusable>@refs/tags/<channel> (<sha>)" line GitHub
+# prints in the run log (#1176). Empty (exit 1) when the log is unreadable or carries no such
+# line: an unknown SHA is never attributed to an older release (fail closed — see _run_is_stale).
+_run_reusable_sha() {
+  local agent="$1" repo="$2" id="$3" key="$2:$3" reusable log sha
+  { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 1; }
+  if [[ -v _RUN_SHA_CACHE["$key"] ]]; then
+    sha="${_RUN_SHA_CACHE[$key]}"; echo "$sha"; [ -n "$sha" ]; return
+  fi
+  reusable="$(_agent_field "$agent" reusable)"; reusable="${reusable##*/}"
+  log="$(gh run view "$id" --repo "$repo" --log 2>/dev/null)" || log=""
+  sha="$(grep -F "Uses:" <<< "$log" | grep -F "${reusable:-@}" | head -n1 \
+    | grep -oE '\(([0-9a-f]{7,40})\)' | head -n1 | tr -d '()' || true)"
+  _RUN_SHA_CACHE["$key"]="$sha"
+  echo "$sha"; [ -n "$sha" ]
+}
+
+# _run_is_stale <agent> <cand> <repo> <run_id> — 0 only when the run PROVABLY executed a release
+# other than the candidate (#1176): a ring's members run the previous release until promoted, so
+# their failures say nothing about the candidate. Anything undeterminable (no cand, no Uses: line)
+# is NOT stale, so it still counts and blocks — the gate never gets more permissive on a guess.
+_run_is_stale() {
+  local agent="$1" cand="$2" repo="$3" id="$4" sha
+  { [ -z "$cand" ] || [ "$cand" = "-" ]; } && return 1
+  sha="$(_run_reusable_sha "$agent" "$repo" "$id")" || return 1
+  case "$cand" in "$sha"*) return 1 ;; esac
+  case "$sha" in "$cand"*) return 1 ;; esac
+  return 0
+}
+
+# _cumulative_health <agent> <since_z> <differs 0|1> <cand|-> <repo...> — failures +
+# startup_failures across EVERY given tier repo since the candidate cut. Only runs that executed
+# the candidate count (#1176): a failure from a run provably on an OLDER release (see
+# _run_is_stale) is tallied separately as target-ring health and never blocks. cand "-" disables
+# that attribution (every failure counts, the pre-#1176 behaviour). Failures
 # matching the per-reusable known-benign allowlist (#1025 P2) are counted separately and
 # excluded from the blocking total; which allowlist entries apply depends on whether the
 # candidate changed the reusable (differs — see _benign_patterns, #668). A counted (non-
 # benign) failure that matches a `suspect_failure_classes` entry sets the suspect flag
 # (#668 increment 2) — it still counts toward the blocking total (SUSPECT blocks like
 # REGRESSION), but downstream triage renders SUSPECT + guidance instead of a bare
-# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count>".
+# REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count> <old_release_failures>".
 _cumulative_health() {
-  local agent="$1" since="$2" differs="$3"; shift 3
-  local wf repo json fail=0 startup=0 benign=0 suspect=0 patterns="" suspect_patterns="" rid rwf
+  local agent="$1" since="$2" differs="$3" cand="${4:--}"; shift 4
+  local wf repo json fail=0 startup=0 benign=0 suspect=0 stale=0 patterns="" suspect_patterns="" rid rwf
   wf="$(_agent_field "$agent" run_workflow)"
   patterns="$(_benign_patterns "$agent" "$differs")"
   suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
     json="$(_run_json "$repo" "$wf" "$since")"
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
-    if [ -z "$patterns" ] && [ -z "$suspect_patterns" ]; then
-      # No benign or suspect patterns to match — count all failures with one jq pass,
-      # avoiding a gh run view call per failure.
+    if [ -z "$patterns" ] && [ -z "$suspect_patterns" ] && [ "$cand" = "-" ]; then
+      # No benign/suspect patterns and no candidate attribution — count all failures with one
+      # jq pass, avoiding a gh run view call per failure.
       fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     else
       while IFS=$'\t' read -r rid rwf; do
-        if [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
+        if _run_is_stale "$agent" "$cand" "$repo" "$rid"; then
+          stale=$(( stale + 1 ))
+        elif [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
           benign=$(( benign + 1 ))
         else
           fail=$(( fail + 1 ))
@@ -810,7 +849,7 @@ _cumulative_health() {
       done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
     fi
   done
-  echo "$fail $startup $benign $suspect"
+  echo "$fail $startup $benign $suspect $stale"
 }
 
 # _baseline_daily <agent> <window_days> <repo...> — per-day EXECUTED counts on the
@@ -1063,8 +1102,13 @@ _frontier_state() {
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \
       < <(resolve_members "$agent" "$ch3")
   done
-  local cum_fail cum_startup cum_benign cum_suspect
-  read -r cum_fail cum_startup cum_benign cum_suspect < <(_cumulative_health "$agent" "$cut_z" "$differs" "${all_repos[@]}")
+  local cum_fail cum_startup cum_benign cum_suspect cum_stale
+  read -r cum_fail cum_startup cum_benign cum_suspect cum_stale < <(_cumulative_health "$agent" "$cut_z" "$differs" "$cand" "${all_repos[@]}")
+  # Target-ring health (#1176): failures from runs still on the previous release are reported,
+  # never counted — the candidate cannot have caused them and may be the fix.
+  if [ "${cum_stale:-0}" -gt 0 ]; then
+    echo "::notice::target-ring health ($agent $transition): ${cum_stale} failure(s) in runs still on the previous release — informational, not counted against candidate ${cand:0:12}." >&2
+  fi
 
   # Per-transition knobs (registry-configurable; #548 defaults live in the ring SoT).
   local dwell_floor waived="false" target=0
@@ -1460,6 +1504,7 @@ _blocker_evidence() {
     local rid sig
     while IFS= read -r rid; do
       [ -z "$rid" ] && continue
+      if _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi   # old release: not counted (#1176)
       if [ "$n" -ge 8 ]; then out+="- _(…more failing runs; truncated at 8)_"$'\n'; printf '%s' "$out"; return 0; fi
       sig="$(_run_signature "$repo" "$rid" | tr '\n' ';' | sed 's/;$//')"
       out+="- \`$repo\` — run [$rid](https://github.com/$repo/actions/runs/$rid); failed steps: ${sig:-unknown}"$'\n'
