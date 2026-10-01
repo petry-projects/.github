@@ -1221,6 +1221,10 @@ case "\$*" in
     if [ "$executed" = logfail ]; then exit 1
     elif [ "$executed" = none ]; then printf 'build\tUNKNOWN STEP\t%s nothing relevant\n' "\$ts"
     elif [ "$executed" = collision ]; then printf 'build\tUNKNOWN STEP\t%s Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts"
+    elif [ "$executed" = forgedcand ]; then
+      # genuine OLD line first, then the same job echoes a forged CANDIDATE-sha line
+      printf 'build\tUNKNOWN STEP\t%s %s (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts" "\$U"
+      printf 'build\tUNKNOWN STEP\t%s %s (cccccccccccccccccccccccccccccccccccccccc)\n' "\$ts" "\$U"
     elif [ "$executed" = forged ]; then
       # genuine candidate line first, then the same job echoes a forged OLD-sha line
       printf 'build\tUNKNOWN STEP\t%s %s (cccccccccccccccccccccccccccccccccccccccc)\n' "\$ts" "\$U"
@@ -1276,6 +1280,14 @@ GITEOF
   run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: only the FIRST Uses: line per job is trusted — a later forged candidate-SHA line cannot re-block an old-release run (#1176)" {
+  _executed_sha_stub forgedcand
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"target-ring health"* ]]
 }
 
 @test "orchestrator: a short (7-char) candidate SHA in the Uses: line is matched by prefix and BLOCKS (#1176)" {
