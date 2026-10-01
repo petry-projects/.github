@@ -1216,7 +1216,12 @@ case "\$*" in
   *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"failure",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
   *"run view"*"--log"*)
     if [ "$executed" = none ]; then echo "build	Set up job	nothing relevant"
-    else echo "build	Set up job	2026-09-25T00:00:00Z Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1 ($executed)"; fi ;;
+    elif [ "$executed" = collision ]; then echo "build	Set up job	Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
+    else
+      for sha in $executed; do
+        echo "build	Set up job	2026-09-25T00:00:00Z Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1 (\$sha)"
+      done
+    fi ;;
   *"run view"*) echo '{"jobs":[{"steps":[{"name":"Compile TypeScript","conclusion":"failure"}]}]}' ;;
   *) echo "{}" ;;
 esac
@@ -1244,6 +1249,20 @@ GITEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" != *"target-ring health"* ]]
+}
+
+@test "orchestrator: a run that called the reusable at the old AND candidate SHA still BLOCKS (#1176)" {
+  _executed_sha_stub "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a Uses: line for a different host's same-named workflow is not attributed — BLOCKS (#1176)" {
+  _executed_sha_stub collision
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
 }
 
 @test "orchestrator: a failure whose executed release cannot be determined fails closed and BLOCKS (#1176)" {

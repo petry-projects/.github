@@ -775,37 +775,59 @@ _failure_suspect() {
   return 1
 }
 
-# Memoization cache for _run_reusable_sha, keyed "repo:run_id" (a run's resolved reusable is immutable).
+# Memoization for _run_reusable_sha. Callers run it in command substitutions (subshells), so the
+# in-memory map alone is lost between the health pass and the blocker-evidence pass; when the
+# sweep has a _RUNS_CACHE_DIR the result is also persisted there so each run's log is fetched once.
 declare -A _RUN_SHA_CACHE=()
 
-# _run_reusable_sha <agent> <repo> <run_id> — the commit SHA the run's reusable-workflow call
-# actually resolved to, read from the "Uses: <reusable>@refs/tags/<channel> (<sha>)" line GitHub
-# prints in the run log (#1176). Empty (exit 1) when the log is unreadable or carries no such
-# line: an unknown SHA is never attributed to an older release (fail closed — see _run_is_stale).
+# _run_reusable_sha <agent> <repo> <run_id> — every distinct commit SHA the run's calls to THIS
+# agent's reusable resolved to (one per line), read from the "Uses: <host>/<reusable>@<ref> (<sha>)"
+# lines GitHub prints in the run log (#1176). Only lines naming the registry host + full reusable
+# path count, so a different workflow with a similar filename is never attributed. Empty (exit 1)
+# when the log is unreadable or has no such line; an unknown SHA is never attributed to an older
+# release (fail closed — see _run_is_stale). Lookup failures are cached as empty too.
 _run_reusable_sha() {
-  local agent="$1" repo="$2" id="$3" key="$2:$3" reusable log sha
+  local agent="$1" repo="$2" id="$3" key="$1:$2:$3" reusable host cachef="" log shas="" line
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 1; }
   if [[ -v _RUN_SHA_CACHE["$key"] ]]; then
-    sha="${_RUN_SHA_CACHE[$key]}"; echo "$sha"; [ -n "$sha" ]; return
+    shas="${_RUN_SHA_CACHE[$key]}"; [ -n "$shas" ] && printf '%s\n' "$shas"; [ -n "$shas" ]; return
   fi
-  reusable="$(_agent_field "$agent" reusable)"; reusable="${reusable##*/}"
+  if [ -n "${_RUNS_CACHE_DIR:-}" ] && [ -d "$_RUNS_CACHE_DIR" ]; then
+    cachef="$_RUNS_CACHE_DIR/sha_${key//[^A-Za-z0-9._-]/_}"
+    if [ -f "$cachef" ]; then
+      shas="$(<"$cachef")"; _RUN_SHA_CACHE["$key"]="$shas"
+      [ -n "$shas" ] && printf '%s\n' "$shas"; [ -n "$shas" ]; return
+    fi
+  fi
+  reusable="$(_agent_field "$agent" reusable)"
+  host="$(_agent_field "$agent" host)"; host="${host:-$THIS_REPO}"
   log="$(gh run view "$id" --repo "$repo" --log 2>/dev/null)" || log=""
-  sha="$(grep -F "Uses:" <<< "$log" | grep -F "${reusable:-@}" | head -n1 \
-    | grep -oE '\(([0-9a-f]{7,40})\)' | head -n1 | tr -d '()' || true)"
-  _RUN_SHA_CACHE["$key"]="$sha"
-  echo "$sha"; [ -n "$sha" ]
+  if [ -n "$reusable" ]; then
+    while IFS= read -r line; do
+      [[ "$line" == *"Uses:"* && "$line" == *"$host/$reusable@"* ]] || continue
+      [[ "$line" =~ \(([0-9a-f]{7,40})\) ]] && shas+="${BASH_REMATCH[1]}"$'\n'
+    done <<< "$log"
+    shas="$(printf '%s' "$shas" | sort -u)"
+  fi
+  _RUN_SHA_CACHE["$key"]="$shas"
+  [ -n "$cachef" ] && printf '%s' "$shas" > "$cachef" 2>/dev/null || true
+  [ -n "$shas" ] && printf '%s\n' "$shas"; [ -n "$shas" ]
 }
 
 # _run_is_stale <agent> <cand> <repo> <run_id> — 0 only when the run PROVABLY executed a release
 # other than the candidate (#1176): a ring's members run the previous release until promoted, so
 # their failures say nothing about the candidate. Anything undeterminable (no cand, no Uses: line)
-# is NOT stale, so it still counts and blocks — the gate never gets more permissive on a guess.
+# or ambiguous (a run that called the reusable at several SHAs, any of them the candidate) is NOT
+# stale, so it still counts and blocks — the gate never gets more permissive on a guess.
 _run_is_stale() {
-  local agent="$1" cand="$2" repo="$3" id="$4" sha
+  local agent="$1" cand="$2" repo="$3" id="$4" sha shas
   { [ -z "$cand" ] || [ "$cand" = "-" ]; } && return 1
-  sha="$(_run_reusable_sha "$agent" "$repo" "$id")" || return 1
-  case "$cand" in "$sha"*) return 1 ;; esac
-  case "$sha" in "$cand"*) return 1 ;; esac
+  shas="$(_run_reusable_sha "$agent" "$repo" "$id")" || return 1
+  while IFS= read -r sha; do
+    [ -z "$sha" ] && continue
+    case "$cand" in "$sha"*) return 1 ;; esac
+    case "$sha" in "$cand"*) return 1 ;; esac
+  done <<< "$shas"
   return 0
 }
 
