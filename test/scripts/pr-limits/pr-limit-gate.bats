@@ -20,6 +20,8 @@ LIB="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/scripts/lib/pr-limit-gate.sh"
 GH_STUB_SRC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/scripts/compliance-remediate/stubs/gh"
 
 setup() {
+  # Quarantine the override so ambient env never skews config-driven tests.
+  unset PR_LIMITS_ORG_CAP
   TMP="$(mktemp -d)"
   export TMP
 

@@ -184,8 +184,9 @@ Use §6.1 only to change the signed-off default in the file.
 3. Open a PR. CI ([`.github/workflows/pr-limits-tests.yml`](../.github/workflows/pr-limits-tests.yml))
    re-runs the config + gate tests.
 4. **Re-apply = nothing to deploy.** Because enforcement is source-side and reads
-   the file at run time (§2–§3), the new ceiling takes effect for every consumer
-   as soon as the change merges to `main` — there is no `apply-*.sh` run and no
+   the file at run time (§2–§3), the new default takes effect for every consumer
+   as soon as the change merges to `main` — unless a valid `PR_LIMITS_ORG_CAP`
+   override (§2.1) is set, in which case the file value is only the fallback — there is no `apply-*.sh` run and no
    GitHub setting to push. (Per-repo Dependabot caps, if you also changed those,
    are applied through `dependabot.yml`, not this file.)
 
