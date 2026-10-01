@@ -130,18 +130,17 @@ bump, migrations land unevenly, and a stale ID silently pins a repo to an
 outdated model. Naming the family defers the ID to the one resolver, so the
 version lives in exactly one place and is promoted like any other release.
 
-### Allowed exceptions — each needs an inline `# model-pin-ok: <reason>`
+### Allowed exceptions — each needs an audit marker
 
 A literal version ID is permitted **only** in these four cases, and each
-occurrence MUST carry an inline `# model-pin-ok: <reason>` comment so the pin is
-auditable and intentional:
+occurrence MUST carry an audit marker so the pin is auditable and intentional:
 
-| # | Exception | Why a real ID is required |
-|---|-----------|---------------------------|
-| a | **The resolver itself** | It is the one place that maps family → current ID, so it must name the IDs. |
-| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. |
-| c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the ID that produced it; rewriting it would falsify the record. |
-| d | **A fixed eval judge** | The judge must stay pinned so A/B results stay comparable across runs. |
+| # | Exception | Why a real ID is required | Audit marker |
+|---|-----------|---------------------------|--------------|
+| a | **The resolver itself** | It is the one place that maps family → current ID, so it must name the IDs. | Inline `# model-pin-ok: <reason>` |
+| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. | Inline `# model-pin-ok: <reason>` |
+| c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the ID that produced it; rewriting it would falsify the record. | Inline `# model-pin-ok: <reason>` for comment-supporting formats; metadata field or sidecar file for formats that don't support comments. |
+| d | **A fixed eval judge** | The judge must stay pinned so A/B results stay comparable across runs. | Inline `# model-pin-ok: <reason>` |
 
 Anything outside these four names a family and lets the resolver supply the ID.
 

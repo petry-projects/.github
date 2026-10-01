@@ -1391,15 +1391,15 @@ understanding why they exist:**
    no Discussions. Passing the workflow's `GITHUB_TOKEN` makes the job-level
    `permissions: discussions: write` grant apply.
 
-2. **`ANTHROPIC_MODEL: claude-opus-4-6` is set as a step env var.**
-   The action does not expose model selection as an input — it reads the
-   `ANTHROPIC_MODEL` environment variable. Opus is required for the depth
-   the multi-skill pipeline expects; Sonnet runs cheaper but produces
-   noticeably shallower adversarial passes. The reusable workflow exposes
-   this as the optional `model` input for callers that need an override — the
-   operator override described in
-   [agent-standards.md § Model selection](agent-standards.md#model-selection),
-   which is the canonical family-not-version rule this gotcha follows.
+2. **The `model` input defaults to the `opus` family.**
+   The reusable workflow passes this via `--model ${{ inputs.model }}` to the
+   Claude Code action, which then resolves the family to the current version ID.
+   Opus is required for the depth the multi-skill pipeline expects; Sonnet runs
+   cheaper but produces noticeably shallower adversarial passes. The `model`
+   input is optional — callers may override it per the
+   [operator override](agent-standards.md#operator-override)
+   described in agent-standards.md, which is the canonical family-not-version
+   rule this gotcha follows.
 
 3. **`show_full_output: true` is NOT enabled.**
    It echoes raw tool results to public action logs, which can leak secrets.
