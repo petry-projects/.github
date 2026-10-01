@@ -787,13 +787,17 @@ declare -A _RUN_SHA_CACHE=()
 # when the log is unreadable or has no such line; an unknown SHA is never attributed to an older
 # release (fail closed — see _run_is_stale). Lookup failures are cached as empty too.
 _run_reusable_sha() {
-  local agent="$1" repo="$2" id="$3" key="$1:$2:$3" reusable host cachef="" log shas="" line
+  local agent="$1" repo="$2" id="$3" key="$1:$2:$3" reusable host cachef="" keyhash log shas="" line
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 1; }
   if [[ -v _RUN_SHA_CACHE["$key"] ]]; then
     shas="${_RUN_SHA_CACHE[$key]}"; [ -n "$shas" ] && printf '%s\n' "$shas"; [ -n "$shas" ]; return
   fi
   if [ -n "${_RUNS_CACHE_DIR:-}" ] && [ -d "$_RUNS_CACHE_DIR" ]; then
-    cachef="$_RUNS_CACHE_DIR/sha_${key//[^A-Za-z0-9._-]/_}"
+    # Hash the key into the filename (as _repo_wf_runs_cached does): char-substitution would map
+    # distinct (agent, repo, run) keys to one file and could hand one run another run's SHA.
+    keyhash="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
+    [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
+    cachef="$_RUNS_CACHE_DIR/sha_${keyhash}"
     if [ -f "$cachef" ]; then
       shas="$(<"$cachef")"; _RUN_SHA_CACHE["$key"]="$shas"
       [ -n "$shas" ] && printf '%s\n' "$shas"; [ -n "$shas" ]; return
