@@ -108,12 +108,21 @@ run_gate() {
 @test "invalid PR_LIMITS_ORG_CAP is ignored and the config cap applies" {
   write_config 5 9
   stub_open_prs 7
-  for bad in 0 -3 abc 1.5 99999999999999999999; do
+  for bad in 0 -3 abc 1.5 007 1000000000 99999999999999999999; do
     PR_LIMITS_ORG_CAP="$bad" run_gate "claude"
     [ "$status" -eq 1 ]
     [[ "$output" == *"decision=defer"* ]]
     [[ "$output" == *"ignoring invalid PR_LIMITS_ORG_CAP"* ]]
   done
+}
+
+@test "9-digit maximum PR_LIMITS_ORG_CAP is accepted as a valid override" {
+  write_config 5 9
+  stub_open_prs 7
+  PR_LIMITS_ORG_CAP=999999999 run_gate "claude"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"decision=allow"* ]]
+  [[ "$output" != *"ignoring invalid PR_LIMITS_ORG_CAP"* ]]
 }
 
 @test "empty PR_LIMITS_ORG_CAP (unset org variable) falls back to config" {
