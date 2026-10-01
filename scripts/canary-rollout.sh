@@ -1130,7 +1130,10 @@ _pair_state() {
   done
   for idx in "${!chan_array[@]}"; do
     ch3="${chan_array[$idx]}"
-    if [ "$idx" -lt "$src_idx" ] && [ "$(channel_commit "$agent" "$ch3")" != "$cand" ]; then
+    # Exclude a lower ring only when it PROVABLY runs a different commit. An unresolvable (empty)
+    # tag is unknown, not "different": keep its failures in scope (fail closed).
+    local lc; lc="$(channel_commit "$agent" "$ch3")"
+    if [ "$idx" -lt "$src_idx" ] && [ -n "$lc" ] && [ "$lc" != "$cand" ]; then
       continue
     fi
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \

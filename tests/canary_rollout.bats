@@ -3592,6 +3592,15 @@ GHEOF
   [[ "$output" != *"fully rolled out"* ]]
 }
 
+@test "#1118: a lower ring whose tag is UNRESOLVABLE stays in scope — its failures still block a higher pair (fail closed)" {
+  # ring0 has no resolvable tag and its member (.github) is failing; ring1->stable must not shed
+  # those failures just because ring0's commit is unknown rather than provably different.
+  _multicand_stub C1 NONE C3 PRIOR "3 days" "3 days" "30 hours" "repo petry-projects/.github --workflow"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[ring1->stable]: BLOCKED"* ]]
+}
+
 # The confirm issue's idempotency marker is keyed on the ring1 CANDIDATE (#1118 AC3), so a
 # recut ring1 candidate does not silently transfer a human's pending go/no-go to a new commit.
 @test "#1118: _confirm_body keys the canary-confirm marker on agent AND candidate" {
