@@ -50,9 +50,9 @@ on:
         default: 'standard'
         type: string
       model:
-        description: 'Anthropic model ID. Opus 4.6 is the default and recommended — Sonnet produces shallower adversarial passes.'
+        description: 'Model family — `opus` (default, recommended), `sonnet`, or `haiku`. The resolver/CLI maps the family to the current version ID. An operator MAY override with a concrete model ID for a one-off pin.'
         required: false
-        default: 'claude-opus-4-6'
+        default: 'opus'
         type: string
       timeout_minutes:
         description: 'Timeout for the analyst job (the gather-signals job has its own short timeout).'

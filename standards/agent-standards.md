@@ -116,42 +116,42 @@ for the full standard, exemplars, and rationale.
 
 ## Model selection
 
-Agent code names a **model family**, never a pinned version id. A caller MAY
+Agent code names a **model family**, never a pinned version ID. A caller MAY
 suggest the family best suited to the task — **`opus`**, **`sonnet`**, or
-**`haiku`** — but MUST NOT hard-code a specific version id such as
-`claude-opus-4-6`. A single resolver/CLI maps a family to the current model id,
+**`haiku`** — but MUST NOT hard-code a specific version ID such as
+`claude-opus-4-6`. A single resolver/CLI maps a family to the current model ID,
 and version changes roll out centrally through the normal release channels — so
 moving the whole fleet to a newer model is one change in the resolver, not a
-find-and-replace of pinned ids across every workflow, script, and prompt.
+find-and-replace of pinned IDs across every workflow, script, and prompt.
 
-**Why family, not version.** A hard-coded version id is drift waiting to happen:
+**Why family, not version.** A hard-coded version ID is drift waiting to happen:
 every place that names `claude-opus-4-6` must be found and edited on each model
-bump, migrations land unevenly, and a stale id silently pins a repo to an
-outdated model. Naming the family defers the id to the one resolver, so the
+bump, migrations land unevenly, and a stale ID silently pins a repo to an
+outdated model. Naming the family defers the ID to the one resolver, so the
 version lives in exactly one place and is promoted like any other release.
 
 ### Allowed exceptions — each needs an inline `# model-pin-ok: <reason>`
 
-A literal version id is permitted **only** in these four cases, and each
+A literal version ID is permitted **only** in these four cases, and each
 occurrence MUST carry an inline `# model-pin-ok: <reason>` comment so the pin is
 auditable and intentional:
 
-| # | Exception | Why a real id is required |
+| # | Exception | Why a real ID is required |
 |---|-----------|---------------------------|
-| a | **The resolver itself** | It is the one place that maps family → current id, so it must name the ids. |
-| b | **Price data keyed by real ids** | Cost is per concrete model, so the table is keyed by the actual version ids. |
-| c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the id that produced it; rewriting it would falsify the record. |
+| a | **The resolver itself** | It is the one place that maps family → current ID, so it must name the IDs. |
+| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. |
+| c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the ID that produced it; rewriting it would falsify the record. |
 | d | **A fixed eval judge** | The judge must stay pinned so A/B results stay comparable across runs. |
 
-Anything outside these four names a family and lets the resolver supply the id.
+Anything outside these four names a family and lets the resolver supply the ID.
 
 ### Operator override
 
-An **operator-supplied full model id** — a workflow input or an Actions variable
+An **operator-supplied full model ID** — a workflow input or an Actions variable
 set by a human operator — is an operator choice and stays allowed; it is not a
 code default. The rule constrains **defaults in code**: those MUST name a family.
-An operator MAY still pass a concrete id to override for a one-off experiment or
-pin, without that id ever becoming the hard-coded default.
+An operator MAY still pass a concrete ID to override for a one-off experiment or
+pin, without that ID ever becoming the hard-coded default.
 
 ## BMAD Method Workflows
 
