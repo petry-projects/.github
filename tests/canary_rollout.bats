@@ -1198,7 +1198,7 @@ GITEOF
 # `gh run view --log` prints the resolved "Uses: …@refs/tags/<chan> (<sha>)" line, with <sha>
 # = $1 (the release the run actually executed); "none" prints a log with no Uses: line.
 _executed_sha_stub() {
-  local executed="$1" cut_iso run_iso
+  local executed="$1" conclusion="${2:-failure}" cut_iso run_iso
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-3d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-2d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
@@ -1213,9 +1213,10 @@ case "\$*" in
   *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
   *"ref=cccc"*) echo "reuseAAAA" ;;
   *"ref=bbbb"*) echo "reuseAAAA" ;;
-  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"failure",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"'"$conclusion"'",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
   *"run view"*"--log"*)
-    if [ "$executed" = none ]; then echo "build	Set up job	nothing relevant"
+    if [ "$executed" = logfail ]; then exit 1
+    elif [ "$executed" = none ]; then echo "build	Set up job	nothing relevant"
     elif [ "$executed" = collision ]; then echo "build	Set up job	Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"
     else
       for sha in $executed; do
@@ -1260,6 +1261,27 @@ GITEOF
 
 @test "orchestrator: a Uses: line for a different host's same-named workflow is not attributed — BLOCKS (#1176)" {
   _executed_sha_stub collision
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a short (7-char) candidate SHA in the Uses: line is matched by prefix and BLOCKS (#1176)" {
+  _executed_sha_stub ccccccc
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a failing 'gh run view --log' lookup fails closed and BLOCKS (#1176)" {
+  _executed_sha_stub logfail
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: startup_failure runs are never attributed to an old release — they still BLOCK (#1176)" {
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb startup_failure
   run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
