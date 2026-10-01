@@ -42,10 +42,11 @@ double-cap it and risk starving a security PR. See §5 and ADR §7.4.
 
 ## 2. Source of truth — the configured value
 
-The cap value, any per-source sub-caps, and the exempt lists live **only** in
-[`standards/pr-limits.json`](pr-limits.json). This document deliberately does
-**not** restate the number: a changeable value stated in prose is a second place
-to forget to update. To read the current cap, read the config:
+The signed-off **default** cap value, any per-source sub-caps, and the exempt
+lists live **only** in [`standards/pr-limits.json`](pr-limits.json). The cap in
+force can be overridden at runtime by the org variable in §2.1. This document
+deliberately does **not** restate the number: a changeable value stated in prose
+is a second place to forget to update. To read the default cap, read the config:
 
 ```bash
 jq '.org_wide.automation_open_pr_cap' standards/pr-limits.json
@@ -54,7 +55,8 @@ jq '.org_wide.automation_open_pr_cap' standards/pr-limits.json
 The config carries its own inline `_note` fields recording the human sign-off
 (epic [#505](https://github.com/petry-projects/.github/issues/505) gate) and the
 rationale for the number. Consumers (the apply path in §3, and any future
-PR-creating workflow) **must** read the value from this file — never hardcode it.
+PR-creating workflow) **must** resolve the cap via `plg_effective_org_cap`
+(override, then this file) — never hardcode it.
 
 ### 2.1 Runtime override — the org-level variable
 
@@ -63,9 +65,10 @@ org-level Actions variable **`PR_LIMITS_ORG_CAP`** (Org → Settings → Secrets
 variables → Actions → Variables). Consumers pass it to the gate as the
 `PR_LIMITS_ORG_CAP` environment variable (`env: PR_LIMITS_ORG_CAP: ${{ vars.PR_LIMITS_ORG_CAP }}`).
 
-- **Precedence:** a positive-integer `PR_LIMITS_ORG_CAP` wins; if it is unset,
-  empty, or invalid (zero, negative, non-integer — logged as a warning), the gate
-  falls back to `org_wide.automation_open_pr_cap` in the config. A bad value can
+- **Precedence:** a positive-integer `PR_LIMITS_ORG_CAP` (at most 9 digits, no
+  leading zeros) wins; if it is unset or empty (the normal "variable not set"
+  case, silent), or invalid (zero, negative, non-integer, leading zeros, more than
+  9 digits — logged as a warning), the gate falls back to `org_wide.automation_open_pr_cap` in the config. A bad value can
   never silently disable or zero the cap.
 - The file value is the **default/fallback**; the variable is the **operational
   lever**. Exempt actors/labels and sub-caps still come only from the config.
@@ -155,10 +158,11 @@ This keeps a single source of truth *per actor*: Dependabot's number lives in
 
 ## 6. Operator runbook
 
-All changes here are edits to the single source of truth
-[`standards/pr-limits.json`](pr-limits.json), gated by the config tests. None of
-them touches a GitHub setting or ruleset — there is no such surface to apply
-(§3).
+Changes here are either edits to the single source of truth
+[`standards/pr-limits.json`](pr-limits.json) (the default, gated by the config
+tests) or a change to the `PR_LIMITS_ORG_CAP` org Actions variable (the runtime
+override, §2.1, not gated by tests). Neither touches a repo setting or ruleset —
+there is no such surface to apply (§3).
 
 ### 6.0 Quick change (no PR)
 

@@ -189,6 +189,28 @@ run_report() {
 }
 
 # --------------------------------------------------------------------------
+# PR_LIMITS_ORG_CAP override is honored by the report (same as the gate)
+# --------------------------------------------------------------------------
+@test "PR_LIMITS_ORG_CAP overrides the config cap in the report" {
+  write_config 4
+  stub_open_prs 4
+  PR_LIMITS_ORG_CAP=20 run_report
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AT OR OVER CAP"* ]]
+  [[ "$output" == *"| Cap | 20 |"* ]]
+}
+
+@test "invalid or empty PR_LIMITS_ORG_CAP falls back to the config cap in the report" {
+  write_config 4
+  stub_open_prs 4
+  for bad in "" 0 abc 99999999999999999999; do
+    PR_LIMITS_ORG_CAP="$bad" run_report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"| Cap | 4 |"* ]]
+  done
+}
+
+# --------------------------------------------------------------------------
 # A null / missing author does not crash jq: it is counted as "unknown".
 # --------------------------------------------------------------------------
 @test "null or missing author is counted as unknown without a jq error" {
