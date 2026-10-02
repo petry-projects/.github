@@ -5352,7 +5352,8 @@ GHEOF
     bash -c "source '$ORCH' && _agent_run_json dev-lead org/legacy '' | jq -c 'map(.databaseId)'"
   [ "$status" -eq 0 ]
   [ "$output" = "[201]" ]
-  ! grep -q "Agent Ingress" "$GH_LOG"
+  run grep -q "Agent Ingress" "$GH_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "_agent_run_json: a repo with neither workflow nor ingress is a non-consumer [] — not unresolved (#747 preserved, #1224)" {

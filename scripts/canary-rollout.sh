@@ -518,7 +518,7 @@ _gh_retry_after() {
 # workflow but no runs" — the signal that a repo may be ADR-0007-collapsed. The not-found
 # verdict is cached alongside the [] (a `.nf` marker) so a strict cache hit still reports it.
 _repo_wf_runs_cached() {
-  local repo="$1" wf="$2" strict="${3:-0}" out err summary ra delay span expo errfile cachef key keyhash
+  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" out err summary ra delay span expo errfile cachef key keyhash
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
@@ -556,7 +556,7 @@ _repo_wf_runs_cached() {
   trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" \
-        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
+        -L "$limit" --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
       rm -f "$errfile"; out="${out:-[]}"
       [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
       printf '%s\n' "$out"; return 0
@@ -656,10 +656,9 @@ _record_unresolved() {
 # once per sweep). Bounded retry; non-zero when the jobs stay unreadable.
 _run_jobs_json() {
   local repo="$1" id="$2" cachef="" keyhash out attempt=1
-  local attempts="${CANARY_GH_RETRIES:-3}" base="${CANARY_GH_RETRY_SLEEP:-2}"
-  case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
+  local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
+  case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
   case "$base" in ''|*[!0-9]*) base=2 ;; esac
-  [ "$attempts" -gt 3 ] && attempts=3
   [ "$attempts" -lt 1 ] && attempts=1
   if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
     keyhash="$(printf 'jobs//%s//%s' "$repo" "$id" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
@@ -673,7 +672,11 @@ _run_jobs_json() {
       printf '%s\n' "$out"; return 0
     fi
     [ "$attempt" -ge "$attempts" ] && return 1
-    sleep "$base"; attempt=$((attempt + 1))
+    # Same policy as the run-list path: exponential backoff with full jitter in [base, 30s].
+    expo=$((attempt - 1)); [ "$expo" -gt 20 ] && expo=20
+    delay=$(( base << expo )); span=$(( delay - base )); [ "$span" -lt 0 ] && span=0
+    delay=$(( base + RANDOM % (span + 1) )); [ "$delay" -gt 30 ] && delay=30
+    sleep "$delay"; attempt=$((attempt + 1))
   done
 }
 
@@ -695,20 +698,23 @@ _ingress_agent_runs() {
     fi
     rec="$(jq -c --arg role "$role" --arg wf "$wf" --arg id "$id" --arg created "$created" --arg rconc "$rconc" '
       def rank(c):
-        if   c == "failure" or c == "timed_out" or c == "action_required" or c == "startup_failure" then 5
+        if   c == "failure" or c == "timed_out" or c == "action_required" or c == "startup_failure" then 6
+        elif c == "cancelled" then 5   # an interrupted job must not be masked by a green sibling
         elif c == "success"   then 4
-        elif c == "cancelled" then 3
         elif c == null or c == "skipped" then 0
         else 2 end;
       (.jobs // []) as $jobs
       | if ($jobs | length) == 0 then
           (if $rconc == "startup_failure" then {conclusion: "startup_failure"} else "UNATTRIBUTED" end)
         else
-          ([ $jobs[] | select(((.name // "") | split(" / ")[0]) == $role) | {c: .conclusion, r: rank(.conclusion)} ]
-           | max_by(.r) // {r: 0}) as $w
+          ([ $jobs[] | select(((.name // "") | split(" / ")[0]) == $role) | {c: .conclusion, r: rank(.conclusion)} ]) as $rj
+          # No job carries the role at all (renamed/misspelled ingress_job) → blind, not "skipped".
+          | if ($rj | length) == 0 then "UNATTRIBUTED"
+          else ($rj | max_by(.r)) as $w
           | if $w.r == 0 then empty
             # A job-level timeout surfaces as a failed run on a legacy per-role workflow.
             else {conclusion: (if $w.c == "timed_out" then "failure" else $w.c end)} end
+          end
         end
       | if . == "UNATTRIBUTED" then .
         else . + {createdAt: $created, databaseId: ($id | tonumber), workflowName: $wf, role: $role} end
@@ -741,10 +747,10 @@ _agent_run_json() {
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
   if [ "$rc" -eq 3 ]; then
     rc=0; iwf="$(_ingress_workflow)"
-    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1)" || rc=$?
+    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "${CANARY_INGRESS_RUN_LIMIT:-5000}")" || rc=$?
     case "$rc" in
       0)
-        role="$(_jq -r --arg a "$agent" '.agents[$a].ingress_job // empty')"
+        role="$(_jq -r --arg a "$agent" '(.agents[$a].ingress_job)? // empty' 2>/dev/null || true)"
         if [ -z "$role" ]; then
           _record_unresolved "$agent" "$repo" "no '$wf' workflow but '$iwf' is present and the agent registers no ingress_job"
           echo '[]'; return 0
@@ -887,7 +893,7 @@ _run_signature() {
   # Use || { } so set -e does not trigger on a failing gh run view; the block caches the
   # sentinel and returns 1 to signal the lookup failure to callers that care (e.g.
   # _suspect_class_counts tracks incomplete evidence and HOLDs the downgrade).
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" || {
+  json="$(_run_jobs_json "$repo" "$id")" || {
     _RUN_SIG_CACHE["$cache_key"]=$'\x01'
     echo ""; return 1
   }
@@ -1112,9 +1118,9 @@ _run_decision_class() {
   if [[ -v _RUN_DECISION_CACHE["$cache_key"] ]]; then
     echo "${_RUN_DECISION_CACHE[$cache_key]}"; return 0
   fi
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null || echo '{}')"
+  json="$(_run_jobs_json "$repo" "$id" 2>/dev/null || echo '{}')"
   if [ -n "$role" ]; then
-    json="$(jq -c --arg role "$role" '.jobs |= map(select(((.name // "")|split(" / ")[0]) == $role))' <<< "$json" 2>/dev/null || echo '{}')"
+    json="$(jq -c --arg role "$role" 'if has("jobs") then .jobs |= map(select(((.name // "")|split(" / ")[0]) == $role)) else error("Missing jobs key") end' <<< "$json" 2>/dev/null || echo '{}')"
   fi
   cls="$(decision_class "$prefix" "$json")"
   _RUN_DECISION_CACHE["$cache_key"]="$cls"
@@ -1456,7 +1462,8 @@ _pair_state() {
   fi
   if [ -n "$unresolved" ]; then
     echo "::error::canary gate for '$agent' [$transition] is BLIND on ring member(s) $unresolved — their runs could not be attributed (ADR-0007 ingress present, role job unresolvable). Counted as UNRESOLVED, not passing evidence; register the agent's ingress_job in the ring registry." >&2
-    if [ "$state" != "BLOCKED" ]; then
+    # PRE_EXISTING is advanceable via `promote --allow-pre-existing`, so UNRESOLVED must dominate it.
+    if [ "$state" != "BLOCKED" ] || [ "$triage" = "PRE_EXISTING" ]; then
       state="BLOCKED"; triage="UNRESOLVED"; mix_shift="-"; downgrade="-"
     fi
   fi
