@@ -1258,8 +1258,9 @@ _pair_state() {
   # run reads below happen in subshells. A caller may pre-arm it (sync-issues evidence).
   local uflag="${_CANARY_UNRESOLVED_FLAG:-}" uflag_owned=0
   if [ -z "$uflag" ]; then
-    uflag="$(mktemp 2>/dev/null || echo "")"; uflag_owned=1
-    [ -n "$uflag" ] && export _CANARY_UNRESOLVED_FLAG="$uflag"
+    # Use a stable temp path so _unresolved_evidence can reuse the same flag (avoid re-evaluating #1224)
+    uflag="/tmp/.canary-unresolved-${agent}-${cand}.txt"; uflag_owned=1
+    : >"$uflag" 2>/dev/null && [ -n "$uflag" ] && export _CANARY_UNRESOLVED_FLAG="$uflag"
   fi
 
   # Source-tier repos (the tier currently running the candidate).
@@ -1450,7 +1451,7 @@ _pair_state() {
     unresolved="$(cut -f1 "$uflag" | sort -u | paste -sd, - | sed 's/,/, /g')"
   fi
   if [ "$uflag_owned" -eq 1 ]; then
-    [ -n "$uflag" ] && rm -f "$uflag"
+    # Keep the flag at stable path for _unresolved_evidence to reuse (#1224 race condition fix)
     unset _CANARY_UNRESOLVED_FLAG
   fi
   if [ -n "$unresolved" ]; then
@@ -1859,14 +1860,21 @@ _blocker_evidence() {
 # runs could not be attributed (#1224), with the reason. Re-walks the same per-candidate window
 # and tier repos as _blocker_evidence under a fresh UNRESOLVED flag.
 _unresolved_evidence() {
-  local agent="$1" cand="$2" flag repo reason out=""
-  flag="$(mktemp 2>/dev/null || echo "")"
-  [ -z "$flag" ] && { printf '_(could not list the unresolved members — see the workflow log ::error:: annotations)_\n'; return 0; }
-  _CANARY_UNRESOLVED_FLAG="$flag" _blocker_evidence "$agent" "$cand" >/dev/null 2>&1 || true
+  local agent="$1" cand="$2" flag repo reason out="" flag_is_persistent=0
+  # Try to reuse the pre-evaluated flag from _frontier_state to avoid race condition (#1224)
+  flag="/tmp/.canary-unresolved-${agent}-${cand}.txt"
+  if [ -s "$flag" ]; then
+    flag_is_persistent=1
+  else
+    # Flag not found or empty, create a new one and re-evaluate
+    flag="$(mktemp 2>/dev/null || echo "")"
+    [ -z "$flag" ] && { printf '_(could not list the unresolved members — see the workflow log ::error:: annotations)_\n'; return 0; }
+    _CANARY_UNRESOLVED_FLAG="$flag" _blocker_evidence "$agent" "$cand" >/dev/null 2>&1 || true
+  fi
   while IFS=$'\t' read -r repo reason; do
     [ -n "$repo" ] && out+="- \`$repo\` — $reason"$'\n'
   done < <(sort -u "$flag")
-  rm -f "$flag"
+  [ "$flag_is_persistent" -eq 0 ] && rm -f "$flag"
   [ -z "$out" ] && out="_(no unresolved member on re-check — the gate should clear next tick)_"$'\n'
   printf '%s' "$out"
 }
