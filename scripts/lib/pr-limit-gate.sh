@@ -238,7 +238,7 @@ plg_admission_gate() {
   else
     # 3. Per-source sub-cap, only when one is configured for this source.
     local sub_cap
-    sub_cap="$(jq -r --arg s "$source" '.per_source_caps[$s] // empty' "$config" 2>/dev/null || printf '')"
+    sub_cap="$(jq -r --arg s "$source" 'try .per_source_caps[$s] catch empty // empty' "$config" 2>/dev/null || printf '')"
     if [[ "$sub_cap" =~ ^[0-9]+$ ]]; then
       local src_count
       src_count="$(plg_count_source_prs "$source")"
