@@ -369,7 +369,7 @@ is_already_compliant() {
      && ! stub_has_s7635_marker <<< "$existing_content"; then
     return 1
   fi
-  local workflow; workflow="$(basename "$template")"
+  local workflow; workflow="${template##*/}"
   if ! is_skipped_repo "$repo" && ! is_body_preserving_workflow "$workflow" \
      && stub_any_surface_drift "$workflow" "$(< "$template")" "$existing_content"; then
     return 1
