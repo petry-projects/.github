@@ -5258,3 +5258,211 @@ GITEOF
   [ "$output" = "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1" ]
   [ "$output" != "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0" ]
 }
+
+# ── ADR-0007 collapsed repos: run attribution by ingress JOB (#1224) ──────────
+# A collapsed repo replaces its per-role caller stubs with ONE `Agent Ingress` workflow
+# carrying one job per role. `gh run list --workflow "Dev-Lead Agent"` then finds nothing
+# there, so the gate must fall back to the ingress and attribute each run to the agent's
+# role job (registry `ingress_job`). A member whose runs cannot be attributed is reported
+# UNRESOLVED and never counts as passing evidence.
+#
+# _ingress_stub — gh stub for three repos:
+#   org/collapsed — no per-role workflows; `Agent Ingress` runs 101,102,104
+#   org/legacy    — `Dev-Lead Agent` run 201 (no ingress)
+#   org/none      — neither workflow (a non-consumer, #747)
+#   org/nojobs    — `Agent Ingress` run 103 whose jobs list is empty (unattributable)
+# Every gh invocation is appended to $GH_LOG.
+_ingress_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export GH_LOG="$BATS_TEST_TMPDIR/gh-ingress.log"; : > "$GH_LOG"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "$*" >> "$GH_LOG"
+repo=""; wf=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "--repo" ] && repo="$a"
+  [ "$prev" = "--workflow" ] && wf="$a"
+  prev="$a"
+done
+nf() { echo "could not find any workflows named $wf" >&2; exit 1; }
+case "$1 $2" in
+  "run list")
+    case "$repo|$wf" in
+      "org/collapsed|Agent Ingress")
+        echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":101,"workflowName":"Agent Ingress"},
+               {"conclusion":"failure","createdAt":"2026-01-02T01:00:00Z","databaseId":102,"workflowName":"Agent Ingress"},
+               {"conclusion":"success","createdAt":"2026-01-02T02:00:00Z","databaseId":104,"workflowName":"Agent Ingress"},
+               {"conclusion":null,"createdAt":"2026-01-02T03:00:00Z","databaseId":105,"workflowName":"Agent Ingress"}]' ;;
+      "org/nojobs|Agent Ingress")
+        echo '[{"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":103,"workflowName":"Agent Ingress"}]' ;;
+      "org/legacy|Dev-Lead Agent")
+        echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":201,"workflowName":"Dev-Lead Agent"}]' ;;
+      *) nf ;;
+    esac ;;
+  "run view")
+    case "$3" in
+      101) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]},
+                          {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
+                          {"name":"ci-failure-analyst","conclusion":"skipped","steps":[]}]}' ;;
+      102) echo '{"jobs":[{"name":"dev-lead / setup","conclusion":"success","steps":[]},
+                          {"name":"dev-lead / run","conclusion":"failure","steps":[{"name":"Build","conclusion":"failure"}]},
+                          {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]}]}' ;;
+      103) echo '{"jobs":[]}' ;;
+      104) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"skipped","steps":[]},
+                          {"name":"ci-failure-analyst / analyse","conclusion":"success","steps":[]}]}' ;;
+      *) echo "run $3 not found" >&2; exit 1 ;;
+    esac ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  # Test registry: dev-lead (ingress_job registered) + `noingress` (same per-role workflow, NO
+  # ingress_job) + `cfa` (ingress_job ci-failure-analyst). Each takes members from its rings.
+  INGRESS_RINGS="$BATS_TEST_TMPDIR/ingress-rings.json"
+  jq '{org_infra_repos, ingress,
+       agents: {
+         "dev-lead": (.agents["dev-lead"] | .ingress_job = "dev-lead"),
+         "noingress": (.agents["dev-lead"] | del(.ingress_job) | .gate.benign_failure_classes = []
+                       | .gate.suspect_failure_classes = [] | del(.gate.correctness)
+                       | .rings = [{"channel":"next","order":0,"members":["org/collapsed"]},
+                                   {"channel":"ring0","order":1,"members":["org/legacy"]}]
+                       | .gate.transitions = {"next->ring0":{"dwell_hours":0,"waive_sample":true}}),
+         "cfa": (.agents["dev-lead"] | .ingress_job = "ci-failure-analyst" | .gate.benign_failure_classes = []
+                 | .gate.suspect_failure_classes = [] | del(.gate.correctness)
+                 | .rings = [{"channel":"next","order":0,"members":["org/collapsed"]},
+                             {"channel":"ring0","order":1,"members":["org/legacy"]}]
+                 | .gate.transitions = {"next->ring0":{"dwell_hours":0,"waive_sample":true}})
+       }}' "$RINGS" > "$INGRESS_RINGS"
+  export INGRESS_RINGS
+}
+
+@test "_agent_run_json: a collapsed repo (ingress role job, no per-role workflow) resolves by JOB (#1224)" {
+  _ingress_stub
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH' && _agent_run_json dev-lead org/collapsed '' | jq -c 'sort_by(.databaseId)|map([.databaseId,.conclusion,.workflowName,.role])'"
+  [ "$status" -eq 0 ]
+  # 101 → dev-lead success; 102 → dev-lead failure (worst-outcome over its two jobs);
+  # 104 → dev-lead skipped = did not run (no record); 105 → in flight (no record).
+  [ "$output" = '[[101,"success","Dev-Lead Agent","dev-lead"],[102,"failure","Dev-Lead Agent","dev-lead"]]' ]
+}
+
+@test "_agent_run_json: a non-collapsed repo still resolves by workflow name and never queries the ingress (#1224)" {
+  _ingress_stub
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH' && _agent_run_json dev-lead org/legacy '' | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[201]" ]
+  ! grep -q "Agent Ingress" "$GH_LOG"
+}
+
+@test "_agent_run_json: a repo with neither workflow nor ingress is a non-consumer [] — not unresolved (#747 preserved, #1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _agent_run_json noingress org/none ''"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: ingress present but the agent has no ingress_job → member reported UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _agent_run_json noingress org/collapsed ''"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNRESOLVED"* ]]
+  [[ "$output" == *"org/collapsed"* ]]
+  grep -q "^org/collapsed" "$flag"
+}
+
+@test "_agent_run_json: an ingress run with NO jobs cannot be attributed → member reported UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _agent_run_json dev-lead org/nojobs ''"
+  [ "$status" -eq 0 ]
+  grep -q "^org/nojobs" "$flag"
+}
+
+@test "_cumulative_health: an ingress role's failure counts, another role's failure in the same run does not leak in (#1224)" {
+  _ingress_stub
+  # differs=0 activates dev-lead's [Pp]ush benign class. Run 102's dev-lead job failed at
+  # 'Build'; only pr-review's job failed at 'Push'. A run-wide signature would wrongly see
+  # 'Push' and excuse dev-lead's failure as benign — the role-scoped signature must not.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 org/collapsed"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1 0 0 0" ]
+}
+
+@test "_tier_sample: a MIXED ring (collapsed + legacy member) counts both in one evaluation (#1224)" {
+  _ingress_stub
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH' && _tier_sample dev-lead '' org/collapsed org/legacy"
+  [ "$status" -eq 0 ]
+  # collapsed: 101 + 102 executed; legacy: 201.
+  [ "$output" = "3 2026-01-02T00:00:00Z" ]
+}
+
+# _frontier_state with tag resolution stubbed out (candidate on next only; cut before the runs).
+_ingress_frontier() {
+  local agent="$1"
+  env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'
+    channel_commit() { case \"\$2\" in next) echo cand ;; *) echo prior ;; esac; }
+    candidate_cut_date() { echo 2026-01-01T00:00:00Z; }
+    _reusable_differs() { echo 0; }
+    _frontier_state $agent"
+}
+
+@test "_frontier_state: a MIXED ring that fully resolves gates normally (collapsed + legacy → PROMOTE) (#1224)" {
+  _ingress_stub
+  run _ingress_frontier cfa
+  [ "$status" -eq 0 ]
+  read -r _c frontier transition state _rest <<< "$(printf '%s\n' "$output" | tail -1)"
+  [ "$frontier" = "ring0" ]; [ "$state" = "PROMOTE" ]
+  [[ "$output" != *"UNRESOLVED"* ]]
+}
+
+@test "_frontier_state: an UNRESOLVED member fails the gate loudly — BLOCKED/UNRESOLVED, never PROMOTE (#1224)" {
+  _ingress_stub
+  run _ingress_frontier noingress
+  [ "$status" -eq 0 ]
+  # The member is named in an ::error:: annotation…
+  [[ "$output" == *"::error::"*"org/collapsed"* ]]
+  # …and the state line holds the promotion with triage UNRESOLVED.
+  local line; line="$(printf '%s\n' "$output" | tail -1)"
+  read -r _c frontier transition state _d _f _s _t _cf _cs _cb triage _rest <<< "$line"
+  [ "$state" = "BLOCKED" ]
+  [ "$triage" = "UNRESOLVED" ]
+}
+
+@test "_blocker_body: UNRESOLVED triage explains the blind member, not a cut-date indeterminate (#1224)" {
+  run bash -c "source '$ORCH' && _blocker_body dev-lead 'next->ring0' cand 0 0 UNRESOLVED petry-projects/.github-private '- \`org/collapsed\` — ingress present'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNRESOLVED"* ]]
+  [[ "$output" == *"ingress_job"* ]]
+  [[ "$output" != *"cut date unresolved"* ]]
+}
+
+@test "registry: every ADR-0007-collapsed role carries ingress_job = its ingress job key, documented (#1224)" {
+  [ "$(jq -r '.ingress.workflow' "$RINGS")" = "Agent Ingress" ]
+  [ -n "$(jq -r '._ingress_note // empty' "$RINGS")" ]
+  local a
+  for a in dev-lead pr-review-mention pr-auto-review pr-review ci-failure-analyst; do
+    [ "$(jq -r --arg a "$a" '.agents[$a].ingress_job // empty' "$RINGS")" = "$a" ]
+  done
+}
+
+@test "_unresolved_evidence: the blocker issue names each blind member and why (#1224)" {
+  _ingress_stub
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'
+    candidate_cut_date() { echo 2026-01-01T00:00:00Z; }
+    _unresolved_evidence noingress cand"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'`org/collapsed`'*"ingress_job"* ]]
+  # The resolvable legacy member is not listed.
+  [[ "$output" != *"org/legacy"* ]]
+}
