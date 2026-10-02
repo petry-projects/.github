@@ -121,9 +121,10 @@ commit SHA**, not a moving tag: the original `ref: v1` predated
 and a moving ref hands the PAT to whatever the tag next points at. To pick up
 gate or threshold changes (`agent-rate-limits.json` is read from the same
 checkout), bump the SHA in `standards/workflows/initiative-driver.yml` in its
-own reviewed PR, after confirming the three gate files
+own reviewed PR, after confirming the four gate files
 (`scripts/agent-rate-limit-gate.sh`, `scripts/lib/agent-rate-limit.sh`,
-`standards/agent-rate-limits.json`) resolve at that SHA, then fan out via
+`scripts/lib/agent-ingress.sh`, `standards/agent-rate-limits.json`) resolve at
+that SHA, then fan out via
 standards-sync. If the script is missing at run time, the gate step **fails
 loudly** (`::error::` annotation, step summary, step marked failed) while
 `continue-on-error` keeps the dispatch fail-open. The gate throttles dispatches
@@ -142,6 +143,30 @@ cooldown's last-run, the rolling daily count, and the breaker's
 `consecutive_failures` — and feeds them to the library's pure
 `arl_admission_decision` / `arl_breaker_decision`. It never reads or writes
 `AGENT_RATE_LIMITS_STATE`.
+
+**On an ADR-0007 collapsed repo, run history comes from ingress role jobs**
+([#1226](https://github.com/petry-projects/.github/issues/1226)). A collapsed repo
+serves an agent from one job of `.github/workflows/agent-ingress.yml`, so the
+per-role workflow does not exist. When `gh run list` reports that the workflow is
+**permanently** missing, or `--workflow` is `agent-ingress.yml` itself, the
+resolver (`arl_resolve_agent_runs`) reads the `agent-ingress.yml` runs instead. It
+keeps only the runs in which the agent's role job actually ran (job `<role>` or
+`<role> / <nested>`; all-`skipped` means it did not run), using that job's own
+status and conclusion. This matches `.github-private`'s `run-attribution.sh`. Each
+ingress run costs one jobs-API read, so the cost is bounded by `--history-limit`;
+the concurrency count reads jobs only for runs still in flight.
+
+Missing and transient failures are handled differently:
+
+- **Transient** (5xx, network, empty payload): degrades permissively, as above.
+- **Permanent, with neither the workflow nor an `agent-ingress.yml`:** reported
+  as **UNRESOLVED** and the gate **fails closed (defer)**. Reading it as zero
+  would turn throttling off for that repo for good.
+
+`arl_count_concurrent_runs` applies the same rule to every repo in
+`AGENT_RATE_LIMITS_ORG_REPOS`. A mixed fleet of collapsed and non-collapsed repos
+therefore tallies correctly, and any unresolved repo makes the whole tally
+unresolved.
 
 **To promote another agent type from log-only to enforcing** (a discrete
 follow-up change, one agent type at a time):

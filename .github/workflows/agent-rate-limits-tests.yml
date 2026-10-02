@@ -5,10 +5,12 @@
 # Triggered on any PR that touches:
 #   - standards/agent-rate-limits.json
 #   - scripts/lib/agent-rate-limit.sh
+#   - scripts/lib/agent-ingress.sh
 #   - tests/test_agent_rate_limits_config.bats
 #   - tests/test_agent_rate_limit.bats
 #   - tests/test_agent_rate_limit_token_budget.bats
 #   - tests/test_agent_rate_limit_weekly_glide.bats
+#   - tests/test_agent_rate_limit_ingress.bats
 #   - .github/workflows/agent-rate-limits-tests.yml
 #
 # Gate: bats validates that standards/agent-rate-limits.json parses as JSON, all
@@ -42,11 +44,13 @@ on:
       - 'standards/agent-rate-limits.json'
       - 'scripts/lib/agent-rate-limit.sh'
       - 'scripts/agent-rate-limit-gate.sh'
+      - 'scripts/lib/agent-ingress.sh'
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
       - 'tests/test_agent_rate_limit_token_budget.bats'
       - 'tests/test_agent_rate_limit_weekly_glide.bats'
       - 'tests/test_agent_rate_limit_gate.bats'
+      - 'tests/test_agent_rate_limit_ingress.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
   push:
     branches:
@@ -55,11 +59,13 @@ on:
       - 'standards/agent-rate-limits.json'
       - 'scripts/lib/agent-rate-limit.sh'
       - 'scripts/agent-rate-limit-gate.sh'
+      - 'scripts/lib/agent-ingress.sh'
       - 'tests/test_agent_rate_limits_config.bats'
       - 'tests/test_agent_rate_limit.bats'
       - 'tests/test_agent_rate_limit_token_budget.bats'
       - 'tests/test_agent_rate_limit_weekly_glide.bats'
       - 'tests/test_agent_rate_limit_gate.bats'
+      - 'tests/test_agent_rate_limit_ingress.bats'
       - '.github/workflows/agent-rate-limits-tests.yml'
 
 permissions:
@@ -95,4 +101,5 @@ jobs:
             tests/test_agent_rate_limit.bats \
             tests/test_agent_rate_limit_token_budget.bats \
             tests/test_agent_rate_limit_weekly_glide.bats \
-            tests/test_agent_rate_limit_gate.bats
+            tests/test_agent_rate_limit_gate.bats \
+            tests/test_agent_rate_limit_ingress.bats

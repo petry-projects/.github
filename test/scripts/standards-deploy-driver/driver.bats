@@ -49,6 +49,8 @@ if [ "${1:-}" = "repo" ] && [ "${2:-}" = "list" ]; then
 fi
 if [ "${1:-}" = "api" ]; then
   case "$2" in
+    *contents/.github/workflows/agent-ingress.yml)
+      echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;   # not collapsed (ADR-0007, #1226)
     *contents*)
       if [ -n "${GH_CONTENT_B64:-}" ]; then
         printf '{"sha":"abc123","content":"%s"}' "$GH_CONTENT_B64"

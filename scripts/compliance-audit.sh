@@ -281,6 +281,12 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 # shellcheck source=lib/ring-pins.sh
 . "$SCRIPT_DIR/lib/ring-pins.sh"
 
+# ADR-0007 agent-ingress identity helpers: a required per-role workflow whose role
+# an agent-ingress.yml job serves is present, not missing (#1226) — the same rule
+# deploy-standard-workflows.sh uses to never re-seed a collapsed stub.
+# shellcheck source=lib/agent-ingress.sh
+. "$SCRIPT_DIR/lib/agent-ingress.sh"
+
 # AGENTS.md structural linter — the pure, data-driven driver (amdl_lint) and its
 # default rule-set path (AMDL_DEFAULT_RULES). Sourced, not exec'd: agents-md-lint.sh
 # guards its CLI behind a BASH_SOURCE check, so sourcing only defines functions.
@@ -343,8 +349,21 @@ detect_ecosystems() {
 check_required_workflows() {
   local repo="$1"
 
+  # ADR-0007 collapse (#1226): a repo that serves a role from an agent-ingress.yml
+  # job has deliberately deleted that role's per-role stub. Read the ingress lazily
+  # (only once a required file is missing) and count a role it serves as present.
+  local ingress_b64="" ingress_decoded="" ingress_read=false
   for wf in "${REQUIRED_WORKFLOWS[@]}"; do
     if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.name' > /dev/null 2>&1; then
+      if [ "$ingress_read" = false ]; then
+        ingress_read=true
+        ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null || echo "")
+        [ -n "$ingress_b64" ] && ingress_decoded=$(echo "$ingress_b64" | base64 -d 2>/dev/null || echo "")
+      fi
+      if [ -n "$ingress_decoded" ] \
+         && agent_ingress_has_role_job "$(agent_ingress_role_for_workflow "$wf")" <<< "$ingress_decoded"; then
+        continue
+      fi
       add_finding "$repo" "ci-workflows" "missing-$wf" "error" \
         "Required workflow \`$wf\` is missing" \
         "standards/ci-standards.md#required-workflows"

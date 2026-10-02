@@ -191,23 +191,37 @@ argate_last_failure_epoch() {
 }
 
 # ---------------------------------------------------------------------------
-# argate_fetch_runs <workflow> <repo> <limit> — the ONLY impure gather: read the
-# agent's recent workflow runs via `gh run list`. Fail-safe: any gh error or
-# empty payload yields `[]`, so a transient API failure degrades the derived
-# counters to their allowing defaults rather than wedging dispatch (AC #1).
+# argate_fetch_runs <workflow> <repo> <limit> [role] — the ONLY impure gather:
+# read the agent's recent runs via the library's ingress-aware resolver
+# (arl_resolve_agent_runs, #1226). On an ADR-0007 collapsed repo — the per-role
+# workflow does not exist, or <workflow> IS agent-ingress.yml — the history is the
+# ingress runs in which [role] (default: <workflow>'s basename) actually ran, with
+# the role job's own status/conclusion, so every derived counter stays per-role.
+#
+# Fail-safe: a TRANSIENT gh error or empty payload yields `[]` and returns 0, so
+# an API blip degrades the derived counters to their allowing defaults rather
+# than wedging dispatch (AC #1). A PERMANENT absence (no workflow and no ingress)
+# also yields `[]` but returns 3 — the caller must not read it as zero runs.
 # ---------------------------------------------------------------------------
 argate_fetch_runs() {
-  local workflow="$1" repo="$2" limit="$3" out
-  local json_fields="databaseId,status,conclusion,createdAt"
-  local args=(run list --workflow "$workflow" --json "$json_fields" --limit "$limit")
-  [ -n "$repo" ] && args+=(--repo "$repo")
-  out="$(gh "${args[@]}" 2>/dev/null || printf '')"
-  if [ -z "$out" ] || ! jq -e . <<<"$out" >/dev/null 2>&1; then
-    argate_log "warning: run history for workflow '${workflow}' was unreadable — treating as empty (degraded)"
-    printf '[]'
-    return 0
-  fi
-  printf '%s' "$out"
+  local workflow="$1" repo="$2" limit="$3" role="${4:-}" out rc=0
+  [ -z "$role" ] && role="$(agent_ingress_role_for_workflow "$workflow")"
+  out="$(arl_resolve_agent_runs "$workflow" "$role" "$repo" "$limit")" || rc=$?
+  case "$rc" in
+    0)
+      printf '%s' "$out"
+      ;;
+    3)
+      argate_log "UNRESOLVED: run history for '${role}' (workflow '${workflow}') cannot be resolved — no such workflow and no ${AGENT_INGRESS_WORKFLOW}"
+      printf '[]'
+      return 3
+      ;;
+    *)
+      argate_log "warning: run history for workflow '${workflow}' was unreadable — treating as empty (degraded)"
+      printf '[]'
+      ;;
+  esac
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -451,8 +465,8 @@ argate_gate() {
   now="$(arl_now)"
 
   # Gather run history once, then derive every counter from it (AC #3).
-  local runs concurrent last_run daily_count failures last_failure
-  runs="$(argate_fetch_runs "$workflow" "$repo" "$history_limit")"
+  local runs concurrent last_run daily_count failures last_failure history_rc=0
+  runs="$(argate_fetch_runs "$workflow" "$repo" "$history_limit" "$agent_type")" || history_rc=$?
   concurrent="$(argate_concurrent "$runs")"
   last_run="$(argate_last_run_epoch "$runs")"
   daily_count="$(argate_daily_count "$runs" "$now")"
@@ -476,6 +490,14 @@ argate_gate() {
   if [ "$decision" = "allow" ]; then
     admission="$(arl_admission_decision "$agent_type" "$concurrent" "$last_run" "$daily_count" "$now")" || true
     [ "$admission" != "decision=allow" ] && decision="defer"
+  fi
+
+  # Unresolved run history (#1226): no per-role workflow and no agent-ingress.yml
+  # role job to derive from. The zeroed counters above would read as "idle" and
+  # never throttle, so fail CLOSED instead of allowing.
+  if [ "$history_rc" -eq 3 ]; then
+    argate_log "run history for '${agent_type}' is UNRESOLVED — failing closed (defer) rather than reading it as zero runs"
+    decision="defer"
   fi
 
   # Org-wide token-budget breaker (#1155). INERT unless AGENT_TOKEN_BUDGET_ENABLED

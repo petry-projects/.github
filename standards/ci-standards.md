@@ -482,6 +482,17 @@ promoted from optional/BMAD-conditional to **required org-wide** in
 [#844](https://github.com/petry-projects/.github/issues/844). All three ship as
 thin caller stubs deployed by `deploy-standard-workflows.sh`.
 
+**ADR-0007 agent-ingress collapse.** A repo that has collapsed its per-role
+agent caller stubs into a single `.github/workflows/agent-ingress.yml` satisfies
+a required per-role workflow (e.g. `dev-lead.yml`, `pr-review-mention.yml`,
+`pr-auto-review.yml`) when the ingress has a **job keyed by that role**. The
+audit counts such a role as present. `deploy-standard-workflows.sh` never
+re-seeds or re-pins that role's stub, because a resurrected stub would
+double-dispatch every event. Both read the repo's live ingress state, so no
+per-repo configuration is needed as the collapse fans out
+([#1226](https://github.com/petry-projects/.github/issues/1226)). A role that the
+ingress does **not** carry still needs its own stub.
+
 > **`feature-ideation.yml` — the `project_context` invariant.** Presence of the
 > file is necessary but **not** sufficient. The seed stub ships a `TODO:`/`Example:`
 > placeholder `project_context`; each adopting repo MUST replace it with a real
