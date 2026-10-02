@@ -18,7 +18,7 @@ GATE_STEP='Agent rate-limit admission gate (enforcing)'
 @test "stub: gate tooling checkout is pinned to a full commit SHA" {
   run yq -r ".jobs.dispatch.steps[] | select(.name == \"${CHECKOUT_STEP}\") | .with.ref" "$STUB"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^[0-9a-f]{40}$ ]]
+  [ "$output" = 'cd0b16751454d2eb3486ec04477d7ee9cc96c425' ]
 }
 
 @test "stub: gate tooling checkout still targets petry-projects/.github" {
@@ -38,7 +38,8 @@ GATE_STEP='Agent rate-limit admission gate (enforcing)'
 @test "stub: gate invocation is not masked by '|| true'" {
   run yq -r ".jobs.dispatch.steps[] | select(.name == \"${GATE_STEP}\") | .run" "$STUB"
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -qF '|| true'
+  run grep -qF '|| true' <<<"$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "stub: missing gate script exits non-zero (step marked failed, job continues)" {
@@ -49,11 +50,13 @@ GATE_STEP='Agent rate-limit admission gate (enforcing)'
   tmp="$(mktemp -d)"
   run env -C "$tmp" GITHUB_STEP_SUMMARY="$tmp/summary" GITHUB_OUTPUT="$tmp/out" \
     ARL_ACTOR=a ARL_TRACKING_REPO=o/r ARL_TRACKING_ISSUE= bash -c "$script"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"::error::"* ]]
   grep -q 'agent-rate-limit-gate.sh' "$tmp/summary"
   # No defer is emitted — the dispatch step's fail-open guard still dispatches.
-  ! grep -q 'decision=defer' "$tmp/out" 2>/dev/null
+  touch "$tmp/out"
+  run grep -q 'decision=defer' "$tmp/out"
+  [ "$status" -eq 1 ]
   rm -rf "$tmp"
 
   run yq -r ".jobs.dispatch.steps[] | select(.name == \"${GATE_STEP}\") | .\"continue-on-error\"" "$STUB"
@@ -61,12 +64,25 @@ GATE_STEP='Agent rate-limit admission gate (enforcing)'
 }
 
 @test "stub: header no longer claims the gate runs AHEAD of the concurrency group" {
-  ! grep -qiE 'AHEAD of the cancel-in-progress' "$STUB"
+  run grep -qiE 'AHEAD of the cancel-in-progress' "$STUB"
+  [ "$status" -eq 1 ]
 }
 
 @test "stub: adoption step names the canonical GH_PAT_DON_PETRY secret" {
   run grep -nE '^#   3\..*GH_PAT_DON_PETRY' "$STUB"
   [ "$status" -eq 0 ]
+}
+
+@test "stub: dispatch step guard dispatches on an empty decision (fail-open)" {
+  run yq -r ".jobs.dispatch.steps[] | select(.name == \"Dispatch central initiative-driver\") | .if" "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "steps.arl_gate.outputs.decision != 'defer'" ]
+}
+
+@test "stub: gate invocation passes --repo so run history is the caller's" {
+  run yq -r ".jobs.dispatch.steps[] | select(.name == \"${GATE_STEP}\") | .run" "$STUB"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'--repo "$ARL_TRACKING_REPO"'* ]]
 }
 
 @test "live copy matches the standard verbatim" {

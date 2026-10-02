@@ -128,7 +128,7 @@ standards-sync. If the script is missing at run time, the gate step **fails
 loudly** (`::error::` annotation, step summary, step marked failed) while
 `continue-on-error` keeps the dispatch fail-open. The gate throttles dispatches
 that start; it does not pre-empt the stub's `cancel-in-progress` concurrency
-group, which cancels a superseded run before any step executes.
+group, which may cancel a superseded run after its steps have started.
 
 **`feature-ideation` runs the gate in `--mode log-only`** (`feature-ideation-reusable.yml`):
 the decision is computed from run history and logged, but the emitted decision is
