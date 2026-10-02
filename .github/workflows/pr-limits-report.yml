@@ -48,4 +48,6 @@ jobs:
         env:
           # `gh search prs` needs a token; github.token has the read scope it needs.
           GH_TOKEN: ${{ github.token }}
+          # Org-level Actions variable; overrides the cap in pr-limits.json when set.
+          PR_LIMITS_ORG_CAP: ${{ vars.PR_LIMITS_ORG_CAP }}
         run: bash scripts/pr-limits-report.sh
