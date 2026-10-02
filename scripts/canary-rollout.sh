@@ -2198,15 +2198,11 @@ cmd_sync_promotion_failures() {
     echo "::error::could not list canary-promotion-failure issues on $ISSUE_REPO — aborting to avoid creating duplicate tracking issues." >&2
     return 1
   fi
-  local -A failed_map=() ok_map=()
+  local -A failed_map=()
   local fa
   while IFS= read -r fa; do
     [ -n "$fa" ] && failed_map["$fa"]=1
   done < <(printf '%s\n' "$failed_agents")
-  local oa
-  while IFS= read -r oa; do
-    [ -n "$oa" ] && ok_map["$oa"]=1
-  done < <(printf '%s\n' "$ok_agents")
   local -A promo_failures=()
   local _pf_agent _pf_num _pf_state _pf_count
   while IFS=$'\t' read -r _pf_agent _pf_num _pf_state _pf_count; do
@@ -2229,7 +2225,9 @@ cmd_sync_promotion_failures() {
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local outcome="ok"
-    [ -n "${failed_map["$agent"]:-}" ] && [ -z "${ok_map["$agent"]:-}" ] && outcome="failed"
+    # Any recorded tag-write failure fails the agent, even if another ring's move succeeded this run
+    # (a ruleset rejecting `stable` writes must not be masked by a successful `ring0` move).
+    [ -n "${failed_map["$agent"]:-}" ] && outcome="failed"
     local ns num istate prior
     ns="${promo_failures["$agent"]:-}"
     num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"

@@ -1955,6 +1955,18 @@ GHEOF
   grep -q -- "issue edit 901 .*--add-label dev-lead --add-label needs-human" "$ISSUE_LOG"
 }
 
+@test "orchestrator: sync-promotion-failures — a successful ring move does not mask a failed write for the same agent (#1023)" {
+  local existing='[{"number":903,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv" slog="$BATS_TEST_TMPDIR/ok.tsv"
+  printf 'dev-lead\tstable\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\n' > "$slog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTION_FAILURE_ESCALATE_AFTER=2 CANARY_PROMOTIONS_FAILED_LOG="$flog" CANARY_PROMOTIONS_LOG="$slog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated promotion-failure issue #903 for dev-lead (count=2)"* ]]
+  ! grep -q "^CLOSE|" "$ISSUE_LOG"
+}
+
 @test "orchestrator: sync-promotion-failures auto-closes the tracking issue when the write recovers (#1023)" {
   # dev-lead succeeded this run (in the SUCCESS log) but an OPEN failure issue exists → close it.
   local existing='[{"number":902,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:3 -->"}]'
