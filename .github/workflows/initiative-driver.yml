@@ -32,19 +32,27 @@
 # whether `initiative-driver` may dispatch right now. initiative-driver is the
 # canary that ENFORCES: the gate derives concurrency / cooldown / daily-budget /
 # consecutive-failure counters from this stub's own run history (no state
-# backend), reads every threshold from standards/agent-rate-limits.json, and
-# serializes a close-event + schedule burst AHEAD of the cancel-in-progress
-# concurrency group so two dispatches cannot race into cancellation (#443/#402).
+# backend) and reads every threshold from standards/agent-rate-limits.json.
+# It throttles dispatches that DO start (cooldown / daily budget / breaker); it
+# does NOT pre-empt the cancel-in-progress concurrency group below — that group
+# cancels a superseded run before any step (gate included) executes (#443/#402).
 # A `defer` simply skips the dispatch step — never a cancel, never a job failure.
+#
+# Gate tooling is fetched at a pinned commit SHA of petry-projects/.github (not
+# a moving tag — the PAT is handed to that code). If the tooling is unavailable
+# or the gate errors, the gate step FAILS LOUDLY (::error:: annotation + step
+# summary, step marked failed) but the dispatch still runs (fail-open — an
+# outage of the gate must never stop the fleet; standards/agent-rate-limits.md).
 #
 # To adopt:
 #   1. Copy this file verbatim to .github/workflows/initiative-driver.yml in your repo.
 #   2. Ensure the `initiative:auto` label exists on the repo.
-#   3. Confirm the org-level secret GH_PAT_WORKFLOWS is accessible **and its
-#      owner has write access to petry-projects/.github-private** (to dispatch
-#      the central workflow) **and to this repo** (the central driver applies the
-#      `dev-lead` label cross-repo with that PAT; a label applied with
-#      GITHUB_TOKEN would not trigger dev-lead).
+#   3. Confirm the org-level secret GH_PAT_DON_PETRY (or the legacy fallback
+#      GH_PAT_WORKFLOWS) is accessible **and its owner has write access to
+#      petry-projects/.github-private** (to dispatch the central workflow) **and
+#      to this repo** (the central driver applies the `dev-lead` label
+#      cross-repo with that PAT; a label applied with GITHUB_TOKEN would not
+#      trigger dev-lead).
 #
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md
 name: Initiative Driver — Dispatch Central
@@ -97,13 +105,18 @@ jobs:
         # dispatch — the workflow's GITHUB_TOKEN cannot read another repo — so the
         # stub's `permissions:` block is unchanged.
         # continue-on-error: a tooling-checkout outage must not stop the fleet —
-        # the gate step then finds no script, emits no decision, and the dispatch
-        # step's `!= 'defer'` guard falls through to dispatching (fail-open).
+        # the gate step then finds no script, reports an ::error:: (fail loudly),
+        # emits no decision, and the dispatch step's `!= 'defer'` guard falls
+        # through to dispatching (fail-open).
+        # ref: pinned to an immutable commit SHA of petry-projects/.github (#1232)
+        # — a moving tag silently lagged the gate script (v1 predates it) and
+        # would hand the PAT to whatever the tag next points at. Bump it in a
+        # reviewed PR (see standards/agent-rate-limits.md §3.1).
         continue-on-error: true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: petry-projects/.github
-          ref: v1
+          ref: cd0b16751454d2eb3486ec04477d7ee9cc96c425 # main @ 2026-10-02 (#1232)
           path: .arl-gate-tooling
           fetch-depth: 1
           persist-credentials: false
@@ -114,7 +127,9 @@ jobs:
         # no model spend, the direct #443 target — AC #5). Reads run history with
         # the PAT (independent of the `permissions:` block) and emits
         # decision=allow|defer to $GITHUB_OUTPUT; a defer is honoured by the `if:`
-        # on the dispatch step below. Fail-safe: the step can never fail the job.
+        # on the dispatch step below. Fail loud, fail open: a missing gate script
+        # or a gate error marks THIS step failed with an ::error:: (visible in the
+        # run), but continue-on-error keeps the job — and the dispatch — going.
         continue-on-error: true
         id: arl_gate
         env:
@@ -129,12 +144,19 @@ jobs:
           ARL_TRACKING_ISSUE: ${{ github.event.issue.number || vars.INITIATIVE_DRIVER_TRACKING_ISSUE || '' }}
         run: |
           set -euo pipefail
-          bash .arl-gate-tooling/scripts/agent-rate-limit-gate.sh initiative-driver \
+          ARL_GATE_SCRIPT=.arl-gate-tooling/scripts/agent-rate-limit-gate.sh
+          if ! [ -f "$ARL_GATE_SCRIPT" ]; then
+            msg="Agent rate-limit gate NOT ENFORCED: ${ARL_GATE_SCRIPT} is missing (tooling checkout failed or the pinned ref lacks the script). Dispatching ungated (fail-open)."
+            echo "::error::${msg}"
+            echo "### :warning: ${msg}" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          bash "$ARL_GATE_SCRIPT" initiative-driver \
             --mode enforce \
             --workflow initiative-driver.yml \
             --actor "$ARL_ACTOR" \
             --tracking-repo "$ARL_TRACKING_REPO" \
-            --tracking-issue "$ARL_TRACKING_ISSUE" || true
+            --tracking-issue "$ARL_TRACKING_ISSUE"
 
       - name: Dispatch central initiative-driver
         # Skipped (clean no-op) ONLY on an explicit `defer` — never a cancel, never
