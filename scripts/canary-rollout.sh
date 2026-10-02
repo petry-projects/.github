@@ -1139,7 +1139,13 @@ _pair_state() {
   # lower candidate block an older, independently-clean higher pair. In a single-candidate rollout
   # no ring is below the source with a different commit, so this is byte-identical to the prior
   # all-tiers scope; it diverges only when a newer candidate is soaking further down the pipeline.
-  local all_repos=() ch3
+  # Two scopes (#1176 + CodeRabbit on #1220): a tier that does NOT yet run the candidate (the
+  # destination and beyond, tag provably on a different commit) has its failures attributed to the
+  # release that actually ran, so old-release failures there never block. Every other tier — the
+  # source tier and below, plus any tier whose commit is unknown — counts RAW, as before #1176:
+  # the source tier's sample still includes runs from before the candidate reached it, so dropping
+  # only their failures would let a candidate with no executions there reach PROMOTE.
+  local raw_repos=() attr_repos=() ch3
   for idx in "${!chan_array[@]}"; do
     ch3="${chan_array[$idx]}"
     # Exclude a lower ring only when it PROVABLY runs a different commit. An unresolvable (empty)
@@ -1148,11 +1154,22 @@ _pair_state() {
     if [ "$idx" -lt "$src_idx" ] && [ -n "$lc" ] && [ "$lc" != "$cand" ]; then
       continue
     fi
-    while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all_repos+=("$r"); done \
-      < <(resolve_members "$agent" "$ch3")
+    while IFS= read -r r; do
+      { [ -z "$r" ] || [ "$r" = '*' ]; } && continue
+      if [ -n "$lc" ] && [ "$lc" != "$cand" ]; then attr_repos+=("$r"); else raw_repos+=("$r"); fi
+    done < <(resolve_members "$agent" "$ch3")
   done
+  # A repo that also belongs to a raw tier (e.g. the host, in both next and ring0) stays raw.
+  local -A raw_set=(); local attr_only=()
+  for r in ${raw_repos[@]+"${raw_repos[@]}"}; do raw_set["$r"]=1; done
+  for r in ${attr_repos[@]+"${attr_repos[@]}"}; do [ -z "${raw_set["$r"]:-}" ] && attr_only+=("$r"); done
   local cum_fail cum_startup cum_benign cum_suspect cum_stale
-  read -r cum_fail cum_startup cum_benign cum_suspect cum_stale < <(_cumulative_health "$agent" "$cut_z" "$differs" "$cand" "${all_repos[@]}")
+  local a_fail a_startup a_benign a_suspect a_stale
+  read -r cum_fail cum_startup cum_benign cum_suspect cum_stale < <(_cumulative_health "$agent" "$cut_z" "$differs" "-" ${raw_repos[@]+"${raw_repos[@]}"})
+  read -r a_fail a_startup a_benign a_suspect a_stale < <(_cumulative_health "$agent" "$cut_z" "$differs" "$cand" ${attr_only[@]+"${attr_only[@]}"})
+  cum_fail=$(( cum_fail + a_fail )); cum_startup=$(( cum_startup + a_startup ))
+  cum_benign=$(( cum_benign + a_benign )); cum_suspect=$(( cum_suspect + a_suspect ))
+  cum_stale=$(( cum_stale + a_stale ))
   # Target-ring health (#1176): failures from runs still on the previous release are reported,
   # never counted — the candidate cannot have caused them and may be the fix.
   if [ "${cum_stale:-0}" -gt 0 ]; then
@@ -1625,6 +1642,16 @@ _blocker_evidence() {
     while IFS= read -r r; do [ -n "$r" ] && [ "$r" != '*' ] && all+=("$r"); done < <(resolve_members "$agent" "$ch")
   done
   for r in "${all[@]}"; do case "$seen" in *" $r "*) ;; *) dedup+=("$r"); seen+="$r ";; esac; done
+  # Same attribution scope as _pair_state: only a repo that belongs solely to tiers provably NOT on
+  # the candidate has its old-release failures skipped; any repo in a tier on (or of unknown) commit
+  # lists every failure, so the evidence matches cum_fail.
+  local -A raw_evidence=(); local ev_c
+  for ch in "${chan_array[@]}"; do
+    ev_c="$(channel_commit "$agent" "$ch" || true)"
+    if [ -z "$ev_c" ] || [ "$ev_c" = "$cand" ]; then
+      while IFS= read -r r; do [ -n "$r" ] && raw_evidence["$r"]=1; done < <(resolve_members "$agent" "$ch")
+    fi
+  done
   for repo in "${dedup[@]}"; do
     json="$(_run_json "$repo" "$wf" "$cut_z")"
     local rid sig
@@ -1633,7 +1660,7 @@ _blocker_evidence() {
       [ -z "$rid" ] && continue
       # Old release: not counted (#1176). Only `failure` runs are attributable — a startup_failure
       # never ran a job, so it has no "Uses:" line and always counts (cum_startup), like the gate.
-      if [ "$concl" = "failure" ] && _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi
+      if [ "$concl" = "failure" ] && [ -z "${raw_evidence["$repo"]:-}" ] && _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi
       if [ "$n" -ge 8 ]; then out+="- _(…more failing runs; truncated at 8)_"$'\n'; printf '%s' "$out"; return 0; fi
       sig="$(_run_signature "$repo" "$rid" | tr '\n' ';' | sed 's/;$//')"
       out+="- \`$repo\` — run [$rid](https://github.com/$repo/actions/runs/$rid); failed steps: ${sig:-unknown}"$'\n'
@@ -2198,16 +2225,16 @@ cmd_sync_promotion_failures() {
     echo "::error::could not list canary-promotion-failure issues on $ISSUE_REPO — aborting to avoid creating duplicate tracking issues." >&2
     return 1
   fi
-  local -A failed_map=() ok_map=()
-  local fa
-  while IFS= read -r fa; do
-    [ -n "$fa" ] && failed_map["$fa"]=1
-  done < <(printf '%s\n' "$failed_agents")
-  local oa
-  while IFS= read -r oa; do
-    [ -n "$oa" ] && ok_map["$oa"]=1
-  done < <(printf '%s\n' "$ok_agents")
-  local -A promo_failures=()
+  # A successful write cancels a failure only for the SAME ring: one run can now advance several
+  # rings (#1118), so a ring0 success must not hide a ring1 failure for the same agent.
+  local -A ok_ring=()
+  if [ -n "${CANARY_PROMOTIONS_LOG:-}" ] && [ -s "$CANARY_PROMOTIONS_LOG" ]; then
+    local ok_a ok_r
+    while IFS=$'\t' read -r ok_a ok_r _; do
+      [ -n "$ok_a" ] && ok_ring["$ok_a|$ok_r"]=1
+    done < "$CANARY_PROMOTIONS_LOG"
+  fi
+  local -A promo_failures=() unresolved=()
   local _pf_agent _pf_num _pf_state _pf_count
   while IFS=$'\t' read -r _pf_agent _pf_num _pf_state _pf_count; do
     [ -n "$_pf_agent" ] && promo_failures["$_pf_agent"]="${_pf_num}"$'\t'"${_pf_state}"$'\t'"${_pf_count}"
@@ -2218,6 +2245,9 @@ cmd_sync_promotion_failures() {
     local lf_agent lf_ring lf_cand lf_host lf_reason
     while IFS=$'\t' read -r lf_agent lf_ring lf_cand lf_host lf_reason; do
       if [ -n "$lf_agent" ]; then
+        # Superseded by a successful write of the same ring this run (a retry) → not a failure.
+        [ -n "${ok_ring["$lf_agent|$lf_ring"]:-}" ] && continue
+        unresolved["$lf_agent"]=1
         fail_ring["$lf_agent"]="$lf_ring"
         fail_cand["$lf_agent"]="$lf_cand"
         fail_host["$lf_agent"]="$lf_host"
@@ -2229,7 +2259,7 @@ cmd_sync_promotion_failures() {
   while IFS= read -r agent; do
     [ -z "$agent" ] && continue
     local outcome="ok"
-    [ -n "${failed_map["$agent"]:-}" ] && [ -z "${ok_map["$agent"]:-}" ] && outcome="failed"
+    [ -n "${unresolved["$agent"]:-}" ] && outcome="failed"
     local ns num istate prior
     ns="${promo_failures["$agent"]:-}"
     num="$(printf '%s' "$ns" | cut -f1)"; istate="$(printf '%s' "$ns" | cut -f2)"; prior="$(printf '%s' "$ns" | cut -f3)"

@@ -1198,7 +1198,7 @@ GITEOF
 # `gh run view --log` prints the resolved "Uses: …@refs/tags/<chan> (<sha>)" line, with <sha>
 # = $1 (the release the run actually executed); "none" prints a log with no Uses: line.
 _executed_sha_stub() {
-  local executed="$1" conclusion="${2:-failure}" cut_iso run_iso
+  local executed="$1" conclusion="${2:-failure}" fail_sub="${3:-repo petry-projects/TalkTerm --workflow}" cut_iso run_iso
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-3d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-2d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
@@ -1213,7 +1213,11 @@ case "\$*" in
   *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
   *"ref=cccc"*) echo "reuseAAAA" ;;
   *"ref=bbbb"*) echo "reuseAAAA" ;;
-  *"run list"*) jq -nc --arg d "$run_iso" '[range(3)|{conclusion:"'"$conclusion"'",createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run list"*)
+    # Only <fail_sub> (default: TalkTerm, a ring1 member = the DESTINATION side of next->ring0)
+    # fails; every other repo is green — mirrors #1176's real case.
+    __c=success; case "\$*" in *"$fail_sub"*) __c="$conclusion" ;; esac
+    jq -nc --arg d "$run_iso" --arg c "\$__c" '[range(3)|{conclusion:\$c,createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
   *"run view"*"--log"*)
     # Mirrors real \`gh run view --log\` output: "<job><TAB><step><TAB><timestamp> <text>".
     ts="2026-09-25T00:00:00.1234567Z"
@@ -1288,6 +1292,17 @@ GITEOF
   [ "$status" -eq 0 ]
   [[ "$output" != *"BLOCKED"* ]]
   [[ "$output" == *"target-ring health"* ]]
+}
+
+@test "orchestrator: old-release failures on the SOURCE tier still BLOCK — attribution only applies to tiers not yet on the candidate (#1176)" {
+  # The source tier's sample still counts runs from before the candidate reached it, so dropping only
+  # their failures would let a candidate with no executions there reach PROMOTE. The host (.github-private)
+  # is the source tier of next->ring0 and its failing run's log names the OLD sha: it must still count.
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb failure "repo petry-projects/.github-private --workflow"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"target-ring health"* ]]
 }
 
 @test "orchestrator: a short (7-char) candidate SHA in the Uses: line is matched by prefix and BLOCKS (#1176)" {
@@ -1977,6 +1992,21 @@ GHEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"closed recovered promotion-failure issue #903 for dev-lead"* ]]
   grep -q "CLOSE|.*903" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures — a ring0 success must NOT hide a ring1 failure from the same run (#1118)" {
+  # One run can now advance several rings. ring0 moved, ring1's tag write was rejected: the agent is
+  # FAILED (its tracking issue stays/gets opened), not "recovered".
+  local existing='[{"number":905,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local slog="$BATS_TEST_TMPDIR/ok.tsv"; printf 'dev-lead\tring0\tdddddddddddddddd\tpetry-projects/.github-private\n' > "$slog"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring1\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_LOG="$slog" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated promotion-failure issue #905 for dev-lead (count=2)"* ]]
+  [[ "$output" != *"closed recovered"* ]]
+  run grep -q "CLOSE|.*905" "$ISSUE_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "orchestrator: sync-promotion-failures does NOT seed a new streak from a CLOSED issue (#1023)" {
