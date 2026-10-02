@@ -1994,17 +1994,16 @@ GHEOF
   grep -q "CLOSE|.*902" "$ISSUE_LOG"
 }
 
-@test "orchestrator: sync-promotion-failures gives failure precedence when agent is in both logs (#1023)" {
-  # dev-lead has a recorded tag-write failure; even if another ring's promotion succeeded in the same run,
-  # the failure takes precedence and the issue is updated, not closed.
+@test "orchestrator: sync-promotion-failures gives success precedence when agent is in both logs (#1023)" {
+  # dev-lead failed initially (in FAILED log) but succeeded later (in SUCCESS log); success takes precedence.
   local existing='[{"number":903,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
   _promo_fail_sync_stub "$existing"
   local slog="$BATS_TEST_TMPDIR/ok.tsv"; printf 'dev-lead\tring0\tdddddddddddddddd\tpetry-projects/.github-private\n' > "$slog"
   local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
   run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_LOG="$slog" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
   [ "$status" -eq 0 ]
-  [[ "$output" == *"updated promotion-failure issue #903 for dev-lead (count=2)"* ]]
-  ! grep -q "^CLOSE|" "$ISSUE_LOG"
+  [[ "$output" == *"closed recovered promotion-failure issue #903 for dev-lead"* ]]
+  grep -q "CLOSE|.*903" "$ISSUE_LOG"
 }
 
 @test "orchestrator: sync-promotion-failures — a ring0 success must NOT hide a ring1 failure from the same run (#1118)" {
