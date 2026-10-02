@@ -75,7 +75,7 @@ plg_effective_org_cap() {
     fi
     plg_log "warning: ignoring invalid PR_LIMITS_ORG_CAP='$override' (need a positive integer of at most 9 digits); using config value"
   fi
-  jq -er '.org_wide.automation_open_pr_cap' "$config" 2>/dev/null || printf ''
+  jq -er 'try .org_wide.automation_open_pr_cap catch empty' "$config" 2>/dev/null || printf ''
 }
 
 # ---------------------------------------------------------------------------
