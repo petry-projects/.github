@@ -42,10 +42,11 @@ double-cap it and risk starving a security PR. See §5 and ADR §7.4.
 
 ## 2. Source of truth — the configured value
 
-The cap value, any per-source sub-caps, and the exempt lists live **only** in
-[`standards/pr-limits.json`](pr-limits.json). This document deliberately does
-**not** restate the number: a changeable value stated in prose is a second place
-to forget to update. To read the current cap, read the config:
+The signed-off **default** cap value, any per-source sub-caps, and the exempt
+lists live **only** in [`standards/pr-limits.json`](pr-limits.json). The cap in
+force can be overridden at runtime by the org variable in §2.1. This document
+deliberately does **not** restate the number: a changeable value stated in prose
+is a second place to forget to update. To read the default cap, read the config:
 
 ```bash
 jq '.org_wide.automation_open_pr_cap' standards/pr-limits.json
@@ -54,7 +55,31 @@ jq '.org_wide.automation_open_pr_cap' standards/pr-limits.json
 The config carries its own inline `_note` fields recording the human sign-off
 (epic [#505](https://github.com/petry-projects/.github/issues/505) gate) and the
 rationale for the number. Consumers (the apply path in §3, and any future
-PR-creating workflow) **must** read the value from this file — never hardcode it.
+PR-creating workflow) **must** resolve the cap via `plg_effective_org_cap`
+(override, then this file) — never hardcode it.
+
+### 2.1 Runtime override — the org-level variable
+
+The ceiling can be changed **on the fly, with no code change or PR**, via the
+org-level Actions variable **`PR_LIMITS_ORG_CAP`** (Org → Settings → Secrets and
+variables → Actions → Variables). Consumers pass it to the gate as the
+`PR_LIMITS_ORG_CAP` environment variable (`env: PR_LIMITS_ORG_CAP: ${{ vars.PR_LIMITS_ORG_CAP }}`).
+
+- **Precedence:** a positive-integer `PR_LIMITS_ORG_CAP` (at most 9 digits, no
+  leading zeros) wins; if it is unset or empty (the normal "variable not set"
+  case, silent), or invalid (zero, negative, non-integer, leading zeros, more than
+  9 digits — logged as a warning), the gate falls back to `org_wide.automation_open_pr_cap` in the config. A bad value can
+  never silently disable or zero the cap.
+- The file value is the **default/fallback**; the variable is the **operational
+  lever**. Exempt actors/labels and sub-caps still come only from the config.
+- Resolution lives in one place (`plg_effective_org_cap` in the gate library) and
+  is reused by [`scripts/pr-limits-report.sh`](../scripts/pr-limits-report.sh), so
+  the gate and the daily report always agree.
+- Set or change it with `gh variable set PR_LIMITS_ORG_CAP --org petry-projects --visibility all --body <N>`.
+  Take effect on the next run of each consumer; remove it to revert to the file.
+- **Wiring:** this repo's report workflow already passes it. The PR-creation
+  engine in `petry-projects/.github-private` must add the same `env:` line to the
+  step that sources the gate for the variable to take effect there.
 
 Its contract (parseable JSON, positive-integer cap, required keys,
 `dependabot[bot]` and the `security` label present on the exempt lists) is
@@ -76,7 +101,9 @@ workflow sources it and calls `plg_admission_gate <source>` before opening a PR:
 1. If `<source>` is an exempt actor (§4) → **allow** (never blocked, never counted).
 2. Else it counts the open, non-draft, non-exempt automation queue org-wide via
    `gh search prs` (the enumeration lives in the gate library itself) and, if
-   the queue is at or over `org_wide.automation_open_pr_cap` → **defer**.
+   the queue is at or over the effective cap (`plg_effective_org_cap`: the
+   `PR_LIMITS_ORG_CAP` override (§2.1) if set and valid, else
+   `org_wide.automation_open_pr_cap`) → **defer**.
 3. If a per-source sub-cap is configured for `<source>` and its own queue is at
    or over it → **defer**. (No sub-caps are configured under the current
    signed-off policy; the map is intentionally empty.)
@@ -133,10 +160,16 @@ This keeps a single source of truth *per actor*: Dependabot's number lives in
 
 ## 6. Operator runbook
 
-All changes here are edits to the single source of truth
-[`standards/pr-limits.json`](pr-limits.json), gated by the config tests. None of
-them touches a GitHub setting or ruleset — there is no such surface to apply
-(§3).
+Changes here are either edits to the single source of truth
+[`standards/pr-limits.json`](pr-limits.json) (the default, gated by the config
+tests) or a change to the `PR_LIMITS_ORG_CAP` org Actions variable (the runtime
+override, §2.1, not gated by tests). Neither touches a repo setting or ruleset —
+there is no such surface to apply (§3).
+
+### 6.0 Quick change (no PR)
+
+Set the org variable (§2.1): `gh variable set PR_LIMITS_ORG_CAP --org petry-projects --visibility all --body <N>`.
+Use §6.1 only to change the signed-off default in the file.
 
 ### 6.1 Change the limit and re-apply it
 
@@ -153,8 +186,9 @@ them touches a GitHub setting or ruleset — there is no such surface to apply
 3. Open a PR. CI ([`.github/workflows/pr-limits-tests.yml`](../.github/workflows/pr-limits-tests.yml))
    re-runs the config + gate tests.
 4. **Re-apply = nothing to deploy.** Because enforcement is source-side and reads
-   the file at run time (§2–§3), the new ceiling takes effect for every consumer
-   as soon as the change merges to `main` — there is no `apply-*.sh` run and no
+   the file at run time (§2–§3), the new default takes effect for every consumer
+   as soon as the change merges to `main` — unless a valid `PR_LIMITS_ORG_CAP`
+   override (§2.1) is set, in which case the file value is only the fallback — there is no `apply-*.sh` run and no
    GitHub setting to push. (Per-repo Dependabot caps, if you also changed those,
    are applied through `dependabot.yml`, not this file.)
 
