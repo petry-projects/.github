@@ -113,6 +113,23 @@ spend) and the direct target of the dispatch-race defect
 calls the orchestrator with `--mode enforce`; a `defer` decision simply skips the
 dispatch step (a clean no-op — never a cancel, never a job failure).
 
+**Gate tooling pin ([#1232](https://github.com/petry-projects/.github/issues/1232)).**
+An enrolled stub does not carry the gate, so it checks out `petry-projects/.github`
+into `.arl-gate-tooling` with the org PAT. That checkout is pinned to a **full
+commit SHA**, not a moving tag: the original `ref: v1` predated
+`scripts/agent-rate-limit-gate.sh`, so the gate was silently inert fleet-wide,
+and a moving ref hands the PAT to whatever the tag next points at. To pick up
+gate or threshold changes (`agent-rate-limits.json` is read from the same
+checkout), bump the SHA in `standards/workflows/initiative-driver.yml` in its
+own reviewed PR, after confirming the three gate files
+(`scripts/agent-rate-limit-gate.sh`, `scripts/lib/agent-rate-limit.sh`,
+`standards/agent-rate-limits.json`) resolve at that SHA, then fan out via
+standards-sync. If the script is missing at run time, the gate step **fails
+loudly** (`::error::` annotation, step summary, step marked failed) while
+`continue-on-error` keeps the dispatch fail-open. The gate throttles dispatches
+that start; it does not pre-empt the stub's `cancel-in-progress` concurrency
+group, which may cancel a superseded run after its steps have started.
+
 **`feature-ideation` runs the gate in `--mode log-only`** (`feature-ideation-reusable.yml`):
 the decision is computed from run history and logged, but the emitted decision is
 always `allow`, so nothing is acted on. `dev-lead` and `compliance-audit` are not
