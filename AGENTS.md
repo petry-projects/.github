@@ -609,8 +609,12 @@ auto-rebase fan-out. Full standard, rationale, and operator runbook:
   so this is enforced **source-side** by [`scripts/lib/pr-limit-gate.sh`](https://github.com/petry-projects/.github/blob/main/scripts/lib/pr-limit-gate.sh):
   a PR-creating workflow asks the gate before opening a PR and **defers** (never
   fails or closes) when the queue is at the cap. Live-path wiring is Story 3 (#508).
-- **The configured value lives only in [`standards/pr-limits.json`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.json)** —
-  the single source of truth. Read it with `jq`; never hardcode or restate it.
+- **The signed-off default value lives only in [`standards/pr-limits.json`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.json)** —
+  the single source of truth for the default. Read it with `jq`; never hardcode or restate it.
+- **Runtime override (the operational lever):** the org-level Actions variable `PR_LIMITS_ORG_CAP`
+  (positive integer) overrides the file value without a code change; invalid or
+  unset falls back to the file. Pass it via `vars.PR_LIMITS_ORG_CAP` (see
+  [`standards/pr-limits.md` §2.1](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md)).
 
 > **Exempt actors are sanctioned policy, not drift.** `dependabot[bot]`,
 > `OrganizationAdmin`, `@petry-projects/org-leads`, the `dependabot-automerge-petry`

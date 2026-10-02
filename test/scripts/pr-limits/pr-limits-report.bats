@@ -19,6 +19,8 @@ SCRIPT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/scripts/pr-limits-report.sh"
 GH_STUB_SRC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/scripts/compliance-remediate/stubs/gh"
 
 setup() {
+  # Quarantine the override so ambient env never skews config-driven tests.
+  unset PR_LIMITS_ORG_CAP
   TMP="$(mktemp -d)"
   export TMP
 
@@ -186,6 +188,28 @@ run_report() {
   # 4 counted vs cap 4 -> at cap
   [[ "$output" == *"AT OR OVER CAP"* ]]
   [[ "$output" == *"| Cap | 4 |"* ]]
+}
+
+# --------------------------------------------------------------------------
+# PR_LIMITS_ORG_CAP override is honored by the report (same as the gate)
+# --------------------------------------------------------------------------
+@test "PR_LIMITS_ORG_CAP overrides the config cap in the report" {
+  write_config 4
+  stub_open_prs 4
+  PR_LIMITS_ORG_CAP=20 run_report
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AT OR OVER CAP"* ]]
+  [[ "$output" == *"| Cap | 20 |"* ]]
+}
+
+@test "invalid or empty PR_LIMITS_ORG_CAP falls back to the config cap in the report" {
+  write_config 4
+  stub_open_prs 4
+  for bad in "" 0 abc 99999999999999999999; do
+    PR_LIMITS_ORG_CAP="$bad" run_report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"| Cap | 4 |"* ]]
+  done
 }
 
 # --------------------------------------------------------------------------
