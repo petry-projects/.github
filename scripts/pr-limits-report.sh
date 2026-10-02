@@ -20,6 +20,8 @@
 #
 # Environment (all optional):
 #   ORG               — GitHub org slug to scope the search (default: petry-projects)
+#   PR_LIMITS_ORG_CAP — org-variable override of the cap (positive integer); wins
+#                       over the config value, same as the admission gate
 #   PR_LIMITS_CONFIG  — path to pr-limits.json (default: <repo>/standards/pr-limits.json,
 #                       resolved relative to this script so it works from any CWD)
 #   GH_TOKEN / GITHUB_TOKEN — token for `gh search prs` (github.token in CI)
@@ -37,15 +39,19 @@ DEFAULT_CONFIG="${SCRIPT_DIR}/../standards/pr-limits.json"
 CONFIG="${PR_LIMITS_CONFIG:-$DEFAULT_CONFIG}"
 ORG="${ORG:-petry-projects}"
 
+# Reuse the gate's cap resolution so report and gate always agree.
+# shellcheck source=scripts/lib/pr-limit-gate.sh
+source "${SCRIPT_DIR}/lib/pr-limit-gate.sh"
+
 if [ ! -f "$CONFIG" ]; then
   echo "pr-limits-report: error: config not found at $CONFIG" >&2
   exit 1
 fi
 
 # ── Read the cap + exempt lists from the single source of truth ───────────────
-CAP="$(jq -er '.org_wide.automation_open_pr_cap' "$CONFIG" 2>/dev/null || printf '')"
+CAP="$(plg_effective_org_cap "$CONFIG")"
 if ! [[ "$CAP" =~ ^[0-9]+$ ]]; then
-  echo "pr-limits-report: error: org_wide.automation_open_pr_cap missing or not an integer in $CONFIG" >&2
+  echo "pr-limits-report: error: org cap missing or not an integer (PR_LIMITS_ORG_CAP / org_wide.automation_open_pr_cap in $CONFIG)" >&2
   exit 1
 fi
 EXEMPT_ACTORS="$(jq -c '.exempt_actors // []' "$CONFIG" 2>/dev/null || echo '[]')"
