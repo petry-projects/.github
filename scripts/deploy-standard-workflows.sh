@@ -46,6 +46,11 @@ source "$SCRIPT_DIR/lib/agent-ingress.sh"
 # compliance-audit.sh so the sweep and the audit agree on drift (#1277).
 # shellcheck source=scripts/lib/stub-verbatim.sh
 source "$SCRIPT_DIR/lib/stub-verbatim.sh"
+# Caller-stub on:/permissions/concurrency surface-drift model — shared with
+# compliance-audit.sh so a stub the audit flags `stub-surface-drift-*` is one this
+# sweep re-syncs rather than skipping as "already compliant" (#1236).
+# shellcheck source=scripts/lib/stub-surface.sh
+source "$SCRIPT_DIR/lib/stub-surface.sh"
 
 # Global temp-file registry — cleaned up by EXIT trap even on premature exit.
 declare -a _TMPFILES=()
@@ -346,11 +351,27 @@ stub_has_s7635_marker() {
 # export, bmad-bgreat-suite, …) whose stubs merged marker-less during #857. Flagging
 # the missing marker as drift re-deploys and restores it. Kept targeted (pin + marker
 # presence), NOT a byte-compare, to avoid churn on cosmetic diffs.
+#
+# A pin-correct stub whose guarded `on:` / `permissions:` / `concurrency:` surface
+# differs from the template is ALSO drift (#1236): the audit flags it
+# `stub-surface-drift-*`, and skipping it here left the finding open every cycle
+# (e.g. stubs missing the `merge_group:` trigger the templates gained). The check
+# uses the audit's own comparison (lib/stub-surface.sh), so documented per-repo
+# liberties (`with:` inputs, cron values, pr-auto-review's workflow list) are not
+# drift. It is applied only where a redeploy actually rewrites the surface from the
+# template — never to a SKIP_REPO or a body-preserving workflow, which are re-pinned
+# from their OWN body (a surface diff there would re-flag forever, cf. #878; the
+# audit likewise exempts the meta-repos).
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   is_pin_compliant "$existing_content" "$template" "$repo" || return 1
   if template_requires_s7635_marker "$template" \
      && ! stub_has_s7635_marker <<< "$existing_content"; then
+    return 1
+  fi
+  local workflow; workflow="$(basename "$template")"
+  if ! is_skipped_repo "$repo" && ! is_body_preserving_workflow "$workflow" \
+     && stub_any_surface_drift "$workflow" "$(< "$template")" "$existing_content"; then
     return 1
   fi
   return 0
