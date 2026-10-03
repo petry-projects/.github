@@ -691,8 +691,16 @@ _ingress_agent_runs() {
   local agent="$1" repo="$2" role="$3" since="$4" wf iraw id created rconc jobs rec recs=""
   wf="$(_agent_field "$agent" run_workflow)"
   iraw="$(cat)"
+  # Bound the per-run `gh run view` fan-out (#810/#819): read at most CANARY_INGRESS_JOBS_MAX
+  # (default 300) of the newest in-window runs; beyond that the member is UNRESOLVED (fail closed).
+  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0
+  case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
   while IFS=$'\t' read -r id created rconc; do
     [ -z "$id" ] && continue
+    if [ "$nread" -ge "$jobs_max" ]; then
+      _record_unresolved "$agent" "$repo" "more than $jobs_max ingress runs in the window; job reads capped (CANARY_INGRESS_JOBS_MAX)"; break
+    fi
+    nread=$((nread + 1))
     if ! jobs="$(_run_jobs_json "$repo" "$id")"; then
       _record_unresolved "$agent" "$repo" "jobs of ingress run $id are unreadable"; continue
     fi
@@ -724,8 +732,9 @@ _ingress_agent_runs() {
     fi
     [ -n "$rec" ] && recs+="$rec"$'\n'
   done < <(jq -r --arg since "$since" \
-    '.[]? | select(.conclusion != null and .conclusion != "")
-          | select($since == "" or (.createdAt // "") >= $since)
+    '[ .[]? | select(.conclusion != null and .conclusion != "")
+          | select($since == "" or (.createdAt // "") >= $since) ]
+          | sort_by(.createdAt // "") | reverse | .[]
           | [(.databaseId|tostring), (.createdAt // ""), .conclusion] | @tsv' 2>/dev/null <<< "${iraw:-[]}")
   printf '%s' "$recs" | jq -cs '.'
 }

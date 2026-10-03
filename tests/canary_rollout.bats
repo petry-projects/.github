@@ -5273,6 +5273,8 @@ GITEOF
 #   org/nojobs    — `Agent Ingress` run 103 whose jobs list is empty (unattributable)
 # Every gh invocation is appended to $GH_LOG.
 _ingress_stub() {
+  # _frontier_state leaves a stable per-(agent,cand) UNRESOLVED flag in /tmp; clear it so tests are isolated.
+  rm -f /tmp/.canary-unresolved-*-cand.txt
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export GH_LOG="$BATS_TEST_TMPDIR/gh-ingress.log"; : > "$GH_LOG"
   cat > "$STUB_BIN/gh" <<'GHEOF'
@@ -5297,6 +5299,8 @@ case "$1 $2" in
         echo '[{"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":103,"workflowName":"Agent Ingress"}]' ;;
       "org/legacy|Dev-Lead Agent")
         echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":201,"workflowName":"Dev-Lead Agent"}]' ;;
+      "org/legacy|CI Failure Analyst")
+        echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":202,"workflowName":"CI Failure Analyst"}]' ;;
       *) nf ;;
     esac ;;
   "run view")
@@ -5306,7 +5310,8 @@ case "$1 $2" in
                           {"name":"ci-failure-analyst","conclusion":"skipped","steps":[]}]}' ;;
       102) echo '{"jobs":[{"name":"dev-lead / setup","conclusion":"success","steps":[]},
                           {"name":"dev-lead / run","conclusion":"failure","steps":[{"name":"Build","conclusion":"failure"}]},
-                          {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]}]}' ;;
+                          {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
+                          {"name":"ci-failure-analyst","conclusion":"skipped","steps":[]}]}' ;;
       103) echo '{"jobs":[]}' ;;
       104) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"skipped","steps":[]},
                           {"name":"ci-failure-analyst / analyse","conclusion":"success","steps":[]}]}' ;;
@@ -5327,7 +5332,7 @@ GHEOF
                        | .rings = [{"channel":"next","order":0,"members":["org/collapsed"]},
                                    {"channel":"ring0","order":1,"members":["org/legacy"]}]
                        | .gate.transitions = {"next->ring0":{"dwell_hours":0,"waive_sample":true}}),
-         "cfa": (.agents["dev-lead"] | .ingress_job = "ci-failure-analyst" | .gate.benign_failure_classes = []
+         "cfa": (.agents["dev-lead"] | .ingress_job = "ci-failure-analyst" | .run_workflow = "CI Failure Analyst" | .gate.benign_failure_classes = []
                  | .gate.suspect_failure_classes = [] | del(.gate.correctness)
                  | .rings = [{"channel":"next","order":0,"members":["org/collapsed"]},
                              {"channel":"ring0","order":1,"members":["org/legacy"]}]
@@ -5437,6 +5442,7 @@ _ingress_frontier() {
   read -r _c frontier transition state _d _f _s _t _cf _cs _cb triage _rest <<< "$line"
   [ "$state" = "BLOCKED" ]
   [ "$triage" = "UNRESOLVED" ]
+  rm -f /tmp/.canary-unresolved-*-cand.txt
 }
 
 @test "_blocker_body: UNRESOLVED triage explains the blind member, not a cut-date indeterminate (#1224)" {
