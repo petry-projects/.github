@@ -300,6 +300,9 @@ probe_agent_ingress() {
     err="$(cat "$errfile")"
     if [[ "$(agent_ingress_gh_error_kind "$err")" == "missing" ]]; then
       rm -f "$errfile"
+      # A 404 also means an inaccessible/unknown repo: confirm access before
+      # accepting absence, else fail closed (inconclusive).
+      gh api "repos/$ORG/$repo" --jq '.name' >/dev/null 2>&1 || return 2
       return 1
     fi
     if [[ "$attempt" -ge "$attempts" ]]; then
@@ -505,7 +508,8 @@ deploy_repo() {
       err "No template at $template — skipping $workflow for $repo"
       continue
     fi
-    if [[ "$ingress_rc" -eq 0 ]]; then
+    # feature-ideation.yml is outside the collapse (schedule-driven, per-repo project_context).
+    if [[ "$ingress_rc" -eq 0 && "$workflow" != "feature-ideation.yml" ]]; then
       role="$(agent_ingress_role_for_workflow "$workflow")"
       if agent_ingress_has_role_job "$role" <<< "$ingress_content"; then
         skip "$repo/$workflow (served by $AGENT_INGRESS_WORKFLOW job '$role')"

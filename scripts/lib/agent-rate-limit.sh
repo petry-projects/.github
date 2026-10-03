@@ -574,7 +574,10 @@ _arl_ingress_declares_role() {
   raw="$(gh api "repos/${api_repo}/contents/.github/workflows/${AGENT_INGRESS_WORKFLOW}" 2>/dev/null || true)"
   content="$(jq -r 'select(.type == "file" and .encoding == "base64") | .content // empty' <<<"$raw" 2>/dev/null \
     | base64 -d 2>/dev/null || true)"
-  [ -n "$content" ] || return 0
+  if [ -z "$content" ]; then
+    arl_log "warning: could not verify ${AGENT_INGRESS_WORKFLOW} in ${api_repo} — treating '${role}' as declared (degraded)"
+    return 0
+  fi
   agent_ingress_has_role_job "$role" <<<"$content"
 }
 

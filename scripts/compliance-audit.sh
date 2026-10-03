@@ -357,22 +357,26 @@ check_required_workflows() {
     if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.name' > /dev/null 2>&1; then
       if [ "$ingress_read" = false ]; then
         ingress_read=true
-        # Failing read + readable directory listing lacking the ingress = genuinely
-        # absent. Listing also unreadable = transient API failure: do not report
+        # Failing read + readable listing WITHOUT the exact ingress filename =
+        # genuinely absent. Listing unreadable (incl. a missing workflows dir), or
+        # listing it while the file read failed = inconclusive: do not report
         # missing workflows we could not actually evaluate.
         if ! ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null); then
           ingress_b64=""
-          if ! gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' > /dev/null 2>&1; then
+          local listing
+          if ! listing=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null) \
+             || grep -qxF "$AGENT_INGRESS_WORKFLOW" <<< "$listing"; then
             ingress_unreadable=true
-            info "could not read $AGENT_INGRESS_WORKFLOW in $repo (transient) — not reporting missing workflows"
+            info "could not read $AGENT_INGRESS_WORKFLOW in $repo (inconclusive) — not reporting missing workflows"
           fi
         fi
         [ -n "$ingress_b64" ] && ingress_decoded=$(echo "$ingress_b64" | base64 -d 2>/dev/null || echo "")
       fi
       if [ "$ingress_unreadable" = true ]; then
+        mark_repo_inconclusive "$repo"
         continue
       fi
-      if [ -n "$ingress_decoded" ] \
+      if [ "$wf" != "feature-ideation.yml" ] && [ -n "$ingress_decoded" ] \
          && agent_ingress_has_role_job "$(agent_ingress_role_for_workflow "$wf")" <<< "$ingress_decoded"; then
         continue
       fi

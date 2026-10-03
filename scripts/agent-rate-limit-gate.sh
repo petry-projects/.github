@@ -205,6 +205,16 @@ argate_last_failure_epoch() {
 # ---------------------------------------------------------------------------
 argate_fetch_runs() {
   local workflow="$1" repo="$2" limit="$3" role="${4:-}" out rc=0
+  # Normalize a display name (github.workflow, e.g. "Agent Ingress") to the
+  # ingress filename so the resolver recognizes the collapsed ingress.
+  case "$workflow" in
+    *.yml|*.yaml) ;;
+    *)
+      if [ "$(printf '%s' "$workflow" | tr '[:upper:] ' '[:lower:]-')" = "$(agent_ingress_role_for_workflow "$AGENT_INGRESS_WORKFLOW")" ]; then
+        workflow="$AGENT_INGRESS_WORKFLOW"
+      fi
+      ;;
+  esac
   [ -z "$role" ] && role="$(agent_ingress_role_for_workflow "$workflow")"
   out="$(arl_resolve_agent_runs "$workflow" "$role" "$repo" "$limit")" || rc=$?
   case "$rc" in

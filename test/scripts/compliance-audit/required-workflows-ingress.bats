@@ -26,6 +26,7 @@ run_check() {
     FINDINGS_FILE="$2"
     PRESENT=" $3 "
     INGRESS_ROLES="$4"
+    LISTING_ERR="${6:-}"
     ingress_yaml() {
       local r
       printf "name: Agent Ingress\njobs:\n"
@@ -34,7 +35,7 @@ run_check() {
     gh_api() {
       local path="$1" wf
       wf="${path##*/}"
-      if [ "$wf" = "workflows" ]; then return 0; fi
+      if [ "$wf" = "workflows" ]; then [ -z "$LISTING_ERR" ] || return 1; return 0; fi
       if [ "$wf" = "agent-ingress.yml" ]; then
         [ -n "$INGRESS_ROLES" ] || return 1
         case " $* " in
@@ -50,7 +51,7 @@ run_check() {
     }
     check_required_workflows "$5"
     jq -r ".[].check" "$FINDINGS_FILE"
-  ' _ "$SCRIPT" "$findings" "$1" "$2" "markets"
+  ' _ "$SCRIPT" "$findings" "$1" "$2" "markets" "${3:-}"
 }
 
 ALL_BUT_COLLAPSED="ci.yml sonarcloud.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml feature-ideation.yml initiative-driver.yml"
@@ -83,4 +84,10 @@ ALL_BUT_COLLAPSED="ci.yml sonarcloud.yml dependabot-automerge.yml dependency-aud
   run_check "sonarcloud.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml feature-ideation.yml initiative-driver.yml" "dev-lead pr-review-mention pr-auto-review"
   [ "$status" -eq 0 ]
   grep -qx 'missing-ci.yml' <<< "$output"
+}
+
+@test "unreadable ingress AND unreadable listing: no missing-* findings (inconclusive)" {
+  run_check "ci.yml" "" "1"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *missing-* ]]
 }
