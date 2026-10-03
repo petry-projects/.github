@@ -163,7 +163,8 @@ seed_collapsed() {
   seed_collapsed _local
   run bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
   [ "$status" -eq 0 ]
-  ! grep -q 'runs/104/jobs' "$GH_STUB_LOG"
+  run grep -q 'runs/104/jobs' "$GH_STUB_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "concurrency: a non-collapsed repo still counts its per-role workflow runs" {
@@ -171,7 +172,8 @@ seed_collapsed() {
   run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
-  ! grep -q 'agent-ingress' "$GH_STUB_LOG"
+  run grep -q 'agent-ingress' "$GH_STUB_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "concurrency: a transient failure still degrades to 0 with its existing warning" {

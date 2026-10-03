@@ -93,7 +93,8 @@ jobs:"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF "markets/dev-lead.yml (served by agent-ingress.yml job 'dev-lead')"
-  ! echo "$output" | grep -qF 'Would open PR'
+  run grep -qF 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "collapsed repo: a full sweep re-seeds none of the three collapsed stubs" {
@@ -121,7 +122,8 @@ jobs:"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF "markets/dev-lead.yml (served by agent-ingress.yml job 'dev-lead')"
-  ! echo "$output" | grep -qF 'Would open PR'
+  run grep -qF 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------
@@ -134,7 +136,8 @@ jobs:"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE 'Would open PR for markets .* dev-lead.yml'
-  ! echo "$output" | grep -qF 'served by agent-ingress.yml'
+  run grep -qF 'served by agent-ingress.yml' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "partial collapse: an ingress lacking a role's job still receives that role's stub" {
@@ -147,7 +150,8 @@ jobs:"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow pr-review-mention.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF "markets/pr-review-mention.yml (served by agent-ingress.yml job 'pr-review-mention')"
-  ! echo "$output" | grep -qF 'Would open PR'
+  run grep -qF 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------
@@ -160,7 +164,8 @@ jobs:"
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow dev-lead.yml
   [ "$status" -ne 0 ]
   echo "$output" | grep -qF 'agent-ingress.yml'
-  ! echo "$output" | grep -qF 'Would open PR'
+  run grep -qF 'Would open PR' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 # ---------------------------------------------------------------------------

@@ -544,6 +544,7 @@ arl_count_concurrent_runs() {
   # The current repo first, then any additional repos for org-wide enforcement.
   local -a repos=("")
   if [ -n "${AGENT_RATE_LIMITS_ORG_REPOS:-}" ]; then
+    local -a _arl_repos
     IFS=',' read -ra _arl_repos <<< "$AGENT_RATE_LIMITS_ORG_REPOS"
     for repo in "${_arl_repos[@]}"; do
       repo="${repo// /}"

@@ -352,13 +352,25 @@ check_required_workflows() {
   # ADR-0007 collapse (#1226): a repo that serves a role from an agent-ingress.yml
   # job has deliberately deleted that role's per-role stub. Read the ingress lazily
   # (only once a required file is missing) and count a role it serves as present.
-  local ingress_b64="" ingress_decoded="" ingress_read=false
+  local ingress_b64="" ingress_decoded="" ingress_read=false ingress_unreadable=false wf
   for wf in "${REQUIRED_WORKFLOWS[@]}"; do
     if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.name' > /dev/null 2>&1; then
       if [ "$ingress_read" = false ]; then
         ingress_read=true
-        ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null || echo "")
+        # Failing read + readable directory listing lacking the ingress = genuinely
+        # absent. Listing also unreadable = transient API failure: do not report
+        # missing workflows we could not actually evaluate.
+        if ! ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null); then
+          ingress_b64=""
+          if ! gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' > /dev/null 2>&1; then
+            ingress_unreadable=true
+            info "could not read $AGENT_INGRESS_WORKFLOW in $repo (transient) — not reporting missing workflows"
+          fi
+        fi
         [ -n "$ingress_b64" ] && ingress_decoded=$(echo "$ingress_b64" | base64 -d 2>/dev/null || echo "")
+      fi
+      if [ "$ingress_unreadable" = true ]; then
+        continue
       fi
       if [ -n "$ingress_decoded" ] \
          && agent_ingress_has_role_job "$(agent_ingress_role_for_workflow "$wf")" <<< "$ingress_decoded"; then

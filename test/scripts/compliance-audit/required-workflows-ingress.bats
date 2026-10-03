@@ -34,6 +34,7 @@ run_check() {
     gh_api() {
       local path="$1" wf
       wf="${path##*/}"
+      if [ "$wf" = "workflows" ]; then return 0; fi
       if [ "$wf" = "agent-ingress.yml" ]; then
         [ -n "$INGRESS_ROLES" ] || return 1
         case " $* " in
@@ -57,14 +58,16 @@ ALL_BUT_COLLAPSED="ci.yml sonarcloud.yml dependabot-automerge.yml dependency-aud
 @test "collapsed repo: roles served by agent-ingress.yml jobs are not flagged missing" {
   run_check "$ALL_BUT_COLLAPSED" "dev-lead pr-review-mention pr-auto-review"
   [ "$status" -eq 0 ]
-  ! grep -qE 'missing-(dev-lead|pr-review-mention|pr-auto-review)\.yml' <<< "$output"
+  run grep -qE 'missing-(dev-lead|pr-review-mention|pr-auto-review)\.yml' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "partial collapse: a role the ingress does NOT serve is still flagged missing" {
   run_check "$ALL_BUT_COLLAPSED" "dev-lead pr-review-mention"
   [ "$status" -eq 0 ]
   grep -qx 'missing-pr-auto-review.yml' <<< "$output"
-  ! grep -qE 'missing-(dev-lead|pr-review-mention)\.yml' <<< "$output"
+  run grep -qE 'missing-(dev-lead|pr-review-mention)\.yml' <<< "$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "non-collapsed repo: missing role stubs are still flagged (no ingress)" {
