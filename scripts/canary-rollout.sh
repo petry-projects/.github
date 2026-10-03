@@ -1313,16 +1313,24 @@ _frontier_state() {
   for i in "${!chan_array[@]}"; do
     ch="${chan_array[$i]}"
     if [ -n "$prev" ]; then
-      # Pending iff dst is not on src's commit. An UNRESOLVABLE src commit (empty) with a populated
-      # dst is still pending and _pair_state holds it BLOCKED (fail closed, as the single-frontier
-      # code did) — never silently skipped into a false COMPLETE.
+      # The pair verdict is the pure core's (pair_verdict, #1242); this loop only acts on it. A
+      # tag-lookup error is not yet distinguishable from an absent tag here (channel_commit, #1225),
+      # so both rings are passed as known (unknown=0).
       cand="${commits[$((i-1))]}"
       dstc="${commits[$i]}"
-      if [ "$dstc" != "$cand" ]; then
-        transition="${prev}->${ch}"
-        _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
-        emitted=1
-      fi
+      transition="${prev}->${ch}"
+      case "$(pair_verdict "${cand:--}" 0 "${dstc:--}" 0)" in
+        ON_CANDIDATE) ;;
+        PENDING|UNRESOLVABLE_SOURCE)
+          # An UNRESOLVABLE src commit (empty) with a populated dst is still pending and _pair_state
+          # holds it BLOCKED (fail closed, as the single-frontier code did).
+          _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
+          emitted=1 ;;
+        *)
+          # HOLD_UNKNOWN (or any unrecognised verdict): fail closed — held BLOCKED, never evaluated.
+          echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"
+          emitted=1 ;;
+      esac
     fi
     prev="$ch"
   done
@@ -1900,10 +1908,11 @@ _frontier_state_resilient() {
     if [ -n "$prev" ]; then
       cand="$prev_commit"
       dstc="$ch_commit"
-      # Same pending rule as _frontier_state: dst not on src's commit, including an unresolvable
-      # (empty) src commit, which stays tracked as BLOCKED rather than vanishing (fail closed).
-      if [ "$dstc" != "$cand" ]; then
-        transition="${prev}->${ch}"
+      transition="${prev}->${ch}"
+      # Same pure pair verdict as _frontier_state (#1242): a pending pair, including an
+      # unresolvable (empty) src commit, stays tracked as BLOCKED rather than vanishing (fail
+      # closed); anything other than ON_CANDIDATE is held.
+      if [ "$(pair_verdict "${cand:--}" 0 "${dstc:--}" 0)" != "ON_CANDIDATE" ]; then
         prior="$dstc"
         differs="$(_reusable_differs "$agent" "$cand" "$prior")"
         # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION

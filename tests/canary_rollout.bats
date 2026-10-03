@@ -808,6 +808,102 @@ GHEOF
   [ "$(transition_key stable 'next,ring0,ring1,stable')" = "ring1->stable" ]
 }
 
+# ── pair_verdict (pure per-pair verdict, #1242: #1118 pending rule + #1225 tag-gap hold) ──
+# Each ring is one of: RESOLVED (a commit; same or different from the other side), ABSENT
+# ("-", unknown=0 — legacy "no tag"), or ERRORED (unknown=1 — the lookup failed, so the
+# commit is not known). Full {resolved, absent, errored} × {src, dst} matrix, gh-free.
+@test "pair_verdict: resolved src, dst on the same commit → ON_CANDIDATE (nothing pending)" {
+  [ "$(pair_verdict aaa 0 aaa 0)" = "ON_CANDIDATE" ]
+}
+@test "pair_verdict: resolved src, dst on a different commit → PENDING" {
+  [ "$(pair_verdict aaa 0 bbb 0)" = "PENDING" ]
+}
+@test "pair_verdict: resolved src, absent dst → PENDING (dst never received a release)" {
+  [ "$(pair_verdict aaa 0 - 0)" = "PENDING" ]
+}
+@test "pair_verdict: resolved src, errored dst → HOLD_UNKNOWN" {
+  [ "$(pair_verdict aaa 0 - 1)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: absent src, resolved dst → UNRESOLVABLE_SOURCE (BLOCKED, never a false COMPLETE)" {
+  [ "$(pair_verdict - 0 bbb 0)" = "UNRESOLVABLE_SOURCE" ]
+}
+@test "pair_verdict: absent src, absent dst → ON_CANDIDATE (legacy: nothing to promote)" {
+  [ "$(pair_verdict - 0 - 0)" = "ON_CANDIDATE" ]
+}
+@test "pair_verdict: absent src, errored dst → HOLD_UNKNOWN" {
+  [ "$(pair_verdict - 0 - 1)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: errored src, resolved dst → HOLD_UNKNOWN" {
+  [ "$(pair_verdict - 1 bbb 0)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: errored src, absent dst → HOLD_UNKNOWN (an outage is never read as 'on the candidate')" {
+  [ "$(pair_verdict - 1 - 0)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: errored src, errored dst → HOLD_UNKNOWN" {
+  [ "$(pair_verdict - 1 - 1)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: precedence — an errored side beats a matching commit (HOLD_UNKNOWN over ON_CANDIDATE)" {
+  [ "$(pair_verdict aaa 1 aaa 0)" = "HOLD_UNKNOWN" ]
+  [ "$(pair_verdict aaa 0 aaa 1)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: precedence — an errored side beats an unresolvable source and a pending pair" {
+  [ "$(pair_verdict - 1 bbb 1)" = "HOLD_UNKNOWN" ]
+  [ "$(pair_verdict aaa 1 bbb 0)" = "HOLD_UNKNOWN" ]
+}
+@test "pair_verdict: an empty commit is the absent sentinel '-' (same verdicts as '-')" {
+  [ "$(pair_verdict '' 0 '' 0)" = "ON_CANDIDATE" ]
+  [ "$(pair_verdict '' 0 bbb 0)" = "UNRESOLVABLE_SOURCE" ]
+  [ "$(pair_verdict aaa 0 '' 0)" = "PENDING" ]
+  [ "$(pair_verdict '' 0 - 0)" = "ON_CANDIDATE" ]
+}
+@test "pair_verdict: an omitted/empty unknown flag means known (0)" {
+  [ "$(pair_verdict aaa '' aaa '')" = "ON_CANDIDATE" ]
+  [ "$(pair_verdict aaa)" = "PENDING" ]
+}
+@test "pair_verdict: any unknown flag other than 0 fails CLOSED to HOLD_UNKNOWN" {
+  [ "$(pair_verdict aaa yes aaa 0)" = "HOLD_UNKNOWN" ]
+  [ "$(pair_verdict aaa 0 aaa 2)" = "HOLD_UNKNOWN" ]
+}
+
+# _pv_rings <commit:unknown>... — fold pair_verdict over an ordered ring list, echoing one
+# "<i> <verdict>" per pair NOT on its candidate, or COMPLETE when none is (the shape
+# _frontier_state emits). Test-only glue; the decision itself is pair_verdict's.
+_pv_rings() {
+  local prev="" ring i=0 v any=0
+  for ring in "$@"; do
+    if [ -n "$prev" ]; then
+      v="$(pair_verdict "${prev%:*}" "${prev##*:}" "${ring%:*}" "${ring##*:}")"
+      if [ "$v" != "ON_CANDIDATE" ]; then echo "$i $v"; any=1; fi
+      i=$((i + 1))
+    fi
+    prev="$ring"
+  done
+  [ "$any" -eq 1 ] || echo "COMPLETE"
+}
+@test "pair_verdict rings: every ring on one commit → legacy COMPLETE" {
+  [ "$(_pv_rings aaa:0 aaa:0 aaa:0 aaa:0)" = "COMPLETE" ]
+}
+@test "pair_verdict rings: every tag ABSENT → legacy COMPLETE (#1118 AC6, unchanged)" {
+  [ "$(_pv_rings -:0 -:0 -:0 -:0)" = "COMPLETE" ]
+}
+@test "pair_verdict rings: TOTAL tag-lookup outage → every pair HOLD_UNKNOWN, never COMPLETE (#1225)" {
+  run _pv_rings -:1 -:1 -:1 -:1
+  [ "$output" = $'0 HOLD_UNKNOWN\n1 HOLD_UNKNOWN\n2 HOLD_UNKNOWN' ]
+}
+@test "pair_verdict rings: one errored ring holds BOTH pairs touching it; the rest evaluate normally" {
+  run _pv_rings ccc:0 bbb:0 -:1 aaa:0
+  [ "$output" = $'0 PENDING\n1 HOLD_UNKNOWN\n2 HOLD_UNKNOWN' ]
+}
+@test "pair_verdict rings: no tier skipping — each pair compares only adjacent rings" {
+  # stable (aaa) differs from next (ccc) but is on ring1's commit: only the lower pairs are pending.
+  run _pv_rings ccc:0 bbb:0 aaa:0 aaa:0
+  [ "$output" = $'0 PENDING\n1 PENDING' ]
+}
+@test "pair_verdict rings: absent source over a populated ring → UNRESOLVABLE_SOURCE, not COMPLETE" {
+  run _pv_rings -:0 bbb:0 bbb:0 bbb:0
+  [ "$output" = "0 UNRESOLVABLE_SOURCE" ]
+}
+
 # ── canary-rings.json SoT shape (rings + gate knobs) ──────────────────────────
 @test "canary-rings.json: pr-auto-review onboarded to canary; unmanaged block emptied" {
   run jq -e '.agents["pr-auto-review"].host == "petry-projects/.github"' "$RINGS"

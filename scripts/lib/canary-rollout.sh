@@ -437,6 +437,30 @@ transition_key() {
   echo ""
 }
 
+# pair_verdict <src_commit|-> <src_unknown> <dst_commit|-> <dst_unknown>
+# Pure per-pair verdict for ONE adjacent ring transition src->dst (#1242). The orchestrator only
+# gathers the facts: each ring's resolved commit ("-" or empty = no tag, i.e. ABSENT) and whether
+# its tag lookup ERRORED (unknown=1, #1225). An empty unknown flag means known (0); any other
+# non-0 value fails closed as unknown. Echoes exactly one of, in precedence order:
+#   HOLD_UNKNOWN        — either ring's lookup errored: its commit is not known, so the pair is held
+#                         BLOCKED and never evaluated or promoted, even with --override (#1225). An
+#                         API outage must never read as "dst is on the candidate", nor a total
+#                         outage as COMPLETE.
+#   ON_CANDIDATE        — dst is already on src's commit (including both ABSENT, the legacy
+#                         behaviour, #1118 AC6): nothing pending.
+#   UNRESOLVABLE_SOURCE — src has no tag but dst does: still pending and held BLOCKED (fail closed),
+#                         never silently skipped into a false COMPLETE (#1118).
+#   PENDING             — dst is not on src's commit: evaluate the gate for this pair. A ring only
+#                         ever advances to the commit on the ring directly below it, so no tier is
+#                         skipped (#1118).
+pair_verdict() {
+  local src="${1:--}" su="${2:-0}" dst="${3:--}" du="${4:-0}"
+  if [ "$su" != "0" ] || [ "$du" != "0" ]; then echo "HOLD_UNKNOWN"; return 0; fi
+  if [ "$src" = "$dst" ]; then echo "ON_CANDIDATE"; return 0; fi
+  if [ "$src" = "-" ]; then echo "UNRESOLVABLE_SOURCE"; return 0; fi
+  echo "PENDING"
+}
+
 # ── set-diff core (drift detection, #1082) ────────────────────────────────────
 # The registry (.agents{}) is the MANUAL source of truth for what the canary pipeline
 # manages; drift detection diffs it against the *-reusable.yml actually present on each
