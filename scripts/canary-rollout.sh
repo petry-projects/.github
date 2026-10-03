@@ -1294,7 +1294,7 @@ _pair_state() {
       # Cannot arm the flag (TMPDIR unwritable/full) → unattributable members could not be
       # recorded; fail closed rather than let a clean-looking gate PROMOTE.
       echo "WARN: cannot create unresolved-member flag '$uflag'; failing closed" >&2
-      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
+      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 FLAG_ERROR -"; return 0
     fi
   fi
 
@@ -1592,6 +1592,8 @@ cmd_evaluate() {
         echo "::notice::triage=PRE_EXISTING (auto-downgraded from SUSPECT, #668 increment 6) — the candidate's suspect-class failure rate (${dg_cand_rate}‰ over ${dg_cand_sample} runs) is no worse than the prior version's (${dg_base_rate}‰ over ${dg_base_sample} runs), so the timeout is environmental, not a candidate regression. Report only; the SUSPECT hold auto-cleared (no human needed). Advances with --allow-pre-existing once dwell/sample pass."
       elif [ "$triage" = "UNRESOLVED" ]; then
         echo "::error::triage=UNRESOLVED — at least one ring member's runs could not be attributed (ADR-0007 collapsed repo: '$(_ingress_workflow)' present, no per-role workflow, role job unresolvable). The gate is blind there, so it holds rather than promote on incomplete evidence. Register the agent's ingress_job in the ring registry (#1224)."
+      elif [ "$triage" = "FLAG_ERROR" ]; then
+        echo "::error::triage=FLAG_ERROR — could not create the unresolved-member flag file (TMPDIR unwritable/full). The gate fails closed and holds; fix the runner's temp dir."
       elif [ "$triage" = "PRE_EXISTING" ]; then
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback. Advances with --allow-pre-existing (or control.allow_pre_existing in the registry) once dwell/sample pass."
       else
@@ -1978,6 +1980,8 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
 > | baseline | \`$dg_base_rate\` | $dg_base_sample |"
   elif [ "$triage" = "UNRESOLVED" ]; then
     note="> ⚠️ **UNRESOLVED (gate blind on a ring member, #1224)** — at least one ring member is an ADR-0007 collapsed repo (its per-role workflow is gone, \`$(_ingress_workflow)\` is present) and this agent's runs there could not be attributed to its role job. That member is **not** counted as passing evidence, so the gate holds instead of promoting on incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: register the agent's \`ingress_job\` (its job key in the ingress) in \`standards/canary-rings.json\`; this issue auto-closes once every member resolves."
+  elif [ "$triage" = "FLAG_ERROR" ]; then
+    note="> ⚠️ **FLAG_ERROR (gate held — runner temp dir unwritable)** — the candidate's cut date resolved fine, but the gate could not create its unresolved-member flag file (\`TMPDIR\` unwritable or full), so it could not record unattributable ring members and fails closed rather than promote on possibly incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: free space / make \`TMPDIR\` writable on the runner; this clears on the next tick."
   elif [ "$triage" = "PRE_EXISTING" ]; then
     note="> ⚠️ **PRE_EXISTING** — the failure is pre-existing/environmental (reusable byte-identical to the prior channel). Report only; the gate will not roll back or advance. Fix-forward, and the armed timer auto-promotes once clean."
   else
@@ -2264,6 +2268,8 @@ cmd_sync_issues() {
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
       elif [ "$bl_triage" = "UNRESOLVED" ]; then
         evidence="$(_unresolved_evidence "$agent" "$bl_cand" || true)"
+      elif [ "$bl_triage" = "FLAG_ERROR" ]; then
+        evidence="_(the gate could not create its unresolved-member flag file in \`TMPDIR\`, so no run evidence was gathered this tick. It FAILS CLOSED and holds this pair until the temp dir is writable.)_"
       else
         if [ "$bl_cand" = "-" ]; then
           evidence="_(the source ring's commit is unresolvable this tick, so there is no candidate whose failing runs can be listed. The gate FAILS CLOSED and holds this pair until the tag resolves.)_"
