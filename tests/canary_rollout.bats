@@ -5645,6 +5645,18 @@ GHEOF
   [ ! -s "$flag" ]
 }
 
+@test "_baseline_daily: truncation is per repo — a fully-read member keeps its older days known beside a capped one (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy is capped to TODAY (older days unknown for it); org/legacy is read completely, so the
+  # older days are known (zero) for the aggregate and must not be dropped by busy's cutoff.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=2 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/busy org/legacy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2 0 0" ]
+  [ ! -s "$flag" ]
+}
+
 @test "_baseline_daily: an UNCAPPED baseline still reports every day (zero-filled), nothing dropped (#1224 liveness)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
@@ -5842,7 +5854,8 @@ _ingress_frontier() {
 }
 
 @test "_record_unresolved: a failed evidence append removes the flag so the gate cannot read it as clean (#1224)" {
-  local flag="$BATS_TEST_TMPDIR/unresolved-ro"; : > "$flag"; chmod 444 "$flag"
-  run env _CANARY_UNRESOLVED_FLAG="$flag" bash -c "source '$ORCH' && _record_unresolved dev-lead org/x 'blind' 2>/dev/null"
+  # Force the append to fail via a printf shim, not file modes (a root runner bypasses chmod 444).
+  local flag="$BATS_TEST_TMPDIR/unresolved-ro"; : > "$flag"
+  run env _CANARY_UNRESOLVED_FLAG="$flag" ORCH="$ORCH" bash -c 'source "$ORCH" && printf() { if [ "$1" = "%s\n" ]; then return 1; fi; builtin printf "$@"; } && _record_unresolved dev-lead org/x blind 2>/dev/null'
   [ ! -e "$flag" ]
 }

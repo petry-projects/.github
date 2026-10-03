@@ -733,7 +733,10 @@ _record_unresolved() {
     grep -qxF -- "$line" "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null && return 0
     # A failed append (temp fs full) must not leave a clean-looking empty flag: remove it, so the
     # gate sees the flag GONE and fails closed (see the "evidence write failed" check in _frontier_state).
-    printf '%s\n' "$line" >> "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || rm -f "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || true
+    # If the cleanup fails too (read-only fs) the empty flag survives; _pair_state re-probes its
+    # writability and fails closed in that case.
+    printf '%s\n' "$line" >> "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || rm -f "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null \
+      || echo "::error::canary: cannot record or remove the unresolved-member flag '$_CANARY_UNRESOLVED_FLAG'; the gate will fail closed" >&2
   fi
   echo "::warning::canary: UNRESOLVED member $repo for '$agent' — $reason" >&2
 }
@@ -1218,33 +1221,52 @@ _cumulative_health() {
 # feeding the robust spike-capped baseline for the sample target (#548).
 _baseline_daily() {
   local agent="$1" window="$2"; shift 2
-  local since repo json dates="" day i count out="" tflag cutday="" d
+  local since repo json day i count out="" tflag d cutday any_trunc=0 total=0
+  local -A dsum=() dknown=() rcount=()
+  local -a days=()
   since="$(_iso_now_minus_days "$window")"
-  tflag="$(mktemp 2>/dev/null || true)"   # unwritable → the ingress cap stays strict (UNRESOLVED)
-  for repo in "$@"; do
-    json="$(_CANARY_INGRESS_TRUNC_FLAG="$tflag" _agent_run_json "$agent" "$repo" "$since")"
-    dates+="$(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)"$'\n'
-  done
-  # A capped ingress read (see _ingress_agent_runs) leaves every day OLDER than its first unread run's
-  # day unknown — NOT zero — and that boundary day itself only partly counted. Drop the older days;
-  # keep the boundary day only when it has observed runs (its partial count is a lower bound, never a
-  # false zero). A truncated read must also never look like "no caller" (an all-zero baseline lets
-  # waive_sample_if_no_caller skip sampling in _pair_state), so if nothing countable was observed the
-  # baseline is a non-zero floor, which sizes the sample target at its clamp minimum.
-  local total=0
-  if [ -n "$tflag" ] && [ -s "$tflag" ]; then
-    while IFS= read -r d; do [ -n "$d" ] && { [ -z "$cutday" ] || [[ "$d" > "$cutday" ]]; } && cutday="$d"; done < "$tflag"
-  fi
-  [ -n "$tflag" ] && rm -f "$tflag"
   for (( i=0; i<window; i++ )); do
     day="$(date -u -d "-${i} days" +%Y-%m-%d 2>/dev/null || date -u -v"-${i}d" +%Y-%m-%d 2>/dev/null || echo "")"
-    [ -n "$cutday" ] && [[ "$day" < "$cutday" ]] && continue
-    count=$(grep -c "^${day}$" 2>/dev/null <<< "$dates" || true)
-    [ -n "$cutday" ] && [ "$day" = "$cutday" ] && [ "${count:-0}" -eq 0 ] && continue
-    total=$(( total + ${count:-0} ))
+    days+=("$day")
+  done
+  # A capped ingress read (see _ingress_agent_runs) leaves every day OLDER than that repo's first unread
+  # run's day unknown — NOT zero — and that boundary day itself only partly counted. Truncation is
+  # tracked PER REPO: a truncated member drops only its own older days, so a fully-read member's history
+  # still counts. The boundary day is kept only when it has observed runs (a lower bound, never a false
+  # zero). A day is dropped from the baseline only when NO member knows it. A truncated read must also
+  # never look like "no caller" (an all-zero baseline lets waive_sample_if_no_caller skip sampling in
+  # _pair_state), so if nothing countable was observed the baseline is a non-zero floor, which sizes the
+  # sample target at its clamp minimum.
+  for repo in "$@"; do
+    tflag="$(mktemp 2>/dev/null || true)"   # unwritable → the ingress cap stays strict (UNRESOLVED)
+    json="$(_CANARY_INGRESS_TRUNC_FLAG="$tflag" _agent_run_json "$agent" "$repo" "$since")"
+    cutday=""
+    if [ -n "$tflag" ] && [ -s "$tflag" ]; then
+      while IFS= read -r d; do [ -n "$d" ] && { [ -z "$cutday" ] || [[ "$d" > "$cutday" ]]; } && cutday="$d"; done < "$tflag"
+    fi
+    [ -n "$tflag" ] && rm -f "$tflag"
+    [ -n "$cutday" ] && any_trunc=1
+    rcount=()
+    while IFS= read -r d; do [ -n "$d" ] && rcount["$d"]=$(( ${rcount["$d"]:-0} + 1 )); done \
+      < <(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)
+    for day in "${days[@]}"; do
+      count="${rcount["$day"]:-0}"
+      if [ -n "$cutday" ]; then
+        [[ "$day" < "$cutday" ]] && continue
+        [ "$day" = "$cutday" ] && [ "$count" -eq 0 ] && continue
+      fi
+      dknown["$day"]=1
+      dsum["$day"]=$(( ${dsum["$day"]:-0} + count ))
+    done
+  done
+  for day in "${days[@]}"; do
+    # No truncated member → every day is known (zero-filled); otherwise only days some member knows.
+    if [ "$any_trunc" -eq 1 ] && [ "$#" -gt 0 ] && [ -z "${dknown["$day"]:-}" ]; then continue; fi
+    count="${dsum["$day"]:-0}"
+    total=$(( total + count ))
     out+="${count} "
   done
-  [ -n "$cutday" ] && [ "$total" -eq 0 ] && out="1 "
+  [ "$any_trunc" -eq 1 ] && [ "$total" -eq 0 ] && out="1 "
   echo "${out% }"
 }
 
@@ -1645,6 +1667,10 @@ _pair_state() {
   if [ -n "$uflag" ] && [ -s "$uflag" ]; then
     unresolved="$(cut -f1 "$uflag" | sort -u | paste -sd, - | sed 's/,/, /g')"
   elif [ -n "$uflag" ] && [ ! -e "$uflag" ]; then
+    unresolved="(unresolved-member evidence could not be persisted)"
+  elif [ -n "$uflag" ] && ! : >>"$uflag" 2>/dev/null; then
+    # Empty but no longer writable: a failed append whose cleanup also failed (read-only fs) would
+    # look clean here, so treat an unwritable flag as lost evidence.
     unresolved="(unresolved-member evidence could not be persisted)"
   fi
   if [ "$uflag_owned" -eq 1 ]; then
