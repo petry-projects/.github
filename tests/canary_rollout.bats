@@ -5273,8 +5273,8 @@ GITEOF
 #   org/nojobs    — `Agent Ingress` run 103 whose jobs list is empty (unattributable)
 # Every gh invocation is appended to $GH_LOG.
 _ingress_stub() {
-  # _frontier_state leaves a stable per-(agent,cand) UNRESOLVED flag in /tmp; clear it so tests are isolated.
-  rm -f /tmp/.canary-unresolved-*-cand.txt
+  # _frontier_state keeps its per-process UNRESOLVED flag under $TMPDIR; scope it to this test.
+  export TMPDIR="$BATS_TEST_TMPDIR"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   export GH_LOG="$BATS_TEST_TMPDIR/gh-ingress.log"; : > "$GH_LOG"
   cat > "$STUB_BIN/gh" <<'GHEOF'
@@ -5380,6 +5380,20 @@ GHEOF
   [[ "$output" == *"UNRESOLVED"* ]]
   [[ "$output" == *"org/collapsed"* ]]
   grep -q "^org/collapsed" "$flag"
+}
+
+@test "_agent_run_json: CANARY_INGRESS_JOBS_MAX caps newest-first job reads and flags the member UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _agent_run_json dev-lead org/collapsed '' 2>/dev/null | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  # Newest completed run is 104 (dev-lead skipped → no record); the cap then stops further reads.
+  [ "$output" = '[]' ]
+  grep -q "more than 1 ingress runs" "$flag"
+  grep -q "run view 104 " "$GH_LOG"
+  ! grep -q "run view 102 " "$GH_LOG"
+  ! grep -q "run view 101 " "$GH_LOG"
 }
 
 @test "_agent_run_json: an ingress run with NO jobs cannot be attributed → member reported UNRESOLVED (#1224)" {

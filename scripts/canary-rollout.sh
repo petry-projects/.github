@@ -651,6 +651,12 @@ _record_unresolved() {
   echo "::warning::canary: UNRESOLVED member $repo for '$agent' — $reason" >&2
 }
 
+# _unresolved_flag_path <agent> <cand> — per-process UNRESOLVED flag path, so concurrent
+# invocations for the same agent/candidate never truncate each other's evidence.
+_unresolved_flag_path() {
+  printf '%s/.canary-unresolved-%s-%s-%s.txt' "${TMPDIR:-/tmp}" "$$" "$1" "$2"
+}
+
 # _run_jobs_json <repo> <run_id> — `gh run view --json jobs` for one run, file-memoized under
 # $_RUNS_CACHE_DIR (an ingress run is shared by every collapsed role, so each run's jobs are read
 # once per sweep). Bounded retry; non-zero when the jobs stay unreadable.
@@ -666,12 +672,18 @@ _run_jobs_json() {
     cachef="$_RUNS_CACHE_DIR/${keyhash}.jobs.json"
     [ -s "$cachef" ] && { cat "$cachef"; return 0; }
   fi
+  local errf; errf="$(mktemp 2>/dev/null || echo /dev/null)"
   while :; do
-    if out="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" && jq -e '.jobs|type=="array"' >/dev/null 2>&1 <<< "$out"; then
+    if out="$(gh run view "$id" --repo "$repo" --json jobs 2>"$errf")" && jq -e '.jobs|type=="array"' >/dev/null 2>&1 <<< "$out"; then
+      [ "$errf" != /dev/null ] && rm -f "$errf"
       [ -n "$cachef" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
       printf '%s\n' "$out"; return 0
     fi
-    [ "$attempt" -ge "$attempts" ] && return 1
+    # A run deleted/expired since `gh run list` is permanent — fail fast, don't burn the backoff.
+    if grep -qiE 'could not find (any )?(workflow )?run|HTTP 404|not found' "$errf" 2>/dev/null; then
+      [ "$errf" != /dev/null ] && rm -f "$errf"; return 1
+    fi
+    if [ "$attempt" -ge "$attempts" ]; then [ "$errf" != /dev/null ] && rm -f "$errf"; return 1; fi
     # Same policy as the run-list path: exponential backoff with full jitter in [base, 30s].
     expo=$((attempt - 1)); [ "$expo" -gt 20 ] && expo=20
     delay=$(( base << expo )); span=$(( delay - base )); [ "$span" -lt 0 ] && span=0
@@ -1273,9 +1285,10 @@ _pair_state() {
   # run reads below happen in subshells. A caller may pre-arm it (sync-issues evidence).
   local uflag="${_CANARY_UNRESOLVED_FLAG:-}" uflag_owned=0
   if [ -z "$uflag" ]; then
-    # Use a stable temp path so _unresolved_evidence can reuse the same flag (avoid re-evaluating #1224)
-    uflag="/tmp/.canary-unresolved-${agent}-${cand}.txt"; uflag_owned=1
-    : >"$uflag" 2>/dev/null && [ -n "$uflag" ] && export _CANARY_UNRESOLVED_FLAG="$uflag"
+    # Per-process path (never shared across concurrent invocations) so _unresolved_evidence in
+    # this same process can reuse the flag instead of re-walking the runs (#1224).
+    uflag="$(_unresolved_flag_path "$agent" "$cand")"; uflag_owned=1
+    : >"$uflag" 2>/dev/null && export _CANARY_UNRESOLVED_FLAG="$uflag"
   fi
 
   # Source-tier repos (the tier currently running the candidate).
@@ -1466,7 +1479,8 @@ _pair_state() {
     unresolved="$(cut -f1 "$uflag" | sort -u | paste -sd, - | sed 's/,/, /g')"
   fi
   if [ "$uflag_owned" -eq 1 ]; then
-    # Keep the flag at stable path for _unresolved_evidence to reuse (#1224 race condition fix)
+    # Keep a non-empty flag for _unresolved_evidence to reuse (it deletes it); drop an empty one.
+    [ -n "$unresolved" ] || rm -f "$uflag"
     unset _CANARY_UNRESOLVED_FLAG
   fi
   if [ -n "$unresolved" ]; then
@@ -1876,11 +1890,13 @@ _blocker_evidence() {
 # runs could not be attributed (#1224), with the reason. Re-walks the same per-candidate window
 # and tier repos as _blocker_evidence under a fresh UNRESOLVED flag.
 _unresolved_evidence() {
-  local agent="$1" cand="$2" flag repo reason out="" flag_is_persistent=0
-  # Try to reuse the pre-evaluated flag from _frontier_state to avoid race condition (#1224)
-  flag="/tmp/.canary-unresolved-${agent}-${cand}.txt"
+  local agent="$1" cand="$2" flag repo reason out="" flag_is_persistent=0 reuse=0
+  # Reuse the flag left by _frontier_state (a caller's pre-armed flag first) to avoid re-walking (#1224)
+  flag="${_CANARY_UNRESOLVED_FLAG:-$(_unresolved_flag_path "$agent" "$cand")}"
   if [ -s "$flag" ]; then
     flag_is_persistent=1
+    # A caller-armed flag belongs to the caller; only delete our own per-process one.
+    [ -z "${_CANARY_UNRESOLVED_FLAG:-}" ] && reuse=1
   else
     # Flag not found or empty, create a new one and re-evaluate
     flag="$(mktemp 2>/dev/null || echo "")"
@@ -1890,7 +1906,7 @@ _unresolved_evidence() {
   while IFS=$'\t' read -r repo reason; do
     [ -n "$repo" ] && out+="- \`$repo\` — $reason"$'\n'
   done < <(sort -u "$flag")
-  [ "$flag_is_persistent" -eq 0 ] && rm -f "$flag"
+  if [ "$flag_is_persistent" -eq 0 ] || [ "$reuse" -eq 1 ]; then rm -f "$flag"; fi
   [ -z "$out" ] && out="_(no unresolved member on re-check — the gate should clear next tick)_"$'\n'
   printf '%s' "$out"
 }
