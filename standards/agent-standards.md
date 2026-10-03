@@ -114,6 +114,44 @@ The AgentShield action adds the agent-specific security layer on top.
 See [AGENTS.md § Decision Logic Lives in a Pure, Tested Script](../AGENTS.md#decision-logic-lives-in-a-pure-tested-script)
 for the full standard, exemplars, and rationale.
 
+## Model selection
+
+Agent code names a **model family**, never a pinned version ID. A caller MAY
+suggest the family best suited to the task — **`opus`**, **`sonnet`**, or
+**`haiku`** — but MUST NOT hard-code a specific version ID such as
+`claude-opus-4-6`. A single resolver/CLI maps a family to the current model ID,
+and version changes roll out centrally through the normal release channels — so
+moving the whole fleet to a newer model is one change in the resolver, not a
+find-and-replace of pinned IDs across every workflow, script, and prompt.
+
+**Why family, not version.** A hard-coded version ID is drift waiting to happen:
+every place that names `claude-opus-4-6` must be found and edited on each model
+bump, migrations land unevenly, and a stale ID silently pins a repo to an
+outdated model. Naming the family defers the ID to the one resolver, so the
+version lives in exactly one place and is promoted like any other release.
+
+### Allowed exceptions — each needs an audit marker
+
+A literal version ID is permitted **only** in these four cases, and each
+occurrence MUST carry an audit marker so the pin is auditable and intentional:
+
+| # | Exception | Why a real ID is required | Audit marker |
+|---|-----------|---------------------------|--------------|
+| a | **The resolver itself** | It is the one place that maps family → current ID, so it must name the IDs. | Inline `# model-pin-ok: <reason>` |
+| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. | Inline `# model-pin-ok: <reason>` for comment-supporting formats; metadata field or sidecar file for formats that don't support comments (e.g. a JSON price table). |
+| c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the ID that produced it; rewriting it would falsify the record. | Inline `# model-pin-ok: <reason>` for comment-supporting formats; metadata field or sidecar file for formats that don't support comments. |
+| d | **A fixed eval judge** | The judge must stay pinned so A/B results stay comparable across runs. | Inline `# model-pin-ok: <reason>` |
+
+Anything outside these four names a family and lets the resolver supply the ID.
+
+### Operator override
+
+An **operator-supplied full model ID** — a workflow input or an Actions variable
+set by a human operator — is an operator choice and stays allowed; it is not a
+code default. The rule constrains **defaults in code**: those MUST name a family.
+An operator MAY still pass a concrete ID to override for a one-off experiment or
+pin, without that ID ever becoming the hard-coded default.
+
 ## BMAD Method Workflows
 
 Repositories with BMAD Method installed (presence of `_bmad/`, `_bmad-output/`,
@@ -123,6 +161,6 @@ the market and produce evidence-grounded feature proposals as GitHub Discussions
 
 See [CI Standards §8 — Feature Ideation](ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos)
 for the full standard, including the multi-skill ideation pipeline and the
-critical configuration gotchas (Opus 4.6 model selection, GitHub token override,
-log-secret hygiene). The template is at
+critical configuration gotchas (Opus-family [model selection](#model-selection),
+GitHub token override, log-secret hygiene). The template is at
 [`standards/workflows/feature-ideation.yml`](workflows/feature-ideation.yml).
