@@ -798,6 +798,7 @@ _ingress_agent_runs() {
   # older one, rather than blocking a busy collapsed repo forever. Gating windows stay strict.
   local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc
   case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
+  [ "$jobs_max" -lt 1 ] && jobs_max=300
   while IFS=$'\t' read -r id created rconc; do
     [ -z "$id" ] && continue
     if [ "$nread" -ge "$jobs_max" ]; then
@@ -1184,18 +1185,26 @@ _baseline_daily() {
     json="$(_CANARY_INGRESS_TRUNC_FLAG="$tflag" _agent_run_json "$agent" "$repo" "$since")"
     dates+="$(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)"$'\n'
   done
-  # A capped ingress read (see _ingress_agent_runs) leaves everything at/before its first unread run's
-  # day unknown — NOT zero. Cover only the days strictly newer than the newest such boundary.
+  # A capped ingress read (see _ingress_agent_runs) leaves every day OLDER than its first unread run's
+  # day unknown — NOT zero — and that boundary day itself only partly counted. Drop the older days;
+  # keep the boundary day only when it has observed runs (its partial count is a lower bound, never a
+  # false zero). A truncated read must also never look like "no caller" (an all-zero baseline lets
+  # waive_sample_if_no_caller skip sampling in _pair_state), so if nothing countable was observed the
+  # baseline is a non-zero floor, which sizes the sample target at its clamp minimum.
+  local total=0
   if [ -n "$tflag" ] && [ -s "$tflag" ]; then
     while IFS= read -r d; do [ -n "$d" ] && { [ -z "$cutday" ] || [[ "$d" > "$cutday" ]]; } && cutday="$d"; done < "$tflag"
   fi
   [ -n "$tflag" ] && rm -f "$tflag"
   for (( i=0; i<window; i++ )); do
     day="$(date -u -d "-${i} days" +%Y-%m-%d 2>/dev/null || date -u -v"-${i}d" +%Y-%m-%d 2>/dev/null || echo "")"
-    [ -n "$cutday" ] && [[ ! "$day" > "$cutday" ]] && continue
+    [ -n "$cutday" ] && [[ "$day" < "$cutday" ]] && continue
     count=$(grep -c "^${day}$" 2>/dev/null <<< "$dates" || true)
+    [ -n "$cutday" ] && [ "$day" = "$cutday" ] && [ "${count:-0}" -eq 0 ] && continue
+    total=$(( total + ${count:-0} ))
     out+="${count} "
   done
+  [ -n "$cutday" ] && [ "$total" -eq 0 ] && out="1 "
   echo "${out% }"
 }
 

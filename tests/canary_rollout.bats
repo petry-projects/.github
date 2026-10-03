@@ -5469,6 +5469,13 @@ case "$1 $2" in
                {"conclusion":null,"createdAt":"2026-01-02T03:00:00Z","databaseId":105,"workflowName":"Agent Ingress"}]' ;;
       "org/nojobs|Agent Ingress")
         echo '[{"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":103,"workflowName":"Agent Ingress"}]' ;;
+      "org/skipbusy|Agent Ingress")
+        # Three runs today in which the dev-lead role job was SKIPPED (other roles' events fired the
+        # shared ingress); the cap leaves the newest-but-one unread, so nothing countable is observed.
+        t="$(date -u +%Y-%m-%d)"
+        echo "[{\"conclusion\":\"success\",\"createdAt\":\"${t}T10:00:00Z\",\"databaseId\":321,\"workflowName\":\"Agent Ingress\"},
+               {\"conclusion\":\"success\",\"createdAt\":\"${t}T09:00:00Z\",\"databaseId\":320,\"workflowName\":\"Agent Ingress\"},
+               {\"conclusion\":\"success\",\"createdAt\":\"${t}T08:00:00Z\",\"databaseId\":319,\"workflowName\":\"Agent Ingress\"}]" ;;
       "org/busy|Agent Ingress")
         # Three attributable runs: two today, one yesterday (newest first once sorted by createdAt).
         t="$(date -u +%Y-%m-%d)"; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
@@ -5486,6 +5493,7 @@ case "$1 $2" in
     [ -n "${STUB_JOBS_FAIL:-}" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     case "$3" in
       30[123]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]}]}' ;;
+      32[01]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"skipped","steps":[]},{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
       101) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]},
                           {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
                           {"name":"ci-failure-analyst","conclusion":"skipped","steps":[]}]}' ;;
@@ -5587,6 +5595,29 @@ GHEOF
     bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/busy 2>/dev/null"
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_baseline_daily: more runs on the NEWEST day than the cap keeps that day's partial count, never an empty baseline (#1224 liveness)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # Cap of 1: only run 303 (today) is read; the first unread run (302) is also today, so today is the
+  # boundary day. Its partial count (1) is a lower bound and must be kept — dropping it would leave an
+  # empty baseline that waive_sample_if_no_caller reads as "no caller".
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/busy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_baseline_daily: a truncated read that observed NOTHING countable is a non-zero floor, never 'no caller' (#1224 liveness)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=2 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/skipbusy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
   [ ! -s "$flag" ]
 }
 
