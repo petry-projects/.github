@@ -2409,19 +2409,12 @@ _frontier_state_resilient() {
       if [ "$(pair_verdict "${cand:--}" "$prev_unknown" "${dstc:--}" "$ch_unknown")" != "ON_CANDIDATE" ]; then
         transition="${prev}->${ch}"
         prior="$dstc"
-        if [ -z "$cand" ]; then
-          # Unresolvable (empty) src commit: whether the candidate changed the reusable is
-          # indeterminate (a tag gap), so do not claim REGRESSION nor PRE_EXISTING — leave the triage
-          # blank ("-", as the HOLD_UNKNOWN row does). The pair is still tracked BLOCKED (fail closed).
-          triage="-"
-        else
-          differs="$(_reusable_differs "$agent" "$cand" "$prior")"
-          # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
-          # (fail closed — a changed reusable with UNREADABLE health is a suspected regression that
-          # needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot be a
-          # candidate regression). Either verdict still tracks the pair as BLOCKED.
-          triage="$(classify_failure "$differs" unknown 0)"
-        fi
+        differs="$(_reusable_differs "$agent" "$cand" "$prior")"
+        # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
+        # (fail closed — a changed reusable with UNREADABLE health is a suspected regression that
+        # needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot be a
+        # candidate regression). Either verdict still tracks the pair as BLOCKED.
+        triage="$(classify_failure "$differs" unknown 0)"
         echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 $triage - - 0 0 0 0 1"
         emitted=1
       fi

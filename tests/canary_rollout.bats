@@ -3371,6 +3371,18 @@ _sync_gap_stub() {
   [[ "$output" == "ccccccc ring0 next->ring0 BLOCKED 0 4 0 3 2 0 0 REGRESSION - - 0 0 0 0 0" ]]
 }
 
+@test "orchestrator: _frontier_state_resilient keeps an unresolvable (empty) src commit tracked BLOCKED with triage PRE_EXISTING — unchanged by the pair_verdict refactor (#1242)" {
+  # A run-history fetch failure (data gap) makes the fallback walk the rings itself. ring0 has no tag but ring1 does:
+  # the pair is still pending (never vanishes), and with no resolvable candidate the reusable cannot
+  # differ, so classify_failure reads it as PRE_EXISTING — exactly as before the refactor.
+  run bash -c "source '$ORCH'; _frontier_state() { echo org/x >> \"\$_CANARY_FETCH_FAIL_FLAG\"; return 1; }
+    ordered_channels() { echo 'next,ring0,ring1'; }
+    _ring_commits() { printf 'next - 0\nring0 - 0\nring1 abc1234 0\n'; }
+    _frontier_state_resilient dev-lead 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *" ring1 ring0->ring1 BLOCKED "*" PRE_EXISTING "* ]]
+}
+
 @test "orchestrator: _frontier_state_resilient fails CLOSED (non-zero) on a TOTAL inability to determine state (#820)" {
   # _frontier_state aborts to empty AND the candidate/frontier cannot be re-resolved from tags:
   # a total inability must stay a HARD ERROR (non-zero), never a green no-op.

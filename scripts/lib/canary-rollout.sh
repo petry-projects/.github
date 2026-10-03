@@ -455,9 +455,9 @@ transition_key() {
 #                         skipped (#1118).
 pair_verdict() {
   local src="${1:--}" su="${2:-0}" dst="${3:--}" du="${4:-0}"
-  if [ "$su" != "0" ] || [ "$du" != "0" ]; then echo "HOLD_UNKNOWN"; return 0; fi
-  if [ "$src" = "$dst" ]; then echo "ON_CANDIDATE"; return 0; fi
-  if [ "$src" = "-" ]; then echo "UNRESOLVABLE_SOURCE"; return 0; fi
+  if [[ "$su" != "0" || "$du" != "0" ]]; then echo "HOLD_UNKNOWN"; return 0; fi
+  if [[ "$src" = "$dst" ]]; then echo "ON_CANDIDATE"; return 0; fi
+  if [[ "$src" = "-" ]]; then echo "UNRESOLVABLE_SOURCE"; return 0; fi
   echo "PENDING"
 }
 
