@@ -43,16 +43,21 @@ set -euo pipefail
 if [ -n "${GH_STUB_LOG:-}" ]; then printf '%q ' "$@" >>"$GH_STUB_LOG"; printf '\n' >>"$GH_STUB_LOG"; fi
 if [ "${1:-} ${2:-}" = "run list" ]; then
   shift 2
-  repo="_local" wf=""
+  repo="_local" wf="" st=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) repo="$2"; shift 2 ;;
       --workflow|-w) wf="$2"; shift 2 ;;
+      --status) st="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
   key="${repo//\//_}__${wf}"
-  if [ -f "$GH_FIX/runs/$key.json" ]; then cat "$GH_FIX/runs/$key.json"; exit 0; fi
+  if [ -f "$GH_FIX/runs/$key.json" ]; then
+    if [ -n "$st" ]; then jq -c --arg s "$st" 'map(select(.status == $s))' "$GH_FIX/runs/$key.json"; else cat "$GH_FIX/runs/$key.json"; fi
+    exit 0
+  fi
+  if [ -f "$GH_FIX/runs/$key.forbidden" ]; then echo "HTTP 404: Not Found (https://api.github.com/repos/o/r)" >&2; exit 1; fi
   if [ -f "$GH_FIX/runs/$key.transient" ]; then echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1; fi
   echo "could not find any workflows named ${wf}" >&2
   exit 1
@@ -246,13 +251,68 @@ seed_collapsed() {
   [ "$output" = "5" ]
 }
 
-@test "concurrency: an unresolved repo in AGENT_RATE_LIMITS_ORG_REPOS makes the tally unresolved" {
+@test "concurrency: an unresolved OTHER org repo counts 0 with a warning (no org-wide wedge)" {
   runs_fixture _local dev-lead '[{"status":"in_progress"}]'
   export AGENT_RATE_LIMITS_ORG_REPOS="petry-projects/ghost"
   run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+  [[ "$stderr" == *"petry-projects/ghost"* ]]
+}
+
+@test "concurrency: the gated (current) repo unresolved still fails closed even with healthy org repos" {
+  seed_collapsed petry-projects/markets
+  export AGENT_RATE_LIMITS_ORG_REPOS="petry-projects/markets"
+  run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
   [ "$status" -eq 3 ]
   [ "$output" = "unresolved" ]
-  [[ "$stderr" == *"petry-projects/ghost"* ]]
+}
+
+@test "concurrency: a permission-caused bare 404 on a private org repo is transient, not permanently missing" {
+  runs_fixture _local dev-lead '[{"status":"in_progress"}]'
+  : >"$GH_FIX/runs/petry-projects_private__dev-lead.forbidden"
+  : >"$GH_FIX/runs/petry-projects_private__agent-ingress.yml.forbidden"
+  export AGENT_RATE_LIMITS_ORG_REPOS="petry-projects/private"
+  run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+  [[ "$stderr" == *"returned no data"* ]]
+}
+
+@test "resolve: inflight_only uses status-filtered listing and reads jobs only for in-flight runs of a large history" {
+  local i runs="[" n=0
+  for i in $(seq 1 300); do
+    runs+="{\"databaseId\":$((2000 + i)),\"status\":\"completed\",\"conclusion\":\"success\",\"createdAt\":\"2026-10-02T10:00:00Z\"},"
+  done
+  runs+='{"databaseId":9001,"status":"in_progress","conclusion":"","createdAt":"2026-10-02T11:00:00Z"},{"databaseId":9002,"status":"queued","conclusion":"","createdAt":"2026-10-02T11:01:00Z"}]'
+  runs_fixture _local agent-ingress.yml "$runs"
+  jobs_fixture 9001 '[{"name":"dev-lead","status":"in_progress","conclusion":null}]'
+  jobs_fixture 9002 '[{"name":"dev-lead","status":"queued","conclusion":null}]'
+  run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+  n="$(grep -c '/jobs' "$GH_STUB_LOG" || true)"
+  [ "$n" -eq 2 ]
+  grep -q -- '--status queued' "$GH_STUB_LOG"
+  grep -q -- '--status in_progress' "$GH_STUB_LOG"
+}
+
+@test "resolve: history path caps total jobs reads and degrades loudly" {
+  local i runs="[" n=0
+  for i in $(seq 1 120); do
+    runs+="{\"databaseId\":$((3000 + i)),\"status\":\"completed\",\"conclusion\":\"success\",\"createdAt\":\"2026-10-02T10:00:00Z\"},"
+    jobs_fixture $((3000 + i)) '[{"name":"pr-review-mention","status":"completed","conclusion":"success"}]'
+  done
+  runs_fixture _local agent-ingress.yml "${runs%,}]"
+  printf 'jobs:\n  dev-lead:\n    uses: x\n' | base64 -w 0 >"$GH_FIX/ingress.b64"
+  export AGENT_INGRESS_MAX_JOBS_READS=25
+  # A rare role (never present): without a cap this would scan all 120 runs.
+  run --separate-stderr timeout 60 bash -c 'source "$1"; arl_resolve_agent_runs agent-ingress.yml dev-lead "" 10' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  n="$(grep -c '/jobs' "$GH_STUB_LOG" || true)"
+  [ "$n" -le 25 ]
+  [[ "$stderr" == *"jobs-read cap"* ]]
 }
 
 @test "concurrency: a transient repo in AGENT_RATE_LIMITS_ORG_REPOS degrades only that repo" {

@@ -43,20 +43,32 @@ agent_ingress_is_ingress_workflow() {
 }
 
 # agent_ingress_has_role_job <role> — read a workflow YAML on stdin; 0 iff it
-# declares a `jobs.<role>:` key, i.e. the ingress serves <role>. Only a key at
-# job indentation (2 spaces) directly under the top-level `jobs:` counts — a
-# same-named key elsewhere, a deeper-nested key, a comment, or a role-name prefix
-# (`dev-lead-ci:`) never does. CRLF-tolerant.
+# declares a `jobs.<role>:` key, i.e. the ingress serves <role>. The job-key
+# indentation is whatever the first entry under the top-level `jobs:` uses (any
+# consistent space indent), and the key may be bare, "double-quoted" or
+# 'single-quoted'. Only a key at exactly that indentation counts — a same-named key
+# elsewhere, a deeper-nested key, a comment, or a role-name prefix (`dev-lead-ci:`)
+# never does. CRLF-tolerant.
 agent_ingress_has_role_job() {
   local role="${1:-}"
   [ -n "$role" ] || return 1
   awk -v role="$role" '
-    BEGIN { injobs = 0; found = 0 }
+    BEGIN { injobs = 0; found = 0; indent = -1 }
     { sub(/\r$/, "") }
-    /^[^ \t#]/ { injobs = ($0 ~ /^jobs:[ \t]*(#.*)?$/); next }
-    injobs && index($0, "  " role ":") == 1 {
-      rest = substr($0, length(role) + 4)
-      if (rest ~ /^[ \t]*(#.*)?$/ || rest ~ /^[ \t]/) { found = 1; exit }
+    /^[^ \t#]/ { injobs = ($0 ~ /^jobs:[ \t]*(#.*)?$/); indent = -1; next }
+    injobs && /^ +[^ #]/ {
+      n = match($0, /[^ ]/) - 1
+      if (indent < 0) indent = n
+      if (n != indent) next
+      key = substr($0, n + 1)
+      for (q = 0; q < 3; q++) {
+        pre = (q == 1) ? "\"" : (q == 2) ? "\047" : ""
+        want = pre role pre ":"
+        if (index(key, want) == 1) {
+          rest = substr(key, length(want) + 1)
+          if (rest ~ /^[ \t]*(#.*)?$/ || rest ~ /^[ \t]/) { found = 1; exit }
+        }
+      }
     }
     END { exit(found ? 0 : 1) }
   '

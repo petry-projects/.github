@@ -434,17 +434,18 @@ arl_state_field() {
 }
 
 # ---------------------------------------------------------------------------
-# _arl_gh_run_list <workflow> <repo> <limit> — one `gh run list` read. Echoes the
+# _arl_gh_run_list <workflow> <repo> <limit> [status] — one `gh run list` read. Echoes the
 # runs JSON array (databaseId,status,conclusion,createdAt) and returns 0; returns
 # 1 on a TRANSIENT failure (5xx, network, empty/malformed payload) and 3 when the
 # workflow PERMANENTLY does not exist (agent_ingress_gh_error_kind), so the two
 # are never conflated. An empty <repo> reads the current repository.
 # ---------------------------------------------------------------------------
 _arl_gh_run_list() {
-  local workflow="$1" repo="$2" limit="$3" out err errfile rc=0
+  local workflow="$1" repo="$2" limit="$3" status="${4:-}" out err errfile rc=0
   local json_fields="databaseId,status,conclusion,createdAt"
   local -a args=(run list --workflow "$workflow" --json "$json_fields" --limit "$limit")
   [ -n "$repo" ] && args+=(--repo "$repo")
+  [ -n "$status" ] && args+=(--status "$status")
   errfile="$(mktemp)"
   out="$(gh "${args[@]}" 2>"$errfile")" || rc=$?
   err="$(cat "$errfile" 2>/dev/null || true)"
@@ -491,18 +492,22 @@ arl_resolve_agent_runs() {
     rc=0
   fi
 
-  # Paginate ingress history until we have at least $limit role-specific runs.
-  # In a busy repo, other roles can fill the initial $limit ingress runs, so we
-  # must continue fetching until we have the requested number of role runs or
-  # exhaust the history (#1226). Use doubled limits to amortize pagination across
-  # multi-role repos while still detecting end-of-history (batch < fetch_limit).
-  local api_repo="${repo:-"{owner}/{repo}"}" records="" role_runs="" final_runs=""
-  local batch_rc=0 filter id status created jobs_out
-  local batch_count role_count fetch_limit="$limit" skipped_runs=0
+  # History path: paginate ingress history until we have at least $limit
+  # role-specific runs (other roles can fill the first $limit ingress runs, #1226),
+  # doubling the fetch window and detecting end-of-history (batch < fetch_limit).
+  # inflight_only path: only queued/in_progress runs can matter, so list them with
+  # a server-side status filter and never page history.
+  # Every jobs read costs one API call, so total reads are hard-capped
+  # (AGENT_INGRESS_MAX_JOBS_READS, default 200): the throttle must not exhaust the
+  # API it guards. Hitting the cap degrades LOUDLY to the runs resolved so far.
+  local api_repo="${repo:-"{owner}/{repo}"}" records="" seen=" " role_runs="" page_runs
+  local batch_rc batch_count role_count fetch_limit="$limit" skipped_runs=0
+  local jobs_reads=0 cap_hit=false jobs_cap
+  jobs_cap="$(arl_sanitize_int "${AGENT_INGRESS_MAX_JOBS_READS:-200}" 200)"
 
   while :; do
-    local page_runs
-    page_runs="$(_arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$fetch_limit")" || batch_rc=$?
+    batch_rc=0
+    page_runs="$(_arl_fetch_ingress_page "$repo" "$fetch_limit" "$inflight_only")" || batch_rc=$?
     case "$batch_rc" in
       0) ;;
       1)
@@ -512,41 +517,24 @@ arl_resolve_agent_runs() {
         return 1
         ;;
       *)
-        if [ -n "$records" ]; then
-          break
+        if [ -z "$records" ]; then
+          arl_log "UNRESOLVED: neither workflow '${workflow}' nor ${AGENT_INGRESS_WORKFLOW} exists in ${where} — '${role}' runs cannot be counted (refusing to read this as zero)"
+          printf '[]'
+          return 3
         fi
-        arl_log "UNRESOLVED: neither workflow '${workflow}' nor ${AGENT_INGRESS_WORKFLOW} exists in ${where} — '${role}' runs cannot be counted (refusing to read this as zero)"
-        printf '[]'
-        return 3
+        page_runs='[]'
         ;;
     esac
 
-    filter='.'
-    [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
-
-    while IFS=$'\t' read -r id status created; do
-      [[ "$id" =~ ^[0-9]+$ ]] || continue
-      # Skip if already processed (avoid redundant API calls on re-fetch).
-      if printf '%s' "$records" | grep -q '"databaseId":'$id','; then
-        continue
-      fi
-      jobs_out="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
-        | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
-      if [ -z "$jobs_out" ]; then
-        arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
-        skipped_runs=$(( skipped_runs + 1 ))
-        continue
-      fi
-      records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs_out" \
-        '{databaseId: $id, status: $s, createdAt: $c, jobs: $jobs}')"$'\n'
-    done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
-      <<<"$page_runs" 2>/dev/null || true)
+    _arl_ingest_ingress_runs
 
     role_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
     role_count="$(jq -r 'length' <<<"$role_runs" 2>/dev/null || printf '0')"
     batch_count="$(jq -r 'length' <<<"$page_runs" 2>/dev/null || printf '0')"
 
-    if [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$fetch_limit" ]; then
+    if [ "$inflight_only" = "true" ] || [ "$cap_hit" = "true" ] \
+      || [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$fetch_limit" ]; then
+      [ "$skipped_runs" -gt 0 ] && arl_log "warning: ${skipped_runs} ${AGENT_INGRESS_WORKFLOW} run(s) in ${where} had unreadable jobs and were NOT counted (degraded)"
       # Every jobs read failed: nothing was resolved, so this is a transient
       # no-data outcome (degrades to 0), not a resolved-empty history.
       if [ -z "$records" ] && [ "$skipped_runs" -gt 0 ]; then
@@ -563,13 +551,57 @@ arl_resolve_agent_runs() {
 
     fetch_limit=$(( fetch_limit * 2 ))
   done
+}
 
-  final_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
-  printf '%s' "$final_runs"
-  if [ "$final_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
-    return 3
+# _arl_fetch_ingress_page <repo> <limit> <inflight_only> — one read of ingress
+# runs. History: a single `gh run list`. inflight_only: the union of the
+# server-side `queued` and `in_progress` listings. Same return codes as
+# _arl_gh_run_list (0 ok / 1 transient / 3 permanently missing).
+_arl_fetch_ingress_page() {
+  local repo="$1" limit="$2" inflight_only="$3" st out rc acc="[]"
+  if [ "$inflight_only" != "true" ]; then
+    _arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$limit"
+    return $?
   fi
-  return 0
+  for st in queued in_progress; do
+    rc=0
+    out="$(_arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$limit" "$st")" || rc=$?
+    [ "$rc" -ne 0 ] && return "$rc"
+    acc="$(jq -sc 'add' <<<"${acc}${out}")"
+  done
+  printf '%s' "$acc"
+}
+
+# _arl_ingest_ingress_runs — read the jobs of each run in $page_runs into
+# $records. Runs inside arl_resolve_agent_runs and deliberately works on ITS locals
+# (page_runs, inflight_only, records, seen, jobs_reads, jobs_cap, cap_hit,
+# skipped_runs, api_repo, where) via bash dynamic scoping. Runs are deduped by
+# numeric id (re-fetches on a doubled window repeat earlier runs); reads stop at the
+# cap.
+_arl_ingest_ingress_runs() {
+  local id status created jobs_out filter='.'
+  [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
+  while IFS=$'\t' read -r id status created; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    case "$seen" in *" ${id} "*) continue ;; esac
+    seen+="${id} "
+    if [ "$jobs_reads" -ge "$jobs_cap" ]; then
+      cap_hit=true
+      arl_log "warning: ${AGENT_INGRESS_WORKFLOW} jobs-read cap (${jobs_cap}, AGENT_INGRESS_MAX_JOBS_READS) hit in ${where} — history is TRUNCATED, '${role}' runs beyond it are not counted (degraded)"
+      break
+    fi
+    jobs_reads=$(( jobs_reads + 1 ))
+    jobs_out="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
+      | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
+    if [ -z "$jobs_out" ]; then
+      arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
+      skipped_runs=$(( skipped_runs + 1 ))
+      continue
+    fi
+    records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs_out" \
+      '{databaseId: $id, status: $s, createdAt: $c, jobs: $jobs}')"$'\n'
+  done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
+    <<<"$page_runs" 2>/dev/null || true)
 }
 
 # _arl_ingress_declares_role <role> <api_repo> — 0 unless the repo's
@@ -595,8 +627,10 @@ _arl_ingress_declares_role() {
 #
 # Fail-safe: a TRANSIENT `gh` failure or empty payload logs and contributes 0, so
 # an API blip degrades to allow rather than wedging dispatch. A PERMANENT absence
-# (no workflow and no ingress) in ANY tallied repo is different: it echoes
-# `unresolved` and returns 3 — never a silent 0 that disables throttling.
+# (no workflow and no ingress) in the repo BEING GATED (the current repo) is
+# different: it echoes `unresolved` and returns 3 — never a silent 0 that disables
+# throttling. In any other tallied org repo the same condition counts 0 with a
+# warning (a repo that never enabled the agent must not defer it everywhere).
 #
 # NOTE: `gh run list` scopes to the current repository by default, so this
 # count cannot enforce org-wide concurrent limits on its own. Set
@@ -633,7 +667,11 @@ arl_count_concurrent_runs() {
         arl_log "warning: run enumeration for '${agent_type}'${repo:+ in ${repo}} returned no data (treating concurrency as 0)"
         ;;
       *)
-        unresolved+=" ${repo:-<current repo>}"
+        if [ -z "$repo" ]; then
+          unresolved+=" <current repo>"
+        else
+          arl_log "warning: '${agent_type}' runs in ${repo} are unresolved (no workflow / ingress role job) — counting 0 for that repo"
+        fi
         ;;
     esac
   done

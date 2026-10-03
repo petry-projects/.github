@@ -197,6 +197,36 @@ has_role_job() {  # <role> <yaml>
   [ "$status" -ne 0 ]
 }
 
+@test "agent_ingress_has_role_job: accepts a consistent 4-space job indent" {
+  has_role_job dev-lead $'jobs:\n    pr-review-mention:\n        uses: a\n    dev-lead:\n        uses: b\n'
+  [ "$status" -eq 0 ]
+}
+
+@test "agent_ingress_has_role_job: does not match a nested key at a deeper indent than the job keys" {
+  has_role_job dev-lead $'jobs:\n    other:\n        dev-lead:\n            a: b\n'
+  [ "$status" -ne 0 ]
+}
+
+@test "agent_ingress_has_role_job: accepts double- and single-quoted job keys" {
+  has_role_job dev-lead $'jobs:\n  "dev-lead":\n    uses: b\n'
+  [ "$status" -eq 0 ]
+  has_role_job dev-lead $'jobs:\n  \'dev-lead\':   # c\n    uses: b\n'
+  [ "$status" -eq 0 ]
+}
+
+@test "agent_ingress_has_role_job: skips leading comments/blank lines under jobs:" {
+  has_role_job dev-lead $'jobs:\n\n  # roles\n  dev-lead:\n    uses: b\n'
+  [ "$status" -eq 0 ]
+}
+
+@test "agent-ingress.yml must never appear in DEPLOYABLE_WORKFLOWS (forward trap)" {
+  local script="$BATS_TEST_DIRNAME/../../../scripts/deploy-standard-workflows.sh" block
+  block="$(sed -n '/^DEPLOYABLE_WORKFLOWS=(/,/^)/p' "$script")"
+  [ -n "$block" ]
+  run grep -F "agent-ingress" <<<"$block"
+  [ "$status" -ne 0 ]
+}
+
 @test "agent_ingress_role_for_workflow: strips the directory and .yml/.yaml suffix" {
   run bash -c 'source "$1"; agent_ingress_role_for_workflow dev-lead.yml; agent_ingress_role_for_workflow .github/workflows/pr-auto-review.yaml; agent_ingress_role_for_workflow dev-lead' _ "$INGRESS_LIB"
   [ "$status" -eq 0 ]
