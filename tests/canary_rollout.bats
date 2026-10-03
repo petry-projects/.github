@@ -5702,7 +5702,6 @@ _ingress_frontier() {
   read -r _c frontier transition state _d _f _s _t _cf _cs _cb triage _rest <<< "$line"
   [ "$state" = "BLOCKED" ]
   [ "$triage" = "UNRESOLVED" ]
-  rm -f /tmp/.canary-unresolved-*-cand.txt
 }
 
 @test "_blocker_body: UNRESOLVED triage explains the blind member, not a cut-date indeterminate (#1224)" {
