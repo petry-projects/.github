@@ -36,7 +36,9 @@ FAKE
 
 # Fake `gh` mirroring the deploy script's own tests: contents API 404s when
 # GH_CONTENT_B64 is unset (stub missing → drift) and returns it as the file body
-# when set (stub present → compliant). `gh repo list` echoes $GH_REPO_LIST.
+# when set (stub present → compliant). The one exception is agent-ingress.yml,
+# which ALWAYS 404s regardless of GH_CONTENT_B64 (repo is not ADR-0007 collapsed,
+# #1226). `gh repo list` echoes $GH_REPO_LIST.
 install_gh_stub() {
   local bin="${TT_TMP}/bin"
   mkdir -p "$bin"
@@ -49,6 +51,8 @@ if [ "${1:-}" = "repo" ] && [ "${2:-}" = "list" ]; then
 fi
 if [ "${1:-}" = "api" ]; then
   case "$2" in
+    *contents/.github/workflows/agent-ingress.yml)
+      echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;   # not collapsed (ADR-0007, #1226)
     *contents*)
       if [ -n "${GH_CONTENT_B64:-}" ]; then
         printf '{"sha":"abc123","content":"%s"}' "$GH_CONTENT_B64"
