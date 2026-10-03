@@ -498,7 +498,7 @@ arl_resolve_agent_runs() {
   # multi-role repos while still detecting end-of-history (#batch < page_size).
   local api_repo="${repo:-"{owner}/{repo}"}" records="" role_runs="" final_runs=""
   local page_size=100 batch_rc=0 filter id status created jobs_out
-  local batch_count role_count fetch_limit="$limit"
+  local batch_count role_count fetch_limit="$limit" skipped_runs=0
 
   while :; do
     local page_runs
@@ -535,6 +535,7 @@ arl_resolve_agent_runs() {
         | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
       if [ -z "$jobs_out" ]; then
         arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
+        skipped_runs=$(( skipped_runs + 1 ))
         continue
       fi
       records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs_out" \
@@ -547,6 +548,12 @@ arl_resolve_agent_runs() {
     batch_count="$(jq -r 'length' <<<"$page_runs" 2>/dev/null || printf '0')"
 
     if [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$page_size" ]; then
+      # Every jobs read failed: nothing was resolved, so this is a transient
+      # no-data outcome (degrades to 0), not a resolved-empty history.
+      if [ -z "$records" ] && [ "$skipped_runs" -gt 0 ]; then
+        printf '[]'
+        return 1
+      fi
       printf '%s' "$role_runs"
       if [ "$role_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
         arl_log "UNRESOLVED: ${AGENT_INGRESS_WORKFLOW} in ${where} declares no '${role}' job — '${role}' runs cannot be counted (refusing to read this as zero)"
