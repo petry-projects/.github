@@ -37,6 +37,8 @@ if [ "${1:-}" = "api" ]; then
     *matching-refs/tags/*)
       [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
       exit 0 ;;
+    *contents/.github/workflows/agent-ingress.yml)
+      echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;   # not collapsed (ADR-0007, #1226)
     *contents*)
       exit 1 ;;   # simulate 404 — stub absent
   esac

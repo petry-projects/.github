@@ -281,6 +281,12 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 # shellcheck source=lib/ring-pins.sh
 . "$SCRIPT_DIR/lib/ring-pins.sh"
 
+# ADR-0007 agent-ingress identity helpers: a required per-role workflow whose role
+# an agent-ingress.yml job serves is present, not missing (#1226) — the same rule
+# deploy-standard-workflows.sh uses to never re-seed a collapsed stub.
+# shellcheck source=lib/agent-ingress.sh
+. "$SCRIPT_DIR/lib/agent-ingress.sh"
+
 # AGENTS.md structural linter — the pure, data-driven driver (amdl_lint) and its
 # default rule-set path (AMDL_DEFAULT_RULES). Sourced, not exec'd: agents-md-lint.sh
 # guards its CLI behind a BASH_SOURCE check, so sourcing only defines functions.
@@ -340,11 +346,69 @@ detect_ecosystems() {
 # ---------------------------------------------------------------------------
 # Check: Required workflows exist
 # ---------------------------------------------------------------------------
+# list_workflow_files <repo> — print the names under .github/workflows.
+# Returns 0 on success, 2 when the directory does not exist (HTTP 404), 1 on any
+# other failure (transient/unknown). Captures stderr, which gh_api discards.
+list_workflow_files() {
+  local repo="$1" errfile out rc=0 kind="" attempt
+  errfile=$(mktemp)
+  # Bounded retry (3 attempts) so a transient rate-limit/network blip does not
+  # mark the repo inconclusive; a definitive 404 is not retried.
+  for attempt in 1 2 3; do
+    rc=0
+    out=$(gh api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>"$errfile") || rc=$?
+    [ "$rc" -eq 0 ] && break
+    kind=$(agent_ingress_gh_error_kind "$(cat "$errfile")")
+    [ "$kind" = "missing" ] && break
+    [ "$attempt" -lt 3 ] && sleep $((attempt * 2))
+  done
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$errfile"
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -f "$errfile"
+  [ "$kind" = "missing" ] && return 2
+  return 1
+}
+
 check_required_workflows() {
   local repo="$1"
 
+  # ADR-0007 collapse (#1226): a repo that serves a role from an agent-ingress.yml
+  # job has deliberately deleted that role's per-role stub. Read the ingress lazily
+  # (only once a required file is missing) and count a role it serves as present.
+  local ingress_b64="" ingress_decoded="" ingress_read=false ingress_unreadable=false wf
   for wf in "${REQUIRED_WORKFLOWS[@]}"; do
     if ! gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.name' > /dev/null 2>&1; then
+      if [ "$ingress_read" = false ]; then
+        ingress_read=true
+        # Failing read + readable listing WITHOUT the exact ingress filename =
+        # genuinely absent. Listing unreadable (incl. a missing workflows dir), or
+        # listing it while the file read failed = inconclusive: do not report
+        # missing workflows we could not actually evaluate.
+        if ! ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null); then
+          ingress_b64=""
+          local listing list_rc=0
+          listing=$(list_workflow_files "$repo") || list_rc=$?
+          # rc 2 = the workflows directory itself is absent (404): genuinely
+          # nothing there, so report missing workflows. Any other failure, or the
+          # ingress being listed while its read failed, is inconclusive.
+          if [ "$list_rc" -eq 1 ] || { [ "$list_rc" -eq 0 ] && grep -qxF "$AGENT_INGRESS_WORKFLOW" <<< "$listing"; }; then
+            ingress_unreadable=true
+            info "could not read $AGENT_INGRESS_WORKFLOW in $repo (inconclusive) — not reporting missing workflows"
+          fi
+        fi
+        [ -n "$ingress_b64" ] && ingress_decoded=$(echo "$ingress_b64" | base64 -d 2>/dev/null || echo "")
+      fi
+      if [ "$ingress_unreadable" = true ]; then
+        mark_repo_inconclusive "$repo"
+        continue
+      fi
+      if [ "$wf" != "feature-ideation.yml" ] && [ -n "$ingress_decoded" ] \
+         && agent_ingress_has_role_job "$(agent_ingress_role_for_workflow "$wf")" <<< "$ingress_decoded"; then
+        continue
+      fi
       add_finding "$repo" "ci-workflows" "missing-$wf" "error" \
         "Required workflow \`$wf\` is missing" \
         "standards/ci-standards.md#required-workflows"
