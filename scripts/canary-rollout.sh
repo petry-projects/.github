@@ -106,19 +106,71 @@ resolve_members() {
   return 0
 }
 
+# _repo_readable <repo> — succeed when the host repository is readable. A READABLE verdict is cached
+# per run in _RUNS_CACHE_DIR (shared across command-substitution subshells) so absent tags (the
+# normal 404 for rings ahead of the frontier) do not each cost a second API read; an unreadable
+# verdict is never cached, so a transient failure cannot stick.
+_repo_readable() {
+  local repo="$1" marker=""
+  [ -n "${_RUNS_CACHE_DIR:-}" ] && marker="$_RUNS_CACHE_DIR/readable.${repo//\//__}"
+  [ -n "$marker" ] && [ -e "$marker" ] && return 0
+  gh api "repos/$repo" --jq '.full_name' >/dev/null 2>&1 || return 1
+  [ -n "$marker" ] && : > "$marker" 2>/dev/null
+  return 0
+}
+
 # _gh_tag_commit <repo> <tag> — echo the COMMIT sha <tag> resolves to on <repo> via the
 # GitHub API, dereferencing an annotated tag object (mirrors cut-release.sh's
 # gh_release_commit). Empty on any error / absent tag (never fails the caller).
+# An ABSENT tag (HTTP 404) and a lookup ERROR (5xx, rate limit, network, a failed annotated-tag
+# deref) both echo empty, but an error is RECORDED (#1225): "<repo> <tag>" is appended to the file
+# named by _CANARY_TAG_FAIL_FLAG when armed (mirrors _CANARY_FETCH_FAIL_FLAG for run history), so
+# the frontier can hold an unknown ring BLOCKED instead of reading an outage as "fully rolled out".
 _gh_tag_commit() {
-  local repo="$1" tag="$2" ref_info obj type
-  ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>/dev/null)" || return 0
+  local repo="$1" tag="$2" ref_info obj type err rc=0 commit _tag_unrecorded=0
+  err="$(mktemp 2>/dev/null || echo /dev/null)"
+  ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>"$err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Absence is an explicit HTTP 404 ONLY; any other failure is a lookup error. A 404 is also what
+    # GitHub returns for a repo the App cannot access, so confirm the host stays readable before
+    # accepting it as an absent tag (otherwise an inaccessible host reads as "every ring empty").
+    if ! grep -qiE 'HTTP 404' "$err" 2>/dev/null; then
+      _tag_lookup_failed "$repo" "$tag" "$(tr '\n' ' ' <"$err" 2>/dev/null || true)" || _tag_unrecorded=1
+    elif ! _repo_readable "$repo"; then
+      _tag_lookup_failed "$repo" "$tag" "404 but host repository is not readable (access lost?)" || _tag_unrecorded=1
+    fi
+    [ "$err" != /dev/null ] && rm -f "$err"
+    [ "$_tag_unrecorded" -eq 1 ] && printf '%s\n' "$_TAG_LOOKUP_UNRECORDED"
+    return 0
+  fi
+  [ "$err" != /dev/null ] && rm -f "$err"
   [ -z "$ref_info" ] && return 0
   read -r obj type <<< "$ref_info"
   if [ "$type" = "tag" ]; then
-    gh api "repos/$repo/git/tags/$obj" --jq '(.object?.sha // "" | tostring)' 2>/dev/null || true
+    # The ref EXISTS, so a failed deref is an error, never "absent".
+    if commit="$(gh api "repos/$repo/git/tags/$obj" --jq '(.object?.sha // "" | tostring)' 2>/dev/null)"; then
+      printf '%s\n' "$commit"
+    else
+      _tag_lookup_failed "$repo" "$tag" "annotated tag object $obj could not be dereferenced" \
+        || printf '%s\n' "$_TAG_LOOKUP_UNRECORDED"
+    fi
   else
     printf '%s\n' "$obj"
   fi
+}
+
+# _tag_lookup_failed <repo> <tag> <detail> — report a tag-lookup ERROR (not an absent tag) and
+# record it to _CANARY_TAG_FAIL_FLAG when armed (#1225). Returns non-zero ONLY when the flag is armed
+# but the record could not be written; the caller then emits _TAG_LOOKUP_UNRECORDED in place of the
+# commit so _ring_commits still reads the ring as unknown (a swallowed write failure must never
+# turn an outage into an absent tag).
+_TAG_LOOKUP_UNRECORDED="!tag-lookup-error-unrecorded"
+_tag_lookup_failed() {
+  echo "::warning::_gh_tag_commit: could not resolve $2 on $1 (lookup error, treated as UNKNOWN — not absent): $3" >&2
+  if [ -n "${_CANARY_TAG_FAIL_FLAG:-}" ]; then
+    printf '%s %s\n' "$1" "$2" >> "$_CANARY_TAG_FAIL_FLAG" 2>/dev/null || return 1
+  fi
+  return 0
 }
 
 # _gh_write <gh-args…> — run a `gh` mutation with the repo-scoped WRITE token when one is
@@ -370,6 +422,37 @@ channel_commit() {
   _resolved_channel "$1" "$2" | cut -f2
 }
 
+# _ring_commits <agent> [<chans_csv>] — resolve every ring's commit once, one line per ring in
+# order: "<channel> <commit|-> <unknown>" (#1225). unknown=1 when a tag lookup for that ring
+# ERRORED (5xx / rate limit / network — recorded by _gh_tag_commit via _CANARY_TAG_FAIL_FLAG),
+# as opposed to a genuinely ABSENT tag (404, unknown=0 with commit "-"), which keeps the legacy
+# semantics (#1118 AC6). If the per-ring flag cannot be armed the ring is reported unknown (fail
+# closed). Local-git agents have no API failure mode, so they are never unknown.
+_ring_commits() {
+  local agent="$1" chans="${2:-}" flag ch c u
+  [ -n "$chans" ] || chans="$(ordered_channels "$agent")"
+  local chan_array=()
+  IFS=, read -r -a chan_array <<< "$chans"
+  flag="$(mktemp 2>/dev/null || true)"
+  for ch in "${chan_array[@]}"; do
+    u=0
+    if [ -n "$flag" ] && : > "$flag" 2>/dev/null; then
+      # Drop the (subshell-local) lookup cache first: an earlier UNARMED failed lookup may have
+      # cached an empty commit, which would skip the API call, leave the flag empty, and read an
+      # outage as an absent tag (unknown=0).
+      c="$(_CHANNEL_COMMIT_CACHE=(); _AGENT_CHANNEL_MAJOR_CACHE=(); _CANARY_TAG_FAIL_FLAG="$flag" channel_commit "$agent" "$ch" || true)"
+      [ -s "$flag" ] && u=1
+      if [[ "$c" == *"$_TAG_LOOKUP_UNRECORDED"* ]]; then c=""; u=1; fi
+    else
+      c="$(channel_commit "$agent" "$ch" || true)"; u=1
+      [[ "$c" == *"$_TAG_LOOKUP_UNRECORDED"* ]] && c=""
+    fi
+    printf '%s %s %s\n' "$ch" "${c:--}" "$u"
+  done
+  [ -n "$flag" ] && rm -f "$flag"
+  return 0
+}
+
 # _gate_field <agent> <field> — read .agents[a].gate.<field> (empty if absent).
 _gate_field() { _jq -r --arg a "$1" --arg f "$2" '.agents[$a].gate[$f] // empty'; }
 # _gate_knob <agent> <transition_key> <field> — read a per-transition knob (empty if absent).
@@ -512,8 +595,13 @@ _gh_retry_after() {
 # populated in one call would not survive to the next. When the dir is unset (a unit test
 # calling _run_json directly), every call fetches. Tunable via CANARY_GH_RETRIES /
 # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
+#
+# Optional 3rd arg `strict` (#1224): when "1", a not-found workflow returns [] with exit 3
+# instead of 0, so the caller can tell "this repo has no such workflow" from "it has the
+# workflow but no runs" — the signal that a repo may be ADR-0007-collapsed. The not-found
+# verdict is cached alongside the [] (a `.nf` marker) so a strict cache hit still reports it.
 _repo_wf_runs_cached() {
-  local repo="$1" wf="$2" out err summary ra delay span expo errfile cachef key keyhash
+  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" out err summary ra delay span expo errfile cachef key keyhash
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
@@ -529,13 +617,19 @@ _repo_wf_runs_cached() {
     # so this is a real collision surface. sha256 (not sha1/md5 — those trip weak-hash linters
     # and are collision-broken) keeps the mapping injective; fall back to substitution only if
     # no hasher exists. This is a filename derivation, not a security context.
-    key="${repo}//${wf}"
+    # The run limit is part of the key: a shorter list cached for the default limit must never serve
+    # the ingress read that asks for more runs (it would look like a quieter repo).
+    key="${repo}//${wf}//${limit}"
     # sha256sum on Linux runners, shasum -a 256 on macOS; substitution only if neither
     # exists (and then, at worst, the pre-existing collision surface — never a crash).
     keyhash="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
     [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
     cachef="$_RUNS_CACHE_DIR/${keyhash}.json"
-    [ -s "$cachef" ] && { cat "$cachef"; return 0; }
+    if [ -s "$cachef" ]; then
+      cat "$cachef"
+      [ "$strict" = "1" ] && [ -e "${cachef}.nf" ] && return 3
+      return 0
+    fi
   fi
   errfile="$(mktemp)"
   declare -p tmpfiles &>/dev/null || declare -g -a tmpfiles=()
@@ -547,7 +641,7 @@ _repo_wf_runs_cached() {
   trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" \
-        -L 1000 --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
+        -L "$limit" --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
       rm -f "$errfile"; out="${out:-[]}"
       [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
       printf '%s\n' "$out"; return 0
@@ -561,8 +655,12 @@ _repo_wf_runs_cached() {
     # counted as an outage; retrying it was the #810→#803 cancellation storm.
     if [[ "${err,,}" == *"could not find any workflow"* ]] || [[ "${err,,}" == *"no workflows"* ]]; then
       rm -f "$errfile"
-      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' '[]' > "$cachef" 2>/dev/null || true
-      echo '[]'; return 0
+      # Marker FIRST, then the cached []: a concurrent strict reader that sees the cache file is
+      # guaranteed to see the .nf marker too (it never reads "workflow exists, no runs").
+      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && : > "${cachef}.nf" 2>/dev/null && printf '%s' '[]' > "$cachef" 2>/dev/null || true
+      echo '[]'
+      [ "$strict" = "1" ] && return 3
+      return 0
     fi
     summary="$(_gh_err_summary "$err")"
     if [ "$attempt" -ge "$attempts" ]; then
@@ -609,14 +707,242 @@ _run_json() {
     <<< "${raw:-[]}" 2>/dev/null || echo '[]'
 }
 
+# ── ADR-0007 collapsed repos: attribute runs by ingress JOB (#1224) ──────────────────
+# A collapsed repo folds its per-role Class-1 caller stubs into ONE `Agent Ingress` workflow
+# with one job per role, so `gh run list --workflow "<run_workflow>"` finds nothing there. The
+# agent's runs are then the ingress runs in which its role job (registry `ingress_job`) ran.
+#
+# DELIBERATE DUPLICATION: the per-run role reduction below mirrors .github-private's
+# scripts/lib/run-attribution.sh `normalize_ingress_runs` (#1727) — role = job-name segment
+# before " / ", worst-outcome precedence across a role's jobs, an all-skipped role did not run,
+# a run with no jobs is never silently dropped. It is NOT importable: this engine runs from a
+# .github checkout with no .github-private tree (the same constraint as the inline autocut,
+# #613/#1069). Keep the two in step if the attribution rules change.
+
+# _ingress_workflow — the collapsed ingress workflow's display name (registry `.ingress.workflow`).
+_ingress_workflow() {
+  local w; w="$(_jq -r '.ingress?.workflow? // empty' 2>/dev/null || true)"
+  printf '%s' "${w:-Agent Ingress}"
+}
+
+# _record_unresolved <agent> <repo> <reason> — note a ring member whose runs could not be
+# attributed. Appends "<repo>\t<reason>" to $_CANARY_UNRESOLVED_FLAG (armed by _frontier_state)
+# and warns once per distinct entry. A file, not a var: callers run in subshells.
+_record_unresolved() {
+  local agent="$1" repo="$2" reason="$3" line
+  line="$(printf '%s\t%s' "$repo" "$reason")"
+  if [ -n "${_CANARY_UNRESOLVED_FLAG:-}" ]; then
+    grep -qxF -- "$line" "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null && return 0
+    # A failed append (temp fs full) must not leave a clean-looking empty flag: remove it, so the
+    # gate sees the flag GONE and fails closed (see the "evidence write failed" check in _frontier_state).
+    # If the cleanup fails too (read-only fs) the empty flag survives; _pair_state re-probes its
+    # writability and fails closed in that case.
+    printf '%s\n' "$line" >> "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || rm -f "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null \
+      || echo "::error::canary: cannot record or remove the unresolved-member flag '$_CANARY_UNRESOLVED_FLAG'; the gate will fail closed" >&2
+  fi
+  echo "::warning::canary: UNRESOLVED member $repo for '$agent' — $reason" >&2
+}
+
+# _unresolved_flag_path <agent> <cand> — per-process UNRESOLVED flag path, so concurrent
+# invocations for the same agent/candidate never truncate each other's evidence.
+_unresolved_flag_path() {
+  printf '%s/.canary-unresolved-%s-%s-%s.txt' "${TMPDIR:-/tmp}" "$$" "$1" "$2"
+}
+
+# _run_jobs_json <repo> <run_id> — `gh run view --json jobs` for one run, file-memoized under
+# $_RUNS_CACHE_DIR (an ingress run is shared by every collapsed role, so each run's jobs are read
+# once per sweep). Bounded retry (CANARY_GH_RETRIES, default 6; an optional 3rd arg caps the attempts —
+# the legacy single-call readers pass 1, preserving their pre-#1224 "one call, fail fast" behavior).
+# Returns 0 on success; 2 when the run is permanently gone/unreadable
+# (deleted or expired — HTTP 404); 1 when the jobs endpoint stayed unreadable after the full backoff
+# (a transient/systemic failure — callers use that to stop reading, see _ingress_agent_runs).
+_run_jobs_json() {
+  local repo="$1" id="$2" cachef="" keyhash out attempt=1
+  local attempts="${3:-${CANARY_GH_RETRIES:-6}}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
+  case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
+  case "$base" in ''|*[!0-9]*) base=2 ;; esac
+  [ "$attempts" -lt 1 ] && attempts=1
+  if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
+    keyhash="$(printf 'jobs//%s//%s' "$repo" "$id" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
+    [ -n "$keyhash" ] || keyhash="jobs_${repo//[^A-Za-z0-9._-]/_}_${id}"
+    cachef="$_RUNS_CACHE_DIR/${keyhash}.jobs.json"
+    [ -s "$cachef" ] && { cat "$cachef"; return 0; }
+  fi
+  local errf; errf="$(mktemp 2>/dev/null || echo /dev/null)"
+  while :; do
+    if out="$(gh run view "$id" --repo "$repo" --json jobs 2>"$errf")" && jq -e '.jobs|type=="array"' >/dev/null 2>&1 <<< "$out"; then
+      [ "$errf" != /dev/null ] && rm -f "$errf"
+      [ -n "$cachef" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
+      printf '%s\n' "$out"; return 0
+    fi
+    # A run deleted/expired since `gh run list` is permanent — fail fast, don't burn the backoff.
+    if grep -qiE 'could not find (any )?(workflow )?run|HTTP 404|run [0-9]+ not found' "$errf" 2>/dev/null; then
+      [ "$errf" != /dev/null ] && rm -f "$errf"; return 2
+    fi
+    if [ "$attempt" -ge "$attempts" ]; then [ "$errf" != /dev/null ] && rm -f "$errf"; return 1; fi
+    # Same policy as the run-list path: exponential backoff with full jitter in [base, 30s].
+    expo=$((attempt - 1)); [ "$expo" -gt 20 ] && expo=20
+    delay=$(( base << expo )); span=$(( delay - base )); [ "$span" -lt 0 ] && span=0
+    delay=$(( base + RANDOM % (span + 1) )); [ "$delay" -gt 30 ] && delay=30
+    sleep "$delay"; attempt=$((attempt + 1))
+  done
+}
+
+# _ingress_agent_runs <agent> <repo> <role> <since_z>   (ingress runs JSON on stdin)
+# — the agent's runs on a collapsed repo, one record per completed ingress run in which the
+# <role> job ran: {conclusion, createdAt, databaseId, workflowName: <run_workflow>, role}.
+# workflowName is the agent's registered run_workflow so its benign/suspect classes keep
+# matching across the collapse (parity with the legacy per-role bucket). Only runs at/after
+# <since_z> have their jobs read. A run with no jobs (unless it is a startup_failure, which hit
+# every role) or unreadable jobs makes the member UNRESOLVED.
+_ingress_agent_runs() {
+  local agent="$1" repo="$2" role="$3" since="$4" wf iraw id created rconc jobs rec recs=""
+  wf="$(_agent_field "$agent" run_workflow)"
+  iraw="$(cat)"
+  # Bound the per-run `gh run view` fan-out (#810/#819): read at most CANARY_INGRESS_JOBS_MAX
+  # (default 300) of the newest in-window runs. Beyond that the member is UNRESOLVED (fail closed) —
+  # EXCEPT for the trailing BASELINE read (_baseline_daily arms _CANARY_INGRESS_TRUNC_FLAG): the
+  # baseline only sizes the sample target, so a truncated read is a valid sample of the NEWEST days.
+  # The first unread run's day is recorded and _baseline_daily drops that (incomplete) day and every
+  # older one, rather than blocking a busy collapsed repo forever. Gating windows stay strict.
+  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc role_oldest="" skipkind norole_created="" ncr
+  case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
+  [ "$jobs_max" -lt 1 ] && jobs_max=300
+  while IFS=$'\t' read -r id created rconc; do
+    [ -z "$id" ] && continue
+    [ "$created" = "-" ] && created=""   # "-" kept the empty field from collapsing in the tab-split read
+    if [ "$nread" -ge "$jobs_max" ]; then
+      if [ -n "${_CANARY_INGRESS_TRUNC_FLAG:-}" ] && printf '%s\n' "${created:0:10}" >> "$_CANARY_INGRESS_TRUNC_FLAG" 2>/dev/null; then
+        echo "::warning::$agent $repo: more than $jobs_max ingress runs in the baseline window; using the newest days only (CANARY_INGRESS_JOBS_MAX)." >&2
+      else
+        _record_unresolved "$agent" "$repo" "more than $jobs_max ingress runs in the window; job reads capped (CANARY_INGRESS_JOBS_MAX)"
+      fi
+      break
+    fi
+    nread=$((nread + 1))
+    jrc=0; jobs="$(_run_jobs_json "$repo" "$id")" || jrc=$?
+    if [ "$jrc" -eq 1 ]; then
+      # Circuit breaker: the jobs endpoint stayed unreadable after the full backoff, so every later
+      # run would burn the same ~30s+ of retries (300 runs can outlive the job timeout before
+      # sync-issues records the fail-closed state). Stop reading; the member is UNRESOLVED.
+      _record_unresolved "$agent" "$repo" "jobs endpoint unreadable (run $id) — stopped reading jobs for this member"; break
+    elif [ "$jrc" -ne 0 ]; then
+      _record_unresolved "$agent" "$repo" "jobs of ingress run $id are unreadable"; continue
+    fi
+    rec="$(jq -c --arg role "$role" --arg wf "$wf" --arg id "$id" --arg created "$created" --arg rconc "$rconc" '
+      def rank(c):
+        # failure/timed_out rank STRICTLY above action_required/startup_failure: max_by keeps the last of
+        # tied elements, so a failed job followed by an action_required one must not reduce the role to
+        # action_required (downstream counters select conclusion=="failure" and would drop the failure).
+        if   c == "failure" or c == "timed_out" then 7
+        elif c == "action_required" or c == "startup_failure" then 6
+        elif c == "cancelled" then 5   # an interrupted job must not be masked by a green sibling
+        elif c == "success"   then 4
+        elif c == null or c == "skipped" then 0
+        else 2 end;
+      (.jobs // []) as $jobs
+      | if ($jobs | length) == 0 then
+          # A run cancelled before any job started (e.g. superseded by workflow concurrency) never
+          # executed this role: it is not a success or a failure, so it is simply not a record.
+          (if $rconc == "startup_failure" then {conclusion: "startup_failure", nojobs: true}
+           elif $rconc == "cancelled" then {skipped: "cancelled"}
+           else "UNATTRIBUTED" end)
+        else
+          ([ $jobs[] | select(((.name // "") | split(" / ")[0]) == $role) | {c: .conclusion, r: rank(.conclusion)} ]) as $rj
+          # No job carries the role: either the role was added to the ingress AFTER this run
+          # (pre-adoption — benign) or ingress_job is renamed/misspelled (blind). The caller decides,
+          # once it knows whether ANY run in the window carries the role.
+          | if ($rj | length) == 0 then "NOROLE"
+          else ($rj | max_by(.r)) as $w
+          | if $w.r == 0 then {skipped: "role"}
+            # A job-level timeout surfaces as a failed run on a legacy per-role workflow.
+            else {conclusion: (if $w.c == "timed_out" then "failure" else $w.c end)} end
+          end
+        end
+      | if . == "UNATTRIBUTED" or . == "NOROLE" or (type == "object" and has("skipped")) then .
+        else . + {createdAt: $created, databaseId: ($id | tonumber), workflowName: $wf, role: $role} end
+    ' <<< "$jobs" 2>/dev/null)" || rec='"UNATTRIBUTED"'
+    if [ "$rec" = '"UNATTRIBUTED"' ]; then
+      _record_unresolved "$agent" "$repo" "ingress run $id has no attributable jobs"; continue
+    fi
+    if [ "$rec" = '"NOROLE"' ]; then
+      # Defer: pre-adoption runs are benign, a renamed ingress_job is not (see after the loop).
+      # Keep the run's own createdAt (no payload re-parse later); "-" stands in for a missing one so
+      # word-splitting cannot drop it — a run with an unknown date must still count as blind.
+      norole_created+="${created:--} "; continue
+    fi
+    skipkind="$(jq -r 'if type == "object" then (.skipped // empty) else empty end' <<< "$rec" 2>/dev/null || true)"
+    if [ -n "$skipkind" ]; then
+      [ "$skipkind" = "role" ] && role_oldest="$created"   # the role job ran (skipped): it exists here
+      continue
+    fi
+    # newest→oldest: the last assignment is the OLDEST run carrying the role. A job-less startup_failure
+    # (nojobs) carries NO role job, so it must not count as the role's appearance.
+    [ "$(jq -r '.nojobs // empty' <<< "$rec" 2>/dev/null || true)" = "true" ] || role_oldest="$created"
+    [ -n "$rec" ] && recs+="$(jq -c 'del(.nojobs)' <<< "$rec")"$'\n'
+  done < <(jq -r --arg since "$since" \
+    '[ .[]? | select(.conclusion != null and .conclusion != "")
+          | select($since == "" or (.createdAt // "") >= $since) ]
+          | sort_by(.createdAt // "") | reverse | .[]
+          | [(.databaseId|tostring), (if (.createdAt // "") == "" then "-" else .createdAt end), .conclusion] | @tsv' 2>/dev/null <<< "${iraw:-[]}")
+  # Runs where no job carried the role. If the role appears in an OLDER run, a no-role run that is
+  # older still predates the role's adoption by the ingress and is benign; one NEWER than the role's
+  # oldest appearance, or any when no run in the window carries the role at all (renamed/misspelled
+  # ingress_job), cannot be attributed → UNRESOLVED. The member stays blocked only for that.
+  if [ -n "$norole_created" ]; then
+    local blind=0
+    for ncr in $norole_created; do
+      if [ -z "$role_oldest" ] || [ "$ncr" = "-" ] || ! [[ "$ncr" < "$role_oldest" ]]; then blind=$((blind + 1)); fi
+    done
+    [ "$blind" -gt 0 ] && _record_unresolved "$agent" "$repo" "$blind ingress run(s) carry no '$role' job and are not older than the role's first appearance (ingress_job renamed or misspelled?)"
+  fi
+  printf '%s' "$recs" | jq -cs '.'
+}
+
+# _agent_run_json <agent> <repo> <since_z> — the agent's runs on one ring member since the given
+# Zulu timestamp (same record shape as _run_json, plus `role` for ingress-attributed runs).
+# Resolution order (#1224):
+#   1. the per-role workflow (`run_workflow`) exists → its runs (legacy, unchanged);
+#   2. it is absent but the ingress exists and the agent registers `ingress_job` → the ingress
+#      runs in which that role job ran;
+#   3. neither exists → [] (the repo does not consume this agent, #747);
+#   4. the ingress exists but the role cannot be attributed (no `ingress_job`, a job-less run,
+#      unreadable jobs) → the member is UNRESOLVED (see _record_unresolved), never silent.
+# A genuine fetch failure fails CLOSED (non-zero), exactly like _run_json.
+_agent_run_json() {
+  local agent="$1" repo="$2" since="$3" wf iwf raw iraw role rc=0
+  if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
+  wf="$(_agent_field "$agent" run_workflow)"
+  raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
+  if [ "$rc" -eq 3 ]; then
+    rc=0; iwf="$(_ingress_workflow)"
+    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "${CANARY_INGRESS_RUN_LIMIT:-5000}")" || rc=$?
+    case "$rc" in
+      0)
+        role="$(_jq -r --arg a "$agent" '(.agents[$a].ingress_job)? // empty' 2>/dev/null || true)"
+        if [ -z "$role" ]; then
+          _record_unresolved "$agent" "$repo" "no '$wf' workflow but '$iwf' is present and the agent registers no ingress_job"
+          echo '[]'; return 0
+        fi
+        _ingress_agent_runs "$agent" "$repo" "$role" "$since" <<< "$iraw"; return 0 ;;
+      3) echo '[]'; return 0 ;;
+      *) return 1 ;;
+    esac
+  elif [ "$rc" -ne 0 ]; then
+    return 1
+  fi
+  jq -c --arg since "$since" \
+    '[ .[]? | select($since == "" or (.createdAt // "") >= $since) ]' \
+    <<< "${raw:-[]}" 2>/dev/null || echo '[]'
+}
+
 # _tier_sample <agent> <since_z> <repo...> — EXECUTED runs (success+failure) on the
 # source tier since the candidate cut. Prints "<executed> <earliest_createdAt|->".
 _tier_sample() {
   local agent="$1" since="$2"; shift 2
-  local wf repo json executed=0 earliest="" e
-  wf="$(_agent_field "$agent" run_workflow)"
+  local repo json executed=0 earliest="" e
   for repo in "$@"; do
-    json="$(_run_json "$repo" "$wf" "$since")"
+    json="$(_agent_run_json "$agent" "$repo" "$since")"
     executed=$(( executed + $(jq '[.[]?|select(.conclusion=="success" or .conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     e="$(jq -r '[.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt?]|min // empty' 2>/dev/null <<< "$json" || echo "")"
     if [ -n "$e" ] && { [ -z "$earliest" ] || [[ "$e" < "$earliest" ]]; }; then earliest="$e"; fi
@@ -678,8 +1004,7 @@ _suspect_downgrade_patterns() {
 # candidate window).
 _suspect_class_counts() {
   local agent="$1" since="$2" before="$3" wf_re="$4" step_re="$5"; shift 5
-  local wf repo json rid rwf sig sig_rc matched=0 executed=0 incomplete=0 count
-  wf="$(_agent_field "$agent" run_workflow)"
+  local repo json rid rwf rrole sig sig_rc matched=0 executed=0 incomplete=0 count
   local exec_filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
   local fail_filter='.[]?|select(.conclusion=="failure")'
   if [ "$before" != "-" ]; then
@@ -688,15 +1013,16 @@ _suspect_class_counts() {
   fi
   for repo in "$@"; do
     { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
-    json="$(_run_json "$repo" "$wf" "$since")"
+    json="$(_agent_run_json "$agent" "$repo" "$since")"
     count="$(jq "[${exec_filter}]|length" 2>/dev/null <<< "$json" || echo 0)"
     executed=$(( executed + ${count:-0} ))
-    while IFS=$'\t' read -r rid rwf || [ -n "$rid" ]; do
+    while IFS=$'\t' read -r rid rwf rrole || [ -n "$rid" ]; do
       rid="${rid%$'\r'}"
       rwf="${rwf%$'\r'}"
+      rrole="${rrole%$'\r'}"
       [ -z "$rid" ] && continue
       sig_rc=0
-      sig="$(_run_signature "$repo" "$rid")" || sig_rc=$?  # || prevents set -e on lookup failure
+      sig="$(_run_signature "$repo" "$rid" "$rrole")" || sig_rc=$?  # || prevents set -e on lookup failure
       if [ -z "$sig" ]; then
         [ "$sig_rc" -ne 0 ] && incomplete=$(( incomplete + 1 ))  # lookup failed; genuine empty sig is fine
         continue
@@ -704,26 +1030,28 @@ _suspect_class_counts() {
       if [ "$(benign_match "$rwf" "$sig" "$wf_re" "$step_re")" = "yes" ]; then
         matched=$(( matched + 1 ))
       fi
-    done < <(jq -r "[${fail_filter}]|.[]|[(.databaseId // \"\"|tostring),(.workflowName // \"\")]|@tsv" 2>/dev/null <<< "$json")
+    done < <(jq -r "[${fail_filter}]|.[]|[(.databaseId // \"\"|tostring),(.workflowName // \"\"),(.role // \"\")]|@tsv" 2>/dev/null <<< "$json")
   done
   echo "$matched $executed $incomplete"
 }
 
-# Memoization cache for _run_signature: keyed by "repo:run_id".
+# Memoization cache for _run_signature: keyed by "repo:run_id:role".
 # Avoids duplicate gh run view calls for the same (repo, run_id) across agents
 # in evaluate-all (where multiple agents can share repos).
 declare -A _RUN_SIG_CACHE=()
 
-# _run_signature <repo> <run_id> — the failed step names of a run, joined by newlines
-# (the "step/error signature" the allowlist matches against). Empty repo/wildcard/id or
+# _run_signature <repo> <run_id> [<role>] — the failed step names of a run, joined by newlines
+# (the "step/error signature" the allowlist matches against). A <role> (an ADR-0007 ingress-
+# attributed run, #1224) scopes it to that role's own jobs, so another role's failure in the
+# same ingress run can never make this agent's failure look benign (or suspect). Empty repo/wildcard/id or
 # any gh error → "" with exit 1 (fail-closed: an unknown signature is never treated as
 # benign, and callers that need to distinguish a lookup failure from a genuine empty
 # signature check the exit code). A successful lookup with no failed steps → "" exit 0.
 # The $'\x01' sentinel in the cache marks a prior lookup failure so it is not retried.
 _run_signature() {
-  local repo="$1" id="$2" cache_key sig json
+  local repo="$1" id="$2" role="${3:-}" cache_key sig json
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
-  cache_key="${repo}:${id}"
+  cache_key="${repo}:${id}:${role}"
   if [[ -v _RUN_SIG_CACHE["$cache_key"] ]]; then
     if [ "${_RUN_SIG_CACHE[$cache_key]}" = $'\x01' ]; then
       echo ""; return 1  # cached lookup failure — signal to caller
@@ -734,21 +1062,21 @@ _run_signature() {
   # Use || { } so set -e does not trigger on a failing gh run view; the block caches the
   # sentinel and returns 1 to signal the lookup failure to callers that care (e.g.
   # _suspect_class_counts tracks incomplete evidence and HOLDs the downgrade).
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null)" || {
+  json="$(_run_jobs_json "$repo" "$id" 1)" || {
     _RUN_SIG_CACHE["$cache_key"]=$'\x01'
     echo ""; return 1
   }
-  sig="$(jq -r '[.jobs[]?|.steps[]?|select(.conclusion=="failure")|.name] | join("\n")' \
-    2>/dev/null <<< "$json" || echo "")"
+  sig="$(jq -r --arg role "$role" '[.jobs[]?|select($role == "" or ((.name // "")|split(" / ")[0]) == $role)
+    |.steps[]?|select(.conclusion=="failure")|.name] | join("\n")' 2>/dev/null <<< "$json" || echo "")"
   _RUN_SIG_CACHE["$cache_key"]="$sig"
   echo "$sig"
 }
 
-# _failure_benign <repo> <run_id> <workflow_name> <patterns_tsv> — return 0 if this
+# _failure_benign <repo> <run_id> <workflow_name> <patterns_tsv> [<role>] — return 0 if this
 # in-window failure matches any allowlist entry, else 1. Fail-closed on an empty signature.
 _failure_benign() {
-  local repo="$1" rid="$2" rwf="$3" patterns="$4" sig wf_re step_re
-  sig="$(_run_signature "$repo" "$rid")"
+  local repo="$1" rid="$2" rwf="$3" patterns="$4" role="${5:-}" sig wf_re step_re
+  sig="$(_run_signature "$repo" "$rid" "$role")"
   [ -z "$sig" ] && return 1
   while IFS=$'\t' read -r wf_re step_re; do
     [ -z "$step_re" ] && continue
@@ -757,14 +1085,14 @@ _failure_benign() {
   return 1
 }
 
-# _failure_suspect <repo> <run_id> <workflow_name> <patterns_tsv> — return 0 if this
+# _failure_suspect <repo> <run_id> <workflow_name> <patterns_tsv> [<role>] — return 0 if this
 # in-window failure matches any SUSPECT allowlist entry (#668 increment 2), else 1. Reuses
 # the benign_match pure matcher against the run's failed-step signature; fail-closed on an
 # empty signature (an unknown signature is never treated as suspect). A suspect match does
 # NOT exclude the failure — it narrows the triage verdict (SUSPECT vs REGRESSION) only.
 _failure_suspect() {
-  local repo="$1" rid="$2" rwf="$3" patterns="$4" sig wf_re step_re
-  sig="$(_run_signature "$repo" "$rid")"
+  local repo="$1" rid="$2" rwf="$3" patterns="$4" role="${5:-}" sig wf_re step_re
+  sig="$(_run_signature "$repo" "$rid" "$role")"
   [ -z "$sig" ] && return 1
   while IFS=$'\t' read -r wf_re step_re || [ -n "$wf_re" ]; do
     wf_re="${wf_re%$'\r'}"
@@ -859,12 +1187,11 @@ _run_is_stale() {
 # REGRESSION. Prints "<failures> <startup_failures> <benign_excluded> <suspect_count> <old_release_failures>".
 _cumulative_health() {
   local agent="$1" since="$2" differs="$3" cand="${4:--}"; shift 4
-  local wf repo json fail=0 startup=0 benign=0 suspect=0 stale=0 patterns="" suspect_patterns="" rid rwf
-  wf="$(_agent_field "$agent" run_workflow)"
+  local repo json fail=0 startup=0 benign=0 suspect=0 stale=0 patterns="" suspect_patterns="" rid rwf rrole
   patterns="$(_benign_patterns "$agent" "$differs")"
   suspect_patterns="$(_suspect_patterns "$agent")"
   for repo in "$@"; do
-    json="$(_run_json "$repo" "$wf" "$since")"
+    json="$(_agent_run_json "$agent" "$repo" "$since")"
     # startup_failure runs never executed a job, so no release can be attributed to them (no
     # "Uses:" log line): they always count, fail closed (#1176).
     startup=$(( startup + $(jq '[.[]?|select(.conclusion=="startup_failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
@@ -873,40 +1200,75 @@ _cumulative_health() {
       # jq pass, avoiding a gh run view call per failure.
       fail=$(( fail + $(jq '[.[]?|select(.conclusion=="failure")]|length' 2>/dev/null <<< "${json:-[]}" || echo 0) ))
     else
-      while IFS=$'\t' read -r rid rwf; do
+      while IFS=$'\t' read -r rid rwf rrole; do
         if _run_is_stale "$agent" "$cand" "$repo" "$rid"; then
           stale=$(( stale + 1 ))
-        elif [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns"; then
+        elif [ -n "$patterns" ] && _failure_benign "$repo" "$rid" "$rwf" "$patterns" "$rrole"; then
           benign=$(( benign + 1 ))
         else
           fail=$(( fail + 1 ))
-          if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns"; then
+          if [ -n "$suspect_patterns" ] && _failure_suspect "$repo" "$rid" "$rwf" "$suspect_patterns" "$rrole"; then
             suspect=$(( suspect + 1 ))
           fi
         fi
-      done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // "")]|@tsv' 2>/dev/null <<< "$json")
+      done < <(jq -r '.[]?|select(.conclusion=="failure")|[(.databaseId // "" | tostring),(.workflowName // ""),(.role // "")]|@tsv' 2>/dev/null <<< "$json")
     fi
   done
   echo "$fail $startup $benign $suspect $stale"
 }
 
 # _baseline_daily <agent> <window_days> <repo...> — per-day EXECUTED counts on the
-# source tier over the trailing window_days (exactly window_days integers, zero-filled),
+# source tier over the trailing window_days (window_days integers, zero-filled — fewer only when a
+# capped collapsed-repo read left the older days unknown, see _ingress_agent_runs),
 # feeding the robust spike-capped baseline for the sample target (#548).
 _baseline_daily() {
   local agent="$1" window="$2"; shift 2
-  local wf since repo json dates="" day i count out=""
-  wf="$(_agent_field "$agent" run_workflow)"
+  local since repo json day i count out="" tflag d cutday any_trunc=0 total=0
+  local -A dsum=() dknown=() rcount=()
+  local -a days=()
   since="$(_iso_now_minus_days "$window")"
-  for repo in "$@"; do
-    json="$(_run_json "$repo" "$wf" "$since")"
-    dates+="$(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)"$'\n'
-  done
   for (( i=0; i<window; i++ )); do
     day="$(date -u -d "-${i} days" +%Y-%m-%d 2>/dev/null || date -u -v"-${i}d" +%Y-%m-%d 2>/dev/null || echo "")"
-    count=$(grep -c "^${day}$" 2>/dev/null <<< "$dates" || true)
+    days+=("$day")
+  done
+  # A capped ingress read (see _ingress_agent_runs) leaves every day OLDER than that repo's first unread
+  # run's day unknown — NOT zero — and that boundary day itself only partly counted. Truncation is
+  # tracked PER REPO: a truncated member drops only its own older days, so a fully-read member's history
+  # still counts. The boundary day is kept only when it has observed runs (a lower bound, never a false
+  # zero). A day is dropped from the baseline only when NO member knows it. A truncated read must also
+  # never look like "no caller" (an all-zero baseline lets waive_sample_if_no_caller skip sampling in
+  # _pair_state), so if nothing countable was observed the baseline is a non-zero floor, which sizes the
+  # sample target at its clamp minimum.
+  for repo in "$@"; do
+    tflag="$(mktemp 2>/dev/null || true)"   # unwritable → the ingress cap stays strict (UNRESOLVED)
+    json="$(_CANARY_INGRESS_TRUNC_FLAG="$tflag" _agent_run_json "$agent" "$repo" "$since")"
+    cutday=""
+    if [ -n "$tflag" ] && [ -s "$tflag" ]; then
+      while IFS= read -r d; do [ -n "$d" ] && { [ -z "$cutday" ] || [[ "$d" > "$cutday" ]]; } && cutday="$d"; done < "$tflag"
+    fi
+    [ -n "$tflag" ] && rm -f "$tflag"
+    [ -n "$cutday" ] && any_trunc=1
+    rcount=()
+    while IFS= read -r d; do [ -n "$d" ] && rcount["$d"]=$(( ${rcount["$d"]:-0} + 1 )); done \
+      < <(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)
+    for day in "${days[@]}"; do
+      count="${rcount["$day"]:-0}"
+      if [ -n "$cutday" ]; then
+        [[ "$day" < "$cutday" ]] && continue
+        [ "$day" = "$cutday" ] && [ "$count" -eq 0 ] && continue
+      fi
+      dknown["$day"]=1
+      dsum["$day"]=$(( ${dsum["$day"]:-0} + count ))
+    done
+  done
+  for day in "${days[@]}"; do
+    # No truncated member → every day is known (zero-filled); otherwise only days some member knows.
+    if [ "$any_trunc" -eq 1 ] && [ "$#" -gt 0 ] && [ -z "${dknown["$day"]:-}" ]; then continue; fi
+    count="${dsum["$day"]:-0}"
+    total=$(( total + count ))
     out+="${count} "
   done
+  [ "$any_trunc" -eq 1 ] && [ "$total" -eq 0 ] && out="1 "
   echo "${out% }"
 }
 
@@ -949,18 +1311,22 @@ _reusable_differs() {
 # so the two never fetch the same run twice.
 declare -A _RUN_DECISION_CACHE=()
 
-# _run_decision_class <repo> <run_id> <prefix> — the decision class a run took (the taken
-# `<prefix><class>` no-op step; skipped branches ignored), via `gh run view --json jobs`.
+# _run_decision_class <repo> <run_id> <prefix> [<role>] — the decision class a run took (the taken
+# `<prefix><class>` no-op step; skipped branches ignored), via `gh run view --json jobs`. A
+# <role> (an ADR-0007 ingress-attributed run, #1224) scopes the read to that role's own jobs.
 # Empty on missing repo/id or any gh error (fail-open: a run with no decision step simply
 # contributes nothing to the tally, degrading toward INSUFFICIENT, never a false SHIFT).
 _run_decision_class() {
-  local repo="$1" id="$2" prefix="$3" cache_key json cls
+  local repo="$1" id="$2" prefix="$3" role="${4:-}" cache_key json cls
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
-  cache_key="${repo}:${id}"
+  cache_key="${repo}:${id}:${role}"
   if [[ -v _RUN_DECISION_CACHE["$cache_key"] ]]; then
     echo "${_RUN_DECISION_CACHE[$cache_key]}"; return 0
   fi
-  json="$(gh run view "$id" --repo "$repo" --json jobs 2>/dev/null || echo '{}')"
+  json="$(_run_jobs_json "$repo" "$id" 1 2>/dev/null || echo '{}')"
+  if [ -n "$role" ]; then
+    json="$(jq -c --arg role "$role" 'if has("jobs") then .jobs |= map(select(((.name // "")|split(" / ")[0]) == $role)) else error("Missing jobs key") end' <<< "$json" 2>/dev/null || echo '{}')"
+  fi
   cls="$(decision_class "$prefix" "$json")"
   _RUN_DECISION_CACHE["$cache_key"]="$cls"
   echo "$cls"
@@ -974,23 +1340,22 @@ _run_decision_class() {
 # reads the object; the min-sample knobs gate sufficiency.
 _sample_decision_counts() {
   local agent="$1" prefix="$2" max_k="$3" since="$4" before="$5"; shift 5
-  local wf repo json rid cls sampled=0
-  wf="$(_agent_field "$agent" run_workflow)"
+  local repo json rid rrole cls sampled=0
   declare -A counts=()
   local filter='.[]?|select(.conclusion=="success" or .conclusion=="failure")'
   [ "$before" != "-" ] && filter="$filter|select(.createdAt < \"$before\")"
   for repo in "$@"; do
     [ "$sampled" -ge "$max_k" ] && break
     { [ -z "$repo" ] || [ "$repo" = '*' ]; } && continue
-    json="$(_run_json "$repo" "$wf" "$since")"
-    while IFS= read -r rid; do
+    json="$(_agent_run_json "$agent" "$repo" "$since")"
+    while IFS=$'\t' read -r rid rrole; do
       [ -z "$rid" ] && continue
       [ "$sampled" -ge "$max_k" ] && break
-      cls="$(_run_decision_class "$repo" "$rid" "$prefix")"
+      cls="$(_run_decision_class "$repo" "$rid" "$prefix" "$rrole")"
       [ -z "$cls" ] && continue
       counts["$cls"]=$(( ${counts["$cls"]:-0} + 1 ))
       sampled=$(( sampled + 1 ))
-    done < <(jq -r "[${filter}]|sort_by(.createdAt)|reverse|.[]|(.databaseId|tostring)" 2>/dev/null <<< "$json")
+    done < <(jq -r "[${filter}]|sort_by(.createdAt)|reverse|.[]|[(.databaseId|tostring),(.role // \"\")]|@tsv" 2>/dev/null <<< "$json")
   done
   # Build the counts object in a SINGLE jq pass (one process, not one per key) —
   # jq does the key/value escaping so arbitrary class names stay valid JSON.
@@ -1085,7 +1450,8 @@ _decision_mix_table() {
 # `next`); the gate measures dwell from THAT candidate's own cut, samples on the <source> tier,
 # and scopes cumulative health to every tier EXCEPT a ring strictly BELOW <source> that runs a
 # DIFFERENT (newer) candidate — so a newer candidate churning on a lower tier can never block an
-# older, independently-clean candidate on a higher pair. Echoes the same 18-field line documented
+# older, independently-clean candidate on a higher pair. A ring member whose runs cannot be
+# attributed (#1224) holds an otherwise-clean gate BLOCKED with triage UNRESOLVED. Echoes the same 18-field line documented
 # on _frontier_state. triage/mix_shift/downgrade semantics are unchanged from the single-frontier
 # implementation this was extracted from.
 _pair_state() {
@@ -1097,6 +1463,24 @@ _pair_state() {
     echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
   fi
   now_epoch="$(date -u +%s)"
+
+  # Arm the UNRESOLVED-member flag (#1224): _agent_run_json records each ring member whose runs
+  # cannot be attributed (ADR-0007 ingress present, role job unresolvable). A file, because the
+  # run reads below happen in subshells. A caller may pre-arm it (sync-issues evidence).
+  local uflag="${_CANARY_UNRESOLVED_FLAG:-}" uflag_owned=0
+  if [ -z "$uflag" ]; then
+    # Per-process path (never shared across concurrent invocations) so _unresolved_evidence in
+    # this same process can reuse the flag instead of re-walking the runs (#1224).
+    uflag="$(_unresolved_flag_path "$agent" "$cand")"; uflag_owned=1
+    if : >"$uflag" 2>/dev/null; then
+      export _CANARY_UNRESOLVED_FLAG="$uflag"
+    else
+      # Cannot arm the flag (TMPDIR unwritable/full) → unattributable members could not be
+      # recorded; fail closed rather than let a clean-looking gate PROMOTE.
+      echo "WARN: cannot create unresolved-member flag '$uflag'; failing closed" >&2
+      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 FLAG_ERROR - - 0 0 0 0"; return 0
+    fi
+  fi
 
   # Source-tier repos (the tier currently running the candidate).
   local src_repos=() r
@@ -1277,6 +1661,33 @@ _pair_state() {
     fi
   fi
 
+  # A blind gate fails LOUDLY (#1224): a ring member whose runs could not be attributed is NOT
+  # passing evidence. Name it in an ::error::, and hold an otherwise-clean gate (PROMOTE /
+  # SOAKING / AWAITING_CONFIRMATION) as BLOCKED with triage UNRESOLVED so sync-issues tracks it.
+  # A gate already BLOCKED by real failures keeps that (more specific) triage.
+  local unresolved=""
+  if [ -n "$uflag" ] && [ -s "$uflag" ]; then
+    unresolved="$(cut -f1 "$uflag" | sort -u | paste -sd, - | sed 's/,/, /g')"
+  elif [ -n "$uflag" ] && [ ! -e "$uflag" ]; then
+    unresolved="(unresolved-member evidence could not be persisted)"
+  elif [ -n "$uflag" ] && ! : >>"$uflag" 2>/dev/null; then
+    # Empty but no longer writable: a failed append whose cleanup also failed (read-only fs) would
+    # look clean here, so treat an unwritable flag as lost evidence.
+    unresolved="(unresolved-member evidence could not be persisted)"
+  fi
+  if [ "$uflag_owned" -eq 1 ]; then
+    # Keep a non-empty flag for _unresolved_evidence to reuse (it deletes it); drop an empty one.
+    [ -n "$unresolved" ] || rm -f "$uflag"
+    unset _CANARY_UNRESOLVED_FLAG
+  fi
+  if [ -n "$unresolved" ]; then
+    echo "::error::canary gate for '$agent' [$transition] is BLIND on ring member(s) $unresolved — their runs could not be attributed (ADR-0007 ingress present, role job unresolvable). Counted as UNRESOLVED, not passing evidence; register the agent's ingress_job in the ring registry." >&2
+    # PRE_EXISTING is advanceable via `promote --allow-pre-existing`, so UNRESOLVED must dominate it.
+    if [ "$state" != "BLOCKED" ] || [ "$triage" = "PRE_EXISTING" ]; then
+      state="BLOCKED"; triage="UNRESOLVED"; mix_shift="-"; downgrade="-"
+    fi
+  fi
+
   echo "${cand:--} $frontier $transition $state $dwell_h $dwell_floor $sample $target $cum_fail $cum_startup $cum_benign $triage $mix_shift $downgrade $dg_cand_rate $dg_cand_sample $dg_base_rate $dg_base_sample"
 }
 
@@ -1301,33 +1712,40 @@ _frontier_state() {
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$chans"
   # Resolve every ring's commit ONCE (channel_commit is uncached across calls; see _pair_state).
-  local -a commits=()
-  local ch c commits_csv=""
-  for ch in "${chan_array[@]}"; do
-    c="$(channel_commit "$agent" "$ch")"
+  local -a commits=() unknown=()
+  local ch c u commits_csv=""
+  while read -r ch c u; do
+    [ "$c" = "-" ] && c=""
     commits+=("$c")
+    unknown+=("$u")
     commits_csv+="${c:--},"
-  done
+  done < <(_ring_commits "$agent" "$chans")
   commits_csv="${commits_csv%,}"
   local i prev="" cand dstc transition emitted=0
   for i in "${!chan_array[@]}"; do
     ch="${chan_array[$i]}"
     if [ -n "$prev" ]; then
-      # The pair verdict is the pure core's (pair_verdict, #1242); this loop only acts on it. A
-      # tag-lookup error is not yet distinguishable from an absent tag here (channel_commit, #1225),
-      # so both rings are passed as known (unknown=0).
+      # The pair verdict is the pure core's (pair_verdict, #1242); this loop only acts on it. A ring
+      # whose tag lookup ERRORED (#1225) is unknown, not absent.
       cand="${commits[$((i-1))]}"
       dstc="${commits[$i]}"
       transition="${prev}->${ch}"
-      case "$(pair_verdict "${cand:--}" 0 "${dstc:--}" 0)" in
+      case "$(pair_verdict "${cand:--}" "${unknown[$((i-1))]:-0}" "${dstc:--}" "${unknown[$i]:-0}")" in
         ON_CANDIDATE) ;;
         PENDING|UNRESOLVABLE_SOURCE)
           # An UNRESOLVABLE src commit (empty) with a populated dst is still pending and _pair_state
-          # holds it BLOCKED (fail closed, as the single-frontier code did).
+          # holds it BLOCKED (fail closed, as the single-frontier code did) — never silently skipped
+          # into a false COMPLETE.
           _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
           emitted=1 ;;
         *)
-          # HOLD_UNKNOWN (or any unrecognised verdict): fail closed — held BLOCKED, never evaluated.
+          # HOLD_UNKNOWN (or any unrecognised verdict): hold the pair BLOCKED (fail closed) — comparing
+          # an errored ring's empty commit would read an API outage as "on the candidate", and a total
+          # outage as COMPLETE. Never evaluated (or promoted) by the gate (#1225).
+          echo "::warning::$agent $transition: a ring tag lookup errored — holding the pair BLOCKED (fail closed) until it resolves (#1225)." >&2
+          if [ -n "${_CANARY_TAG_GAP_FLAG:-}" ]; then
+            printf '%s\n' "$transition" >> "$_CANARY_TAG_GAP_FLAG" 2>/dev/null || true
+          fi
           echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"
           emitted=1 ;;
       esac
@@ -1377,10 +1795,14 @@ cmd_evaluate() {
         echo "::warning::triage=SUSPECT — failure matches a suspect class (possibly candidate-caused). BLOCKS + needs a human; see the blocker issue's discriminating question, then promote --override if unrelated or roll back if a real regression."
       elif [ "$downgrade" = "DOWNGRADE" ]; then
         echo "::notice::triage=PRE_EXISTING (auto-downgraded from SUSPECT, #668 increment 6) — the candidate's suspect-class failure rate (${dg_cand_rate}‰ over ${dg_cand_sample} runs) is no worse than the prior version's (${dg_base_rate}‰ over ${dg_base_sample} runs), so the timeout is environmental, not a candidate regression. Report only; the SUSPECT hold auto-cleared (no human needed). Advances with --allow-pre-existing once dwell/sample pass."
+      elif [ "$triage" = "UNRESOLVED" ]; then
+        echo "::error::triage=UNRESOLVED — at least one ring member's runs could not be attributed (ADR-0007 collapsed repo: '$(_ingress_workflow)' present, no per-role workflow, role job unresolvable). The gate is blind there, so it holds rather than promote on incomplete evidence. Register the agent's ingress_job in the ring registry (#1224)."
+      elif [ "$triage" = "FLAG_ERROR" ]; then
+        echo "::error::triage=FLAG_ERROR — could not create the unresolved-member flag file (TMPDIR unwritable/full). The gate fails closed and holds; fix the runner's temp dir."
       elif [ "$triage" = "PRE_EXISTING" ]; then
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback. Advances with --allow-pre-existing (or control.allow_pre_existing in the registry) once dwell/sample pass."
       else
-        echo "::warning::state=BLOCKED (indeterminate) — could not resolve the candidate's cut date, so the gate fails closed and holds (not a detected failure; cum_fail=$cum_fail). Clears once the candidate's cut date/tag is resolvable."
+        echo "::warning::state=BLOCKED (indeterminate) — could not resolve the candidate's cut date or a ring's channel tag (lookup error), so the gate fails closed and holds (not a detected failure; cum_fail=$cum_fail). Clears once the candidate's cut date/tag is resolvable."
       fi
     elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
       echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
@@ -1427,7 +1849,23 @@ cmd_promote() {
   # in one sweep, and pairs are decided INDEPENDENTLY — a BLOCKED lower pair never blocks a clean
   # higher pair, and `--confirm` clears only an AWAITING_CONFIRMATION pair.
   local -a _pairs=()
+  # Arm the tag-gap flag so pairs held for an ERRORED ring tag lookup (#1225) are known and can
+  # never be advanced — not even with --override (the destination ring is unresolved).
+  local _gapflag _prev_gapflag="${_CANARY_TAG_GAP_FLAG:-}"
+  _gapflag="$(mktemp 2>/dev/null || true)"
+  if [ -z "$_gapflag" ]; then
+    # Cannot arm the detector: with no marker an errored ring could still be overridden/promoted.
+    echo "::error::promote $agent: cannot create the tag-gap marker file (temp filesystem unwritable) — failing closed, promoting nothing (#1225)." >&2
+    return 1
+  fi
+  export _CANARY_TAG_GAP_FLAG="$_gapflag"
   mapfile -t _pairs < <(_frontier_state "$agent")
+  local _gap_transitions=""
+  if [ -n "$_gapflag" ]; then
+    _gap_transitions="$(cat "$_gapflag" 2>/dev/null || true)"
+    rm -f "$_gapflag"
+    if [ -n "$_prev_gapflag" ]; then export _CANARY_TAG_GAP_FLAG="$_prev_gapflag"; else unset _CANARY_TAG_GAP_FLAG; fi
+  fi
   # allow_pre: advance a BLOCKED pair ONLY when triage=PRE_EXISTING (never REGRESSION). Sourced
   # from the per-reusable control block or the --allow-pre-existing flag (#1025 P2). Computed once.
   local allow_pre
@@ -1453,6 +1891,10 @@ cmd_promote() {
     first_pair=0
     # An unresolvable candidate ("-") cannot be promoted, even with --override: there is no commit to
     # move a tag to. It stays held BLOCKED (fail closed) until the source ring's tag resolves.
+    if [ -n "$_gap_transitions" ] && grep -qxF -- "$transition" <<< "$_gap_transitions"; then
+      echo "::error::gate=$state for '$frontier' [$transition] — a ring tag lookup errored; not promoting (even with --override). Clears once the tags resolve (#1225)." >&2
+      continue
+    fi
     if [ "$cand" = "-" ]; then
       echo "::error::gate=$state for '$frontier' [$transition] — the source ring's commit is unresolvable; not promoting (even with --override). Clears once the tag resolves." >&2
       continue
@@ -1640,8 +2082,7 @@ _gh_issue_create() {
 # runs (repo + run link + failed-step signature), capped at 8. Uses the SAME per-candidate
 # window + tier repos the gate counts, so the evidence matches cum_fail.
 _blocker_evidence() {
-  local agent="$1" cand="$2" wf cut_z repo json r n=0 out=""
-  wf="$(_agent_field "$agent" run_workflow)"
+  local agent="$1" cand="$2" cut_z repo json r n=0 out=""
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   [ -z "$cut_z" ] && { printf '_(no candidate cut date resolved — cannot list failing runs)_\n'; return 0; }
   local chan_array=() ch all=() seen=" " dedup=()
@@ -1661,21 +2102,46 @@ _blocker_evidence() {
     fi
   done
   for repo in "${dedup[@]}"; do
-    json="$(_run_json "$repo" "$wf" "$cut_z")"
-    local rid sig
+    json="$(_agent_run_json "$agent" "$repo" "$cut_z")"
+    local rid rrole sig
     local concl
-    while IFS=$'\t' read -r rid concl; do
+    while IFS=$'\t' read -r rid concl rrole; do
       [ -z "$rid" ] && continue
       # Old release: not counted (#1176). Only `failure` runs are attributable — a startup_failure
       # never ran a job, so it has no "Uses:" line and always counts (cum_startup), like the gate.
       if [ "$concl" = "failure" ] && [ -z "${raw_evidence["$repo"]:-}" ] && _run_is_stale "$agent" "$cand" "$repo" "$rid"; then continue; fi
       if [ "$n" -ge 8 ]; then out+="- _(…more failing runs; truncated at 8)_"$'\n'; printf '%s' "$out"; return 0; fi
-      sig="$(_run_signature "$repo" "$rid" | tr '\n' ';' | sed 's/;$//')"
+      sig="$(_run_signature "$repo" "$rid" "$rrole" | tr '\n' ';' | sed 's/;$//')"
       out+="- \`$repo\` — run [$rid](https://github.com/$repo/actions/runs/$rid); failed steps: ${sig:-unknown}"$'\n'
       n=$((n+1))
-    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="startup_failure")|[(.databaseId|tostring),.conclusion]|@tsv' 2>/dev/null <<< "$json")
+    done < <(jq -r '.[]?|select(.conclusion=="failure" or .conclusion=="startup_failure")|[(.databaseId|tostring),.conclusion,(.role // "")]|@tsv' 2>/dev/null <<< "$json")
   done
   [ -z "$out" ] && out="_(no failing runs in the per-candidate window — cum_fail may be startup_failures or a transient count)_"$'\n'
+  printf '%s' "$out"
+}
+
+# _unresolved_evidence <agent> <candidate_commit> — markdown bullets naming each ring member whose
+# runs could not be attributed (#1224), with the reason. Re-walks the same per-candidate window
+# and tier repos as _blocker_evidence under a fresh UNRESOLVED flag.
+_unresolved_evidence() {
+  local agent="$1" cand="$2" flag repo reason out="" flag_is_persistent=0 reuse=0
+  # Reuse the flag left by _frontier_state (a caller's pre-armed flag first) to avoid re-walking (#1224)
+  flag="${_CANARY_UNRESOLVED_FLAG:-$(_unresolved_flag_path "$agent" "$cand")}"
+  if [ -s "$flag" ]; then
+    flag_is_persistent=1
+    # A caller-armed flag belongs to the caller; only delete our own per-process one.
+    [ -z "${_CANARY_UNRESOLVED_FLAG:-}" ] && reuse=1
+  else
+    # Flag not found or empty, create a new one and re-evaluate
+    flag="$(mktemp 2>/dev/null || echo "")"
+    [ -z "$flag" ] && { printf '_(could not list the unresolved members — see the workflow log ::error:: annotations)_\n'; return 0; }
+    _CANARY_UNRESOLVED_FLAG="$flag" _blocker_evidence "$agent" "$cand" >/dev/null 2>&1 || true
+  fi
+  while IFS=$'\t' read -r repo reason; do
+    [ -n "$repo" ] && out+="- \`$repo\` — $reason"$'\n'
+  done < <(sort -u "$flag")
+  if [ "$flag_is_persistent" -eq 0 ] || [ "$reuse" -eq 1 ]; then rm -f "$flag"; fi
+  [ -z "$out" ] && out="_(no unresolved member found in the blocker scope on re-check — the hold may come from the baseline window or an unpersisted evidence flag; it re-evaluates next tick)_"$'\n'
   printf '%s' "$out"
 }
 
@@ -1737,6 +2203,10 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
 > |---|---|---|
 > | candidate | \`$dg_cand_rate\` | $dg_cand_sample |
 > | baseline | \`$dg_base_rate\` | $dg_base_sample |"
+  elif [ "$triage" = "UNRESOLVED" ]; then
+    note="> ⚠️ **UNRESOLVED (gate blind on a ring member, #1224)** — at least one ring member is an ADR-0007 collapsed repo (its per-role workflow is gone, \`$(_ingress_workflow)\` is present) and this agent's runs there could not be attributed to its role job. That member is **not** counted as passing evidence, so the gate holds instead of promoting on incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: register the agent's \`ingress_job\` (its job key in the ingress) in \`standards/canary-rings.json\`. If the evidence below says job reads were capped, the ingress has more runs in the window than \`CANARY_INGRESS_JOBS_MAX\` allows: raise that knob (default 300) instead. This issue auto-closes once every member resolves."
+  elif [ "$triage" = "FLAG_ERROR" ]; then
+    note="> ⚠️ **FLAG_ERROR (gate held — runner temp dir unwritable)** — the candidate's cut date resolved fine, but the gate could not create its unresolved-member flag file (\`TMPDIR\` unwritable or full), so it could not record unattributable ring members and fails closed rather than promote on possibly incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: free space / make \`TMPDIR\` writable on the runner; this clears on the next tick."
   elif [ "$triage" = "PRE_EXISTING" ]; then
     note="> ⚠️ **PRE_EXISTING** — the failure is pre-existing/environmental (reusable byte-identical to the prior channel). Report only; the gate will not roll back or advance. Fix-forward, and the armed timer auto-promotes once clean."
   else
@@ -1750,7 +2220,12 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
   # are NOT reliable and the triage verdict rests on the reusable diff alone. Prepend a banner
   # (before the triage note) and blank out the misleading "0" cumulative-failures cell.
   local cum_row="**$cum_fail** (startup_failures: $cum_startup)"
-  if [ "$data_gap" = "1" ]; then
+  local evidence_heading="Failing runs in the per-candidate window"
+  [ "$triage" = "UNRESOLVED" ] && evidence_heading="Unresolved ring members"
+  if [ "$data_gap" = "2" ]; then
+    cum_row="_unknown — channel tags unresolved this tick_"
+    note="> ⚠️ **TAG LOOKUP FAILED — FAILING CLOSED.** A channel-tag lookup for this pair errored this tick (a GitHub API failure — see the workflow log — not an absent tag), so the gate cannot tell where the rings are. Rather than report a false \"fully rolled out\", it holds the promotion and keeps this issue open. This clears automatically once the tags resolve again and the gate re-evaluates (#1225)."
+  elif [ "$data_gap" = "1" ]; then
     cum_row="_unknown — run history unavailable this tick_"
     note="> ⚠️ **PARTIAL DATA (run-history fetch failed) — FAILING CLOSED.** The canary gate could not read this agent's recent run history this tick (a sustained GitHub API failure — see the workflow log). Rather than report a false all-clear, the gate holds the promotion and keeps this issue open. The cumulative counts below are **not reliable for this tick**; the triage verdict is derived from the reusable diff alone. This clears automatically once run history is readable again and the gate re-evaluates.
 >
@@ -1771,7 +2246,7 @@ $note"
 
 $note
 
-### Failing runs in the per-candidate window
+### $evidence_heading
 $evidence
 ---
 _Whole-fleet status is in the Canary Rollout workflow run's job summary (Actions → Canary Rollout → latest run → Summary)._
@@ -1863,31 +2338,45 @@ EOF
 # TOTAL inability stays a hard error, surfaced by the caller. Since #1118 _frontier_state emits
 # one line per PENDING pair, so the wrapper appends the datagap flag to EACH line and, on a data
 # gap, reconstructs one BLOCKED line per pending pair.
+# A TAG-lookup error (#1225) is a second kind of data gap: the pair(s) touching a ring whose tag
+# lookup errored are held BLOCKED by _frontier_state and tagged datagap=2 here, so sync-issues
+# keeps their issues open and fails closed instead of reading an API outage as "gate cleared".
 _frontier_state_resilient() {
   local agent="$1" out="" rc=0 fetch_failed=0
   # Arm a file flag that _run_json appends to on a sustained fetch failure. A file (not a shell
   # var) is used because _frontier_state runs in a command-substitution subshell, and a var set
-  # there would not survive back to us — the file does.
-  local flag; flag="$(mktemp 2>/dev/null || echo "")"
-  if [ -z "$flag" ]; then
-    # Cannot arm the fetch-failure detector at all — treat as an unreadable tick rather
+  # there would not survive back to us — the file does. The tag-gap flag (#1225) collects the
+  # transitions _frontier_state held because a ring's tag lookup errored.
+  local flag gapflag gaps=""
+  flag="$(mktemp 2>/dev/null || echo "")"
+  gapflag="$(mktemp 2>/dev/null || echo "")"
+  if [ -z "$flag" ] || [ -z "$gapflag" ]; then
+    # Cannot arm a failure detector at all — treat as an unreadable tick rather
     # than silently falling back to the old undetectable-outage behavior.
     fetch_failed=1
     out="$(_frontier_state "$agent")" || rc=$?
   else
     # `|| rc=$?` catches any abort so set -e does not tear down the fleet loop on one agent.
-    export _CANARY_FETCH_FAIL_FLAG="$flag"
+    export _CANARY_FETCH_FAIL_FLAG="$flag" _CANARY_TAG_GAP_FLAG="$gapflag"
     out="$(_frontier_state "$agent")" || rc=$?
-    unset _CANARY_FETCH_FAIL_FLAG
+    unset _CANARY_FETCH_FAIL_FLAG _CANARY_TAG_GAP_FLAG
     [ -s "$flag" ] && fetch_failed=1
-    rm -f "$flag"
+    gaps="$(<"$gapflag")"
   fi
+  [ -n "$flag" ] && rm -f "$flag"
+  [ -n "$gapflag" ] && rm -f "$gapflag"
   # Normal path (no fetch failure, state lines produced): transparent pass-through, datagap=0
-  # appended to EVERY pending-pair line (#1118).
+  # appended to EVERY pending-pair line (#1118) — or 2 for a pair held on a tag-lookup error.
   if [ "$fetch_failed" -eq 0 ] && [ -n "$out" ] && [ "$rc" -eq 0 ]; then
-    local line
+    local line ltr gap
     while IFS= read -r line; do
-      [ -n "$line" ] && printf '%s 0\n' "$line"
+      [ -n "$line" ] || continue
+      local temp="${line#* }"
+      temp="${temp#* }"
+      ltr="${temp%% *}"
+      gap=0
+      [[ $'\n'"$gaps"$'\n' == *$'\n'"$ltr"$'\n'* ]] && gap=2
+      printf '%s %s\n' "$line" "$gap"
     done <<< "$out"
     return 0
   fi
@@ -1900,19 +2389,25 @@ _frontier_state_resilient() {
   # Data gap: the run-history fetch failed — reconstruct the tag-only facts for EVERY pending pair
   # (none read run history). Each is failed CLOSED to BLOCKED so its tracked issue is upserted.
   local chans; chans="$(ordered_channels "$agent" || true)"
-  local chan_array=()
-  IFS=, read -r -a chan_array <<< "$chans"
-  local prev="" prev_commit="" ch ch_commit cand dstc transition prior differs triage emitted=0
-  for ch in "${chan_array[@]}"; do
-    ch_commit="$(channel_commit "$agent" "$ch" || true)"   # once per ring (uncached across calls)
+  local prev="" prev_commit="" prev_unknown=0 ch ch_commit ch_unknown cand dstc transition prior differs triage emitted=0
+  while read -r ch ch_commit ch_unknown; do   # once per ring (uncached across calls)
+    [ -n "$ch" ] || continue
+    [ "$ch_commit" = "-" ] && ch_commit=""
     if [ -n "$prev" ]; then
       cand="$prev_commit"
       dstc="$ch_commit"
-      transition="${prev}->${ch}"
-      # Same pure pair verdict as _frontier_state (#1242): a pending pair, including an
-      # unresolvable (empty) src commit, stays tracked as BLOCKED rather than vanishing (fail
-      # closed); anything other than ON_CANDIDATE is held.
-      if [ "$(pair_verdict "${cand:--}" 0 "${dstc:--}" 0)" != "ON_CANDIDATE" ]; then
+      # A ring whose tag lookup errored (#1225) is unknown: hold the pair BLOCKED, tag-gap.
+      if [ "$prev_unknown" = 1 ] || [ "$ch_unknown" = 1 ]; then
+        echo "${cand:--} $ch ${prev}->${ch} BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0 2"
+        emitted=1
+        prev="$ch"; prev_commit="$ch_commit"; prev_unknown="$ch_unknown"
+        continue
+      fi
+      # Same pure pair verdict as _frontier_state (#1242): a pending pair, including an unresolvable
+      # (empty) src commit, stays tracked as BLOCKED rather than vanishing (fail closed); anything
+      # other than ON_CANDIDATE is held.
+      if [ "$(pair_verdict "${cand:--}" "$prev_unknown" "${dstc:--}" "$ch_unknown")" != "ON_CANDIDATE" ]; then
+        transition="${prev}->${ch}"
         prior="$dstc"
         if [ -z "$cand" ]; then
           # Unresolvable (empty) src commit: whether the candidate changed the reusable is
@@ -1931,8 +2426,8 @@ _frontier_state_resilient() {
         emitted=1
       fi
     fi
-    prev="$ch"; prev_commit="$ch_commit"
-  done
+    prev="$ch"; prev_commit="$ch_commit"; prev_unknown="$ch_unknown"
+  done < <(if [ -n "$chans" ]; then _ring_commits "$agent" "$chans"; fi)
   # Total inability: cannot resolve even one pending pair → hard error. Fail closed (never a silent
   # green); the caller surfaces ::error:: and ends non-zero.
   [ "$emitted" -eq 0 ] && return 1
@@ -2003,10 +2498,20 @@ cmd_sync_issues() {
     # tracked by SEPARATE issues in the same tick.
     local have_blocked=0 bl_cand="" bl_transition="" bl_triage="-" bl_cum_fail=0 bl_cum_startup=0
     local bl_mix_shift="-" bl_downgrade="-" bl_dgcr=0 bl_dgcs=0 bl_dgbr=0 bl_dgbs=0 bl_datagap=0
-    local have_awaiting=0 cf_cand="" cf_transition="" cf_sample=0 cf_target=0
+    local have_awaiting=0 cf_cand="" cf_transition="" cf_sample=0 cf_target=0 tag_gap=0
     while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
       { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
-      if [ "$state" = "BLOCKED" ] && [ "$have_blocked" -eq 0 ]; then
+      [ "${datagap:-0}" = "2" ] && tag_gap=1
+      # Blocker source priority: a substantive REGRESSION/SUSPECT pair outranks a tag-lookup-error pair
+      # (datagap=2), which outranks an ordinary BLOCKED pair — so an active regression's escalation
+      # (needs-human) is never replaced by the outage's `-` triage, while the outage still beats
+      # unrelated run evidence. The outage itself is surfaced via tag_gap (hard_fail + dashboard).
+      local _rank=1 _bl_rank=1
+      { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && _rank=3
+      [ "${datagap:-0}" = "2" ] && _rank=2
+      { [ "$bl_triage" = "REGRESSION" ] || [ "$bl_triage" = "SUSPECT" ]; } && _bl_rank=3
+      [ "$bl_datagap" = "2" ] && _bl_rank=2
+      if [ "$state" = "BLOCKED" ] && { [ "$have_blocked" -eq 0 ] || [ "$_rank" -gt "$_bl_rank" ]; }; then
         have_blocked=1
         bl_cand="$cand"; bl_transition="$transition"; bl_triage="$triage"
         bl_cum_fail="$cum_fail"; bl_cum_startup="$cum_startup"; bl_mix_shift="$mix_shift"
@@ -2018,6 +2523,13 @@ cmd_sync_issues() {
         cf_cand="$cand"; cf_transition="$transition"; cf_sample="$_s"; cf_target="$_t"
       fi
     done <<< "$pairs_out"
+    # A ring's tag lookup ERRORED this tick (#1225): the pairs touching it are held BLOCKED, but the
+    # agent's true state is unknown — fail closed (non-zero, like a total run-history outage) and
+    # never close an issue on the strength of it (handled below).
+    if [ "$tag_gap" -eq 1 ]; then
+      echo "::error::sync-issues: a channel-tag lookup for '$agent' errored (API failure, not an absent tag) — holding the affected pair(s) BLOCKED and failing closed rather than reporting a false all-clear." >&2
+      hard_fail=1
+    fi
 
     # Blocker issue (per agent, keyed canary-blocker:<agent>). Driven by the selected BLOCKED pair.
     local bl_link="—" num_state num istate
@@ -2025,8 +2537,14 @@ cmd_sync_issues() {
     num="${num_state%%$'\t'*}"; istate="${num_state##*$'\t'}"
     if [ "$have_blocked" -eq 1 ]; then
       local evidence body title mix_table=""
-      if [ "$bl_datagap" = "1" ]; then
+      if [ "$bl_datagap" = "2" ]; then
+        evidence="_(⚠️ a channel-tag lookup failed this tick, so this pair's rings could not be resolved and no failing runs can be attributed. The gate FAILS CLOSED: the promotion is held and this issue stays open until the tags resolve again.)_"
+      elif [ "$bl_datagap" = "1" ]; then
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
+      elif [ "$bl_triage" = "UNRESOLVED" ]; then
+        evidence="$(_unresolved_evidence "$agent" "$bl_cand" || true)"
+      elif [ "$bl_triage" = "FLAG_ERROR" ]; then
+        evidence="_(the gate could not create its unresolved-member flag file in \`TMPDIR\`, so no run evidence was gathered this tick. It FAILS CLOSED and holds this pair until the temp dir is writable.)_"
       else
         if [ "$bl_cand" = "-" ]; then
           evidence="_(the source ring's commit is unresolvable this tick, so there is no candidate whose failing runs can be listed. The gate FAILS CLOSED and holds this pair until the tag resolves.)_"
@@ -2038,6 +2556,8 @@ cmd_sync_issues() {
       body="$(_blocker_body "$agent" "$bl_transition" "$bl_cand" "$bl_cum_fail" "$bl_cum_startup" "$bl_triage" "$host" "$evidence" "$bl_mix_shift" "$mix_table" "$bl_downgrade" "$bl_dgcr" "$bl_dgcs" "$bl_dgbr" "$bl_dgbs" "$bl_datagap")"
       if [ "$bl_mix_shift" = "SHIFT" ]; then
         title="Canary blocker: $agent $bl_transition (decision-mix shift, SUSPECT)"
+      elif [ "$bl_datagap" = "2" ]; then
+        title="Canary blocker: $agent $bl_transition (tag lookup failed — fail-closed)"
       elif [ "$bl_datagap" = "1" ]; then
         title="Canary blocker: $agent $bl_transition ($bl_triage, partial run-history — fail-closed)"
       else
@@ -2067,8 +2587,9 @@ cmd_sync_issues() {
         fi
       fi
     else
-      # No BLOCKED pair — close a stale open blocker issue (the gate cleared).
-      if [ -n "$num" ] && [ "$istate" = "OPEN" ]; then
+      # No BLOCKED pair — close a stale open blocker issue (the gate cleared). Never on a tag gap
+      # (#1225): an unresolved ring is not a cleared gate.
+      if [ -n "$num" ] && [ "$istate" = "OPEN" ] && [ "$tag_gap" -eq 0 ]; then
         if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared blocker issue #$num for $agent"; else
           gh issue close "$num" --repo "$ISSUE_REPO" \
             --comment "✅ Gate cleared — \`$agent\` is no longer BLOCKED. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
@@ -2113,9 +2634,11 @@ cmd_sync_issues() {
     fi
     # Close any confirm issue for this agent that is NOT the current ring1 candidate's (a recut
     # ring1 candidate, or an agent no longer awaiting at all) — a stale go/no-go must never linger.
+    # Skipped on a tag gap (#1225): with a ring unresolved we cannot tell stale from still-pending.
     local ci_num ci_state
     while IFS=$'\t' read -r ci_num ci_state; do
       [ -z "$ci_num" ] && continue
+      [ "$tag_gap" -eq 1 ] && continue
       [ -n "$keep_num" ] && [ "$ci_num" = "$keep_num" ] && continue
       [ "$ci_state" = "OPEN" ] || continue
       if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared confirm issue #$ci_num for $agent"; else
