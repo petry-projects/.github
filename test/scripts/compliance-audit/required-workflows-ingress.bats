@@ -34,7 +34,8 @@ run_check() {
       for r in $INGRESS_ROLES; do printf "  %s:\n    uses: x/y/.github/workflows/%s-reusable.yml@%s/stable\n" "$r" "$r" "$r"; done
     }
     list_workflow_files() {
-      # LISTING_ERR: "404" ⇒ workflows dir absent (rc 2); other non-empty ⇒ transient (rc 1)
+      # LISTING_ERR: "listed" ⇒ success, prints agent-ingress.yml (rc 0); "404" ⇒ workflows dir absent (rc 2);
+      # other non-empty ⇒ transient (rc 1)
       case "$LISTING_ERR" in
         "") return 0 ;;
         listed) printf "agent-ingress.yml\n"; return 0 ;;
