@@ -5486,6 +5486,12 @@ case "$1 $2" in
         echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":431,"workflowName":"Agent Ingress"}]' ;;
       "org/cancelled|Agent Ingress")
         echo '[{"conclusion":"cancelled","createdAt":"2026-01-02T00:00:00Z","databaseId":441,"workflowName":"Agent Ingress"}]' ;;
+      "org/tie|Agent Ingress")
+        echo '[{"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":451,"workflowName":"Agent Ingress"},
+               {"conclusion":"failure","createdAt":"2026-01-03T00:00:00Z","databaseId":452,"workflowName":"Agent Ingress"}]' ;;
+      "org/sfgap|Agent Ingress")
+        echo '[{"conclusion":"startup_failure","createdAt":"2026-01-03T00:00:00Z","databaseId":461,"workflowName":"Agent Ingress"},
+               {"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":462,"workflowName":"Agent Ingress"}]' ;;
       "org/busy|Agent Ingress")
         # Three attributable runs: two today, one yesterday (newest first once sorted by createdAt).
         t="$(date -u +%Y-%m-%d)"; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
@@ -5506,6 +5512,11 @@ case "$1 $2" in
       411|421) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]}]}' ;;
       410|422|431) echo '{"jobs":[{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
       441) echo '{"jobs":[]}' ;;
+      461) echo '{"jobs":[]}' ;;
+      462) echo '{"jobs":[{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
+      # A failed job and an action_required job of the SAME role, in both orders (max_by tie-break).
+      451) echo '{"jobs":[{"name":"dev-lead / build","conclusion":"failure","steps":[]},{"name":"dev-lead / approve","conclusion":"action_required","steps":[]}]}' ;;
+      452) echo '{"jobs":[{"name":"dev-lead / approve","conclusion":"action_required","steps":[]},{"name":"dev-lead / build","conclusion":"failure","steps":[]}]}' ;;
       32[01]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"skipped","steps":[]},{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
       101) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]},
                           {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
@@ -5684,6 +5695,30 @@ GHEOF
     bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/norole '' 2>/dev/null | jq -c 'map(.databaseId)'"
   [ "$status" -eq 0 ]
   [ "$output" = '[]' ]
+  grep -q "carry no 'dev-lead' job" "$flag"
+}
+
+@test "_agent_run_json: a failed job plus an action_required job of the same role stays a FAILURE in either order (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # jq max_by keeps the last of tied elements; with failure and action_required ranked equal, the role's
+  # conclusion depended on job order and a real failure could be dropped from cum_fail.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/tie '' 2>/dev/null | jq -c 'map(.conclusion)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["failure","failure"]' ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: a job-less startup_failure is not the role's first appearance — an older no-role run stays UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # 461 (newer) has no jobs at all (startup_failure, so it counts as a failure); 462 (older) has only another
+  # role's job. No run carries dev-lead's job, so 462 is blind (misspelled ingress_job?), not pre-adoption.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/sfgap '' 2>/dev/null | jq -c 'map([.databaseId,.conclusion])'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[[461,"startup_failure"]]' ]
   grep -q "carry no 'dev-lead' job" "$flag"
 }
 

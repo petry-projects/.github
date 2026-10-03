@@ -821,7 +821,11 @@ _ingress_agent_runs() {
     fi
     rec="$(jq -c --arg role "$role" --arg wf "$wf" --arg id "$id" --arg created "$created" --arg rconc "$rconc" '
       def rank(c):
-        if   c == "failure" or c == "timed_out" or c == "action_required" or c == "startup_failure" then 6
+        # failure/timed_out rank STRICTLY above action_required/startup_failure: max_by keeps the last of
+        # tied elements, so a failed job followed by an action_required one must not reduce the role to
+        # action_required (downstream counters select conclusion=="failure" and would drop the failure).
+        if   c == "failure" or c == "timed_out" then 7
+        elif c == "action_required" or c == "startup_failure" then 6
         elif c == "cancelled" then 5   # an interrupted job must not be masked by a green sibling
         elif c == "success"   then 4
         elif c == null or c == "skipped" then 0
@@ -830,7 +834,7 @@ _ingress_agent_runs() {
       | if ($jobs | length) == 0 then
           # A run cancelled before any job started (e.g. superseded by workflow concurrency) never
           # executed this role: it is not a success or a failure, so it is simply not a record.
-          (if $rconc == "startup_failure" then {conclusion: "startup_failure"}
+          (if $rconc == "startup_failure" then {conclusion: "startup_failure", nojobs: true}
            elif $rconc == "cancelled" then {skipped: "cancelled"}
            else "UNATTRIBUTED" end)
         else
@@ -860,8 +864,10 @@ _ingress_agent_runs() {
       [ "$skipkind" = "role" ] && role_oldest="$created"   # the role job ran (skipped): it exists here
       continue
     fi
-    role_oldest="$created"   # newest→oldest: the last assignment is the OLDEST run carrying the role
-    [ -n "$rec" ] && recs+="$rec"$'\n'
+    # newest→oldest: the last assignment is the OLDEST run carrying the role. A job-less startup_failure
+    # (nojobs) carries NO role job, so it must not count as the role's appearance.
+    [ "$(jq -r '.nojobs // empty' <<< "$rec" 2>/dev/null || true)" = "true" ] || role_oldest="$created"
+    [ -n "$rec" ] && recs+="$(jq -c 'del(.nojobs)' <<< "$rec")"$'\n'
   done < <(jq -r --arg since "$since" \
     '[ .[]? | select(.conclusion != null and .conclusion != "")
           | select($since == "" or (.createdAt // "") >= $since) ]
