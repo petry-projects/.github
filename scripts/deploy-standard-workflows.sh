@@ -489,7 +489,7 @@ deploy_repo() {
   local ingress_content="" ingress_rc=0
   ingress_content="$(probe_agent_ingress "$repo")" || ingress_rc=$?
   if [[ "$ingress_rc" -eq 2 ]]; then
-    err "$repo — could not read .github/workflows/$AGENT_INGRESS_WORKFLOW (non-404 error); skipping the repo rather than risk re-seeding a collapsed stub"
+    err "$repo — could not read .github/workflows/$AGENT_INGRESS_WORKFLOW (ingress/repo state could not be verified); skipping the repo rather than risk re-seeding a collapsed stub"
     _OVERALL_FAILED=1
     return
   fi

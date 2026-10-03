@@ -506,9 +506,8 @@ arl_resolve_agent_runs() {
     case "$batch_rc" in
       0) ;;
       1)
-        if [ -n "$records" ]; then
-          break
-        fi
+        # Transient failure, even after earlier pages: a partial history would
+        # silently undercount runs, so take the documented degraded path.
         printf '[]'
         return 1
         ;;

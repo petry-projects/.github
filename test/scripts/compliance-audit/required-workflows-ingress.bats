@@ -14,9 +14,10 @@ bats_require_minimum_version 1.5.0
 
 SCRIPT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/scripts/compliance-audit.sh"
 
-# run_check <present_wfs> <ingress_roles>
+# run_check <present_wfs> <ingress_roles> [listing_err]
 #   present_wfs   space-separated workflow files that exist in the repo
 #   ingress_roles space-separated role jobs in agent-ingress.yml ("" ⇒ no ingress)
+#   listing_err   non-empty ⇒ the workflows-directory listing fails (optional)
 # Prints the `check` of every finding filed, one per line.
 run_check() {
   local findings="$BATS_TEST_TMPDIR/findings.json"
