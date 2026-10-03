@@ -49,6 +49,13 @@
 # default. (A hard first-hand 429 blocking signal belongs to the token-budget
 # breaker of Phases 5/6, not this library.)
 #
+# One deliberate exception (#1226): a PERMANENT absence of the agent's runs — no
+# per-role workflow AND no ADR-0007 agent-ingress.yml to attribute role jobs from
+# — is not an outage but an identity the guard cannot resolve. Reading it as zero
+# would silently disable throttling for that repo forever, so it is reported as
+# UNRESOLVED and the admission gate fails closed (defer). A transient API failure
+# still degrades permissively as above.
+#
 # Functions are namespaced with the `arl_` prefix to avoid colliding with caller
 # helpers.
 
@@ -56,6 +63,12 @@
 # Resolved relative to this library so a caller that sources it from anywhere
 # still finds the org single source of truth without hardcoding a path.
 ARL_DEFAULT_CONFIG="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/standards/agent-rate-limits.json"
+
+# ADR-0007 agent-ingress identity helpers (pure; sourcing defines functions only).
+# On a collapsed repo an agent's runs are ingress JOBS, not runs of a per-role
+# workflow, so run enumeration attributes them by role job (#1226).
+# shellcheck source=scripts/lib/agent-ingress.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/agent-ingress.sh"
 
 # Stable HTML marker prefix for the deduped, human-clearable open-breaker record
 # (mirrors the pr-automation-budget exhaustion marker idiom). The agent type is
@@ -421,45 +434,253 @@ arl_state_field() {
 }
 
 # ---------------------------------------------------------------------------
+# _arl_gh_run_list <workflow> <repo> <limit> [status] — one `gh run list` read. Echoes the
+# runs JSON array (databaseId,status,conclusion,createdAt) and returns 0; returns
+# 1 on a TRANSIENT failure (5xx, network, empty/malformed payload) and 3 when the
+# workflow PERMANENTLY does not exist (agent_ingress_gh_error_kind), so the two
+# are never conflated. An empty <repo> reads the current repository.
+# ---------------------------------------------------------------------------
+_arl_gh_run_list() {
+  local workflow="$1" repo="$2" limit="$3" status="${4:-}" out err errfile rc=0
+  local json_fields="databaseId,status,conclusion,createdAt"
+  local -a args=(run list --workflow "$workflow" --json "$json_fields" --limit "$limit")
+  [ -n "$repo" ] && args+=(--repo "$repo")
+  [ -n "$status" ] && args+=(--status "$status")
+  errfile="$(mktemp)"
+  out="$(gh "${args[@]}" 2>"$errfile")" || rc=$?
+  err="$(cat "$errfile" 2>/dev/null || true)"
+  rm -f "$errfile"
+  if [ "$rc" -ne 0 ]; then
+    [ "$(agent_ingress_gh_error_kind "$err" workflow-only)" = "missing" ] && return 3
+    return 1
+  fi
+  if [ -z "$out" ] || ! jq -e 'type == "array"' <<<"$out" >/dev/null 2>&1; then
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
+# arl_resolve_agent_runs <workflow> <role> <repo> <limit> [inflight_only] —
+# resolve an agent's recent runs in <repo> (empty = current repo), ingress-aware
+# (#1226, ADR-0007). Echoes a JSON array of {databaseId,status,conclusion,
+# createdAt} records — the legacy `gh run list` shape — and returns:
+#   0  resolved: from the per-role <workflow>, or, when that workflow PERMANENTLY
+#      does not exist (or <workflow> IS the ingress), from agent-ingress.yml runs
+#      attributed to <role> by role-bearing job (agent_ingress_role_runs);
+#   1  transient read failure (including every ingress jobs read failing) — echoes
+#      `[]`; callers keep their permissive degrade;
+#   3  UNRESOLVED — neither the workflow nor an agent-ingress.yml exists, or the
+#      ingress exists but declares no <role> job; echoes `[]` but callers must NOT
+#      read it as zero runs.
+# [inflight_only]=true fetches jobs only for not-yet-completed ingress runs (the
+# concurrency count needs nothing else). Each ingress run costs one jobs-API read,
+# so a history read is bounded by <limit>. A run whose jobs cannot be read is
+# skipped with a warning (transient, degraded).
+# ---------------------------------------------------------------------------
+arl_resolve_agent_runs() {
+  local workflow="$1" role="$2" repo="$3" limit="$4" inflight_only="${5:-false}"
+  local where="${repo:-the current repo}" runs rc=0
+
+  if ! agent_ingress_is_ingress_workflow "$workflow"; then
+    runs="$(_arl_gh_run_list "$workflow" "$repo" "$limit")" || rc=$?
+    case "$rc" in
+      0) printf '%s' "$runs"; return 0 ;;
+      1) printf '[]'; return 1 ;;
+    esac
+    arl_log "workflow '${workflow}' does not exist in ${where} — resolving '${role}' from ${AGENT_INGRESS_WORKFLOW} role jobs (ADR-0007)"
+    rc=0
+  fi
+
+  # History path: paginate ingress history until we have at least $limit
+  # role-specific runs (other roles can fill the first $limit ingress runs, #1226),
+  # doubling the fetch window and detecting end-of-history (batch < fetch_limit).
+  # inflight_only path: only queued/in_progress runs can matter, so list them with
+  # a server-side status filter and never page history.
+  # Every jobs read costs one API call, so total reads are hard-capped
+  # (AGENT_INGRESS_MAX_JOBS_READS, default 200): the throttle must not exhaust the
+  # API it guards. Hitting the cap degrades LOUDLY to the runs resolved so far.
+  local api_repo="${repo:-"{owner}/{repo}"}" records="" seen=" " role_runs="" page_runs
+  local batch_rc batch_count role_count fetch_limit="$limit" skipped_runs=0
+  local jobs_reads=0 cap_hit=false jobs_cap
+  jobs_cap="$(arl_sanitize_int "${AGENT_INGRESS_MAX_JOBS_READS:-200}" 200)"
+
+  while :; do
+    batch_rc=0
+    page_runs="$(_arl_fetch_ingress_page "$repo" "$fetch_limit" "$inflight_only")" || batch_rc=$?
+    case "$batch_rc" in
+      0) ;;
+      1)
+        # Transient failure, even after earlier pages: a partial history would
+        # silently undercount runs, so take the documented degraded path.
+        printf '[]'
+        return 1
+        ;;
+      *)
+        if [ -z "$records" ]; then
+          arl_log "UNRESOLVED: neither workflow '${workflow}' nor ${AGENT_INGRESS_WORKFLOW} exists in ${where} — '${role}' runs cannot be counted (refusing to read this as zero)"
+          printf '[]'
+          return 3
+        fi
+        page_runs='[]'
+        ;;
+    esac
+
+    _arl_ingest_ingress_runs
+
+    role_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
+    role_count="$(jq -r 'length' <<<"$role_runs" 2>/dev/null || printf '0')"
+    batch_count="$(jq -r 'length' <<<"$page_runs" 2>/dev/null || printf '0')"
+
+    if [ "$inflight_only" = "true" ] || [ "$cap_hit" = "true" ] \
+      || [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$fetch_limit" ]; then
+      [ "$skipped_runs" -gt 0 ] && arl_log "warning: ${skipped_runs} ${AGENT_INGRESS_WORKFLOW} run(s) in ${where} had unreadable jobs and were NOT counted (degraded)"
+      # Every jobs read failed: nothing was resolved, so this is a transient
+      # no-data outcome (degrades to 0), not a resolved-empty history.
+      if [ -z "$records" ] && [ "$skipped_runs" -gt 0 ]; then
+        printf '[]'
+        return 1
+      fi
+      printf '%s' "$role_runs"
+      if [ "$role_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
+        arl_log "UNRESOLVED: ${AGENT_INGRESS_WORKFLOW} in ${where} declares no '${role}' job — '${role}' runs cannot be counted (refusing to read this as zero)"
+        return 3
+      fi
+      return 0
+    fi
+
+    fetch_limit=$(( fetch_limit * 2 ))
+  done
+}
+
+# _arl_fetch_ingress_page <repo> <limit> <inflight_only> — one read of ingress
+# runs. History: a single `gh run list`. inflight_only: the union of the
+# server-side `queued` and `in_progress` listings. Same return codes as
+# _arl_gh_run_list (0 ok / 1 transient / 3 permanently missing).
+_arl_fetch_ingress_page() {
+  local repo="$1" limit="$2" inflight_only="$3" st out rc acc="[]"
+  if [ "$inflight_only" != "true" ]; then
+    _arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$limit"
+    return $?
+  fi
+  for st in queued in_progress; do
+    rc=0
+    out="$(_arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$limit" "$st")" || rc=$?
+    [ "$rc" -ne 0 ] && return "$rc"
+    acc="$(jq -sc 'add' <<<"${acc}${out}")"
+  done
+  printf '%s' "$acc"
+}
+
+# _arl_ingest_ingress_runs — read the jobs of each run in $page_runs into
+# $records. Runs inside arl_resolve_agent_runs and deliberately works on ITS locals
+# (page_runs, inflight_only, records, seen, jobs_reads, jobs_cap, cap_hit,
+# skipped_runs, api_repo, where) via bash dynamic scoping. Runs are deduped by
+# numeric id (re-fetches on a doubled window repeat earlier runs); reads stop at the
+# cap.
+_arl_ingest_ingress_runs() {
+  local id status created jobs_out filter='.'
+  [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
+  while IFS=$'\t' read -r id status created; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    case "$seen" in *" ${id} "*) continue ;; esac
+    seen+="${id} "
+    if [ "$jobs_reads" -ge "$jobs_cap" ]; then
+      cap_hit=true
+      arl_log "warning: ${AGENT_INGRESS_WORKFLOW} jobs-read cap (${jobs_cap}, AGENT_INGRESS_MAX_JOBS_READS) hit in ${where} — history is TRUNCATED, '${role}' runs beyond it are not counted (degraded)"
+      break
+    fi
+    jobs_reads=$(( jobs_reads + 1 ))
+    jobs_out="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
+      | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
+    if [ -z "$jobs_out" ]; then
+      arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
+      skipped_runs=$(( skipped_runs + 1 ))
+      continue
+    fi
+    records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs_out" \
+      '{databaseId: $id, status: $s, createdAt: $c, jobs: $jobs}')"$'\n'
+  done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
+    <<<"$page_runs" 2>/dev/null || true)
+}
+
+# _arl_ingress_declares_role <role> <api_repo> — 0 unless the repo's
+# agent-ingress.yml is READABLE and declares no `jobs.<role>` key. An unreadable or
+# empty read returns 0 (declared) so a blip keeps the permissive degrade.
+_arl_ingress_declares_role() {
+  local role="$1" api_repo="$2" raw content
+  raw="$(gh api "repos/${api_repo}/contents/.github/workflows/${AGENT_INGRESS_WORKFLOW}" 2>/dev/null || true)"
+  content="$(jq -r 'select(.type == "file" and .encoding == "base64") | .content // empty' <<<"$raw" 2>/dev/null \
+    | base64 -d 2>/dev/null || true)"
+  if [ -z "$content" ]; then
+    arl_log "warning: could not verify ${AGENT_INGRESS_WORKFLOW} in ${api_repo} — treating '${role}' as declared (degraded)"
+    return 0
+  fi
+  agent_ingress_has_role_job "$role" <<<"$content"
+}
+
+# ---------------------------------------------------------------------------
 # arl_count_concurrent_runs <agent_type> — count this agent type's in-flight
-# (queued or in-progress) workflow runs via `gh run list`. Echoes the integer
-# count on stdout. Fail-safe: a `gh` failure or empty payload logs and yields 0,
-# so a transient API error degrades to allow rather than wedging dispatch.
+# (queued or in-progress) runs. Echoes the integer count on stdout. Ingress-aware
+# (#1226): on an ADR-0007 collapsed repo the agent's runs are counted from its
+# agent-ingress.yml role jobs (arl_resolve_agent_runs).
+#
+# Fail-safe: a TRANSIENT `gh` failure or empty payload logs and contributes 0, so
+# an API blip degrades to allow rather than wedging dispatch. A PERMANENT absence
+# (no workflow and no ingress) in the repo BEING GATED (the current repo) is
+# different: it echoes `unresolved` and returns 3 — never a silent 0 that disables
+# throttling. In any other tallied org repo the same condition counts 0 with a
+# warning (a repo that never enabled the agent must not defer it everywhere).
 #
 # NOTE: `gh run list` scopes to the current repository by default, so this
 # count cannot enforce org-wide concurrent limits on its own. Set
 # AGENT_RATE_LIMITS_ORG_REPOS to a comma-separated list of "owner/repo" values
-# to include additional repos in the tally (Phase-4 wiring responsibility).
+# to include additional repos in the tally (Phase-4 wiring responsibility); the
+# fleet may freely mix collapsed and non-collapsed repos.
 # ---------------------------------------------------------------------------
 arl_count_concurrent_runs() {
   local agent_type="$1"
-  local total=0 runs n
+  local total=0 runs n rc repo role unresolved=""
+  role="$(agent_ingress_role_for_workflow "$agent_type")"
 
-  runs="$(gh run list --workflow "$agent_type" --json status --limit 1000 2>/dev/null || true)"
-  if [ -z "$runs" ]; then
-    arl_log "warning: run enumeration for '${agent_type}' returned no data (treating concurrency as 0)"
-  else
-    n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
-      <<<"$runs" 2>/dev/null || printf '0')"
-    total=$(( total + $(arl_sanitize_int "$n") ))
-  fi
-
-  # Extend to additional repos for org-wide enforcement when configured.
+  # The current repo first, then any additional repos for org-wide enforcement.
+  local -a repos=("")
   if [ -n "${AGENT_RATE_LIMITS_ORG_REPOS:-}" ]; then
-    local repo
+    local -a _arl_repos
     IFS=',' read -ra _arl_repos <<< "$AGENT_RATE_LIMITS_ORG_REPOS"
     for repo in "${_arl_repos[@]}"; do
       repo="${repo// /}"
-      [ -z "$repo" ] && continue
-      runs="$(gh run list --repo "$repo" --workflow "$agent_type" --json status --limit 1000 2>/dev/null || true)"
-      if [ -n "$runs" ]; then
-        n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
-          <<<"$runs" 2>/dev/null || printf '0')"
-        total=$(( total + $(arl_sanitize_int "$n") ))
-      fi
+      [ -n "$repo" ] && repos+=("$repo")
     done
   fi
 
+  for repo in "${repos[@]}"; do
+    rc=0
+    runs="$(arl_resolve_agent_runs "$agent_type" "$role" "$repo" 1000 true)" || rc=$?
+    case "$rc" in
+      0)
+        n="$(jq -r '[.[]? | select((.status // "") == "in_progress" or (.status // "") == "queued")] | length' \
+          <<<"$runs" 2>/dev/null || printf '0')"
+        total=$(( total + $(arl_sanitize_int "$n") ))
+        ;;
+      1)
+        arl_log "warning: run enumeration for '${agent_type}'${repo:+ in ${repo}} returned no data (treating concurrency as 0)"
+        ;;
+      *)
+        if [ -z "$repo" ]; then
+          unresolved+=" <current repo>"
+        else
+          arl_log "warning: '${agent_type}' runs in ${repo} are unresolved (no workflow / ingress role job) — counting 0 for that repo"
+        fi
+        ;;
+    esac
+  done
+
+  if [ -n "$unresolved" ]; then
+    arl_log "UNRESOLVED: concurrency for '${agent_type}' cannot be counted in:${unresolved} — reporting unresolved, not 0"
+    printf 'unresolved'
+    return 3
+  fi
   printf '%s' "$total"
   return 0
 }
@@ -1234,8 +1455,14 @@ arl_admission_gate() {
   fi
 
   # 4. Admission — concurrency / cooldown / daily budget.
-  local concurrent last_run daily_count daily_window_start
-  concurrent="$(arl_count_concurrent_runs "$agent_type")"
+  local concurrent last_run daily_count daily_window_start concurrent_rc=0
+  concurrent="$(arl_count_concurrent_runs "$agent_type")" || concurrent_rc=$?
+  # An UNRESOLVED count (no workflow and no agent-ingress.yml role job to count —
+  # #1226) fails CLOSED: reading it as 0 would never throttle that repo.
+  if [ "$concurrent_rc" -eq 3 ]; then
+    arl_finish "$agent_type" "defer" "concurrency unresolved — no '${agent_type}' workflow and no ${AGENT_INGRESS_WORKFLOW} to count role jobs from (failing closed)"
+    return $?
+  fi
   last_run="$(arl_state_field "$state" "$agent_type" last_run_epoch 0)"
   daily_count="$(arl_state_field "$state" "$agent_type" daily_count 0)"
   daily_window_start="$(arl_state_field "$state" "$agent_type" daily_window_start 0)"
