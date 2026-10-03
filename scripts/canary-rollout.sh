@@ -731,7 +731,9 @@ _record_unresolved() {
   line="$(printf '%s\t%s' "$repo" "$reason")"
   if [ -n "${_CANARY_UNRESOLVED_FLAG:-}" ]; then
     grep -qxF -- "$line" "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null && return 0
-    printf '%s\n' "$line" >> "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || true
+    # A failed append (temp fs full) must not leave a clean-looking empty flag: remove it, so the
+    # gate sees the flag GONE and fails closed (see the "evidence write failed" check in _frontier_state).
+    printf '%s\n' "$line" >> "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || rm -f "$_CANARY_UNRESOLVED_FLAG" 2>/dev/null || true
   fi
   echo "::warning::canary: UNRESOLVED member $repo for '$agent' — $reason" >&2
 }
@@ -803,6 +805,7 @@ _ingress_agent_runs() {
   [ "$jobs_max" -lt 1 ] && jobs_max=300
   while IFS=$'\t' read -r id created rconc; do
     [ -z "$id" ] && continue
+    [ "$created" = "-" ] && created=""   # "-" kept the empty field from collapsing in the tab-split read
     if [ "$nread" -ge "$jobs_max" ]; then
       if [ -n "${_CANARY_INGRESS_TRUNC_FLAG:-}" ] && printf '%s\n' "${created:0:10}" >> "$_CANARY_INGRESS_TRUNC_FLAG" 2>/dev/null; then
         echo "::warning::$agent $repo: more than $jobs_max ingress runs in the baseline window; using the newest days only (CANARY_INGRESS_JOBS_MAX)." >&2
@@ -876,7 +879,7 @@ _ingress_agent_runs() {
     '[ .[]? | select(.conclusion != null and .conclusion != "")
           | select($since == "" or (.createdAt // "") >= $since) ]
           | sort_by(.createdAt // "") | reverse | .[]
-          | [(.databaseId|tostring), (.createdAt // ""), .conclusion] | @tsv' 2>/dev/null <<< "${iraw:-[]}")
+          | [(.databaseId|tostring), (if (.createdAt // "") == "" then "-" else .createdAt end), .conclusion] | @tsv' 2>/dev/null <<< "${iraw:-[]}")
   # Runs where no job carried the role. If the role appears in an OLDER run, a no-role run that is
   # older still predates the role's adoption by the ingress and is benign; one NEWER than the role's
   # oldest appearance, or any when no run in the window carries the role at all (renamed/misspelled
@@ -1641,6 +1644,8 @@ _pair_state() {
   local unresolved=""
   if [ -n "$uflag" ] && [ -s "$uflag" ]; then
     unresolved="$(cut -f1 "$uflag" | sort -u | paste -sd, - | sed 's/,/, /g')"
+  elif [ -n "$uflag" ] && [ ! -e "$uflag" ]; then
+    unresolved="(unresolved-member evidence could not be persisted)"
   fi
   if [ "$uflag_owned" -eq 1 ]; then
     # Keep a non-empty flag for _unresolved_evidence to reuse (it deletes it); drop an empty one.

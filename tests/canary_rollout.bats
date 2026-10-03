@@ -5840,3 +5840,9 @@ _ingress_frontier() {
   # The resolvable legacy member is not listed.
   [[ "$output" != *"org/legacy"* ]]
 }
+
+@test "_record_unresolved: a failed evidence append removes the flag so the gate cannot read it as clean (#1224)" {
+  local flag="$BATS_TEST_TMPDIR/unresolved-ro"; : > "$flag"; chmod 444 "$flag"
+  run env _CANARY_UNRESOLVED_FLAG="$flag" bash -c "source '$ORCH' && _record_unresolved dev-lead org/x 'blind' 2>/dev/null"
+  [ ! -e "$flag" ]
+}
