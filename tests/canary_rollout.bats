@@ -3621,8 +3621,8 @@ GHEOF
 # human go/no-go regardless of newer cuts landing on next/ring0.
 #
 # _multicand_stub <t_next> <t_ring0> <t_ring1> <t_stable> <off_c1> <off_c2> <off_c3> [fail_sub] [differ] [issue_list]
-#   t_* ∈ {C1,C2,C3,PRIOR} — the commit each tier carries (C1=cccc…, C2=dddd…, C3=eeee…,
-#   PRIOR=bbbb…). off_cN — cut age (a `date -d` offset string, e.g. "1 hours"/"3 days") of the
+#   t_* ∈ {C1,C2,C3,PRIOR,NONE,ERR} — the commit each tier carries (C1=cccc…, C2=dddd…, C3=eeee…,
+#   PRIOR=bbbb…); NONE = the tag is genuinely absent (404), ERR = its lookup errors (5xx, #1225). off_cN — cut age (a `date -d` offset string, e.g. "1 hours"/"3 days") of the
 #   release tag for C1/C2/C3. fail_sub — a repo substring whose `run list` returns FAILURES
 #   (default: none → all clean). differ="C1" makes C1's reusable blob differ from the prior
 #   (default: all identical → differs=0). issue_list — JSON returned by `gh issue list`.
@@ -3636,7 +3636,7 @@ _multicand_stub() {
   local C2="dddddddddddddddddddddddddddddddddddddddd"
   local C3="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
   local PRIOR="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  local -A M=( [C1]="$C1" [C2]="$C2" [C3]="$C3" [PRIOR]="$PRIOR" [NONE]="" )
+  local -A M=( [C1]="$C1" [C2]="$C2" [C3]="$C3" [PRIOR]="$PRIOR" [NONE]="" [ERR]="ERR" )
   local n="${M[$t_next]}" r0="${M[$t_ring0]}" r1="${M[$t_ring1]}" st="${M[$t_stable]}"
   local blob_c1="reuseSAME"; [ "$differ" = "C1" ] && blob_c1="reuseCAND"
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
@@ -3653,11 +3653,19 @@ GITEOF
   chmod +x "$STUB_BIN/git"
   cat > "$STUB_BIN/gh" <<GHEOF
 #!/usr/bin/env bash
+# NONE = genuinely absent (HTTP 404, as the real API reports it); ERR = a lookup ERROR (HTTP 502).
+_ref() {
+  case "\$1" in
+    "")  echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    ERR) echo "gh: Server Error (HTTP 502)" >&2; exit 1 ;;
+    *)   echo "\$1 commit" ;;
+  esac
+}
 case "\$*" in
-  *"git/ref/tags/dev-lead/next"*)   [ -n "$n" ] && echo "$n commit" ;;
-  *"git/ref/tags/dev-lead/ring0"*)  [ -n "$r0" ] && echo "$r0 commit" ;;
-  *"git/ref/tags/dev-lead/ring1"*)  [ -n "$r1" ] && echo "$r1 commit" ;;
-  *"git/ref/tags/dev-lead/stable"*) [ -n "$st" ] && echo "$st commit" ;;
+  *"git/ref/tags/dev-lead/next"*)   _ref "$n" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  _ref "$r0" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  _ref "$r1" ;;
+  *"git/ref/tags/dev-lead/stable"*) _ref "$st" ;;
   *"matching-refs/tags/dev-lead/v"*)
     printf 'refs/tags/dev-lead/v2.2.0\tobjC1\ttag\n'
     printf 'refs/tags/dev-lead/v2.1.0\tobjC2\ttag\n'
@@ -3805,6 +3813,170 @@ GHEOF
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
   [ "$status" -eq 0 ]
   [[ "$output" == *"[ring1->stable]: BLOCKED"* ]]
+}
+
+# ── #1225: a tag-lookup ERROR is unknown, not absent — a lookup outage never reads as COMPLETE ──
+# _gh_tag_commit used to return empty for ANY failure, so when every ring lookup errored all rings
+# compared equal ("" == "") and _frontier_state emitted COMPLETE: an in-flight rollout reported
+# "fully rolled out", sync-issues closed open blockers, promote-all found nothing to promote. A
+# genuinely ABSENT tag (404) keeps the legacy behaviour (#1118 AC6); an ERRORED lookup holds every
+# pair touching that ring BLOCKED, and sync-issues fails closed (non-zero), as for a run-history outage.
+
+@test "#1225: _gh_tag_commit — an absent tag (404) is empty and NOT recorded as a lookup error" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  # the tag ref 404s, but the host repo itself stays readable (so the 404 is a genuine absence)
+  printf '#!/usr/bin/env bash\ncase "$*" in *git/ref/tags/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; *) echo petry-projects/.github ;; esac\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -s "$flag" ]
+}
+
+@test "#1225: _gh_tag_commit — a 404 on an UNREADABLE host repo is a lookup error, not an absent tag" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: Not Found (HTTP 404)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "dev-lead/next" "$flag"
+}
+
+@test "#1225: _gh_tag_commit — only an explicit HTTP 404 is absence ('not found' text without 404 is an error)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: repository not found (HTTP 500)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "dev-lead/next" "$flag"
+}
+
+@test "#1225: a lookup error whose flag write FAILS still reads as unknown in _ring_commits" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: Server Error (HTTP 502)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="/nonexistent-dir/flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"!tag-lookup-error-unrecorded"* ]]
+}
+
+@test "#1225: _gh_tag_commit — a lookup ERROR (5xx) is empty but RECORDED, so callers can tell it from absent" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: Server Error (HTTP 502)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]          # never fails the caller (every other call site keeps working)
+  [ -z "$output" ]
+  grep -q "dev-lead/next" "$flag"
+}
+
+@test "#1225: _gh_tag_commit — a failed annotated-tag DEREF is an error too (the ref exists)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"git/ref/tags/"*) printf 'tagobj\ttag\n' ;;
+  *) echo "gh: Server Error (HTTP 503)" >&2; exit 1 ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/ring0 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  grep -q "dev-lead/ring0" "$flag"
+}
+
+@test "#1225: a TOTAL tag-lookup outage holds BLOCKED and NEVER reports fully rolled out" {
+  _multicand_stub ERR ERR ERR ERR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[next->ring0]: BLOCKED"* ]]
+  [[ "$output" == *"[ring0->ring1]: BLOCKED"* ]]
+  [[ "$output" == *"[ring1->stable]: BLOCKED"* ]]
+  [[ "$output" != *"COMPLETE"* ]]
+  [[ "$output" != *"fully rolled out"* ]]
+}
+
+@test "#1225: a TOTAL tag-lookup outage — promote moves nothing and does not report nothing-to-promote" {
+  _multicand_stub ERR ERR ERR ERR "3 days" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"fully rolled out"* ]]
+  [[ "$output" != *"nothing to promote"* ]]
+  [[ "$output" != *"tags/dev-lead/"*" sha="* ]]
+}
+
+@test "#1225: a TOTAL tag-lookup outage — promote --override still moves nothing" {
+  _multicand_stub ERR ERR ERR ERR "3 days" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --override --dry-run
+  [[ "$output" == *"a ring tag lookup errored; not promoting"* ]]
+  [[ "$output" != *"advancing dev-lead"* ]]
+  [[ "$output" != *"tags/dev-lead/"*" sha="* ]]
+}
+
+@test "#1225: sync-issues FAILS CLOSED on a total tag-lookup outage — non-zero, and closes neither blocker nor confirm issue" {
+  _multicand_stub ERR ERR ERR ERR "1 hours" "3 days" "30 hours" "" "" \
+    '[{"number":905,"state":"OPEN","body":"<!-- canary-blocker:dev-lead -->"},{"number":906,"state":"OPEN","body":"<!-- canary-confirm:dev-lead:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee -->"}]'
+  local summ="$BATS_TEST_TMPDIR/tg-a.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag lookup"* ]]
+  grep -q "EDIT|.*905" "$ISSUE_LOG"          # the open blocker is refreshed (held), never closed
+  run grep -q "CLOSE|" "$ISSUE_LOG"           # no issue is closed on the strength of an outage
+  [ "$status" -eq 1 ]
+  grep -q '| `dev-lead` | BLOCKED |' "$summ"
+  run grep -qF '| `dev-lead` | COMPLETE |' "$summ"
+  [ "$status" -eq 1 ]
+}
+
+@test "#1225: every tag genuinely ABSENT (404) keeps the legacy COMPLETE (#1118 AC6)" {
+  _multicand_stub NONE NONE NONE NONE "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fully rolled out"* ]]
+  [[ "$output" != *"BLOCKED"* ]]
+}
+
+@test "#1225: sync-issues on an all-ABSENT (unseeded/legacy) agent is a clean COMPLETE, exit 0" {
+  _multicand_stub NONE NONE NONE NONE "1 hours" "3 days" "30 hours"
+  local summ="$BATS_TEST_TMPDIR/tg-b.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  grep -qF '| `dev-lead` | COMPLETE |' "$summ"
+  run grep -q "CREATE|" "$ISSUE_LOG"          # no blocker opened for an agent with no tags yet
+  [ "$status" -eq 1 ]
+}
+
+@test "#1225: a single ERRORED lookup holds only the pair touching that ring; other pairs evaluate normally" {
+  # next errors; ring0=ring1=C3 (cut 30h) and stable=prior → ring1->stable is independently
+  # AWAITING_CONFIRMATION exactly as in the all-resolved case; only next->ring0 is held.
+  _multicand_stub ERR C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[next->ring0]: BLOCKED"* ]]
+  [[ "$output" == *"[ring1->stable]: AWAITING_CONFIRMATION"* ]]
+  [[ "$output" != *"[ring0->ring1]"* ]]
+}
+
+@test "#1225: an ERRORED destination lookup holds that pair — never PROMOTEs onto an unknown ring" {
+  # stable errors; next=C1 clean and old enough to PROMOTE into ring0, which must still advance.
+  _multicand_stub C1 C3 C3 ERR "3 days" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tags/dev-lead/ring0 sha=cccccccccccc"* ]]
+  [[ "$output" != *"tags/dev-lead/stable sha="* ]]
+  [[ "$output" == *"ring1->stable"*"BLOCKED"* ]]
+}
+
+@test "#1225: sync-issues opens a tag-lookup blocker for a single errored pair and still exits non-zero" {
+  _multicand_stub ERR C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  local summ="$BATS_TEST_TMPDIR/tg-c.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"opened blocker issue"* ]]
+  grep -q "CREATE|.*tag lookup failed" "$ISSUE_LOG"
+  grep -q "AWAITING_CONFIRMATION" "$summ"     # the unaffected higher pair is still tracked normally
 }
 
 # The confirm issue's idempotency marker is keyed on the ring1 CANDIDATE (#1118 AC3), so a
