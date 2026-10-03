@@ -28,6 +28,8 @@ install_gh_stub() {
 { printf 'gh'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "$GH_CALLS"
 if [ "${1:-}" = "api" ]; then
   case "$2" in
+    *contents/.github/workflows/agent-ingress.yml)
+      echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;   # not collapsed (ADR-0007, #1226)
     *contents*)
       if [ -n "${GH_CONTENT_B64:-}" ]; then
         printf '{"sha":"abc123","content":"%s"}' "$GH_CONTENT_B64"
