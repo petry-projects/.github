@@ -37,6 +37,7 @@ run_check() {
       # LISTING_ERR: "404" ⇒ workflows dir absent (rc 2); other non-empty ⇒ transient (rc 1)
       case "$LISTING_ERR" in
         "") return 0 ;;
+        listed) printf "agent-ingress.yml\n"; return 0 ;;
         404) return 2 ;;
         *) return 1 ;;
       esac
@@ -99,6 +100,12 @@ ALL_BUT_COLLAPSED="ci.yml sonarcloud.yml dependabot-automerge.yml dependency-aud
   [ "$status" -eq 0 ]
   grep -qx 'missing-ci.yml' <<< "$output"
   grep -qx 'missing-dev-lead.yml' <<< "$output"
+}
+
+@test "ingress listed but its content read failed: no missing-* findings (inconclusive)" {
+  run_check "ci.yml" "" "listed"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *missing-* ]]
 }
 
 @test "unreadable ingress AND unreadable listing: no missing-* findings (inconclusive)" {

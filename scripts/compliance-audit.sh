@@ -350,16 +350,23 @@ detect_ecosystems() {
 # Returns 0 on success, 2 when the directory does not exist (HTTP 404), 1 on any
 # other failure (transient/unknown). Captures stderr, which gh_api discards.
 list_workflow_files() {
-  local repo="$1" errfile out rc=0
+  local repo="$1" errfile out rc=0 kind="" attempt
   errfile=$(mktemp)
-  out=$(gh api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>"$errfile") || rc=$?
+  # Bounded retry (3 attempts) so a transient rate-limit/network blip does not
+  # mark the repo inconclusive; a definitive 404 is not retried.
+  for attempt in 1 2 3; do
+    rc=0
+    out=$(gh api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>"$errfile") || rc=$?
+    [ "$rc" -eq 0 ] && break
+    kind=$(agent_ingress_gh_error_kind "$(cat "$errfile")")
+    [ "$kind" = "missing" ] && break
+    [ "$attempt" -lt 3 ] && sleep $((attempt * 2))
+  done
   if [ "$rc" -eq 0 ]; then
     rm -f "$errfile"
     printf '%s\n' "$out"
     return 0
   fi
-  local kind
-  kind=$(agent_ingress_gh_error_kind "$(cat "$errfile")")
   rm -f "$errfile"
   [ "$kind" = "missing" ] && return 2
   return 1
