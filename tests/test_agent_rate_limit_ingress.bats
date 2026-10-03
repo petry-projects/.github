@@ -170,6 +170,21 @@ seed_collapsed() {
   [ "$status" -eq 1 ]
 }
 
+@test "concurrency: 100+ ingress runs with fewer matching role runs than the limit terminates" {
+  # Every run is in-flight but serves pr-review-mention only; the history holds
+  # more than 100 runs yet fewer than the 1000 requested, so end-of-history must
+  # be detected against the requested limit (not a fixed page size).
+  local i runs="["
+  for i in $(seq 1 150); do
+    runs+="{\"databaseId\":$((1000 + i)),\"status\":\"in_progress\",\"conclusion\":\"\",\"createdAt\":\"2026-10-02T10:00:00Z\"},"
+    jobs_fixture $((1000 + i)) '[{"name":"dev-lead","status":"completed","conclusion":"skipped"},{"name":"pr-review-mention","status":"in_progress","conclusion":null}]'
+  done
+  runs_fixture _local agent-ingress.yml "${runs%,}]"
+  run --separate-stderr timeout 60 bash -c 'source "$1"; arl_count_concurrent_runs pr-review-mention' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "150" ]
+}
+
 @test "concurrency: a non-collapsed repo still counts its per-role workflow runs" {
   runs_fixture _local dev-lead '[{"status":"in_progress"},{"status":"queued"},{"status":"completed"}]'
   run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"

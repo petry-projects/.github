@@ -33,10 +33,17 @@ run_check() {
       printf "name: Agent Ingress\njobs:\n"
       for r in $INGRESS_ROLES; do printf "  %s:\n    uses: x/y/.github/workflows/%s-reusable.yml@%s/stable\n" "$r" "$r" "$r"; done
     }
+    list_workflow_files() {
+      # LISTING_ERR: "404" ⇒ workflows dir absent (rc 2); other non-empty ⇒ transient (rc 1)
+      case "$LISTING_ERR" in
+        "") return 0 ;;
+        404) return 2 ;;
+        *) return 1 ;;
+      esac
+    }
     gh_api() {
       local path="$1" wf
       wf="${path##*/}"
-      if [ "$wf" = "workflows" ]; then [ -z "$LISTING_ERR" ] || return 1; return 0; fi
       if [ "$wf" = "agent-ingress.yml" ]; then
         [ -n "$INGRESS_ROLES" ] || return 1
         case " $* " in
@@ -85,6 +92,13 @@ ALL_BUT_COLLAPSED="ci.yml sonarcloud.yml dependabot-automerge.yml dependency-aud
   run_check "sonarcloud.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml feature-ideation.yml initiative-driver.yml" "dev-lead pr-review-mention pr-auto-review"
   [ "$status" -eq 0 ]
   grep -qx 'missing-ci.yml' <<< "$output"
+}
+
+@test "no .github/workflows directory (404 listing): required workflows are still flagged missing" {
+  run_check "" "" "404"
+  [ "$status" -eq 0 ]
+  grep -qx 'missing-ci.yml' <<< "$output"
+  grep -qx 'missing-dev-lead.yml' <<< "$output"
 }
 
 @test "unreadable ingress AND unreadable listing: no missing-* findings (inconclusive)" {

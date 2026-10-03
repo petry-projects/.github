@@ -346,6 +346,25 @@ detect_ecosystems() {
 # ---------------------------------------------------------------------------
 # Check: Required workflows exist
 # ---------------------------------------------------------------------------
+# list_workflow_files <repo> — print the names under .github/workflows.
+# Returns 0 on success, 2 when the directory does not exist (HTTP 404), 1 on any
+# other failure (transient/unknown). Captures stderr, which gh_api discards.
+list_workflow_files() {
+  local repo="$1" errfile out rc=0
+  errfile=$(mktemp)
+  out=$(gh api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>"$errfile") || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$errfile"
+    printf '%s\n' "$out"
+    return 0
+  fi
+  local kind
+  kind=$(agent_ingress_gh_error_kind "$(cat "$errfile")")
+  rm -f "$errfile"
+  [ "$kind" = "missing" ] && return 2
+  return 1
+}
+
 check_required_workflows() {
   local repo="$1"
 
@@ -363,9 +382,12 @@ check_required_workflows() {
         # missing workflows we could not actually evaluate.
         if ! ingress_b64=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" --jq '.content' 2>/dev/null); then
           ingress_b64=""
-          local listing
-          if ! listing=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null) \
-             || grep -qxF "$AGENT_INGRESS_WORKFLOW" <<< "$listing"; then
+          local listing list_rc=0
+          listing=$(list_workflow_files "$repo") || list_rc=$?
+          # rc 2 = the workflows directory itself is absent (404): genuinely
+          # nothing there, so report missing workflows. Any other failure, or the
+          # ingress being listed while its read failed, is inconclusive.
+          if [ "$list_rc" -eq 1 ] || { [ "$list_rc" -eq 0 ] && grep -qxF "$AGENT_INGRESS_WORKFLOW" <<< "$listing"; }; then
             ingress_unreadable=true
             info "could not read $AGENT_INGRESS_WORKFLOW in $repo (inconclusive) — not reporting missing workflows"
           fi

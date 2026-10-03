@@ -495,9 +495,9 @@ arl_resolve_agent_runs() {
   # In a busy repo, other roles can fill the initial $limit ingress runs, so we
   # must continue fetching until we have the requested number of role runs or
   # exhaust the history (#1226). Use doubled limits to amortize pagination across
-  # multi-role repos while still detecting end-of-history (#batch < page_size).
+  # multi-role repos while still detecting end-of-history (batch < fetch_limit).
   local api_repo="${repo:-"{owner}/{repo}"}" records="" role_runs="" final_runs=""
-  local page_size=100 batch_rc=0 filter id status created jobs_out
+  local batch_rc=0 filter id status created jobs_out
   local batch_count role_count fetch_limit="$limit" skipped_runs=0
 
   while :; do
@@ -546,7 +546,7 @@ arl_resolve_agent_runs() {
     role_count="$(jq -r 'length' <<<"$role_runs" 2>/dev/null || printf '0')"
     batch_count="$(jq -r 'length' <<<"$page_runs" 2>/dev/null || printf '0')"
 
-    if [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$page_size" ]; then
+    if [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$fetch_limit" ]; then
       # Every jobs read failed: nothing was resolved, so this is a transient
       # no-data outcome (degrades to 0), not a resolved-empty history.
       if [ -z "$records" ] && [ "$skipped_runs" -gt 0 ]; then
