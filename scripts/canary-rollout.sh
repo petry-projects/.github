@@ -106,6 +106,19 @@ resolve_members() {
   return 0
 }
 
+# _repo_readable <repo> — succeed when the host repository is readable. A READABLE verdict is cached
+# per run in _RUNS_CACHE_DIR (shared across command-substitution subshells) so absent tags (the
+# normal 404 for rings ahead of the frontier) do not each cost a second API read; an unreadable
+# verdict is never cached, so a transient failure cannot stick.
+_repo_readable() {
+  local repo="$1" marker=""
+  [ -n "${_RUNS_CACHE_DIR:-}" ] && marker="$_RUNS_CACHE_DIR/readable.${repo//\//__}"
+  [ -n "$marker" ] && [ -e "$marker" ] && return 0
+  gh api "repos/$repo" --jq '.full_name' >/dev/null 2>&1 || return 1
+  [ -n "$marker" ] && : > "$marker" 2>/dev/null
+  return 0
+}
+
 # _gh_tag_commit <repo> <tag> — echo the COMMIT sha <tag> resolves to on <repo> via the
 # GitHub API, dereferencing an annotated tag object (mirrors cut-release.sh's
 # gh_release_commit). Empty on any error / absent tag (never fails the caller).
@@ -123,7 +136,7 @@ _gh_tag_commit() {
     # accepting it as an absent tag (otherwise an inaccessible host reads as "every ring empty").
     if ! grep -qiE 'HTTP 404' "$err" 2>/dev/null; then
       _tag_lookup_failed "$repo" "$tag" "$(tr '\n' ' ' <"$err" 2>/dev/null || true)" || _tag_unrecorded=1
-    elif ! gh api "repos/$repo" --jq '.full_name' >/dev/null 2>&1; then
+    elif ! _repo_readable "$repo"; then
       _tag_lookup_failed "$repo" "$tag" "404 but host repository is not readable (access lost?)" || _tag_unrecorded=1
     fi
     [ "$err" != /dev/null ] && rm -f "$err"
