@@ -5823,6 +5823,23 @@ _ingress_frontier() {
     _frontier_state $agent"
 }
 
+@test "_frontier_state: an uncreatable unresolved flag fails closed as FLAG_ERROR with a full 18-field line (#1224)" {
+  _ingress_stub
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'
+    channel_commit() { case \"\$2\" in next) echo cand ;; *) echo prior ;; esac; }
+    candidate_cut_date() { echo 2026-01-01T00:00:00Z; }
+    _reusable_differs() { echo 0; }
+    _unresolved_flag_path() { echo '$BATS_TEST_TMPDIR/no-such-dir/flag'; }   # cannot be created
+    _frontier_state cfa 2>/dev/null"
+  [ "$status" -eq 0 ]
+  local line; line="$(grep ' FLAG_ERROR ' <<< "$output" | head -1)"
+  [ -n "$line" ]
+  [[ "$line" == *" BLOCKED "* ]]
+  # cmd_sync_issues appends the datagap field, so a short line would shift it into `downgrade`.
+  [ "$(wc -w <<< "$line")" -eq 18 ]
+}
+
 @test "_frontier_state: a MIXED ring that fully resolves gates normally (collapsed + legacy → PROMOTE) (#1224)" {
   _ingress_stub
   run _ingress_frontier cfa

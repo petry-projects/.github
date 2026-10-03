@@ -1478,7 +1478,7 @@ _pair_state() {
       # Cannot arm the flag (TMPDIR unwritable/full) → unattributable members could not be
       # recorded; fail closed rather than let a clean-looking gate PROMOTE.
       echo "WARN: cannot create unresolved-member flag '$uflag'; failing closed" >&2
-      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 FLAG_ERROR -"; return 0
+      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 FLAG_ERROR - - 0 0 0 0"; return 0
     fi
   fi
 
