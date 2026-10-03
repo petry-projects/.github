@@ -303,9 +303,8 @@ jobs:
                   ;;
                 absent)
                   rm -f "$ibody_file"
-                  echo "::warning::no interaction contract for '${slug}' at ${interaction_url} — a persona with a manifest must declare its stop markers; refusing to route on the opt-out alone"
-                  echo "::endgroup::"
-                  continue
+                  echo "::error::no interaction contract for '${slug}' at ${interaction_url} — a manifested persona must declare its stop markers; refusing to dispatch"
+                  exit 1
                   ;;
                 *)  # fail
                   rm -f "$ibody_file"
@@ -612,8 +611,8 @@ jobs:
                 rm -f "$ibody_file" ;;
               absent)
                 rm -f "$ibody_file"
-                echo "::warning::no interaction contract for '${slug}' at ${interaction_url} — a persona firing on pull_request must declare its stop markers; refusing to route on the opt-out alone"
-                echo "::endgroup::"; continue ;;
+                echo "::error::no interaction contract for '${slug}' at ${interaction_url} — a manifested persona must declare its stop markers; refusing to dispatch"
+                exit 1 ;;
               *)  # fail
                 rm -f "$ibody_file"
                 echo "::error::fetching ${interaction_url} returned HTTP ${ihttp} — refusing to treat a fetch failure as 'no stop markers'"
