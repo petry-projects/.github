@@ -1458,7 +1458,7 @@ cmd_promote() {
     fi
     local advance=false
     [ "$state" = "PROMOTE" ] && advance=true
-    [ "$pair_override" = true ] && advance=true
+    [ "$pair_override" = true ] && [ "$state" != "AWAITING_CONFIRMATION" ] && advance=true
     [ "$state" = "BLOCKED" ] && [ "$triage" = "PRE_EXISTING" ] && [ "$allow_pre" = true ] && advance=true
     # Layer 3 (#668 increment 3): a human --confirm advances an AWAITING_CONFIRMATION pair
     # (reliability is already PROMOTE — the state is only ever set from an otherwise-PROMOTE
