@@ -23,7 +23,7 @@
 #     place propagates to every BMAD-enabled repo after the v1 tag is bumped
 #     and their next scheduled run executes. Repos tracking @main pick it up
 #     immediately on their next run.
-#   - The two critical gotchas (github_token override, ANTHROPIC_MODEL env var)
+#   - The two critical gotchas (github_token override, the `model` input)
 #     are baked in here so callers cannot accidentally regress them.
 #
 # Standard: https://github.com/petry-projects/.github/blob/main/standards/ci-standards.md#8-feature-ideation-feature-ideationyml--bmad-method-repos
@@ -467,7 +467,7 @@ jobs:
               avoid missing major developments.
 
             This keeps each weekly run focused on genuinely new signal rather than
-            re-processing the same content at Opus 4.6 cost.
+            re-processing the same content at Opus cost.
 
             Using the **Project Context** above as your starting point and the
             source list as your seed, research the competitive landscape and

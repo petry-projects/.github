@@ -1242,7 +1242,7 @@ These workflows are required only when a specific ecosystem is detected.
 (warning) by the audit. The BMAD Method framing below reflects the original
 pilot; the pipeline itself is not BMAD-specific.
 
-Scheduled weekly workflow that runs the BMAD Analyst (Mary) on **Claude Opus 4.6**
+Scheduled weekly workflow that runs the BMAD Analyst (Mary) on the **Claude Opus family**
 through a 5-phase multi-skill ideation pipeline, producing evidence-grounded
 feature proposals as GitHub Discussions in the **Ideas** category. Each proposal
 is a separate Discussion, updated by subsequent runs as the market and project
@@ -1331,13 +1331,13 @@ The adversarial pass is the load-bearing part: ideas that survive it are
 
 | Setting | Value |
 |---------|-------|
-| **Model** | `claude-opus-4-6` (set via `ANTHROPIC_MODEL` env var on the step) |
+| **Model** | `opus` family by default (the reusable workflow's `model` input, passed as `--model`) |
 | **Schedule** | Weekly (template uses Friday 07:00 UTC) |
 | **Output** | GitHub Discussions in the Ideas category, one per proposal |
 | **Inputs** | `focus_area` (optional), `research_depth` (quick/standard/deep) |
 | **Permissions** | `contents: read`, `discussions: write`, `id-token: write` |
 | **Required secrets** | `CLAUDE_CODE_OAUTH_TOKEN` (org-level) |
-| **Typical cost** | ~$2-3 per run on Opus 4.6, standard depth, 25-40 turns |
+| **Typical cost** | ~$2-3 per run on Opus, standard depth, 25-40 turns |
 
 **Prerequisite:** Discussions must be enabled with an "Ideas" category
 (see [Discussions Configuration](github-settings.md#discussions-configuration)).
@@ -1433,7 +1433,7 @@ understanding why they exist:**
 | `project_context` | yes | — | 3-5 sentence project description; the only required input |
 | `focus_area` | no | `''` | Optional research focus, typically wired to `workflow_dispatch` input |
 | `research_depth` | no | `'standard'` | `quick` / `standard` / `deep` |
-| `model` | no | `'claude-opus-4-6'` | Override only for cost experiments — see gotcha #2 |
+| `model` | no | `'opus'` | Model family; override only for cost experiments — see gotcha #2 |
 | `timeout_minutes` | no | `60` | Analyst job timeout (signal collection has its own short timeout) |
 
 | Secret | Required | Notes |

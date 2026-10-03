@@ -138,7 +138,7 @@ occurrence MUST carry an audit marker so the pin is auditable and intentional:
 | # | Exception | Why a real ID is required | Audit marker |
 |---|-----------|---------------------------|--------------|
 | a | **The resolver itself** | It is the one place that maps family → current ID, so it must name the IDs. | Inline `# model-pin-ok: <reason>` |
-| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. | Inline `# model-pin-ok: <reason>` |
+| b | **Price data keyed by real IDs** | Cost is per concrete model, so the table is keyed by the actual version IDs. | Inline `# model-pin-ok: <reason>` for comment-supporting formats; metadata field or sidecar file for formats that don't support comments (e.g. a JSON price table). |
 | c | **Recorded data** (fixtures, eval sets, baselines) | A captured artifact records the ID that produced it; rewriting it would falsify the record. | Inline `# model-pin-ok: <reason>` for comment-supporting formats; metadata field or sidecar file for formats that don't support comments. |
 | d | **A fixed eval judge** | The judge must stay pinned so A/B results stay comparable across runs. | Inline `# model-pin-ok: <reason>` |
 
