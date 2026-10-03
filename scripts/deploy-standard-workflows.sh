@@ -38,6 +38,10 @@ source "$SCRIPT_DIR/lib/standards-deploy.sh"
 # intentional ring/next pin back to the template's stable channel (#482).
 # shellcheck source=scripts/lib/ring-pins.sh
 source "$SCRIPT_DIR/lib/ring-pins.sh"
+# ADR-0007 agent-ingress identity helpers — a role served by an agent-ingress.yml
+# job must never have its per-role stub re-seeded (#1226).
+# shellcheck source=scripts/lib/agent-ingress.sh
+source "$SCRIPT_DIR/lib/agent-ingress.sh"
 
 # Global temp-file registry — cleaned up by EXIT trap even on premature exit.
 declare -a _TMPFILES=()
@@ -277,6 +281,43 @@ fetch_existing() {
   printf '%s\t%s' "$sha" "$decoded"
 }
 
+# probe_agent_ingress <repo> — read the repo's ADR-0007 agent-ingress.yml (#1226).
+# Prints the decoded content and returns 0 when present; returns 1 when absent
+# (HTTP 404 — the repo is not collapsed); returns 2 when the read is INCONCLUSIVE
+# (any other error). Unlike fetch_existing, a transient error is NOT read as
+# "absent": doing so would re-seed every collapsed stub on an API blip.
+#
+# A transient failure is retried (3 attempts, bounded backoff of
+# AGENT_INGRESS_PROBE_BACKOFF seconds x attempt, default 2) before it is declared
+# inconclusive; a 404 is returned as absent immediately. A success without a file
+# payload (type=file, base64, non-empty content) is inconclusive, never "absent".
+probe_agent_ingress() {
+  local repo="$1" raw err errfile rc attempt=1 attempts=3 encoded
+  errfile="$(mktemp)"
+  while :; do
+    rc=0
+    raw=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" 2>"$errfile") || rc=$?
+    [[ "$rc" -eq 0 ]] && break
+    err="$(cat "$errfile")"
+    if [[ "$(agent_ingress_gh_error_kind "$err")" == "missing" ]]; then
+      rm -f "$errfile"
+      # A 404 also means an inaccessible/unknown repo: confirm access before
+      # accepting absence, else fail closed (inconclusive).
+      gh api "repos/$ORG/$repo" --jq '.name' >/dev/null 2>&1 || return 2
+      return 1
+    fi
+    if [[ "$attempt" -ge "$attempts" ]]; then
+      rm -f "$errfile"
+      return 2
+    fi
+    sleep "$(( attempt * ${AGENT_INGRESS_PROBE_BACKOFF:-2} ))"
+    attempt=$(( attempt + 1 ))
+  done
+  rm -f "$errfile"
+  encoded="$(jq -er 'select(.type == "file" and .encoding == "base64" and (.content | type) == "string" and (.content | length) > 0) | .content' <<<"$raw" 2>/dev/null)" || return 2
+  printf '%s' "$encoded" | base64 -d 2>/dev/null || return 2
+}
+
 # template_requires_s7635_marker <template> -> 0 if the template carries a REAL
 # `secrets: inherit` YAML line (indented key, not a `#`-comment/prose mention). Such
 # stubs hand the reusable every org secret and must carry the inline
@@ -456,12 +497,27 @@ deploy_repo() {
   # ref (stays exempt) from a channel-pinned consumer ref (re-pinned by the F5
   # sweep, #704). Each exempt workflow still logs its own `(exempt)` line.
 
+  # ADR-0007 collapse (#1226). A collapsed repo serves a role from ONE job of
+  # agent-ingress.yml and has deleted the per-role stub; re-seeding it would leave
+  # both subscribed to the same events — every event double-dispatched. So read the
+  # repo's ACTUAL ingress state once (never a hardcoded repo list — fan-out is
+  # incremental) and skip any workflow whose role an ingress job serves. An
+  # inconclusive read fails closed for the whole repo: a transient error must not
+  # resurrect a collapsed stub.
+  local ingress_content="" ingress_rc=0
+  ingress_content="$(probe_agent_ingress "$repo")" || ingress_rc=$?
+  if [[ "$ingress_rc" -eq 2 ]]; then
+    err "$repo — could not read .github/workflows/$AGENT_INGRESS_WORKFLOW (ingress/repo state could not be verified); skipping the repo rather than risk re-seeding a collapsed stub"
+    _OVERALL_FAILED=1
+    return
+  fi
+
   # Collect the drifted stubs for this repo (path/template pairs + names). For
   # ring-managed reusables the deployed template is REWRITTEN to pin the repo's
   # tier channel (major-scoped `v<M>-<tier>` when the agent has a release) — the
   # emit ref (#657 F5). Rewritten templates land in temp files cleaned up below.
   local -a paths=() templates=() names=() emits=() modes=()
-  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode
+  local workflow template target_path raw existing_sha existing_content emit deploy_template base repin_source mode role
   for workflow in "${WORKFLOWS[@]}"; do
     base=""; repin_source=""; emit=""; deploy_template=""; mode=""
     template="$STANDARDS_DIR/$workflow"
@@ -469,6 +525,14 @@ deploy_repo() {
     if [[ ! -f "$template" ]]; then
       err "No template at $template — skipping $workflow for $repo"
       continue
+    fi
+    # feature-ideation.yml is outside the collapse (schedule-driven, per-repo project_context).
+    if [[ "$ingress_rc" -eq 0 && "$workflow" != "feature-ideation.yml" ]]; then
+      role="$(agent_ingress_role_for_workflow "$workflow")"
+      if agent_ingress_has_role_job "$role" <<< "$ingress_content"; then
+        skip "$repo/$workflow (served by $AGENT_INGRESS_WORKFLOW job '$role')"
+        continue
+      fi
     fi
     raw=$(fetch_existing "$repo" "$target_path")
     existing_sha="${raw%%$'\t'*}"
