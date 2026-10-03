@@ -5411,9 +5411,9 @@ GHEOF
   # 'Build'; only pr-review's job failed at 'Push'. A run-wide signature would wrongly see
   # 'Push' and excuse dev-lead's failure as benign — the role-scoped signature must not.
   run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
-    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 org/collapsed"
+    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 - org/collapsed"
   [ "$status" -eq 0 ]
-  [ "$output" = "1 0 0 0" ]
+  [ "$output" = "1 0 0 0 0" ]
 }
 
 @test "_tier_sample: a MIXED ring (collapsed + legacy member) counts both in one evaluation (#1224)" {
