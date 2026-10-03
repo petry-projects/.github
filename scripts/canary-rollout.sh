@@ -413,7 +413,10 @@ _ring_commits() {
   for ch in "${chan_array[@]}"; do
     u=0
     if [ -n "$flag" ] && : > "$flag" 2>/dev/null; then
-      c="$(_CANARY_TAG_FAIL_FLAG="$flag" channel_commit "$agent" "$ch" || true)"
+      # Drop the (subshell-local) lookup cache first: an earlier UNARMED failed lookup may have
+      # cached an empty commit, which would skip the API call, leave the flag empty, and read an
+      # outage as an absent tag (unknown=0).
+      c="$(_CHANNEL_COMMIT_CACHE=(); _AGENT_CHANNEL_MAJOR_CACHE=(); _CANARY_TAG_FAIL_FLAG="$flag" channel_commit "$agent" "$ch" || true)"
       [ -s "$flag" ] && u=1
     else
       c="$(channel_commit "$agent" "$ch" || true)"; u=1
@@ -1486,7 +1489,18 @@ cmd_promote() {
   # in one sweep, and pairs are decided INDEPENDENTLY — a BLOCKED lower pair never blocks a clean
   # higher pair, and `--confirm` clears only an AWAITING_CONFIRMATION pair.
   local -a _pairs=()
+  # Arm the tag-gap flag so pairs held for an ERRORED ring tag lookup (#1225) are known and can
+  # never be advanced — not even with --override (the destination ring is unresolved).
+  local _gapflag _prev_gapflag="${_CANARY_TAG_GAP_FLAG:-}"
+  _gapflag="$(mktemp 2>/dev/null || true)"
+  [ -n "$_gapflag" ] && export _CANARY_TAG_GAP_FLAG="$_gapflag"
   mapfile -t _pairs < <(_frontier_state "$agent")
+  local _gap_transitions=""
+  if [ -n "$_gapflag" ]; then
+    _gap_transitions="$(cat "$_gapflag" 2>/dev/null || true)"
+    rm -f "$_gapflag"
+    if [ -n "$_prev_gapflag" ]; then export _CANARY_TAG_GAP_FLAG="$_prev_gapflag"; else unset _CANARY_TAG_GAP_FLAG; fi
+  fi
   # allow_pre: advance a BLOCKED pair ONLY when triage=PRE_EXISTING (never REGRESSION). Sourced
   # from the per-reusable control block or the --allow-pre-existing flag (#1025 P2). Computed once.
   local allow_pre
@@ -1512,6 +1526,10 @@ cmd_promote() {
     first_pair=0
     # An unresolvable candidate ("-") cannot be promoted, even with --override: there is no commit to
     # move a tag to. It stays held BLOCKED (fail closed) until the source ring's tag resolves.
+    if [ -n "$_gap_transitions" ] && grep -qxF -- "$transition" <<< "$_gap_transitions"; then
+      echo "::error::gate=$state for '$frontier' [$transition] — a ring tag lookup errored; not promoting (even with --override). Clears once the tags resolve (#1225)." >&2
+      continue
+    fi
     if [ "$cand" = "-" ]; then
       echo "::error::gate=$state for '$frontier' [$transition] — the source ring's commit is unresolvable; not promoting (even with --override). Clears once the tag resolves." >&2
       continue
@@ -2079,7 +2097,9 @@ cmd_sync_issues() {
     while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
       { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
       [ "${datagap:-0}" = "2" ] && tag_gap=1
-      if [ "$state" = "BLOCKED" ] && [ "$have_blocked" -eq 0 ]; then
+      # A tag-lookup-error pair (datagap=2) outranks an ordinary BLOCKED pair as the blocker source,
+      # so the issue title/body report the outage rather than unrelated run evidence.
+      if [ "$state" = "BLOCKED" ] && { [ "$have_blocked" -eq 0 ] || { [ "${datagap:-0}" = "2" ] && [ "$bl_datagap" != "2" ]; }; }; then
         have_blocked=1
         bl_cand="$cand"; bl_transition="$transition"; bl_triage="$triage"
         bl_cum_fail="$cum_fail"; bl_cum_startup="$cum_startup"; bl_mix_shift="$mix_shift"

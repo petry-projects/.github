@@ -3730,8 +3730,17 @@ GHEOF
 @test "#1225: a TOTAL tag-lookup outage — promote moves nothing and does not report nothing-to-promote" {
   _multicand_stub ERR ERR ERR ERR "3 days" "3 days" "30 hours"
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" != *"fully rolled out"* ]]
   [[ "$output" != *"nothing to promote"* ]]
+  [[ "$output" != *"tags/dev-lead/"*" sha="* ]]
+}
+
+@test "#1225: a TOTAL tag-lookup outage — promote --override still moves nothing" {
+  _multicand_stub ERR ERR ERR ERR "3 days" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --override --dry-run
+  [[ "$output" == *"a ring tag lookup errored; not promoting"* ]]
+  [[ "$output" != *"advancing dev-lead"* ]]
   [[ "$output" != *"tags/dev-lead/"*" sha="* ]]
 }
 
