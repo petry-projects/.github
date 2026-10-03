@@ -1288,7 +1288,14 @@ _pair_state() {
     # Per-process path (never shared across concurrent invocations) so _unresolved_evidence in
     # this same process can reuse the flag instead of re-walking the runs (#1224).
     uflag="$(_unresolved_flag_path "$agent" "$cand")"; uflag_owned=1
-    : >"$uflag" 2>/dev/null && export _CANARY_UNRESOLVED_FLAG="$uflag"
+    if : >"$uflag" 2>/dev/null; then
+      export _CANARY_UNRESOLVED_FLAG="$uflag"
+    else
+      # Cannot arm the flag (TMPDIR unwritable/full) → unattributable members could not be
+      # recorded; fail closed rather than let a clean-looking gate PROMOTE.
+      echo "WARN: cannot create unresolved-member flag '$uflag'; failing closed" >&2
+      echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
+    fi
   fi
 
   # Source-tier repos (the tier currently running the candidate).
@@ -2255,8 +2262,8 @@ cmd_sync_issues() {
       local evidence body title mix_table=""
       if [ "$bl_datagap" = "1" ]; then
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
-      elif [ "$triage" = "UNRESOLVED" ]; then
-        evidence="$(_unresolved_evidence "$agent" "$cand" || true)"
+      elif [ "$bl_triage" = "UNRESOLVED" ]; then
+        evidence="$(_unresolved_evidence "$agent" "$bl_cand" || true)"
       else
         if [ "$bl_cand" = "-" ]; then
           evidence="_(the source ring's commit is unresolvable this tick, so there is no candidate whose failing runs can be listed. The gate FAILS CLOSED and holds this pair until the tag resolves.)_"
