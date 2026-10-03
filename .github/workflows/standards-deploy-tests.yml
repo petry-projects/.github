@@ -4,6 +4,7 @@
 #   - scripts/deploy-standard-workflows.sh
 #   - scripts/standards-deploy-driver.sh
 #   - scripts/lib/standards-deploy.sh
+#   - scripts/lib/agent-ingress.sh
 #   - test/scripts/deploy-standard-workflows/**
 #   - test/scripts/standards-deploy-driver/**
 #   - test/scripts/lib/standards-deploy.bats
@@ -24,6 +25,7 @@ on:
       - 'scripts/standards-deploy-driver.sh'
       - 'scripts/lib/standards-deploy.sh'
       - 'scripts/lib/ring-pins.sh'
+      - 'scripts/lib/agent-ingress.sh'
       - 'test/scripts/deploy-standard-workflows/**'
       - 'test/scripts/standards-deploy-driver/**'
       - 'test/scripts/lib/standards-deploy.bats'
@@ -38,6 +40,7 @@ on:
       - 'scripts/standards-deploy-driver.sh'
       - 'scripts/lib/standards-deploy.sh'
       - 'scripts/lib/ring-pins.sh'
+      - 'scripts/lib/agent-ingress.sh'
       - 'test/scripts/deploy-standard-workflows/**'
       - 'test/scripts/standards-deploy-driver/**'
       - 'test/scripts/lib/standards-deploy.bats'
@@ -95,7 +98,8 @@ jobs:
             scripts/deploy-standard-workflows.sh \
             scripts/standards-deploy-driver.sh \
             scripts/lib/standards-deploy.sh \
-            scripts/lib/ring-pins.sh
+            scripts/lib/ring-pins.sh \
+            scripts/lib/agent-ingress.sh
 
       - name: Run bats suite
         run: |
