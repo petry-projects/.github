@@ -1914,7 +1914,9 @@ _frontier_state_resilient() {
       # closed); anything other than ON_CANDIDATE is held.
       if [ "$(pair_verdict "${cand:--}" 0 "${dstc:--}" 0)" != "ON_CANDIDATE" ]; then
         prior="$dstc"
-        differs="$(_reusable_differs "$agent" "$cand" "$prior")"
+        # An unresolvable (empty) src commit makes _reusable_differs return 0 by contract, which would
+        # classify as PRE_EXISTING and suppress regression triage — fail closed to "differs" instead.
+        if [ -z "$cand" ]; then differs=1; else differs="$(_reusable_differs "$agent" "$cand" "$prior")"; fi
         # classify_failure with an unknown category + no suspect signal: differs=1 → REGRESSION
         # (fail closed — a changed reusable with UNREADABLE health is a suspected regression that
         # needs a human), differs=0 → PRE_EXISTING (a byte-identical reusable cannot be a

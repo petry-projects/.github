@@ -888,19 +888,23 @@ _pv_rings() {
 }
 @test "pair_verdict rings: TOTAL tag-lookup outage → every pair HOLD_UNKNOWN, never COMPLETE (#1225)" {
   run _pv_rings -:1 -:1 -:1 -:1
+  [ "$status" -eq 0 ]
   [ "$output" = $'0 HOLD_UNKNOWN\n1 HOLD_UNKNOWN\n2 HOLD_UNKNOWN' ]
 }
 @test "pair_verdict rings: one errored ring holds BOTH pairs touching it; the rest evaluate normally" {
   run _pv_rings ccc:0 bbb:0 -:1 aaa:0
+  [ "$status" -eq 0 ]
   [ "$output" = $'0 PENDING\n1 HOLD_UNKNOWN\n2 HOLD_UNKNOWN' ]
 }
 @test "pair_verdict rings: no tier skipping — each pair compares only adjacent rings" {
   # stable (aaa) differs from next (ccc) but is on ring1's commit: only the lower pairs are pending.
   run _pv_rings ccc:0 bbb:0 aaa:0 aaa:0
+  [ "$status" -eq 0 ]
   [ "$output" = $'0 PENDING\n1 PENDING' ]
 }
 @test "pair_verdict rings: absent source over a populated ring → UNRESOLVABLE_SOURCE, not COMPLETE" {
   run _pv_rings -:0 bbb:0 bbb:0 bbb:0
+  [ "$status" -eq 0 ]
   [ "$output" = "0 UNRESOLVABLE_SOURCE" ]
 }
 
