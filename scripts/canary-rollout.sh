@@ -1725,28 +1725,30 @@ _frontier_state() {
   for i in "${!chan_array[@]}"; do
     ch="${chan_array[$i]}"
     if [ -n "$prev" ]; then
+      # The pair verdict is the pure core's (pair_verdict, #1242); this loop only acts on it. A ring
+      # whose tag lookup ERRORED (#1225) is unknown, not absent.
       cand="${commits[$((i-1))]}"
       dstc="${commits[$i]}"
       transition="${prev}->${ch}"
-      # A ring whose tag lookup ERRORED (#1225) is unknown, not absent: hold every pair touching it
-      # BLOCKED (fail closed) — comparing its empty commit would read an API outage as "on the
-      # candidate", and a total outage as COMPLETE. Never evaluated (or promoted) by the gate.
-      if [ "${unknown[$((i-1))]:-0}" = 1 ] || [ "${unknown[$i]:-0}" = 1 ]; then
-        echo "::warning::$agent $transition: a ring tag lookup errored — holding the pair BLOCKED (fail closed) until it resolves (#1225)." >&2
-        if [ -n "${_CANARY_TAG_GAP_FLAG:-}" ]; then
-          printf '%s\n' "$transition" >> "$_CANARY_TAG_GAP_FLAG" 2>/dev/null || true
-        fi
-        echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"
-        emitted=1
-        prev="$ch"; continue
-      fi
-      # Pending iff dst is not on src's commit. An UNRESOLVABLE src commit (empty) with a populated
-      # dst is still pending and _pair_state holds it BLOCKED (fail closed, as the single-frontier
-      # code did) — never silently skipped into a false COMPLETE.
-      if [ "$dstc" != "$cand" ]; then
-        _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
-        emitted=1
-      fi
+      case "$(pair_verdict "${cand:--}" "${unknown[$((i-1))]:-0}" "${dstc:--}" "${unknown[$i]:-0}")" in
+        ON_CANDIDATE) ;;
+        PENDING|UNRESOLVABLE_SOURCE)
+          # An UNRESOLVABLE src commit (empty) with a populated dst is still pending and _pair_state
+          # holds it BLOCKED (fail closed, as the single-frontier code did) — never silently skipped
+          # into a false COMPLETE.
+          _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
+          emitted=1 ;;
+        *)
+          # HOLD_UNKNOWN (or any unrecognised verdict): hold the pair BLOCKED (fail closed) — comparing
+          # an errored ring's empty commit would read an API outage as "on the candidate", and a total
+          # outage as COMPLETE. Never evaluated (or promoted) by the gate (#1225).
+          echo "::warning::$agent $transition: a ring tag lookup errored — holding the pair BLOCKED (fail closed) until it resolves (#1225)." >&2
+          if [ -n "${_CANARY_TAG_GAP_FLAG:-}" ]; then
+            printf '%s\n' "$transition" >> "$_CANARY_TAG_GAP_FLAG" 2>/dev/null || true
+          fi
+          echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"
+          emitted=1 ;;
+      esac
     fi
     prev="$ch"
   done
@@ -2401,9 +2403,10 @@ _frontier_state_resilient() {
         prev="$ch"; prev_commit="$ch_commit"; prev_unknown="$ch_unknown"
         continue
       fi
-      # Same pending rule as _frontier_state: dst not on src's commit, including an unresolvable
-      # (empty) src commit, which stays tracked as BLOCKED rather than vanishing (fail closed).
-      if [ "$dstc" != "$cand" ]; then
+      # Same pure pair verdict as _frontier_state (#1242): a pending pair, including an unresolvable
+      # (empty) src commit, stays tracked as BLOCKED rather than vanishing (fail closed); anything
+      # other than ON_CANDIDATE is held.
+      if [ "$(pair_verdict "${cand:--}" "$prev_unknown" "${dstc:--}" "$ch_unknown")" != "ON_CANDIDATE" ]; then
         transition="${prev}->${ch}"
         prior="$dstc"
         differs="$(_reusable_differs "$agent" "$cand" "$prior")"
