@@ -444,6 +444,7 @@ pm_surface_decision() {
        end) as $decision
     | $decision + " " + ($t.opt_out_label // "")
   ' --arg surface "$surface"
+  return 0
 }
 
 # pm_surface_trust_floor <manifest-yaml> <surface> — emit the floor for the named
@@ -479,6 +480,7 @@ pm_surface_trust_floor() {
       )
     | join(" ")
   ' --arg surface "$surface"
+  return 0
 }
 
 # pm_surface_gate_label <manifest-yaml> <surface> — the label that ARMS a
@@ -492,6 +494,7 @@ pm_surface_gate_label() {
     ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
     | ($row.gate_label // "")
   ' --arg surface "$surface"
+  return 0
 }
 
 # pm_surface_declares_event <manifest-yaml> <surface> <action> — 0 only when the
