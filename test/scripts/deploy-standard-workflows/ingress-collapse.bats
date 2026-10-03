@@ -35,6 +35,7 @@ b64() { base64 -w 0 2>/dev/null || base64 -b 0; }
 install_gh_stub() {
   local bin="${TT_TMP}/bin"
   mkdir -p "$bin"
+  export AGENT_INGRESS_PROBE_BACKOFF=0
   cat > "$bin/gh" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "api" ]; then
@@ -44,7 +45,7 @@ if [ "${1:-}" = "api" ]; then
         echo "gh: Server Error (HTTP 502)" >&2; exit 1
       fi
       if [ -n "${GH_INGRESS_B64:-}" ]; then
-        printf '{"sha":"ing123","content":"%s"}' "$GH_INGRESS_B64"; exit 0
+        printf '{"type":"file","encoding":"base64","sha":"ing123","content":"%s"}' "$GH_INGRESS_B64"; exit 0
       fi
       echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
     *contents*)

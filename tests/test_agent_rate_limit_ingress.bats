@@ -58,6 +58,9 @@ if [ "${1:-} ${2:-}" = "run list" ]; then
   exit 1
 fi
 if [ "${1:-}" = "api" ]; then
+  if [[ "${2:-}" == *contents/.github/workflows/agent-ingress.yml ]] && [ -f "$GH_FIX/ingress.b64" ]; then
+    printf '{"type":"file","encoding":"base64","content":"%s"}' "$(cat "$GH_FIX/ingress.b64")"; exit 0
+  fi
   if [[ "${2:-}" =~ /actions/runs/([0-9]+)/jobs ]]; then
     id="${BASH_REMATCH[1]}"
     if [ -f "$GH_FIX/jobs/$id.json" ]; then cat "$GH_FIX/jobs/$id.json"; exit 0; fi
@@ -177,11 +180,36 @@ seed_collapsed() {
 }
 
 @test "concurrency: a transient failure still degrades to 0 with its existing warning" {
-  transient_fixture _local dev-lead
+  # dev-lead.yml is permanently missing, then the ingress read fails transiently.
+  transient_fixture _local agent-ingress.yml
   run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
   [ "$status" -eq 0 ]
   [ "$output" = "0" ]
   [[ "$stderr" == *"returned no data (treating concurrency as 0)"* ]]
+}
+
+@test "concurrency: an ingress that declares no role job is UNRESOLVED, not 0" {
+  runs_fixture _local agent-ingress.yml '[{"databaseId":104,"status":"completed","conclusion":"success","createdAt":"2026-10-02T09:00:00Z"}]'
+  jobs_fixture 104 '[{"name":"pr-review-mention","status":"completed","conclusion":"success"}]'
+  printf 'jobs:\n  pr-review-mention:\n    uses: x\n' | base64 -w 0 >"$GH_FIX/ingress.b64"
+  run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
+  [ "$status" -eq 3 ]
+  [ "$output" = "unresolved" ]
+}
+
+@test "concurrency: every jobs read failing is transient (degrades to 0), not resolved-empty" {
+  runs_fixture _local agent-ingress.yml '[{"databaseId":777,"status":"in_progress","conclusion":"","createdAt":"2026-10-02T09:00:00Z"}]'
+  run --separate-stderr bash -c 'source "$1"; arl_count_concurrent_runs dev-lead' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+  [[ "$stderr" == *"returned no data"* ]]
+}
+
+@test "agent_ingress_gh_error_kind: workflow-only mode keeps a bare repo 404 transient" {
+  run bash -c 'source "$1"
+    agent_ingress_gh_error_kind "HTTP 404: Not Found" workflow-only
+    agent_ingress_gh_error_kind "could not find any workflows named x" workflow-only' _ "$INGRESS_LIB"
+  [ "$output" = $'transient\nmissing' ]
 }
 
 @test "concurrency: a permanent missing workflow with no ingress does NOT read as 0" {

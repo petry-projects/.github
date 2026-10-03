@@ -285,16 +285,33 @@ fetch_existing() {
 # (HTTP 404 — the repo is not collapsed); returns 2 when the read is INCONCLUSIVE
 # (any other error). Unlike fetch_existing, a transient error is NOT read as
 # "absent": doing so would re-seed every collapsed stub on an API blip.
+#
+# A transient failure is retried (3 attempts, bounded backoff of
+# AGENT_INGRESS_PROBE_BACKOFF seconds x attempt, default 2) before it is declared
+# inconclusive; a 404 is returned as absent immediately. A success without a file
+# payload (type=file, base64, non-empty content) is inconclusive, never "absent".
 probe_agent_ingress() {
-  local repo="$1" raw err errfile rc=0
+  local repo="$1" raw err errfile rc attempt=1 attempts=3 encoded
   errfile="$(mktemp)"
-  raw=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" 2>"$errfile") || rc=$?
-  err="$(cat "$errfile")"; rm -f "$errfile"
-  if [[ "$rc" -ne 0 ]]; then
-    [[ "$(agent_ingress_gh_error_kind "$err")" == "missing" ]] && return 1
-    return 2
-  fi
-  echo "$raw" | jq -r '.content // empty' | base64 -d 2>/dev/null || return 2
+  while :; do
+    rc=0
+    raw=$(gh api "repos/$ORG/$repo/contents/.github/workflows/$AGENT_INGRESS_WORKFLOW" 2>"$errfile") || rc=$?
+    [[ "$rc" -eq 0 ]] && break
+    err="$(cat "$errfile")"
+    if [[ "$(agent_ingress_gh_error_kind "$err")" == "missing" ]]; then
+      rm -f "$errfile"
+      return 1
+    fi
+    if [[ "$attempt" -ge "$attempts" ]]; then
+      rm -f "$errfile"
+      return 2
+    fi
+    sleep "$(( attempt * ${AGENT_INGRESS_PROBE_BACKOFF:-2} ))"
+    attempt=$(( attempt + 1 ))
+  done
+  rm -f "$errfile"
+  encoded="$(jq -er 'select(.type == "file" and .encoding == "base64" and (.content | type) == "string" and (.content | length) > 0) | .content' <<<"$raw" 2>/dev/null)" || return 2
+  printf '%s' "$encoded" | base64 -d 2>/dev/null || return 2
 }
 
 # template_requires_s7635_marker <template> -> 0 if the template carries a REAL

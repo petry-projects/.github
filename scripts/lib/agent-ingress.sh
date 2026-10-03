@@ -62,15 +62,22 @@ agent_ingress_has_role_job() {
   '
 }
 
-# agent_ingress_gh_error_kind <stderr> — classify a failed `gh run list` /
-# `gh api` by its stderr: `missing` for a PERMANENT absence (gh's "could not find
-# any workflows named …", or an HTTP 404 / Not Found), `transient` for everything
-# else (5xx, rate limit, network, empty). A permanent absence must never be read
-# as "zero runs"; a transient one keeps the callers' permissive degrade.
+# agent_ingress_gh_error_kind <stderr> [workflow-only] — classify a failed
+# `gh run list` / `gh api` by its stderr: `missing` for a PERMANENT absence (gh's
+# "could not find any workflows named …", or an HTTP 404 / Not Found), `transient`
+# for everything else (5xx, rate limit, network, empty). A permanent absence must
+# never be read as "zero runs"; a transient one keeps the callers' permissive
+# degrade. With the optional `workflow-only` flag (used for `gh run list`) ONLY the
+# workflow-specific message counts: a bare HTTP 404 there can mean a nonexistent or
+# unreadable repo (e.g. a typo in AGENT_RATE_LIMITS_ORG_REPOS), which is not proof
+# that the workflow is absent and stays transient.
 agent_ingress_gh_error_kind() {
-  local err="${1:-}"
+  local err="${1:-}" mode="${2:-}"
   case "$err" in
-    *"could not find any workflow"*|*"HTTP 404"*|*"Not Found"*) printf 'missing\n' ;;
+    *"could not find any workflow"*) printf 'missing\n' ;;
+    *"HTTP 404"*|*"Not Found"*)
+      if [ "$mode" = "workflow-only" ]; then printf 'transient\n'; else printf 'missing\n'; fi
+      ;;
     *) printf 'transient\n' ;;
   esac
 }

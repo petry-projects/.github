@@ -450,7 +450,7 @@ _arl_gh_run_list() {
   err="$(cat "$errfile" 2>/dev/null || true)"
   rm -f "$errfile"
   if [ "$rc" -ne 0 ]; then
-    [ "$(agent_ingress_gh_error_kind "$err")" = "missing" ] && return 3
+    [ "$(agent_ingress_gh_error_kind "$err" workflow-only)" = "missing" ] && return 3
     return 1
   fi
   if [ -z "$out" ] || ! jq -e 'type == "array"' <<<"$out" >/dev/null 2>&1; then
@@ -467,9 +467,11 @@ _arl_gh_run_list() {
 #   0  resolved: from the per-role <workflow>, or, when that workflow PERMANENTLY
 #      does not exist (or <workflow> IS the ingress), from agent-ingress.yml runs
 #      attributed to <role> by role-bearing job (agent_ingress_role_runs);
-#   1  transient read failure — echoes `[]`; callers keep their permissive degrade;
-#   3  UNRESOLVED — neither the workflow nor an agent-ingress.yml exists; echoes
-#      `[]` but callers must NOT read it as zero runs.
+#   1  transient read failure (including every ingress jobs read failing) — echoes
+#      `[]`; callers keep their permissive degrade;
+#   3  UNRESOLVED — neither the workflow nor an agent-ingress.yml exists, or the
+#      ingress exists but declares no <role> job; echoes `[]` but callers must NOT
+#      read it as zero runs.
 # [inflight_only]=true fetches jobs only for not-yet-completed ingress runs (the
 # concurrency count needs nothing else). Each ingress run costs one jobs-API read,
 # so a history read is bounded by <limit>. A run whose jobs cannot be read is
@@ -503,11 +505,14 @@ arl_resolve_agent_runs() {
   local filter='.'
   [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
   local api_repo="${repo:-"{owner}/{repo}"}" id status created jobs records=""
+  local job_reads=0 job_failures=0
   while IFS=$'\t' read -r id status created; do
     [[ "$id" =~ ^[0-9]+$ ]] || continue
+    job_reads=$(( job_reads + 1 ))
     jobs="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
       | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
     if [ -z "$jobs" ]; then
+      job_failures=$(( job_failures + 1 ))
       arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
       continue
     fi
@@ -516,7 +521,34 @@ arl_resolve_agent_runs() {
   done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
     <<<"$runs" 2>/dev/null || true)
 
-  printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role"
+  # Every jobs read failed (rate limit / 5xx): the empty history is an outage, not
+  # an idle role — report it transient rather than resolved-empty.
+  if [ "$job_reads" -gt 0 ] && [ "$job_failures" -eq "$job_reads" ]; then
+    arl_log "warning: every jobs read of ${AGENT_INGRESS_WORKFLOW} in ${where} failed — treating history as transient"
+    printf '[]'
+    return 1
+  fi
+
+  local role_runs
+  role_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
+  if [ "$role_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
+    arl_log "UNRESOLVED: ${AGENT_INGRESS_WORKFLOW} in ${where} declares no '${role}' job — '${role}' runs cannot be counted (refusing to read this as zero)"
+    printf '[]'
+    return 3
+  fi
+  printf '%s' "$role_runs"
+}
+
+# _arl_ingress_declares_role <role> <api_repo> — 0 unless the repo's
+# agent-ingress.yml is READABLE and declares no `jobs.<role>` key. An unreadable or
+# empty read returns 0 (declared) so a blip keeps the permissive degrade.
+_arl_ingress_declares_role() {
+  local role="$1" api_repo="$2" raw content
+  raw="$(gh api "repos/${api_repo}/contents/.github/workflows/${AGENT_INGRESS_WORKFLOW}" 2>/dev/null || true)"
+  content="$(jq -r 'select(.type == "file" and .encoding == "base64") | .content // empty' <<<"$raw" 2>/dev/null \
+    | base64 -d 2>/dev/null || true)"
+  [ -n "$content" ] || return 0
+  agent_ingress_has_role_job "$role" <<<"$content"
 }
 
 # ---------------------------------------------------------------------------

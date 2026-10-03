@@ -152,9 +152,9 @@ per-role workflow does not exist. When `gh run list` reports that the workflow i
 resolver (`arl_resolve_agent_runs`) reads the `agent-ingress.yml` runs instead. It
 keeps only the runs in which the agent's role job actually ran (job `<role>` or
 `<role> / <nested>`; all-`skipped` means it did not run), using that job's own
-status and conclusion. This matches `.github-private`'s `run-attribution.sh`. Each
-ingress run costs one jobs-API read, so the cost is bounded by `--history-limit`;
-the concurrency count reads jobs only for runs still in flight.
+status and conclusion. This matches `.github-private`'s `run-attribution.sh`. The
+history read costs at most `--history-limit` jobs-API calls; concurrency checks
+fetch jobs only for in-flight runs, reading up to 1,000 ingress runs per repo.
 
 Missing and transient failures are handled differently:
 
