@@ -785,7 +785,7 @@ GHEOF
   printf '#!/usr/bin/env bash\necho "gh: HTTP 503: server error" >&2\nexit 1\n' > "$STUB_BIN/gh"
   chmod +x "$STUB_BIN/gh"
   run env CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
-    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 some/repo"
+    bash -c "source '$ORCH' && _cumulative_health dev-lead '' 0 - some/repo"
   # Fail-closed path returns non-zero, but NEVER with an arithmetic syntax error.
   [[ "$output" != *"syntax error"* ]]
   [[ "$output" != *"operand expected"* ]]
@@ -1219,6 +1219,146 @@ GITEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" == *"PRE_EXISTING"* ]]
+}
+
+# ── orchestrator: failures from runs still on the OLD release don't block (#1176) ──
+# next = candidate (cccc), every ring = prior (bbbb); all tier repos return 3 failed runs.
+# `gh run view --log` prints the resolved "Uses: …@refs/tags/<chan> (<sha>)" line, with <sha>
+# = $1 (the release the run actually executed); "none" prints a log with no Uses: line.
+_executed_sha_stub() {
+  local executed="$1" conclusion="${2:-failure}" fail_sub="${3:-repo petry-projects/TalkTerm --workflow}" cut_iso run_iso
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cut_iso="$(date -u -d "-3 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-3d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  run_iso="$(date -u -d "-2 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"-2d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   echo "cccccccccccccccccccccccccccccccccccccccc commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit" ;;
+  *"matching-refs/tags/dev-lead/v"*) printf 'refs/tags/dev-lead/v2.0.0\ttagobj\ttag\n' ;;
+  *"git/tags/tagobj"*) printf '%s\t%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$cut_iso" ;;
+  *"ref=cccc"*) echo "reuseAAAA" ;;
+  *"ref=bbbb"*) echo "reuseAAAA" ;;
+  *"run list"*)
+    # Only <fail_sub> (default: TalkTerm, a ring1 member = the DESTINATION side of next->ring0)
+    # fails; every other repo is green — mirrors #1176's real case.
+    __c=success; case "\$*" in *"$fail_sub"*) __c="$conclusion" ;; esac
+    jq -nc --arg d "$run_iso" --arg c "\$__c" '[range(3)|{conclusion:\$c,createdAt:\$d,databaseId:(1000+.),workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*"--log"*)
+    # Mirrors real \`gh run view --log\` output: "<job><TAB><step><TAB><timestamp> <text>".
+    ts="2026-09-25T00:00:00.1234567Z"
+    U="Uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@refs/tags/dev-lead/v2-ring1"
+    if [ "$executed" = logfail ]; then exit 1
+    elif [ "$executed" = none ]; then printf 'build\tUNKNOWN STEP\t%s nothing relevant\n' "\$ts"
+    elif [ "$executed" = collision ]; then printf 'build\tUNKNOWN STEP\t%s Uses: someone/else/.github/workflows/dev-lead-reusable.yml@refs/tags/x (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts"
+    elif [ "$executed" = forgedcand ]; then
+      # genuine OLD line first, then the same job echoes a forged CANDIDATE-sha line
+      printf 'build\tUNKNOWN STEP\t%s %s (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts" "\$U"
+      printf 'build\tUNKNOWN STEP\t%s %s (cccccccccccccccccccccccccccccccccccccccc)\n' "\$ts" "\$U"
+    elif [ "$executed" = forged ]; then
+      # genuine candidate line first, then the same job echoes a forged OLD-sha line
+      printf 'build\tUNKNOWN STEP\t%s %s (cccccccccccccccccccccccccccccccccccccccc)\n' "\$ts" "\$U"
+      printf 'build\tUNKNOWN STEP\t%s %s (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n' "\$ts" "\$U"
+    else
+      n=0; for sha in $executed; do n=\$((n+1)); printf 'job%s\tUNKNOWN STEP\t%s %s (%s)\n' "\$n" "\$ts" "\$U" "\$sha"; done
+    fi ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Compile TypeScript","conclusion":"failure"}]}]}' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+:
+GITEOF
+  chmod +x "$STUB_BIN/git"
+}
+
+@test "orchestrator: failures from runs on the OLD release do not block the candidate (#1176)" {
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"target-ring health"* ]]
+  [[ "$output" == *"informational"* ]]
+}
+
+@test "orchestrator: failures from runs that executed the candidate SHA still BLOCK (#1176)" {
+  _executed_sha_stub cccccccccccccccccccccccccccccccccccccccc
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"target-ring health"* ]]
+}
+
+@test "orchestrator: a run that called the reusable at the old AND candidate SHA still BLOCKS (#1176)" {
+  _executed_sha_stub "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a Uses: line for a different host's same-named workflow is not attributed — BLOCKS (#1176)" {
+  _executed_sha_stub collision
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a forged old-SHA Uses: line echoed after the genuine one is ignored — still BLOCKS (#1176)" {
+  _executed_sha_stub forged
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: only the FIRST Uses: line per job is trusted — a later forged candidate-SHA line cannot re-block an old-release run (#1176)" {
+  _executed_sha_stub forgedcand
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BLOCKED"* ]]
+  [[ "$output" == *"target-ring health"* ]]
+}
+
+@test "orchestrator: old-release failures on the SOURCE tier still BLOCK — attribution only applies to tiers not yet on the candidate (#1176)" {
+  # The source tier's sample still counts runs from before the candidate reached it, so dropping only
+  # their failures would let a candidate with no executions there reach PROMOTE. The host (.github-private)
+  # is the source tier of next->ring0 and its failing run's log names the OLD sha: it must still count.
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb failure "repo petry-projects/.github-private --workflow"
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"target-ring health"* ]]
+}
+
+@test "orchestrator: a short (7-char) candidate SHA in the Uses: line is matched by prefix and BLOCKS (#1176)" {
+  _executed_sha_stub ccccccc
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a failing 'gh run view --log' lookup fails closed and BLOCKS (#1176)" {
+  _executed_sha_stub logfail
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: startup_failure runs are never attributed to an old release — they still BLOCK (#1176)" {
+  _executed_sha_stub bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb startup_failure
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
+}
+
+@test "orchestrator: a failure whose executed release cannot be determined fails closed and BLOCKS (#1176)" {
+  _executed_sha_stub none
+  run env CANARY_RINGS="$RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BLOCKED"* ]]
 }
 
 # ── orchestrator: promote --allow-pre-existing (control override, #1025 P2) ─────
@@ -1858,6 +1998,18 @@ GHEOF
   grep -q -- "issue edit 901 .*--add-label dev-lead --add-label needs-human" "$ISSUE_LOG"
 }
 
+@test "orchestrator: sync-promotion-failures — a successful ring move does not mask a failed write for the same agent (#1023)" {
+  local existing='[{"number":903,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv" slog="$BATS_TEST_TMPDIR/ok.tsv"
+  printf 'dev-lead\tstable\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  printf 'dev-lead\tring0\tccccccccccccccccc\tpetry-projects/.github-private\n' > "$slog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTION_FAILURE_ESCALATE_AFTER=2 CANARY_PROMOTIONS_FAILED_LOG="$flog" CANARY_PROMOTIONS_LOG="$slog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated promotion-failure issue #903 for dev-lead (count=2)"* ]]
+  ! grep -q "^CLOSE|" "$ISSUE_LOG"
+}
+
 @test "orchestrator: sync-promotion-failures auto-closes the tracking issue when the write recovers (#1023)" {
   # dev-lead succeeded this run (in the SUCCESS log) but an OPEN failure issue exists → close it.
   local existing='[{"number":902,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:3 -->"}]'
@@ -1880,6 +2032,21 @@ GHEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"closed recovered promotion-failure issue #903 for dev-lead"* ]]
   grep -q "CLOSE|.*903" "$ISSUE_LOG"
+}
+
+@test "orchestrator: sync-promotion-failures — a ring0 success must NOT hide a ring1 failure from the same run (#1118)" {
+  # One run can now advance several rings. ring0 moved, ring1's tag write was rejected: the agent is
+  # FAILED (its tracking issue stays/gets opened), not "recovered".
+  local existing='[{"number":905,"state":"OPEN","body":"<!-- canary-promo-fail:dev-lead -->\n<!-- canary-promo-fail-count:1 -->"}]'
+  _promo_fail_sync_stub "$existing"
+  local slog="$BATS_TEST_TMPDIR/ok.tsv"; printf 'dev-lead\tring0\tdddddddddddddddd\tpetry-projects/.github-private\n' > "$slog"
+  local flog="$BATS_TEST_TMPDIR/pf.tsv"; printf 'dev-lead\tring1\tccccccccccccccccc\tpetry-projects/.github-private\ttag write rejected\n' > "$flog"
+  run env ISSUE_REPO="petry-projects/.github" CANARY_PROMOTIONS_LOG="$slog" CANARY_PROMOTIONS_FAILED_LOG="$flog" bash "$ORCH" sync-promotion-failures
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"updated promotion-failure issue #905 for dev-lead (count=2)"* ]]
+  [[ "$output" != *"closed recovered"* ]]
+  run grep -q "CLOSE|.*905" "$ISSUE_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "orchestrator: sync-promotion-failures does NOT seed a new streak from a CLOSED issue (#1023)" {
@@ -3443,6 +3610,210 @@ GHEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"closed cleared confirm issue #502 for dev-lead"* ]]
   grep -q "CLOSE|.*502" "$ISSUE_LOG"
+}
+
+# ── #1118: independent per-pair evaluation — a ring1->stable hold survives newer cuts ──
+# Before #1118 `_frontier_state` evaluated ONLY next's candidate at a SINGLE frontier: once
+# autocut moved `next`, the frontier fell back to ring0 and a pending ring1->stable
+# AWAITING_CONFIRMATION hold vanished (its canary-confirm issue auto-closed, unconfirmed). Now
+# EVERY adjacent src->dst pair is evaluated independently on the commit currently sitting on
+# `src`, so several transitions can be in flight at once and an older ring1 candidate keeps its
+# human go/no-go regardless of newer cuts landing on next/ring0.
+#
+# _multicand_stub <t_next> <t_ring0> <t_ring1> <t_stable> <off_c1> <off_c2> <off_c3> [fail_sub] [differ] [issue_list]
+#   t_* ∈ {C1,C2,C3,PRIOR} — the commit each tier carries (C1=cccc…, C2=dddd…, C3=eeee…,
+#   PRIOR=bbbb…). off_cN — cut age (a `date -d` offset string, e.g. "1 hours"/"3 days") of the
+#   release tag for C1/C2/C3. fail_sub — a repo substring whose `run list` returns FAILURES
+#   (default: none → all clean). differ="C1" makes C1's reusable blob differ from the prior
+#   (default: all identical → differs=0). issue_list — JSON returned by `gh issue list`.
+#   dev-lead is cross-repo (GITHUB_REPOSITORY=.github forces THIS_REPO=.github): all tag/blob/
+#   release resolution goes via gh api. Sets MC_RINGS (dev-lead-only registry); logs issue ops
+#   to ISSUE_LOG.
+_multicand_stub() {
+  local t_next="$1" t_ring0="$2" t_ring1="$3" t_stable="$4"
+  local off1="$5" off2="$6" off3="$7" fail_sub="${8:-__NEVER_FAIL__}" differ="${9:-}" issue_list="${10:-[]}"
+  local C1="cccccccccccccccccccccccccccccccccccccccc"
+  local C2="dddddddddddddddddddddddddddddddddddddddd"
+  local C3="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  local PRIOR="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  local -A M=( [C1]="$C1" [C2]="$C2" [C3]="$C3" [PRIOR]="$PRIOR" [NONE]="" )
+  local n="${M[$t_next]}" r0="${M[$t_ring0]}" r1="${M[$t_ring1]}" st="${M[$t_stable]}"
+  local blob_c1="reuseSAME"; [ "$differ" = "C1" ] && blob_c1="reuseCAND"
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export ISSUE_LOG="$STUB_BIN/issue.log"; : > "$ISSUE_LOG"
+  local c1_iso c2_iso c3_iso run_iso
+  c1_iso="$(date -u -d "-$off1" +%Y-%m-%dT%H:%M:%SZ)"
+  c2_iso="$(date -u -d "-$off2" +%Y-%m-%dT%H:%M:%SZ)"
+  c3_iso="$(date -u -d "-$off3" +%Y-%m-%dT%H:%M:%SZ)"
+  run_iso="$(date -u -d '-12 hours' +%Y-%m-%dT%H:%M:%SZ)"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # dev-lead is cross-repo; all tag/blob/release resolution goes via gh api
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case "\$*" in
+  *"git/ref/tags/dev-lead/next"*)   [ -n "$n" ] && echo "$n commit" ;;
+  *"git/ref/tags/dev-lead/ring0"*)  [ -n "$r0" ] && echo "$r0 commit" ;;
+  *"git/ref/tags/dev-lead/ring1"*)  [ -n "$r1" ] && echo "$r1 commit" ;;
+  *"git/ref/tags/dev-lead/stable"*) [ -n "$st" ] && echo "$st commit" ;;
+  *"matching-refs/tags/dev-lead/v"*)
+    printf 'refs/tags/dev-lead/v2.2.0\tobjC1\ttag\n'
+    printf 'refs/tags/dev-lead/v2.1.0\tobjC2\ttag\n'
+    printf 'refs/tags/dev-lead/v2.0.0\tobjC3\ttag\n' ;;
+  *"git/tags/objC1"*) printf '%s\t%s\n' "$C1" "$c1_iso" ;;
+  *"git/tags/objC2"*) printf '%s\t%s\n' "$C2" "$c2_iso" ;;
+  *"git/tags/objC3"*) printf '%s\t%s\n' "$C3" "$c3_iso" ;;
+  *"ref=cccc"*) echo "$blob_c1" ;;
+  *"ref=dddd"*) echo "reuseSAME" ;;
+  *"ref=eeee"*) echo "reuseSAME" ;;
+  *"ref=bbbb"*) echo "reuseSAME" ;;
+  *"run list"*)
+    __c=success
+    case "\$*" in *"$fail_sub"*) __c=failure ;; esac
+    jq -nc --arg d "$run_iso" --arg c "\$__c" '[range(20)|{conclusion:\$c,createdAt:\$d,databaseId:88010,workflowName:"Dev-Lead Agent"}]' ;;
+  *"run view"*) echo '{"jobs":[{"steps":[{"name":"Compile TypeScript","conclusion":"failure"}]}]}' ;;
+  "issue list"*) echo '$issue_list' ;;
+  "issue create"*) echo "CREATE|\$*" >> "$ISSUE_LOG"; echo "https://github.com/petry-projects/.github-private/issues/909" ;;
+  "issue edit"*)   echo "EDIT|\$*"   >> "$ISSUE_LOG" ;;
+  "issue close"*)  echo "CLOSE|\$*"  >> "$ISSUE_LOG" ;;
+  "issue reopen"*) echo "REOPEN|\$*" >> "$ISSUE_LOG" ;;
+  "label create"*) : ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  MC_RINGS="$BATS_TEST_TMPDIR/mc-rings.json"
+  jq '{org_infra_repos, agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$MC_RINGS"
+}
+
+@test "#1118: a newer next cut does NOT drop a pending ring1->stable AWAITING_CONFIRMATION hold" {
+  # next=C1 cut 1h ago (next->ring0 SOAKING), ring0=ring1=C3 cut 30h ago, stable=prior.
+  # ring1->stable must STILL be evaluated as AWAITING_CONFIRMATION even though `next` moved.
+  _multicand_stub C1 C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ring1->stable"* ]]
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+  # the newer next candidate is independently in flight, still soaking (it does NOT cancel the hold)
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"SOAKING"* ]]
+}
+
+@test "#1118: sync-issues KEEPS (updates, not closes) the ring1-candidate confirm issue across a newer next cut" {
+  # An OPEN canary-confirm issue already exists keyed on ring1's candidate C3. A newer next cut
+  # (C1) must NOT close it — the hold is keyed on the ring1 candidate, which is unchanged (AC3/AC7a).
+  _multicand_stub C1 C3 C3 PRIOR "1 hours" "3 days" "30 hours" "" "" \
+    '[{"number":901,"state":"OPEN","body":"<!-- canary-confirm:dev-lead:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee -->"}]'
+  local summ="$BATS_TEST_TMPDIR/mc-a.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  grep -q "EDIT|.*901" "$ISSUE_LOG"          # the C3 confirm issue is refreshed, not closed
+  run grep -q "CLOSE|.*901" "$ISSUE_LOG"      # the hold survived the newer next cut
+  [ "$status" -eq 1 ]                         # (exactly 1: a missing log, status 2, must not pass)
+  grep -q "AWAITING_CONFIRMATION" "$summ"
+}
+
+@test "#1118: promote --confirm advances stable to ring1's candidate while next->ring0 keeps soaking" {
+  # next=C1 (soaking), ring0=ring1=C3 (AWAITING at ring1->stable). --confirm clears ONLY the
+  # ring1->stable hold; the newer, still-soaking next candidate is untouched (AC4/AC7b).
+  _multicand_stub C1 C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --confirm --dry-run
+  [ "$status" -eq 0 ]
+  # stable advances to ring1's candidate (C3 = eeee…), confirmed
+  [[ "$output" == *"tags/dev-lead/stable sha=eeeeeeeeeeee"* ]]
+  # next->ring0 (the newer candidate) is still soaking — never advanced by --confirm
+  [[ "$output" == *"SOAKING"* ]]
+  [[ "$output" != *"tags/dev-lead/ring0 sha="* ]]
+}
+
+@test "#1118: no tier skip — ring1 only ever advances to the commit currently on ring0" {
+  # next=C1, ring0=C2, ring1=C3, stable=prior; every pair clean and old enough to PROMOTE.
+  _multicand_stub C1 C2 C3 PRIOR "3 days" "40 hours" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
+  # ring0 advances to next's commit (C1 = cccc…)
+  [[ "$output" == *"tags/dev-lead/ring0 sha=cccccccccccc"* ]]
+  # ring1 advances to ring0's OLD commit (C2 = dddd…) — NEVER skips to next's (C1)
+  [[ "$output" == *"tags/dev-lead/ring1 sha=dddddddddddd"* ]]
+  [[ "$output" != *"tags/dev-lead/ring1 sha=cccc"* ]]
+  # ring1->stable holds for human confirmation (require_confirmation; no --confirm passed)
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+}
+
+@test "#1118: a BLOCKED lower pair does not block an independently clean higher pair" {
+  # next=C1 with a REGRESSION on the next tier (reusable differs + a failure there);
+  # ring0=ring1=C3 independently clean → ring1->stable is AWAITING, unblocked by the lower pair.
+  _multicand_stub C1 C3 C3 PRIOR "3 days" "3 days" "30 hours" "petry-projects/.github-private" C1
+  local summ="$BATS_TEST_TMPDIR/mc-d.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  # lower pair blocked → its canary-blocker issue opens (REGRESSION at next->ring0)
+  [[ "$output" == *"opened blocker issue"* ]]
+  grep -q "REGRESSION" "$summ"
+  # higher pair independently clean → its canary-confirm issue opens (AWAITING at ring1->stable)
+  [[ "$output" == *"confirm issue"* ]]
+  grep -q "AWAITING_CONFIRMATION" "$summ"
+}
+
+@test "#1118: --override advances ONLY the lowest pending pair — never an AWAITING_CONFIRMATION pair for another candidate" {
+  # next=C1 BLOCKED (REGRESSION), ring0=ring1=C3 AWAITING at ring1->stable. An operator --override of
+  # the blocked newest candidate must not also push stable past the human go/no-go (#668 L3 stays).
+  _multicand_stub C1 C3 C3 PRIOR "3 days" "3 days" "30 hours" "petry-projects/.github-private" C1
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --override --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tags/dev-lead/ring0 sha=cccccccccccc"* ]]     # the overridden lowest pair advances
+  [[ "$output" != *"tags/dev-lead/stable sha="* ]]                 # the higher pair keeps its own gate
+  [[ "$output" == *"AWAITING_CONFIRMATION"* ]]
+}
+
+@test "#1118: an UNRESOLVABLE source commit with a populated destination fails closed (BLOCKED), never a false COMPLETE" {
+  # next has no resolvable tag but ring0 does: next->ring0 is pending and must hold BLOCKED.
+  _multicand_stub NONE C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"next->ring0"* ]]
+  [[ "$output" == *"BLOCKED"* ]]
+  [[ "$output" != *"fully rolled out"* ]]
+}
+
+@test "#1118: an unresolvable source commit is a held pair that sync-issues SEES (sentinel, not a shifted blank field)" {
+  # next has no resolvable tag: the pair record must still parse (a leading blank field would shift
+  # every field, hiding BLOCKED), so sync-issues opens its blocker issue.
+  _multicand_stub NONE C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  local summ="$BATS_TEST_TMPDIR/mc-n.md"; : > "$summ"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opened blocker issue"* ]]
+  grep -q "BLOCKED" "$summ"
+}
+
+@test "#1118: promote --override never acts on an unresolvable candidate (no tag is moved to a sentinel)" {
+  _multicand_stub NONE C3 C3 PRIOR "1 hours" "3 days" "30 hours"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --override --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unresolvable"* ]]
+  [[ "$output" != *"tags/dev-lead/ring0 sha=-"* ]]
+  [[ "$output" != *"advancing dev-lead/ring0 -> -"* ]]
+}
+
+@test "#1118: a lower ring whose tag is UNRESOLVABLE stays in scope — its failures still block a higher pair (fail closed)" {
+  # ring0 has no resolvable tag and its member (.github) is failing; ring1->stable must not shed
+  # those failures just because ring0's commit is unknown rather than provably different.
+  _multicand_stub C1 NONE C3 PRIOR "3 days" "3 days" "30 hours" "repo petry-projects/.github --workflow"
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" evaluate dev-lead
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[ring1->stable]: BLOCKED"* ]]
+}
+
+# The confirm issue's idempotency marker is keyed on the ring1 CANDIDATE (#1118 AC3), so a
+# recut ring1 candidate does not silently transfer a human's pending go/no-go to a new commit.
+@test "#1118: _confirm_body keys the canary-confirm marker on agent AND candidate" {
+  run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$RINGS" bash -c \
+    "source '$ORCH' && _confirm_body dev-lead 'ring1->stable' cafe1234cafe bbbbbbbbbbbb petry-projects/.github-private 5 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"<!-- canary-confirm:dev-lead:cafe1234cafe -->"* ]]
 }
 
 # ── #668 increment 4 (Layer 2): decision telemetry — pure core + engine overlay ──
