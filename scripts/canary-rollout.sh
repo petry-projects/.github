@@ -653,7 +653,9 @@ _repo_wf_runs_cached() {
     # counted as an outage; retrying it was the #810→#803 cancellation storm.
     if [[ "${err,,}" == *"could not find any workflow"* ]] || [[ "${err,,}" == *"no workflows"* ]]; then
       rm -f "$errfile"
-      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' '[]' > "$cachef" 2>/dev/null && : > "${cachef}.nf" 2>/dev/null || true
+      # Marker FIRST, then the cached []: a concurrent strict reader that sees the cache file is
+      # guaranteed to see the .nf marker too (it never reads "workflow exists, no runs").
+      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && : > "${cachef}.nf" 2>/dev/null && printf '%s' '[]' > "$cachef" 2>/dev/null || true
       echo '[]'
       [ "$strict" = "1" ] && return 3
       return 0
@@ -742,7 +744,9 @@ _unresolved_flag_path() {
 
 # _run_jobs_json <repo> <run_id> — `gh run view --json jobs` for one run, file-memoized under
 # $_RUNS_CACHE_DIR (an ingress run is shared by every collapsed role, so each run's jobs are read
-# once per sweep). Bounded retry; non-zero when the jobs stay unreadable.
+# once per sweep). Bounded retry. Returns 0 on success; 2 when the run is permanently gone/unreadable
+# (deleted or expired — HTTP 404); 1 when the jobs endpoint stayed unreadable after the full backoff
+# (a transient/systemic failure — callers use that to stop reading, see _ingress_agent_runs).
 _run_jobs_json() {
   local repo="$1" id="$2" cachef="" keyhash out attempt=1
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
@@ -764,7 +768,7 @@ _run_jobs_json() {
     fi
     # A run deleted/expired since `gh run list` is permanent — fail fast, don't burn the backoff.
     if grep -qiE 'could not find (any )?(workflow )?run|HTTP 404|not found' "$errf" 2>/dev/null; then
-      [ "$errf" != /dev/null ] && rm -f "$errf"; return 1
+      [ "$errf" != /dev/null ] && rm -f "$errf"; return 2
     fi
     if [ "$attempt" -ge "$attempts" ]; then [ "$errf" != /dev/null ] && rm -f "$errf"; return 1; fi
     # Same policy as the run-list path: exponential backoff with full jitter in [base, 30s].
@@ -787,16 +791,31 @@ _ingress_agent_runs() {
   wf="$(_agent_field "$agent" run_workflow)"
   iraw="$(cat)"
   # Bound the per-run `gh run view` fan-out (#810/#819): read at most CANARY_INGRESS_JOBS_MAX
-  # (default 300) of the newest in-window runs; beyond that the member is UNRESOLVED (fail closed).
-  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0
+  # (default 300) of the newest in-window runs. Beyond that the member is UNRESOLVED (fail closed) —
+  # EXCEPT for the trailing BASELINE read (_baseline_daily arms _CANARY_INGRESS_TRUNC_FLAG): the
+  # baseline only sizes the sample target, so a truncated read is a valid sample of the NEWEST days.
+  # The first unread run's day is recorded and _baseline_daily drops that (incomplete) day and every
+  # older one, rather than blocking a busy collapsed repo forever. Gating windows stay strict.
+  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc
   case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
   while IFS=$'\t' read -r id created rconc; do
     [ -z "$id" ] && continue
     if [ "$nread" -ge "$jobs_max" ]; then
-      _record_unresolved "$agent" "$repo" "more than $jobs_max ingress runs in the window; job reads capped (CANARY_INGRESS_JOBS_MAX)"; break
+      if [ -n "${_CANARY_INGRESS_TRUNC_FLAG:-}" ] && printf '%s\n' "${created:0:10}" >> "$_CANARY_INGRESS_TRUNC_FLAG" 2>/dev/null; then
+        echo "::warning::$agent $repo: more than $jobs_max ingress runs in the baseline window; using the newest days only (CANARY_INGRESS_JOBS_MAX)." >&2
+      else
+        _record_unresolved "$agent" "$repo" "more than $jobs_max ingress runs in the window; job reads capped (CANARY_INGRESS_JOBS_MAX)"
+      fi
+      break
     fi
     nread=$((nread + 1))
-    if ! jobs="$(_run_jobs_json "$repo" "$id")"; then
+    jrc=0; jobs="$(_run_jobs_json "$repo" "$id")" || jrc=$?
+    if [ "$jrc" -eq 1 ]; then
+      # Circuit breaker: the jobs endpoint stayed unreadable after the full backoff, so every later
+      # run would burn the same ~30s+ of retries (300 runs can outlive the job timeout before
+      # sync-issues records the fail-closed state). Stop reading; the member is UNRESOLVED.
+      _record_unresolved "$agent" "$repo" "jobs endpoint unreadable (run $id) — stopped reading jobs for this member"; break
+    elif [ "$jrc" -ne 0 ]; then
       _record_unresolved "$agent" "$repo" "jobs of ingress run $id are unreadable"; continue
     fi
     rec="$(jq -c --arg role "$role" --arg wf "$wf" --arg id "$id" --arg created "$created" --arg rconc "$rconc" '
@@ -1153,18 +1172,27 @@ _cumulative_health() {
 }
 
 # _baseline_daily <agent> <window_days> <repo...> — per-day EXECUTED counts on the
-# source tier over the trailing window_days (exactly window_days integers, zero-filled),
+# source tier over the trailing window_days (window_days integers, zero-filled — fewer only when a
+# capped collapsed-repo read left the older days unknown, see _ingress_agent_runs),
 # feeding the robust spike-capped baseline for the sample target (#548).
 _baseline_daily() {
   local agent="$1" window="$2"; shift 2
-  local since repo json dates="" day i count out=""
+  local since repo json dates="" day i count out="" tflag cutday="" d
   since="$(_iso_now_minus_days "$window")"
+  tflag="$(mktemp 2>/dev/null || true)"   # unwritable → the ingress cap stays strict (UNRESOLVED)
   for repo in "$@"; do
-    json="$(_agent_run_json "$agent" "$repo" "$since")"
+    json="$(_CANARY_INGRESS_TRUNC_FLAG="$tflag" _agent_run_json "$agent" "$repo" "$since")"
     dates+="$(jq -r '.[]?|select(.conclusion=="success" or .conclusion=="failure")|.createdAt[0:10]?' 2>/dev/null <<< "$json" || true)"$'\n'
   done
+  # A capped ingress read (see _ingress_agent_runs) leaves everything at/before its first unread run's
+  # day unknown — NOT zero. Cover only the days strictly newer than the newest such boundary.
+  if [ -n "$tflag" ] && [ -s "$tflag" ]; then
+    while IFS= read -r d; do [ -n "$d" ] && { [ -z "$cutday" ] || [[ "$d" > "$cutday" ]]; } && cutday="$d"; done < "$tflag"
+  fi
+  [ -n "$tflag" ] && rm -f "$tflag"
   for (( i=0; i<window; i++ )); do
     day="$(date -u -d "-${i} days" +%Y-%m-%d 2>/dev/null || date -u -v"-${i}d" +%Y-%m-%d 2>/dev/null || echo "")"
+    [ -n "$cutday" ] && [[ ! "$day" > "$cutday" ]] && continue
     count=$(grep -c "^${day}$" 2>/dev/null <<< "$dates" || true)
     out+="${count} "
   done

@@ -5469,6 +5469,12 @@ case "$1 $2" in
                {"conclusion":null,"createdAt":"2026-01-02T03:00:00Z","databaseId":105,"workflowName":"Agent Ingress"}]' ;;
       "org/nojobs|Agent Ingress")
         echo '[{"conclusion":"failure","createdAt":"2026-01-02T00:00:00Z","databaseId":103,"workflowName":"Agent Ingress"}]' ;;
+      "org/busy|Agent Ingress")
+        # Three attributable runs: two today, one yesterday (newest first once sorted by createdAt).
+        t="$(date -u +%Y-%m-%d)"; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
+        echo "[{\"conclusion\":\"success\",\"createdAt\":\"${t}T10:00:00Z\",\"databaseId\":303,\"workflowName\":\"Agent Ingress\"},
+               {\"conclusion\":\"success\",\"createdAt\":\"${t}T09:00:00Z\",\"databaseId\":302,\"workflowName\":\"Agent Ingress\"},
+               {\"conclusion\":\"success\",\"createdAt\":\"${y}T12:00:00Z\",\"databaseId\":301,\"workflowName\":\"Agent Ingress\"}]" ;;
       "org/legacy|Dev-Lead Agent")
         echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":201,"workflowName":"Dev-Lead Agent"}]' ;;
       "org/legacy|CI Failure Analyst")
@@ -5476,7 +5482,10 @@ case "$1 $2" in
       *) nf ;;
     esac ;;
   "run view")
+    # Transient/systemic jobs-endpoint failure (5xx) — NOT a permanent 404.
+    [ -n "${STUB_JOBS_FAIL:-}" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     case "$3" in
+      30[123]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]}]}' ;;
       101) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]},
                           {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
                           {"name":"ci-failure-analyst","conclusion":"skipped","steps":[]}]}' ;;
@@ -5566,6 +5575,40 @@ GHEOF
   grep -q "run view 104 " "$GH_LOG"
   ! grep -q "run view 102 " "$GH_LOG"
   ! grep -q "run view 101 " "$GH_LOG"
+}
+
+@test "_baseline_daily: a capped ingress read is a valid truncated sample of the NEWEST days, not UNRESOLVED (#1224 liveness)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy has 3 attributable runs (2 today, 1 yesterday); the cap of 2 leaves yesterday's run
+  # unread. The baseline must cover TODAY only (yesterday and older are unknown, not zero) and the
+  # member must NOT be flagged UNRESOLVED — a busy collapsed repo may not hold the gate forever.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=2 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/busy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_baseline_daily: an UNCAPPED baseline still reports every day (zero-filled), nothing dropped (#1224 liveness)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=300 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _baseline_daily dev-lead 3 org/busy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2 1 0" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: the jobs-read circuit breaker stops after the first exhausted 5xx instead of retrying every run (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH' && _agent_run_json dev-lead org/collapsed '' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  # org/collapsed has three completed runs (104, 102, 101); without the breaker all three are read.
+  [ "$(grep -c '^run view ' "$GH_LOG")" -eq 1 ]
+  grep -q "jobs endpoint unreadable" "$flag"
 }
 
 @test "_agent_run_json: an ingress run with NO jobs cannot be attributed → member reported UNRESOLVED (#1224)" {
