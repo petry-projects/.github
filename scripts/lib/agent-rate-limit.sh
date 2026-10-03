@@ -491,52 +491,79 @@ arl_resolve_agent_runs() {
     rc=0
   fi
 
-  runs="$(_arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$limit")" || rc=$?
-  case "$rc" in
-    0) ;;
-    1) printf '[]'; return 1 ;;
-    *)
-      arl_log "UNRESOLVED: neither workflow '${workflow}' nor ${AGENT_INGRESS_WORKFLOW} exists in ${where} — '${role}' runs cannot be counted (refusing to read this as zero)"
-      printf '[]'
-      return 3
-      ;;
-  esac
+  # Paginate ingress history until we have at least $limit role-specific runs.
+  # In a busy repo, other roles can fill the initial $limit ingress runs, so we
+  # must continue fetching until we have the requested number of role runs or
+  # exhaust the history (#1226). Use doubled limits to amortize pagination across
+  # multi-role repos while still detecting end-of-history (#batch < page_size).
+  local api_repo="${repo:-"{owner}/{repo}"}" records="" role_runs="" final_runs=""
+  local page_size=100 batch_rc=0 filter id status created jobs_out
+  local batch_count role_count fetch_limit="$limit"
 
-  local filter='.'
-  [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
-  local api_repo="${repo:-"{owner}/{repo}"}" id status created jobs records=""
-  local job_reads=0 job_failures=0
-  while IFS=$'\t' read -r id status created; do
-    [[ "$id" =~ ^[0-9]+$ ]] || continue
-    job_reads=$(( job_reads + 1 ))
-    jobs="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
-      | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
-    if [ -z "$jobs" ]; then
-      job_failures=$(( job_failures + 1 ))
-      arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
-      continue
+  while :; do
+    local page_runs
+    page_runs="$(_arl_gh_run_list "$AGENT_INGRESS_WORKFLOW" "$repo" "$fetch_limit")" || batch_rc=$?
+    case "$batch_rc" in
+      0) ;;
+      1)
+        if [ -n "$records" ]; then
+          break
+        fi
+        printf '[]'
+        return 1
+        ;;
+      *)
+        if [ -n "$records" ]; then
+          break
+        fi
+        arl_log "UNRESOLVED: neither workflow '${workflow}' nor ${AGENT_INGRESS_WORKFLOW} exists in ${where} — '${role}' runs cannot be counted (refusing to read this as zero)"
+        printf '[]'
+        return 3
+        ;;
+    esac
+
+    filter='.'
+    [ "$inflight_only" = "true" ] && filter='map(select((.status // "") != "completed"))'
+
+    while IFS=$'\t' read -r id status created; do
+      [[ "$id" =~ ^[0-9]+$ ]] || continue
+      # Skip if already processed (avoid redundant API calls on re-fetch).
+      if printf '%s' "$records" | grep -q '"databaseId":'$id','; then
+        continue
+      fi
+      jobs_out="$(gh api "repos/${api_repo}/actions/runs/${id}/jobs?per_page=100" 2>/dev/null \
+        | jq -c '[.jobs[]? | {name, status, conclusion}]' 2>/dev/null || true)"
+      if [ -z "$jobs_out" ]; then
+        arl_log "warning: jobs of ${AGENT_INGRESS_WORKFLOW} run ${id} in ${where} were unreadable — skipping that run (degraded)"
+        continue
+      fi
+      records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs_out" \
+        '{databaseId: $id, status: $s, createdAt: $c, jobs: $jobs}')"$'\n'
+    done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
+      <<<"$page_runs" 2>/dev/null || true)
+
+    role_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
+    role_count="$(jq -r 'length' <<<"$role_runs" 2>/dev/null || printf '0')"
+    batch_count="$(jq -r 'length' <<<"$page_runs" 2>/dev/null || printf '0')"
+
+    if [ "$role_count" -ge "$limit" ] || [ "$batch_count" -lt "$page_size" ]; then
+      printf '%s' "$role_runs"
+      if [ "$role_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
+        arl_log "UNRESOLVED: ${AGENT_INGRESS_WORKFLOW} in ${where} declares no '${role}' job — '${role}' runs cannot be counted (refusing to read this as zero)"
+        return 3
+      fi
+      return 0
     fi
-    records+="$(jq -nc --argjson id "$id" --arg s "$status" --arg c "$created" --argjson jobs "$jobs" \
-      '{databaseId: $id, status: $s, createdAt: $c, jobs: $jobs}')"$'\n'
-  done < <(jq -r "${filter} | .[] | [(.databaseId | tostring), (.status // \"\"), (.createdAt // \"\")] | @tsv" \
-    <<<"$runs" 2>/dev/null || true)
 
-  # Every jobs read failed (rate limit / 5xx): the empty history is an outage, not
-  # an idle role — report it transient rather than resolved-empty.
-  if [ "$job_reads" -gt 0 ] && [ "$job_failures" -eq "$job_reads" ]; then
-    arl_log "warning: every jobs read of ${AGENT_INGRESS_WORKFLOW} in ${where} failed — treating history as transient"
-    printf '[]'
-    return 1
-  fi
+    fetch_limit=$(( fetch_limit * 2 ))
+  done
 
-  local role_runs
-  role_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
-  if [ "$role_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
-    arl_log "UNRESOLVED: ${AGENT_INGRESS_WORKFLOW} in ${where} declares no '${role}' job — '${role}' runs cannot be counted (refusing to read this as zero)"
-    printf '[]'
+  final_runs="$(printf '%s' "$records" | jq -sc '.' | agent_ingress_role_runs "$role")"
+  printf '%s' "$final_runs"
+  if [ "$final_runs" = "[]" ] && ! _arl_ingress_declares_role "$role" "$api_repo"; then
     return 3
   fi
-  printf '%s' "$role_runs"
+  return 0
 }
 
 # _arl_ingress_declares_role <role> <api_repo> — 0 unless the repo's
