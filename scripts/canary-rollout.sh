@@ -798,7 +798,7 @@ _ingress_agent_runs() {
   # baseline only sizes the sample target, so a truncated read is a valid sample of the NEWEST days.
   # The first unread run's day is recorded and _baseline_daily drops that (incomplete) day and every
   # older one, rather than blocking a busy collapsed repo forever. Gating windows stay strict.
-  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc role_oldest="" skipkind norole_ids="" nid ncr
+  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc role_oldest="" skipkind norole_created="" ncr
   case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
   [ "$jobs_max" -lt 1 ] && jobs_max=300
   while IFS=$'\t' read -r id created rconc; do
@@ -859,7 +859,9 @@ _ingress_agent_runs() {
     fi
     if [ "$rec" = '"NOROLE"' ]; then
       # Defer: pre-adoption runs are benign, a renamed ingress_job is not (see after the loop).
-      norole_ids+="$id "; continue
+      # Keep the run's own createdAt (no payload re-parse later); "-" stands in for a missing one so
+      # word-splitting cannot drop it — a run with an unknown date must still count as blind.
+      norole_created+="${created:--} "; continue
     fi
     skipkind="$(jq -r 'if type == "object" then (.skipped // empty) else empty end' <<< "$rec" 2>/dev/null || true)"
     if [ -n "$skipkind" ]; then
@@ -879,11 +881,10 @@ _ingress_agent_runs() {
   # older still predates the role's adoption by the ingress and is benign; one NEWER than the role's
   # oldest appearance, or any when no run in the window carries the role at all (renamed/misspelled
   # ingress_job), cannot be attributed → UNRESOLVED. The member stays blocked only for that.
-  if [ -n "$norole_ids" ]; then
+  if [ -n "$norole_created" ]; then
     local blind=0
-    for nid in $norole_ids; do
-      ncr="$(jq -r --arg id "$nid" '[ .[]? | select((.databaseId|tostring) == $id) | .createdAt ][0] // empty' 2>/dev/null <<< "${iraw:-[]}")"
-      if [ -z "$role_oldest" ] || [ -z "$ncr" ] || ! [[ "$ncr" < "$role_oldest" ]]; then blind=$((blind + 1)); fi
+    for ncr in $norole_created; do
+      if [ -z "$role_oldest" ] || [ "$ncr" = "-" ] || ! [[ "$ncr" < "$role_oldest" ]]; then blind=$((blind + 1)); fi
     done
     [ "$blind" -gt 0 ] && _record_unresolved "$agent" "$repo" "$blind ingress run(s) carry no '$role' job and are not older than the role's first appearance (ingress_job renamed or misspelled?)"
   fi
