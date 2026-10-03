@@ -5476,6 +5476,16 @@ case "$1 $2" in
         echo "[{\"conclusion\":\"success\",\"createdAt\":\"${t}T10:00:00Z\",\"databaseId\":321,\"workflowName\":\"Agent Ingress\"},
                {\"conclusion\":\"success\",\"createdAt\":\"${t}T09:00:00Z\",\"databaseId\":320,\"workflowName\":\"Agent Ingress\"},
                {\"conclusion\":\"success\",\"createdAt\":\"${t}T08:00:00Z\",\"databaseId\":319,\"workflowName\":\"Agent Ingress\"}]" ;;
+      "org/preadopt|Agent Ingress")
+        echo '[{"conclusion":"success","createdAt":"2026-01-03T00:00:00Z","databaseId":411,"workflowName":"Agent Ingress"},
+               {"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":410,"workflowName":"Agent Ingress"}]' ;;
+      "org/rolegap|Agent Ingress")
+        echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":421,"workflowName":"Agent Ingress"},
+               {"conclusion":"success","createdAt":"2026-01-03T00:00:00Z","databaseId":422,"workflowName":"Agent Ingress"}]' ;;
+      "org/norole|Agent Ingress")
+        echo '[{"conclusion":"success","createdAt":"2026-01-02T00:00:00Z","databaseId":431,"workflowName":"Agent Ingress"}]' ;;
+      "org/cancelled|Agent Ingress")
+        echo '[{"conclusion":"cancelled","createdAt":"2026-01-02T00:00:00Z","databaseId":441,"workflowName":"Agent Ingress"}]' ;;
       "org/busy|Agent Ingress")
         # Three attributable runs: two today, one yesterday (newest first once sorted by createdAt).
         t="$(date -u +%Y-%m-%d)"; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
@@ -5493,6 +5503,9 @@ case "$1 $2" in
     [ -n "${STUB_JOBS_FAIL:-}" ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     case "$3" in
       30[123]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]}]}' ;;
+      411|421) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]}]}' ;;
+      410|422|431) echo '{"jobs":[{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
+      441) echo '{"jobs":[]}' ;;
       32[01]) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"skipped","steps":[]},{"name":"pr-review / review","conclusion":"success","steps":[]}]}' ;;
       101) echo '{"jobs":[{"name":"dev-lead / run","conclusion":"success","steps":[]},
                           {"name":"pr-review / review","conclusion":"failure","steps":[{"name":"Push","conclusion":"failure"}]},
@@ -5640,6 +5653,48 @@ GHEOF
   # org/collapsed has three completed runs (104, 102, 101); without the breaker all three are read.
   [ "$(grep -c '^run view ' "$GH_LOG")" -eq 1 ]
   grep -q "jobs endpoint unreadable" "$flag"
+}
+
+@test "_agent_run_json: an ingress run from BEFORE the role was added to the ingress is not-yet-adopted, not UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # 410 (older) has only pr-review's job; 411 (newer) carries dev-lead's. The role's oldest appearance is
+  # 411, so 410 predates adoption and must not hold a correctly configured member BLOCKED for ~14 days.
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/preadopt '' 2>/dev/null | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[411]' ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: a no-role ingress run NEWER than the role's first appearance is still UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/rolegap '' 2>/dev/null | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[421]' ]
+  grep -q "carry no 'dev-lead' job" "$flag"
+}
+
+@test "_agent_run_json: when NO run carries the role (ingress_job renamed/misspelled) the member is UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/norole '' 2>/dev/null | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+  grep -q "carry no 'dev-lead' job" "$flag"
+}
+
+@test "_agent_run_json: a job-less CANCELLED ingress run never executed the role — no record, not UNRESOLVED (#1224)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/cancelled '' 2>/dev/null | jq -c 'map(.databaseId)'"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+  [ ! -s "$flag" ]
 }
 
 @test "_agent_run_json: an ingress run with NO jobs cannot be attributed → member reported UNRESOLVED (#1224)" {

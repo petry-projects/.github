@@ -796,7 +796,7 @@ _ingress_agent_runs() {
   # baseline only sizes the sample target, so a truncated read is a valid sample of the NEWEST days.
   # The first unread run's day is recorded and _baseline_daily drops that (incomplete) day and every
   # older one, rather than blocking a busy collapsed repo forever. Gating windows stay strict.
-  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc
+  local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc role_oldest="" skipkind norole_ids="" nid ncr
   case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
   [ "$jobs_max" -lt 1 ] && jobs_max=300
   while IFS=$'\t' read -r id created rconc; do
@@ -828,29 +828,57 @@ _ingress_agent_runs() {
         else 2 end;
       (.jobs // []) as $jobs
       | if ($jobs | length) == 0 then
-          (if $rconc == "startup_failure" then {conclusion: "startup_failure"} else "UNATTRIBUTED" end)
+          # A run cancelled before any job started (e.g. superseded by workflow concurrency) never
+          # executed this role: it is not a success or a failure, so it is simply not a record.
+          (if $rconc == "startup_failure" then {conclusion: "startup_failure"}
+           elif $rconc == "cancelled" then {skipped: "cancelled"}
+           else "UNATTRIBUTED" end)
         else
           ([ $jobs[] | select(((.name // "") | split(" / ")[0]) == $role) | {c: .conclusion, r: rank(.conclusion)} ]) as $rj
-          # No job carries the role at all (renamed/misspelled ingress_job) → blind, not "skipped".
-          | if ($rj | length) == 0 then "UNATTRIBUTED"
+          # No job carries the role: either the role was added to the ingress AFTER this run
+          # (pre-adoption — benign) or ingress_job is renamed/misspelled (blind). The caller decides,
+          # once it knows whether ANY run in the window carries the role.
+          | if ($rj | length) == 0 then "NOROLE"
           else ($rj | max_by(.r)) as $w
-          | if $w.r == 0 then empty
+          | if $w.r == 0 then {skipped: "role"}
             # A job-level timeout surfaces as a failed run on a legacy per-role workflow.
             else {conclusion: (if $w.c == "timed_out" then "failure" else $w.c end)} end
           end
         end
-      | if . == "UNATTRIBUTED" then .
+      | if . == "UNATTRIBUTED" or . == "NOROLE" or (type == "object" and has("skipped")) then .
         else . + {createdAt: $created, databaseId: ($id | tonumber), workflowName: $wf, role: $role} end
     ' <<< "$jobs" 2>/dev/null)" || rec='"UNATTRIBUTED"'
     if [ "$rec" = '"UNATTRIBUTED"' ]; then
       _record_unresolved "$agent" "$repo" "ingress run $id has no attributable jobs"; continue
     fi
+    if [ "$rec" = '"NOROLE"' ]; then
+      # Defer: pre-adoption runs are benign, a renamed ingress_job is not (see after the loop).
+      norole_ids+="$id "; continue
+    fi
+    skipkind="$(jq -r 'if type == "object" then (.skipped // empty) else empty end' <<< "$rec" 2>/dev/null || true)"
+    if [ -n "$skipkind" ]; then
+      [ "$skipkind" = "role" ] && role_oldest="$created"   # the role job ran (skipped): it exists here
+      continue
+    fi
+    role_oldest="$created"   # newest→oldest: the last assignment is the OLDEST run carrying the role
     [ -n "$rec" ] && recs+="$rec"$'\n'
   done < <(jq -r --arg since "$since" \
     '[ .[]? | select(.conclusion != null and .conclusion != "")
           | select($since == "" or (.createdAt // "") >= $since) ]
           | sort_by(.createdAt // "") | reverse | .[]
           | [(.databaseId|tostring), (.createdAt // ""), .conclusion] | @tsv' 2>/dev/null <<< "${iraw:-[]}")
+  # Runs where no job carried the role. If the role appears in an OLDER run, a no-role run that is
+  # older still predates the role's adoption by the ingress and is benign; one NEWER than the role's
+  # oldest appearance, or any when no run in the window carries the role at all (renamed/misspelled
+  # ingress_job), cannot be attributed → UNRESOLVED. The member stays blocked only for that.
+  if [ -n "$norole_ids" ]; then
+    local blind=0
+    for nid in $norole_ids; do
+      ncr="$(jq -r --arg id "$nid" '[ .[]? | select((.databaseId|tostring) == $id) | .createdAt ][0] // empty' 2>/dev/null <<< "${iraw:-[]}")"
+      if [ -z "$role_oldest" ] || [ -z "$ncr" ] || ! [[ "$ncr" < "$role_oldest" ]]; then blind=$((blind + 1)); fi
+    done
+    [ "$blind" -gt 0 ] && _record_unresolved "$agent" "$repo" "$blind ingress run(s) carry no '$role' job and are not older than the role's first appearance (ingress_job renamed or misspelled?)"
+  fi
   printf '%s' "$recs" | jq -cs '.'
 }
 
