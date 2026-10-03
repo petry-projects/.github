@@ -617,7 +617,9 @@ _repo_wf_runs_cached() {
     # so this is a real collision surface. sha256 (not sha1/md5 — those trip weak-hash linters
     # and are collision-broken) keeps the mapping injective; fall back to substitution only if
     # no hasher exists. This is a filename derivation, not a security context.
-    key="${repo}//${wf}"
+    # The run limit is part of the key: a shorter list cached for the default limit must never serve
+    # the ingress read that asks for more runs (it would look like a quieter repo).
+    key="${repo}//${wf}//${limit}"
     # sha256sum on Linux runners, shasum -a 256 on macOS; substitution only if neither
     # exists (and then, at worst, the pre-existing collision surface — never a crash).
     keyhash="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
@@ -2137,7 +2139,7 @@ _unresolved_evidence() {
     [ -n "$repo" ] && out+="- \`$repo\` — $reason"$'\n'
   done < <(sort -u "$flag")
   if [ "$flag_is_persistent" -eq 0 ] || [ "$reuse" -eq 1 ]; then rm -f "$flag"; fi
-  [ -z "$out" ] && out="_(no unresolved member on re-check — the gate should clear next tick)_"$'\n'
+  [ -z "$out" ] && out="_(no unresolved member found in the blocker scope on re-check — the hold may come from the baseline window or an unpersisted evidence flag; it re-evaluates next tick)_"$'\n'
   printf '%s' "$out"
 }
 

@@ -704,6 +704,27 @@ GHEOF
   [ "$(wc -l < "$CALLS")" -eq 1 ]
 }
 
+@test "_repo_wf_runs_cached: the run limit is part of the cache key — a limit-1000 hit never serves a limit-5000 read (#1224)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALLS="$BATS_TEST_TMPDIR/limit-calls"; : > "$CALLS"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+echo '[{"conclusion":"success","createdAt":"2026-01-10T00:00:00Z","databaseId":1,"workflowName":"W"}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env _RUNS_CACHE_DIR="$BATS_TEST_TMPDIR/rc-limit" bash -c '
+    mkdir -p "$_RUNS_CACHE_DIR"; source "'"$ORCH"'"
+    _repo_wf_runs_cached some/repo W 0 1000 >/dev/null
+    _repo_wf_runs_cached some/repo W 0 1000 >/dev/null
+    _repo_wf_runs_cached some/repo W 0 5000 >/dev/null
+  '
+  [ "$status" -eq 0 ]
+  # Same limit is served from cache (1 fetch); the larger limit is a distinct entry (2nd fetch).
+  [ "$(wc -l < "$CALLS")" -eq 2 ]
+  grep -q -- "-L 5000" "$CALLS"
+}
+
 @test "_run_json: cache key is collision-free — 'A B' vs 'A/B' workflows don't share a file (#835 CodeRabbit)" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
   # gh echoes back the requested workflow name so we can prove which cache entry served the call.
