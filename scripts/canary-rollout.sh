@@ -1976,9 +1976,11 @@ _frontier_state_resilient() {
     local line ltr gap
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      read -r _ _ ltr _ <<< "$line"
+      local temp="${line#* }"
+      temp="${temp#* }"
+      ltr="${temp%% *}"
       gap=0
-      grep -qxF -- "$ltr" <<< "$gaps" && gap=2
+      [[ $'\n'"$gaps"$'\n' == *$'\n'"$ltr"$'\n'* ]] && gap=2
       printf '%s %s\n' "$line" "$gap"
     done <<< "$out"
     return 0

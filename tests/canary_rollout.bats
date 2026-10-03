@@ -3730,6 +3730,7 @@ GHEOF
 @test "#1225: a TOTAL tag-lookup outage — promote moves nothing and does not report nothing-to-promote" {
   _multicand_stub ERR ERR ERR ERR "3 days" "3 days" "30 hours"
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
   [[ "$output" == *"BLOCKED"* ]]
   [[ "$output" != *"fully rolled out"* ]]
   [[ "$output" != *"nothing to promote"* ]]
@@ -3749,7 +3750,7 @@ GHEOF
     '[{"number":905,"state":"OPEN","body":"<!-- canary-blocker:dev-lead -->"},{"number":906,"state":"OPEN","body":"<!-- canary-confirm:dev-lead:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee -->"}]'
   local summ="$BATS_TEST_TMPDIR/tg-a.md"; : > "$summ"
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"tag lookup"* ]]
   grep -q "EDIT|.*905" "$ISSUE_LOG"          # the open blocker is refreshed (held), never closed
   run grep -q "CLOSE|" "$ISSUE_LOG"           # no issue is closed on the strength of an outage
@@ -3792,6 +3793,7 @@ GHEOF
   # stable errors; next=C1 clean and old enough to PROMOTE into ring0, which must still advance.
   _multicand_stub C1 C3 C3 ERR "3 days" "3 days" "30 hours"
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" bash "$ORCH" promote dev-lead --dry-run
+  [ "$status" -eq 0 ]
   [[ "$output" == *"tags/dev-lead/ring0 sha=cccccccccccc"* ]]
   [[ "$output" != *"tags/dev-lead/stable sha="* ]]
   [[ "$output" == *"ring1->stable"*"BLOCKED"* ]]
@@ -3801,7 +3803,7 @@ GHEOF
   _multicand_stub ERR C3 C3 PRIOR "1 hours" "3 days" "30 hours"
   local summ="$BATS_TEST_TMPDIR/tg-c.md"; : > "$summ"
   run env GITHUB_REPOSITORY="petry-projects/.github" CANARY_RINGS="$MC_RINGS" ISSUE_REPO="petry-projects/.github-private" GITHUB_STEP_SUMMARY="$summ" bash "$ORCH" sync-issues
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"opened blocker issue"* ]]
   grep -q "CREATE|.*tag lookup failed" "$ISSUE_LOG"
   grep -q "AWAITING_CONFIRMATION" "$summ"     # the unaffected higher pair is still tracked normally
