@@ -114,14 +114,20 @@ resolve_members() {
 # named by _CANARY_TAG_FAIL_FLAG when armed (mirrors _CANARY_FETCH_FAIL_FLAG for run history), so
 # the frontier can hold an unknown ring BLOCKED instead of reading an outage as "fully rolled out".
 _gh_tag_commit() {
-  local repo="$1" tag="$2" ref_info obj type err rc=0 commit
+  local repo="$1" tag="$2" ref_info obj type err rc=0 commit _tag_unrecorded=0
   err="$(mktemp 2>/dev/null || echo /dev/null)"
   ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>"$err")" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    if ! grep -qiE 'HTTP 404|not found' "$err" 2>/dev/null; then
-      _tag_lookup_failed "$repo" "$tag" "$(tr '\n' ' ' <"$err" 2>/dev/null || true)"
+    # Absence is an explicit HTTP 404 ONLY; any other failure is a lookup error. A 404 is also what
+    # GitHub returns for a repo the App cannot access, so confirm the host stays readable before
+    # accepting it as an absent tag (otherwise an inaccessible host reads as "every ring empty").
+    if ! grep -qiE 'HTTP 404' "$err" 2>/dev/null; then
+      _tag_lookup_failed "$repo" "$tag" "$(tr '\n' ' ' <"$err" 2>/dev/null || true)" || _tag_unrecorded=1
+    elif ! gh api "repos/$repo" --jq '.full_name' >/dev/null 2>&1; then
+      _tag_lookup_failed "$repo" "$tag" "404 but host repository is not readable (access lost?)" || _tag_unrecorded=1
     fi
     [ "$err" != /dev/null ] && rm -f "$err"
+    [ "$_tag_unrecorded" -eq 1 ] && printf '%s\n' "$_TAG_LOOKUP_UNRECORDED"
     return 0
   fi
   [ "$err" != /dev/null ] && rm -f "$err"
@@ -132,7 +138,8 @@ _gh_tag_commit() {
     if commit="$(gh api "repos/$repo/git/tags/$obj" --jq '(.object?.sha // "" | tostring)' 2>/dev/null)"; then
       printf '%s\n' "$commit"
     else
-      _tag_lookup_failed "$repo" "$tag" "annotated tag object $obj could not be dereferenced"
+      _tag_lookup_failed "$repo" "$tag" "annotated tag object $obj could not be dereferenced" \
+        || printf '%s\n' "$_TAG_LOOKUP_UNRECORDED"
     fi
   else
     printf '%s\n' "$obj"
@@ -140,11 +147,15 @@ _gh_tag_commit() {
 }
 
 # _tag_lookup_failed <repo> <tag> <detail> — report a tag-lookup ERROR (not an absent tag) and
-# record it to _CANARY_TAG_FAIL_FLAG when armed (#1225). Never fails.
+# record it to _CANARY_TAG_FAIL_FLAG when armed (#1225). Returns non-zero ONLY when the flag is armed
+# but the record could not be written; the caller then emits _TAG_LOOKUP_UNRECORDED in place of the
+# commit so _ring_commits still reads the ring as unknown (a swallowed write failure must never
+# turn an outage into an absent tag).
+_TAG_LOOKUP_UNRECORDED="!tag-lookup-error-unrecorded"
 _tag_lookup_failed() {
   echo "::warning::_gh_tag_commit: could not resolve $2 on $1 (lookup error, treated as UNKNOWN — not absent): $3" >&2
   if [ -n "${_CANARY_TAG_FAIL_FLAG:-}" ]; then
-    printf '%s %s\n' "$1" "$2" >> "$_CANARY_TAG_FAIL_FLAG" 2>/dev/null || true
+    printf '%s %s\n' "$1" "$2" >> "$_CANARY_TAG_FAIL_FLAG" 2>/dev/null || return 1
   fi
   return 0
 }
@@ -418,8 +429,10 @@ _ring_commits() {
       # outage as an absent tag (unknown=0).
       c="$(_CHANNEL_COMMIT_CACHE=(); _AGENT_CHANNEL_MAJOR_CACHE=(); _CANARY_TAG_FAIL_FLAG="$flag" channel_commit "$agent" "$ch" || true)"
       [ -s "$flag" ] && u=1
+      if [[ "$c" == *"$_TAG_LOOKUP_UNRECORDED"* ]]; then c=""; u=1; fi
     else
       c="$(channel_commit "$agent" "$ch" || true)"; u=1
+      [[ "$c" == *"$_TAG_LOOKUP_UNRECORDED"* ]] && c=""
     fi
     printf '%s %s %s\n' "$ch" "${c:--}" "$u"
   done
@@ -1493,7 +1506,12 @@ cmd_promote() {
   # never be advanced — not even with --override (the destination ring is unresolved).
   local _gapflag _prev_gapflag="${_CANARY_TAG_GAP_FLAG:-}"
   _gapflag="$(mktemp 2>/dev/null || true)"
-  [ -n "$_gapflag" ] && export _CANARY_TAG_GAP_FLAG="$_gapflag"
+  if [ -z "$_gapflag" ]; then
+    # Cannot arm the detector: with no marker an errored ring could still be overridden/promoted.
+    echo "::error::promote $agent: cannot create the tag-gap marker file (temp filesystem unwritable) — failing closed, promoting nothing (#1225)." >&2
+    return 1
+  fi
+  export _CANARY_TAG_GAP_FLAG="$_gapflag"
   mapfile -t _pairs < <(_frontier_state "$agent")
   local _gap_transitions=""
   if [ -n "$_gapflag" ]; then
@@ -2099,9 +2117,16 @@ cmd_sync_issues() {
     while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
       { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
       [ "${datagap:-0}" = "2" ] && tag_gap=1
-      # A tag-lookup-error pair (datagap=2) outranks an ordinary BLOCKED pair as the blocker source,
-      # so the issue title/body report the outage rather than unrelated run evidence.
-      if [ "$state" = "BLOCKED" ] && { [ "$have_blocked" -eq 0 ] || { [ "${datagap:-0}" = "2" ] && [ "$bl_datagap" != "2" ]; }; }; then
+      # Blocker source priority: a substantive REGRESSION/SUSPECT pair outranks a tag-lookup-error pair
+      # (datagap=2), which outranks an ordinary BLOCKED pair — so an active regression's escalation
+      # (needs-human) is never replaced by the outage's `-` triage, while the outage still beats
+      # unrelated run evidence. The outage itself is surfaced via tag_gap (hard_fail + dashboard).
+      local _rank=1 _bl_rank=1
+      { [ "$triage" = "REGRESSION" ] || [ "$triage" = "SUSPECT" ]; } && _rank=3
+      [ "${datagap:-0}" = "2" ] && _rank=2
+      { [ "$bl_triage" = "REGRESSION" ] || [ "$bl_triage" = "SUSPECT" ]; } && _bl_rank=3
+      [ "$bl_datagap" = "2" ] && _bl_rank=2
+      if [ "$state" = "BLOCKED" ] && { [ "$have_blocked" -eq 0 ] || [ "$_rank" -gt "$_bl_rank" ]; }; then
         have_blocked=1
         bl_cand="$cand"; bl_transition="$transition"; bl_triage="$triage"
         bl_cum_fail="$cum_fail"; bl_cum_startup="$cum_startup"; bl_mix_shift="$mix_shift"

@@ -3681,12 +3681,39 @@ GHEOF
 
 @test "#1225: _gh_tag_commit — an absent tag (404) is empty and NOT recorded as a lookup error" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
-  printf '#!/usr/bin/env bash\necho "gh: Not Found (HTTP 404)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  # the tag ref 404s, but the host repo itself stays readable (so the 404 is a genuine absence)
+  printf '#!/usr/bin/env bash\ncase "$*" in *git/ref/tags/*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; *) echo petry-projects/.github ;; esac\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
   local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
   run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ ! -s "$flag" ]
+}
+
+@test "#1225: _gh_tag_commit — a 404 on an UNREADABLE host repo is a lookup error, not an absent tag" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: Not Found (HTTP 404)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "dev-lead/next" "$flag"
+}
+
+@test "#1225: _gh_tag_commit — only an explicit HTTP 404 is absence ('not found' text without 404 is an error)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: repository not found (HTTP 500)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local flag="$BATS_TEST_TMPDIR/tagfail"; : > "$flag"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="$flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "dev-lead/next" "$flag"
+}
+
+@test "#1225: a lookup error whose flag write FAILS still reads as unknown in _ring_commits" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"
+  printf '#!/usr/bin/env bash\necho "gh: Server Error (HTTP 502)" >&2; exit 1\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  run env PATH="$STUB_BIN:$PATH" _CANARY_TAG_FAIL_FLAG="/nonexistent-dir/flag" bash -c "source '$ORCH'; _gh_tag_commit petry-projects/.github dev-lead/next 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"!tag-lookup-error-unrecorded"* ]]
 }
 
 @test "#1225: _gh_tag_commit — a lookup ERROR (5xx) is empty but RECORDED, so callers can tell it from absent" {
