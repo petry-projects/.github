@@ -5386,7 +5386,7 @@ GHEOF
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
   run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 CANARY_INGRESS_JOBS_MAX=1 _CANARY_UNRESOLVED_FLAG="$flag" \
-    bash -c "source '$ORCH' && _agent_run_json dev-lead org/collapsed '' 2>/dev/null | jq -c 'map(.databaseId)'"
+    bash -c "set -o pipefail; source '$ORCH' && _agent_run_json dev-lead org/collapsed '' 2>/dev/null | jq -c 'map(.databaseId)'"
   [ "$status" -eq 0 ]
   # Newest completed run is 104 (dev-lead skipped → no record); the cap then stops further reads.
   [ "$output" = '[]' ]
