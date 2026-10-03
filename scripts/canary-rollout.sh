@@ -109,16 +109,44 @@ resolve_members() {
 # _gh_tag_commit <repo> <tag> — echo the COMMIT sha <tag> resolves to on <repo> via the
 # GitHub API, dereferencing an annotated tag object (mirrors cut-release.sh's
 # gh_release_commit). Empty on any error / absent tag (never fails the caller).
+# An ABSENT tag (HTTP 404) and a lookup ERROR (5xx, rate limit, network, a failed annotated-tag
+# deref) both echo empty, but an error is RECORDED (#1225): "<repo> <tag>" is appended to the file
+# named by _CANARY_TAG_FAIL_FLAG when armed (mirrors _CANARY_FETCH_FAIL_FLAG for run history), so
+# the frontier can hold an unknown ring BLOCKED instead of reading an outage as "fully rolled out".
 _gh_tag_commit() {
-  local repo="$1" tag="$2" ref_info obj type
-  ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>/dev/null)" || return 0
+  local repo="$1" tag="$2" ref_info obj type err rc=0 commit
+  err="$(mktemp 2>/dev/null || echo /dev/null)"
+  ref_info="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '[(.object?.sha // "" | tostring), (.object?.type // "" | tostring)] | @tsv' 2>"$err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if ! grep -qiE 'HTTP 404|not found' "$err" 2>/dev/null; then
+      _tag_lookup_failed "$repo" "$tag" "$(tr '\n' ' ' <"$err" 2>/dev/null || true)"
+    fi
+    [ "$err" != /dev/null ] && rm -f "$err"
+    return 0
+  fi
+  [ "$err" != /dev/null ] && rm -f "$err"
   [ -z "$ref_info" ] && return 0
   read -r obj type <<< "$ref_info"
   if [ "$type" = "tag" ]; then
-    gh api "repos/$repo/git/tags/$obj" --jq '(.object?.sha // "" | tostring)' 2>/dev/null || true
+    # The ref EXISTS, so a failed deref is an error, never "absent".
+    if commit="$(gh api "repos/$repo/git/tags/$obj" --jq '(.object?.sha // "" | tostring)' 2>/dev/null)"; then
+      printf '%s\n' "$commit"
+    else
+      _tag_lookup_failed "$repo" "$tag" "annotated tag object $obj could not be dereferenced"
+    fi
   else
     printf '%s\n' "$obj"
   fi
+}
+
+# _tag_lookup_failed <repo> <tag> <detail> — report a tag-lookup ERROR (not an absent tag) and
+# record it to _CANARY_TAG_FAIL_FLAG when armed (#1225). Never fails.
+_tag_lookup_failed() {
+  echo "::warning::_gh_tag_commit: could not resolve $2 on $1 (lookup error, treated as UNKNOWN — not absent): $3" >&2
+  if [ -n "${_CANARY_TAG_FAIL_FLAG:-}" ]; then
+    printf '%s %s\n' "$1" "$2" >> "$_CANARY_TAG_FAIL_FLAG" 2>/dev/null || true
+  fi
+  return 0
 }
 
 # _gh_write <gh-args…> — run a `gh` mutation with the repo-scoped WRITE token when one is
@@ -368,6 +396,32 @@ _resolved_channel_tag() { _resolved_channel "$1" "$2" | cut -f1; }
 # frontier falsely reports "fully rolled out" (#1049).
 channel_commit() {
   _resolved_channel "$1" "$2" | cut -f2
+}
+
+# _ring_commits <agent> [<chans_csv>] — resolve every ring's commit once, one line per ring in
+# order: "<channel> <commit|-> <unknown>" (#1225). unknown=1 when a tag lookup for that ring
+# ERRORED (5xx / rate limit / network — recorded by _gh_tag_commit via _CANARY_TAG_FAIL_FLAG),
+# as opposed to a genuinely ABSENT tag (404, unknown=0 with commit "-"), which keeps the legacy
+# semantics (#1118 AC6). If the per-ring flag cannot be armed the ring is reported unknown (fail
+# closed). Local-git agents have no API failure mode, so they are never unknown.
+_ring_commits() {
+  local agent="$1" chans="${2:-}" flag ch c u
+  [ -n "$chans" ] || chans="$(ordered_channels "$agent")"
+  local chan_array=()
+  IFS=, read -r -a chan_array <<< "$chans"
+  flag="$(mktemp 2>/dev/null || true)"
+  for ch in "${chan_array[@]}"; do
+    u=0
+    if [ -n "$flag" ] && : > "$flag" 2>/dev/null; then
+      c="$(_CANARY_TAG_FAIL_FLAG="$flag" channel_commit "$agent" "$ch" || true)"
+      [ -s "$flag" ] && u=1
+    else
+      c="$(channel_commit "$agent" "$ch" || true)"; u=1
+    fi
+    printf '%s %s %s\n' "$ch" "${c:--}" "$u"
+  done
+  [ -n "$flag" ] && rm -f "$flag"
+  return 0
 }
 
 # _gate_field <agent> <field> — read .agents[a].gate.<field> (empty if absent).
@@ -1301,25 +1355,38 @@ _frontier_state() {
   local chan_array=()
   IFS=, read -r -a chan_array <<< "$chans"
   # Resolve every ring's commit ONCE (channel_commit is uncached across calls; see _pair_state).
-  local -a commits=()
-  local ch c commits_csv=""
-  for ch in "${chan_array[@]}"; do
-    c="$(channel_commit "$agent" "$ch")"
+  local -a commits=() unknown=()
+  local ch c u commits_csv=""
+  while read -r ch c u; do
+    [ "$c" = "-" ] && c=""
     commits+=("$c")
+    unknown+=("$u")
     commits_csv+="${c:--},"
-  done
+  done < <(_ring_commits "$agent" "$chans")
   commits_csv="${commits_csv%,}"
   local i prev="" cand dstc transition emitted=0
   for i in "${!chan_array[@]}"; do
     ch="${chan_array[$i]}"
     if [ -n "$prev" ]; then
+      cand="${commits[$((i-1))]}"
+      dstc="${commits[$i]}"
+      transition="${prev}->${ch}"
+      # A ring whose tag lookup ERRORED (#1225) is unknown, not absent: hold every pair touching it
+      # BLOCKED (fail closed) — comparing its empty commit would read an API outage as "on the
+      # candidate", and a total outage as COMPLETE. Never evaluated (or promoted) by the gate.
+      if [ "${unknown[$((i-1))]:-0}" = 1 ] || [ "${unknown[$i]:-0}" = 1 ]; then
+        echo "::warning::$agent $transition: a ring tag lookup errored — holding the pair BLOCKED (fail closed) until it resolves (#1225)." >&2
+        if [ -n "${_CANARY_TAG_GAP_FLAG:-}" ]; then
+          printf '%s\n' "$transition" >> "$_CANARY_TAG_GAP_FLAG" 2>/dev/null || true
+        fi
+        echo "${cand:--} $ch $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"
+        emitted=1
+        prev="$ch"; continue
+      fi
       # Pending iff dst is not on src's commit. An UNRESOLVABLE src commit (empty) with a populated
       # dst is still pending and _pair_state holds it BLOCKED (fail closed, as the single-frontier
       # code did) — never silently skipped into a false COMPLETE.
-      cand="${commits[$((i-1))]}"
-      dstc="${commits[$i]}"
       if [ "$dstc" != "$cand" ]; then
-        transition="${prev}->${ch}"
         _pair_state "$agent" "$prev" "$ch" "$cand" "$transition" "$chans" "$commits_csv"
         emitted=1
       fi
@@ -1372,7 +1439,7 @@ cmd_evaluate() {
       elif [ "$triage" = "PRE_EXISTING" ]; then
         echo "::warning::triage=PRE_EXISTING — failure is pre-existing/environmental. Report only; do NOT rollback. Advances with --allow-pre-existing (or control.allow_pre_existing in the registry) once dwell/sample pass."
       else
-        echo "::warning::state=BLOCKED (indeterminate) — could not resolve the candidate's cut date, so the gate fails closed and holds (not a detected failure; cum_fail=$cum_fail). Clears once the candidate's cut date/tag is resolvable."
+        echo "::warning::state=BLOCKED (indeterminate) — could not resolve the candidate's cut date or a ring's channel tag (lookup error), so the gate fails closed and holds (not a detected failure; cum_fail=$cum_fail). Clears once the candidate's cut date/tag is resolvable."
       fi
     elif [ "$state" = "AWAITING_CONFIRMATION" ]; then
       echo "::notice::state=AWAITING_CONFIRMATION — reliability PASSED; holding for an opt-in human go/no-go at $transition (#668 Layer 3). Review the canary-confirm issue, then dispatch: promote $agent --confirm  (not --override)."
@@ -1742,7 +1809,10 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
   # are NOT reliable and the triage verdict rests on the reusable diff alone. Prepend a banner
   # (before the triage note) and blank out the misleading "0" cumulative-failures cell.
   local cum_row="**$cum_fail** (startup_failures: $cum_startup)"
-  if [ "$data_gap" = "1" ]; then
+  if [ "$data_gap" = "2" ]; then
+    cum_row="_unknown — channel tags unresolved this tick_"
+    note="> ⚠️ **TAG LOOKUP FAILED — FAILING CLOSED.** A channel-tag lookup for this pair errored this tick (a GitHub API failure — see the workflow log — not an absent tag), so the gate cannot tell where the rings are. Rather than report a false \"fully rolled out\", it holds the promotion and keeps this issue open. This clears automatically once the tags resolve again and the gate re-evaluates (#1225)."
+  elif [ "$data_gap" = "1" ]; then
     cum_row="_unknown — run history unavailable this tick_"
     note="> ⚠️ **PARTIAL DATA (run-history fetch failed) — FAILING CLOSED.** The canary gate could not read this agent's recent run history this tick (a sustained GitHub API failure — see the workflow log). Rather than report a false all-clear, the gate holds the promotion and keeps this issue open. The cumulative counts below are **not reliable for this tick**; the triage verdict is derived from the reusable diff alone. This clears automatically once run history is readable again and the gate re-evaluates.
 >
@@ -1855,31 +1925,43 @@ EOF
 # TOTAL inability stays a hard error, surfaced by the caller. Since #1118 _frontier_state emits
 # one line per PENDING pair, so the wrapper appends the datagap flag to EACH line and, on a data
 # gap, reconstructs one BLOCKED line per pending pair.
+# A TAG-lookup error (#1225) is a second kind of data gap: the pair(s) touching a ring whose tag
+# lookup errored are held BLOCKED by _frontier_state and tagged datagap=2 here, so sync-issues
+# keeps their issues open and fails closed instead of reading an API outage as "gate cleared".
 _frontier_state_resilient() {
   local agent="$1" out="" rc=0 fetch_failed=0
   # Arm a file flag that _run_json appends to on a sustained fetch failure. A file (not a shell
   # var) is used because _frontier_state runs in a command-substitution subshell, and a var set
-  # there would not survive back to us — the file does.
-  local flag; flag="$(mktemp 2>/dev/null || echo "")"
-  if [ -z "$flag" ]; then
-    # Cannot arm the fetch-failure detector at all — treat as an unreadable tick rather
+  # there would not survive back to us — the file does. The tag-gap flag (#1225) collects the
+  # transitions _frontier_state held because a ring's tag lookup errored.
+  local flag gapflag gaps=""
+  flag="$(mktemp 2>/dev/null || echo "")"
+  gapflag="$(mktemp 2>/dev/null || echo "")"
+  if [ -z "$flag" ] || [ -z "$gapflag" ]; then
+    # Cannot arm a failure detector at all — treat as an unreadable tick rather
     # than silently falling back to the old undetectable-outage behavior.
     fetch_failed=1
     out="$(_frontier_state "$agent")" || rc=$?
   else
     # `|| rc=$?` catches any abort so set -e does not tear down the fleet loop on one agent.
-    export _CANARY_FETCH_FAIL_FLAG="$flag"
+    export _CANARY_FETCH_FAIL_FLAG="$flag" _CANARY_TAG_GAP_FLAG="$gapflag"
     out="$(_frontier_state "$agent")" || rc=$?
-    unset _CANARY_FETCH_FAIL_FLAG
+    unset _CANARY_FETCH_FAIL_FLAG _CANARY_TAG_GAP_FLAG
     [ -s "$flag" ] && fetch_failed=1
-    rm -f "$flag"
+    gaps="$(<"$gapflag")"
   fi
+  [ -n "$flag" ] && rm -f "$flag"
+  [ -n "$gapflag" ] && rm -f "$gapflag"
   # Normal path (no fetch failure, state lines produced): transparent pass-through, datagap=0
-  # appended to EVERY pending-pair line (#1118).
+  # appended to EVERY pending-pair line (#1118) — or 2 for a pair held on a tag-lookup error.
   if [ "$fetch_failed" -eq 0 ] && [ -n "$out" ] && [ "$rc" -eq 0 ]; then
-    local line
+    local line ltr gap
     while IFS= read -r line; do
-      [ -n "$line" ] && printf '%s 0\n' "$line"
+      [ -n "$line" ] || continue
+      read -r _ _ ltr _ <<< "$line"
+      gap=0
+      grep -qxF -- "$ltr" <<< "$gaps" && gap=2
+      printf '%s %s\n' "$line" "$gap"
     done <<< "$out"
     return 0
   fi
@@ -1892,14 +1974,20 @@ _frontier_state_resilient() {
   # Data gap: the run-history fetch failed — reconstruct the tag-only facts for EVERY pending pair
   # (none read run history). Each is failed CLOSED to BLOCKED so its tracked issue is upserted.
   local chans; chans="$(ordered_channels "$agent" || true)"
-  local chan_array=()
-  IFS=, read -r -a chan_array <<< "$chans"
-  local prev="" prev_commit="" ch ch_commit cand dstc transition prior differs triage emitted=0
-  for ch in "${chan_array[@]}"; do
-    ch_commit="$(channel_commit "$agent" "$ch" || true)"   # once per ring (uncached across calls)
+  local prev="" prev_commit="" prev_unknown=0 ch ch_commit ch_unknown cand dstc transition prior differs triage emitted=0
+  while read -r ch ch_commit ch_unknown; do   # once per ring (uncached across calls)
+    [ -n "$ch" ] || continue
+    [ "$ch_commit" = "-" ] && ch_commit=""
     if [ -n "$prev" ]; then
       cand="$prev_commit"
       dstc="$ch_commit"
+      # A ring whose tag lookup errored (#1225) is unknown: hold the pair BLOCKED, tag-gap.
+      if [ "$prev_unknown" = 1 ] || [ "$ch_unknown" = 1 ]; then
+        echo "${cand:--} $ch ${prev}->${ch} BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0 2"
+        emitted=1
+        prev="$ch"; prev_commit="$ch_commit"; prev_unknown="$ch_unknown"
+        continue
+      fi
       # Same pending rule as _frontier_state: dst not on src's commit, including an unresolvable
       # (empty) src commit, which stays tracked as BLOCKED rather than vanishing (fail closed).
       if [ "$dstc" != "$cand" ]; then
@@ -1915,8 +2003,8 @@ _frontier_state_resilient() {
         emitted=1
       fi
     fi
-    prev="$ch"; prev_commit="$ch_commit"
-  done
+    prev="$ch"; prev_commit="$ch_commit"; prev_unknown="$ch_unknown"
+  done < <(if [ -n "$chans" ]; then _ring_commits "$agent" "$chans"; fi)
   # Total inability: cannot resolve even one pending pair → hard error. Fail closed (never a silent
   # green); the caller surfaces ::error:: and ends non-zero.
   [ "$emitted" -eq 0 ] && return 1
@@ -1987,9 +2075,10 @@ cmd_sync_issues() {
     # tracked by SEPARATE issues in the same tick.
     local have_blocked=0 bl_cand="" bl_transition="" bl_triage="-" bl_cum_fail=0 bl_cum_startup=0
     local bl_mix_shift="-" bl_downgrade="-" bl_dgcr=0 bl_dgcs=0 bl_dgbr=0 bl_dgbs=0 bl_datagap=0
-    local have_awaiting=0 cf_cand="" cf_transition="" cf_sample=0 cf_target=0
+    local have_awaiting=0 cf_cand="" cf_transition="" cf_sample=0 cf_target=0 tag_gap=0
     while read -r cand frontier transition state _d _f _s _t cum_fail cum_startup _cb triage mix_shift downgrade dg_cand_rate dg_cand_sample dg_base_rate dg_base_sample datagap; do
       { [ -z "$frontier" ] || [ "$frontier" = "-" ]; } && continue
+      [ "${datagap:-0}" = "2" ] && tag_gap=1
       if [ "$state" = "BLOCKED" ] && [ "$have_blocked" -eq 0 ]; then
         have_blocked=1
         bl_cand="$cand"; bl_transition="$transition"; bl_triage="$triage"
@@ -2002,6 +2091,13 @@ cmd_sync_issues() {
         cf_cand="$cand"; cf_transition="$transition"; cf_sample="$_s"; cf_target="$_t"
       fi
     done <<< "$pairs_out"
+    # A ring's tag lookup ERRORED this tick (#1225): the pairs touching it are held BLOCKED, but the
+    # agent's true state is unknown — fail closed (non-zero, like a total run-history outage) and
+    # never close an issue on the strength of it (handled below).
+    if [ "$tag_gap" -eq 1 ]; then
+      echo "::error::sync-issues: a channel-tag lookup for '$agent' errored (API failure, not an absent tag) — holding the affected pair(s) BLOCKED and failing closed rather than reporting a false all-clear." >&2
+      hard_fail=1
+    fi
 
     # Blocker issue (per agent, keyed canary-blocker:<agent>). Driven by the selected BLOCKED pair.
     local bl_link="—" num_state num istate
@@ -2009,7 +2105,9 @@ cmd_sync_issues() {
     num="${num_state%%$'\t'*}"; istate="${num_state##*$'\t'}"
     if [ "$have_blocked" -eq 1 ]; then
       local evidence body title mix_table=""
-      if [ "$bl_datagap" = "1" ]; then
+      if [ "$bl_datagap" = "2" ]; then
+        evidence="_(⚠️ a channel-tag lookup failed this tick, so this pair's rings could not be resolved and no failing runs can be attributed. The gate FAILS CLOSED: the promotion is held and this issue stays open until the tags resolve again.)_"
+      elif [ "$bl_datagap" = "1" ]; then
         evidence="_(⚠️ run-history fetch failed this tick — the failing runs could not be listed. The gate FAILS CLOSED: the promotion is held and this issue stays open until run history is readable again and the gate can re-evaluate.)_"
       else
         if [ "$bl_cand" = "-" ]; then
@@ -2022,6 +2120,8 @@ cmd_sync_issues() {
       body="$(_blocker_body "$agent" "$bl_transition" "$bl_cand" "$bl_cum_fail" "$bl_cum_startup" "$bl_triage" "$host" "$evidence" "$bl_mix_shift" "$mix_table" "$bl_downgrade" "$bl_dgcr" "$bl_dgcs" "$bl_dgbr" "$bl_dgbs" "$bl_datagap")"
       if [ "$bl_mix_shift" = "SHIFT" ]; then
         title="Canary blocker: $agent $bl_transition (decision-mix shift, SUSPECT)"
+      elif [ "$bl_datagap" = "2" ]; then
+        title="Canary blocker: $agent $bl_transition (tag lookup failed — fail-closed)"
       elif [ "$bl_datagap" = "1" ]; then
         title="Canary blocker: $agent $bl_transition ($bl_triage, partial run-history — fail-closed)"
       else
@@ -2051,8 +2151,9 @@ cmd_sync_issues() {
         fi
       fi
     else
-      # No BLOCKED pair — close a stale open blocker issue (the gate cleared).
-      if [ -n "$num" ] && [ "$istate" = "OPEN" ]; then
+      # No BLOCKED pair — close a stale open blocker issue (the gate cleared). Never on a tag gap
+      # (#1225): an unresolved ring is not a cleared gate.
+      if [ -n "$num" ] && [ "$istate" = "OPEN" ] && [ "$tag_gap" -eq 0 ]; then
         if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared blocker issue #$num for $agent"; else
           gh issue close "$num" --repo "$ISSUE_REPO" \
             --comment "✅ Gate cleared — \`$agent\` is no longer BLOCKED. Closed automatically by canary-rollout." >/dev/null 2>&1 || true
@@ -2097,9 +2198,11 @@ cmd_sync_issues() {
     fi
     # Close any confirm issue for this agent that is NOT the current ring1 candidate's (a recut
     # ring1 candidate, or an agent no longer awaiting at all) — a stale go/no-go must never linger.
+    # Skipped on a tag gap (#1225): with a ring unresolved we cannot tell stale from still-pending.
     local ci_num ci_state
     while IFS=$'\t' read -r ci_num ci_state; do
       [ -z "$ci_num" ] && continue
+      [ "$tag_gap" -eq 1 ] && continue
       [ -n "$keep_num" ] && [ "$ci_num" = "$keep_num" ] && continue
       [ "$ci_state" = "OPEN" ] || continue
       if [ "$dry" = true ]; then echo "  [DRY] would CLOSE cleared confirm issue #$ci_num for $agent"; else
