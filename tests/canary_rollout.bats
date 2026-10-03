@@ -5722,6 +5722,24 @@ GHEOF
   grep -q "carry no 'dev-lead' job" "$flag"
 }
 
+@test "_run_signature and _run_decision_class make ONE gh call on a failing lookup, not the ingress retry loop (#1224 regression)" {
+  _ingress_stub
+  # Before #1224 these legacy single-call readers did one `gh run view` and failed fast. A persistently
+  # failing lookup (410 expired logs, 403/rate limit) must not cost the 6-attempt backoff per run.
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=6 \
+    bash -c "source '$ORCH'; set +e; _run_signature org/collapsed 101 '' >/dev/null 2>&1; _run_decision_class org/collapsed 102 dev-lead '' >/dev/null 2>&1; true"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run view ' "$GH_LOG")" -eq 2 ]
+}
+
+@test "_run_jobs_json: the ingress path keeps the bounded retry (CANARY_GH_RETRIES attempts) on a transient 5xx (#1224)" {
+  _ingress_stub
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=3 \
+    bash -c "source '$ORCH'; set +e; _run_jobs_json org/collapsed 101 >/dev/null 2>&1; echo rc=\$?"
+  [[ "$output" == *"rc=1"* ]]
+  [ "$(grep -c '^run view ' "$GH_LOG")" -eq 3 ]
+}
+
 @test "_agent_run_json: a job-less CANCELLED ingress run never executed the role — no record, not UNRESOLVED (#1224)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"

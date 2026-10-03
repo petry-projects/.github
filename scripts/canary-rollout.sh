@@ -744,12 +744,14 @@ _unresolved_flag_path() {
 
 # _run_jobs_json <repo> <run_id> — `gh run view --json jobs` for one run, file-memoized under
 # $_RUNS_CACHE_DIR (an ingress run is shared by every collapsed role, so each run's jobs are read
-# once per sweep). Bounded retry. Returns 0 on success; 2 when the run is permanently gone/unreadable
+# once per sweep). Bounded retry (CANARY_GH_RETRIES, default 6; an optional 3rd arg caps the attempts —
+# the legacy single-call readers pass 1, preserving their pre-#1224 "one call, fail fast" behavior).
+# Returns 0 on success; 2 when the run is permanently gone/unreadable
 # (deleted or expired — HTTP 404); 1 when the jobs endpoint stayed unreadable after the full backoff
 # (a transient/systemic failure — callers use that to stop reading, see _ingress_agent_runs).
 _run_jobs_json() {
   local repo="$1" id="$2" cachef="" keyhash out attempt=1
-  local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
+  local attempts="${3:-${CANARY_GH_RETRIES:-6}}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
   case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
   case "$base" in ''|*[!0-9]*) base=2 ;; esac
   [ "$attempts" -lt 1 ] && attempts=1
@@ -767,7 +769,7 @@ _run_jobs_json() {
       printf '%s\n' "$out"; return 0
     fi
     # A run deleted/expired since `gh run list` is permanent — fail fast, don't burn the backoff.
-    if grep -qiE 'could not find (any )?(workflow )?run|HTTP 404|not found' "$errf" 2>/dev/null; then
+    if grep -qiE 'could not find (any )?(workflow )?run|HTTP 404|run [0-9]+ not found' "$errf" 2>/dev/null; then
       [ "$errf" != /dev/null ] && rm -f "$errf"; return 2
     fi
     if [ "$attempt" -ge "$attempts" ]; then [ "$errf" != /dev/null ] && rm -f "$errf"; return 1; fi
@@ -1051,7 +1053,7 @@ _run_signature() {
   # Use || { } so set -e does not trigger on a failing gh run view; the block caches the
   # sentinel and returns 1 to signal the lookup failure to callers that care (e.g.
   # _suspect_class_counts tracks incomplete evidence and HOLDs the downgrade).
-  json="$(_run_jobs_json "$repo" "$id")" || {
+  json="$(_run_jobs_json "$repo" "$id" 1)" || {
     _RUN_SIG_CACHE["$cache_key"]=$'\x01'
     echo ""; return 1
   }
@@ -1293,7 +1295,7 @@ _run_decision_class() {
   if [[ -v _RUN_DECISION_CACHE["$cache_key"] ]]; then
     echo "${_RUN_DECISION_CACHE[$cache_key]}"; return 0
   fi
-  json="$(_run_jobs_json "$repo" "$id" 2>/dev/null || echo '{}')"
+  json="$(_run_jobs_json "$repo" "$id" 1 2>/dev/null || echo '{}')"
   if [ -n "$role" ]; then
     json="$(jq -c --arg role "$role" 'if has("jobs") then .jobs |= map(select(((.name // "")|split(" / ")[0]) == $role)) else error("Missing jobs key") end' <<< "$json" 2>/dev/null || echo '{}')"
   fi
@@ -2166,7 +2168,7 @@ $(printf '%s\n' "$guidance" | sed 's/^/> /')"
 > | candidate | \`$dg_cand_rate\` | $dg_cand_sample |
 > | baseline | \`$dg_base_rate\` | $dg_base_sample |"
   elif [ "$triage" = "UNRESOLVED" ]; then
-    note="> ⚠️ **UNRESOLVED (gate blind on a ring member, #1224)** — at least one ring member is an ADR-0007 collapsed repo (its per-role workflow is gone, \`$(_ingress_workflow)\` is present) and this agent's runs there could not be attributed to its role job. That member is **not** counted as passing evidence, so the gate holds instead of promoting on incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: register the agent's \`ingress_job\` (its job key in the ingress) in \`standards/canary-rings.json\`; this issue auto-closes once every member resolves."
+    note="> ⚠️ **UNRESOLVED (gate blind on a ring member, #1224)** — at least one ring member is an ADR-0007 collapsed repo (its per-role workflow is gone, \`$(_ingress_workflow)\` is present) and this agent's runs there could not be attributed to its role job. That member is **not** counted as passing evidence, so the gate holds instead of promoting on incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: register the agent's \`ingress_job\` (its job key in the ingress) in \`standards/canary-rings.json\`. If the evidence below says job reads were capped, the ingress has more runs in the window than \`CANARY_INGRESS_JOBS_MAX\` allows: raise that knob (default 300) instead. This issue auto-closes once every member resolves."
   elif [ "$triage" = "FLAG_ERROR" ]; then
     note="> ⚠️ **FLAG_ERROR (gate held — runner temp dir unwritable)** — the candidate's cut date resolved fine, but the gate could not create its unresolved-member flag file (\`TMPDIR\` unwritable or full), so it could not record unattributable ring members and fails closed rather than promote on possibly incomplete evidence. This is **not** a detected run failure (cumulative failures: $cum_fail). Fix: free space / make \`TMPDIR\` writable on the runner; this clears on the next tick."
   elif [ "$triage" = "PRE_EXISTING" ]; then
