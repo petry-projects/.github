@@ -411,9 +411,9 @@ pm_first_stop_marker() {
 # <opt_out_label>" for the named surface. An absent surface row is "false off"
 # (not dispatched); a declared row reports its own enabled/mode.
 pm_surface_decision() {
-  local manifest="$1" surface="$2"
+  local manifest="$1" surface="$2" result
   # shellcheck disable=SC2016  # $surface/$t/$s/$row are jq variables, not shell
-  printf '%s' "$manifest" | pm_manifest_query '
+  result="$(printf '%s' "$manifest" | pm_manifest_query '
     (.triggers // {}) as $t
     | ($t.surfaces // []) as $s
     | ($s | map(select(.surface == $surface)) | first) as $row
@@ -422,7 +422,8 @@ pm_surface_decision() {
        else ((($row.enabled // false) | tostring) + " " + ($row.mode // "advisory"))
        end) as $decision
     | $decision + " " + ($t.opt_out_label // "")
-  ' --arg surface "$surface"
+  ' --arg surface "$surface")" || return 2
+  printf '%s' "$result"
 }
 
 # pm_surface_trust_floor <manifest-yaml> <surface> — emit the floor for the named
@@ -432,9 +433,9 @@ pm_surface_decision() {
 # Emits nothing when neither is declared — pm_trust_ok then denies, the safe
 # direction.
 pm_surface_trust_floor() {
-  local manifest="$1" surface="$2"
+  local manifest="$1" surface="$2" result
   # shellcheck disable=SC2016  # $surface/$row are jq variables, not shell
-  printf '%s' "$manifest" | pm_manifest_query '
+  result="$(printf '%s' "$manifest" | pm_manifest_query '
     ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
     | .trust.author_association_floor as $global_floor
     | $row.trust_floor as $surface_floor
@@ -457,7 +458,8 @@ pm_surface_trust_floor() {
         end
       )
     | join(" ")
-  ' --arg surface "$surface"
+  ' --arg surface "$surface")" || return 2
+  printf '%s' "$result"
 }
 
 # pm_surface_gate_label <manifest-yaml> <surface> — the label that ARMS a
@@ -465,12 +467,13 @@ pm_surface_trust_floor() {
 # mode == write; the schema enforces it is DECLARED, the caller must enforce it
 # is APPLIED.
 pm_surface_gate_label() {
-  local manifest="$1" surface="$2"
+  local manifest="$1" surface="$2" result
   # shellcheck disable=SC2016  # $surface/$row are jq variables, not shell
-  printf '%s' "$manifest" | pm_manifest_query '
+  result="$(printf '%s' "$manifest" | pm_manifest_query '
     ((.triggers.surfaces // []) | map(select(.surface == $surface)) | first) as $row
     | ($row.gate_label // "")
-  ' --arg surface "$surface"
+  ' --arg surface "$surface")" || return 2
+  printf '%s' "$result"
 }
 
 # pm_surface_declares_event <manifest-yaml> <surface> <action> — 0 only when the
