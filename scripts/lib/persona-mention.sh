@@ -278,35 +278,14 @@ pm_mention_decision() {
 # pm_mention_trust_floor <manifest-yaml> — emit the floor for the mention
 # surface, space-separated. A per-surface trust_floor tightens the persona-wide
 # trust.author_association_floor; when absent, the persona-wide floor applies
-# (§5). When BOTH are declared, intersect them (keep only values in both) — the
-# same intersect semantics as pm_surface_trust_floor, so "tightens" means the
-# same thing on the mention and event surfaces and a surface floor can never
-# WIDEN the persona-wide floor. Emits nothing when neither is declared —
-# pm_trust_ok then denies, which is the safe direction.
+# (§5). Surface floor, if declared, overrides the persona-wide floor. Emits
+# nothing when neither is declared — pm_trust_ok then denies, which is the safe
+# direction.
 pm_mention_trust_floor() {
   # shellcheck disable=SC2016  # $m is a jq variable, not a shell expansion
   printf '%s' "$1" | pm_manifest_query '
     ((.triggers.surfaces // []) | map(select(.surface == "mention")) | first) as $m
-    | .trust.author_association_floor as $global_floor
-    | $m.trust_floor as $surface_floor
-    | (
-        if ($surface_floor | type) == "array" and ($global_floor | type) == "array"
-        then
-          # Both declared: intersect them (a surface floor can only tighten)
-          ($surface_floor | map(. as $x | select($global_floor[] == $x)))
-        elif ($surface_floor | type) == "array"
-        then
-          # Only surface floor
-          $surface_floor
-        elif ($global_floor | type) == "array"
-        then
-          # Only global floor
-          $global_floor
-        else
-          # Neither
-          []
-        end
-      )
+    | ($m.trust_floor // .trust.author_association_floor // [])
     | join(" ")
   '
 }

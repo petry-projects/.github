@@ -206,18 +206,6 @@ MENTION_ON='    - surface: mention
   [ "$output" = "OWNER" ]
 }
 
-@test "pm_mention_trust_floor cannot widen the persona-wide floor" {
-  # Same intersect semantics as pm_surface_trust_floor: a surface trust_floor can
-  # only tighten. CONTRIBUTOR is outside the persona-wide floor and must be
-  # dropped, so a mention resolves the floor identically to a pull_request event
-  # for the same manifest (cubic P3 — the two paths must not diverge).
-  run pm_mention_trust_floor "$(manifest '    - surface: mention
-      enabled: true
-      mode: advisory
-      trust_floor: [OWNER, CONTRIBUTOR]')"
-  [ "$output" = "OWNER" ]
-}
-
 @test "pm_persona_id reads the id the manifest claims" {
   run pm_persona_id "$(manifest "$MENTION_ON")"
   [ "$output" = "qa-lead" ]

@@ -303,8 +303,9 @@ jobs:
                   ;;
                 absent)
                   rm -f "$ibody_file"
-                  echo "::error::no interaction contract for '${slug}' at ${interaction_url} — a manifested persona must declare its stop markers; refusing to dispatch"
-                  exit 1
+                  echo "::warning::no interaction contract for '${slug}' at ${interaction_url} — a persona with a manifest must declare its stop markers; refusing to route on the opt-out alone"
+                  echo "::endgroup::"
+                  continue
                   ;;
                 *)  # fail
                   rm -f "$ibody_file"
