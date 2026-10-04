@@ -808,6 +808,25 @@ _ingress_agent_runs() {
   local jobs_max="${CANARY_INGRESS_JOBS_MAX:-300}" nread=0 jrc role_oldest="" skipkind norole_created="" ncr
   case "$jobs_max" in ''|*[!0-9]*) jobs_max=300 ;; esac
   [ "$jobs_max" -lt 1 ] && jobs_max=300
+  # The RUN LIST itself is capped too (`gh run list -L CANARY_INGRESS_RUN_LIMIT`, default 5000). A list
+  # that hit its cap AND does not reach back past the window start may be missing older in-window runs,
+  # so a very busy ingress would look quieter than it is (#1244 item 11). Fail closed exactly like the
+  # jobs cap: the BASELINE read records the oldest listed day (a valid sample of the newest days), a
+  # gating window is UNRESOLVED. A list that reaches back before the window start is complete.
+  local list_max="${CANARY_INGRESS_RUN_LIMIT:-5000}" list_n list_oldest
+  case "$list_max" in ''|*[!0-9]*) list_max=5000 ;; esac
+  [ "$list_max" -lt 1 ] && list_max=5000
+  list_n="$(jq 'if type == "array" then length else 0 end' <<< "${iraw:-[]}" 2>/dev/null || echo 0)"
+  if [ "${list_n:-0}" -ge "$list_max" ]; then
+    list_oldest="$(jq -r '[.[]? | (.createdAt // "")] | min // ""' <<< "$iraw" 2>/dev/null || true)"
+    if [ -z "$since" ] || [ -z "$list_oldest" ] || ! [[ "$list_oldest" < "$since" ]]; then
+      if [ -n "$list_oldest" ] && [ -n "${_CANARY_INGRESS_TRUNC_FLAG:-}" ] && printf '%s\n' "${list_oldest:0:10}" >> "$_CANARY_INGRESS_TRUNC_FLAG" 2>/dev/null; then
+        echo "::warning::$agent $repo: the ingress run list reached CANARY_INGRESS_RUN_LIMIT ($list_max) in the baseline window; using the newest days only." >&2
+      else
+        _record_unresolved "$agent" "$repo" "the ingress run list reached CANARY_INGRESS_RUN_LIMIT ($list_max) before the window start; older in-window runs may be missing"
+      fi
+    fi
+  fi
   while IFS=$'\t' read -r id created rconc; do
     [ -z "$id" ] && continue
     [ "$created" = "-" ] && created=""   # "-" kept the empty field from collapsing in the tab-split read
@@ -843,7 +862,12 @@ _ingress_agent_runs() {
       (.jobs // []) as $jobs
       | if ($jobs | length) == 0 then
           # A run cancelled before any job started (e.g. superseded by workflow concurrency) never
-          # executed this role: it is not a success or a failure, so it is simply not a record.
+          # executed this role: it is not a success or a failure, so it is simply not a record. A run
+          # whose jobs are merely not recorded YET (jobs-API lag) looks the same for a moment; that is
+          # the same tolerance the gate already has for an in-flight run (conclusion null, ignored), the
+          # jobs are re-read on every sweep (never persisted across ticks), so the run is attributed
+          # properly on the next tick. Holding the gate for it would false-block on every
+          # concurrency-superseded run (#1244 item 12: accepted, pinned by a test).
           (if $rconc == "startup_failure" then {conclusion: "startup_failure", nojobs: true}
            elif $rconc == "cancelled" then {skipped: "cancelled"}
            else "UNATTRIBUTED" end)
@@ -1311,19 +1335,29 @@ _reusable_differs() {
 # so the two never fetch the same run twice.
 declare -A _RUN_DECISION_CACHE=()
 
-# _run_decision_class <repo> <run_id> <prefix> [<role>] — the decision class a run took (the taken
-# `<prefix><class>` no-op step; skipped branches ignored), via `gh run view --json jobs`. A
+# _run_decision_class <repo> <run_id> <prefix> [<role>] [<agent>] — the decision class a run took
+# (the taken `<prefix><class>` no-op step; skipped branches ignored), via `gh run view --json jobs`. A
 # <role> (an ADR-0007 ingress-attributed run, #1224) scopes the read to that role's own jobs.
-# Empty on missing repo/id or any gh error (fail-open: a run with no decision step simply
-# contributes nothing to the tally, degrading toward INSUFFICIENT, never a false SHIFT).
+# Empty (status 0) on a missing repo/id, a run with no decision step, or a run that is permanently gone
+# (deleted/expired, HTTP 404 — an expected outcome that simply contributes nothing to the tally).
+# A TRANSIENT jobs-read failure (the endpoint stayed unreadable) is NOT "no decision step": it is
+# recorded UNRESOLVED for <agent>'s member (the gate holds, #1244 item 3), echoes empty, returns 1 so
+# the sampler stops reading that member, and is never memoized (the next tick retries).
 _run_decision_class() {
-  local repo="$1" id="$2" prefix="$3" role="${4:-}" cache_key json cls
+  local repo="$1" id="$2" prefix="$3" role="${4:-}" agent="${5:-}" cache_key json cls jrc=0
   { [ -z "$repo" ] || [ "$repo" = '*' ] || [ -z "$id" ]; } && { echo ""; return 0; }
   cache_key="${repo}:${id}:${role}"
   if [[ -v _RUN_DECISION_CACHE["$cache_key"] ]]; then
     echo "${_RUN_DECISION_CACHE[$cache_key]}"; return 0
   fi
-  json="$(_run_jobs_json "$repo" "$id" 1 2>/dev/null || echo '{}')"
+  json="$(_run_jobs_json "$repo" "$id" 1 2>/dev/null)" || jrc=$?
+  case "$jrc" in
+    0) ;;
+    2) json='{}' ;;   # permanently gone: contributes nothing
+    *)
+      _record_unresolved "$agent" "$repo" "jobs of run $id are unreadable while sampling the decision mix (correctness evidence missing)"
+      echo ""; return 1 ;;
+  esac
   if [ -n "$role" ]; then
     json="$(jq -c --arg role "$role" 'if has("jobs") then .jobs |= map(select(((.name // "")|split(" / ")[0]) == $role)) else error("Missing jobs key") end' <<< "$json" 2>/dev/null || echo '{}')"
   fi
@@ -1351,7 +1385,9 @@ _sample_decision_counts() {
     while IFS=$'\t' read -r rid rrole; do
       [ -z "$rid" ] && continue
       [ "$sampled" -ge "$max_k" ] && break
-      cls="$(_run_decision_class "$repo" "$rid" "$prefix" "$rrole")"
+      # A transient jobs-read failure (status 1) is recorded UNRESOLVED by _run_decision_class; stop
+      # reading this member rather than burn one failing call per remaining run.
+      cls="$(_run_decision_class "$repo" "$rid" "$prefix" "$rrole" "$agent")" || break
       [ -z "$cls" ] && continue
       counts["$cls"]=$(( ${counts["$cls"]:-0} + 1 ))
       sampled=$(( sampled + 1 ))
@@ -1460,7 +1496,7 @@ _pair_state() {
   cut_z="$(candidate_cut_date "$agent" "$cand")"
   if [ -z "$cut_z" ]; then
     # Cannot determine the per-candidate window start — fail closed to prevent unbounded history queries.
-    echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - -"; return 0
+    echo "${cand:--} $frontier $transition BLOCKED 0 0 0 0 0 0 0 - - - 0 0 0 0"; return 0
   fi
   now_epoch="$(date -u +%s)"
 
