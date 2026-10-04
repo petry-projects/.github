@@ -2526,6 +2526,22 @@ _drift_rings_one_agent() {
   [[ "$output" == *".github/workflows/pr-review.yml"* ]]
 }
 
+# A registered path to a present NON-YAML file is not a reusable workflow: the registered-path
+# exception is restricted to .yml/.yaml, so the audit still flags it missing-file (cubic review on #1124).
+@test "orchestrator: drift still flags a registered non-YAML path even when present on the host" {
+  DRIFT_RINGS="$BATS_TEST_TMPDIR/drift-nonyaml.json"
+  jq '{version, description, org_infra_repos, member_tokens,
+       agents: {"pr-review": (.agents["dev-lead"] + {host: "petry-projects/.github-private",
+                                                     reusable: ".github/workflows/README.md"})}}' \
+    "$RINGS" > "$DRIFT_RINGS"
+  _drift_stub '[
+    {"type":"file","name":"README.md","path":".github/workflows/README.md"}
+  ]' '[]'
+  run env CANARY_RINGS="$DRIFT_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT[missing-file]"* ]]
+}
+
 @test "orchestrator: drift reports NO drift when the registry and host reusables are in sync" {
   _drift_rings_one_agent
   # Host lists exactly the one registered reusable — nothing extra, nothing missing.

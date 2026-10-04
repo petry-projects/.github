@@ -3329,7 +3329,8 @@ _gh_list_reusables() {
     ($reg | split("\n") | map(select(length>0))) as $regpaths
     | [ .[] | select(.type=="file")
         | .path as $p
-        | select(($p | endswith("-reusable.yml")) or any($regpaths[]; . == $p))
+        | select(($p | endswith("-reusable.yml"))
+                 or (($p | test("\\.ya?ml$")) and any($regpaths[]; . == $p)))
         | $p ] | .[]' 2>/dev/null <<< "$json" || true
   return 0
 }
