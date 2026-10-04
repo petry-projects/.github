@@ -816,7 +816,14 @@ _ingress_agent_runs() {
   local list_max="${CANARY_INGRESS_RUN_LIMIT:-5000}" list_n list_oldest
   case "$list_max" in ''|*[!0-9]*) list_max=5000 ;; esac
   [ "$list_max" -lt 1 ] && list_max=5000
-  list_n="$(jq 'if type == "array" then length else 0 end' <<< "${iraw:-[]}" 2>/dev/null || echo 0)"
+  # `gh run list` output is passed through unchecked on success: a non-array body would count as 0 runs
+  # (skipping the cap check) and iterate to nothing, reading as "no caller". Fail closed instead.
+  if ! jq -e 'type == "array"' >/dev/null 2>&1 <<< "${iraw:-[]}"; then
+    _record_unresolved "$agent" "$repo" "the ingress run list is not a JSON array"
+    iraw='[]'; list_n=0
+  else
+    list_n="$(jq 'length' <<< "${iraw:-[]}" 2>/dev/null || echo 0)"
+  fi
   if [ "${list_n:-0}" -ge "$list_max" ]; then
     list_oldest="$(jq -r '[.[]? | (.createdAt // "")] | min // ""' <<< "$iraw" 2>/dev/null || true)"
     if [ -z "$since" ] || [ -z "$list_oldest" ] || ! [[ "$list_oldest" < "$since" ]]; then

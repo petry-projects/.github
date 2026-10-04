@@ -5866,6 +5866,31 @@ GHEOF
   [ ! -s "$flag" ]
 }
 
+@test "_agent_run_json: a non-array ingress run list is UNRESOLVED, not read as 'no caller' (#1250 review)" {
+  _ingress_stub
+  local d2; d2="$(mktemp -d "$BATS_TEST_TMPDIR/stub3.XXXXXX")"; export PATH="$d2:$PATH"
+  cat > "$d2/gh" <<'GHEOF'
+#!/usr/bin/env bash
+wf=""; prev=""
+for a in "$@"; do [ "$prev" = "--workflow" ] && wf="$a"; prev="$a"; done
+case "$1 $2" in
+  "run list")
+    case "$wf" in
+      "Agent Ingress") echo '{"message":"unexpected body"}' ;;
+      *) echo "could not find any workflows named $wf" >&2; exit 1 ;;
+    esac ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$d2/gh"
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/weird '' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  grep -q "not a JSON array" "$flag"
+}
+
 @test "_agent_run_json: a job-less cancelled run is tolerated like an in-flight run — its jobs are re-read next sweep and the failure is then attributed (#1244 item 12)" {
   _ingress_stub
   local d2; d2="$(mktemp -d "$BATS_TEST_TMPDIR/stub2.XXXXXX")"; export PATH="$d2:$PATH"
