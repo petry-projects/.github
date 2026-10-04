@@ -5,6 +5,10 @@
     "petry-projects/.github",
     "petry-projects/.github-private"
   ],
+  "_reserved_tag_namespaces_note": "#1106 — tag prefixes that carry `<name>/v<M>-<tier>` channel tags on an infra repo but are NOT canary-managed agents, so the registry-completeness drift check (cmd_drift) must not flag them as missing agents. Today only `standards` (the standards-versioning release channel `standards/v1-stable`, #1091) — a single artifact with one moving channel, not a ringed agent.",
+  "reserved_tag_namespaces": [
+    "standards"
+  ],
   "member_tokens": {
     "$host": "the agent's host repo (the repo that owns the reusable)",
     "$org_infra": "org_infra_repos minus the host (the host is already in `next`)",
