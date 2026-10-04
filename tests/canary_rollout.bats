@@ -2717,6 +2717,18 @@ GITEOF
   [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
 }
 
+@test "orchestrator: drift completeness skips the sweep when the registry has no agents (no false positives)" {
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-empty-rings.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"], agents: {}}' "$RINGS" > "$COMP_RINGS"
+  _completeness_stub '[
+    {"ref":"refs/tags/pr-review/v1-next"}
+  ]'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [[ "$output" == *"registry completeness: .agents{} is empty or unreadable"* ]]
+  [[ "$output" == *"completeness check was INCOMPLETE"* ]]
+  [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
+}
+
 @test "orchestrator: drift completeness ignores release tags that lack a channel tier (#1106)" {
   # Registry knows only dev-lead; release-only-agent has only release tags (no v<M>-<tier> tags).
   COMP_RINGS="$BATS_TEST_TMPDIR/comp-release-only.json"

@@ -3659,6 +3659,13 @@ cmd_drift() {
   infra_repos="$(_jq -r '(.org_infra_repos // []) | .[]')"
   reserved="$(_reserved_tag_namespaces)"
   registered_agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
+  if [ -z "$registered_agents" ]; then
+    # An unreadable/empty registry would flag EVERY channel-tagged agent as unregistered (false
+    # positives) — skip the sweep and mark it incomplete rather than report noise.
+    echo "::warning::registry completeness: .agents{} is empty or unreadable — skipping the sweep"
+    rc_incomplete=1
+    infra_repos=""
+  fi
   while IFS= read -r ir; do
     [ -z "$ir" ] && continue
     local tag_agents ta attempt max_attempts=3
