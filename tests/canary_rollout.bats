@@ -2646,6 +2646,40 @@ GITEOF
   [[ "$output" == *"registry-completeness summary: 1"* ]]
 }
 
+@test "orchestrator: drift completeness flags an unregistered agent with tags on .github (both repos checked, #1106)" {
+  # Registry knows only dev-lead; an unregistered agent has tags on .github (not .github-private).
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-github-tags.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$COMP_RINGS"
+  # Override the stub to return tags for .github (the public infra repo) as well.
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"git/matching-refs/tags"*)
+    # Return unregistered-agent tags on both .github and .github-private
+    cat <<'JSON'
+[{"ref":"refs/tags/unregistered-agent/v1-next"},{"ref":"refs/tags/unregistered-agent/v1-stable"},{"ref":"refs/tags/dev-lead/v1-next"}]
+JSON
+    ;;
+  *"contents/.github/workflows"*) echo '[]' ;;
+  *) echo "{}" ;;
+esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  cat > "$STUB_BIN/git" <<'GITEOF'
+#!/usr/bin/env bash
+: # completeness never touches git
+GITEOF
+  chmod +x "$STUB_BIN/git"
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  # unregistered-agent has channel tags but is not in the registry → flagged
+  [[ "$output" == *"DRIFT[registry-incomplete]"* ]]
+  [[ "$output" == *"unregistered-agent"* ]]
+  [[ "$output" == *"registry-completeness summary: 1"* ]]
+}
+
 @test "orchestrator: drift completeness is clean once every channel-tagged agent is registered (#1106)" {
   # Both dev-lead and pr-review are registered; standards is reserved → no completeness gap.
   COMP_RINGS="$BATS_TEST_TMPDIR/comp-clean-rings.json"
@@ -2665,6 +2699,23 @@ GITEOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"registry-completeness summary: 0"* ]]
   [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
+}
+
+@test "orchestrator: drift completeness ignores release tags that lack a channel tier (#1106)" {
+  # Registry knows only dev-lead; release-only-agent has only release tags (no v<M>-<tier> tags).
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-release-only.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$COMP_RINGS"
+  _completeness_stub '[
+    {"ref":"refs/tags/release-only-agent/v1.0.0"},
+    {"ref":"refs/tags/release-only-agent/v1.1.0"},
+    {"ref":"refs/tags/dev-lead/v1-next"}
+  ]'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  # release-only-agent is NOT a channel-tag agent (has only vX.Y.Z, no v<M>-<tier>) → not flagged
+  [[ "$output" != *"release-only-agent"* ]]
+  [[ "$output" == *"registry-completeness summary: 0"* ]]
 }
 
 @test "orchestrator: drift completeness skips an infra repo it cannot enumerate (no false gap) (#1106)" {
