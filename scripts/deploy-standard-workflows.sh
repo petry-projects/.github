@@ -42,6 +42,11 @@ source "$SCRIPT_DIR/lib/ring-pins.sh"
 # job must never have its per-role stub re-seeded (#1226).
 # shellcheck source=scripts/lib/agent-ingress.sh
 source "$SCRIPT_DIR/lib/agent-ingress.sh"
+# Caller-stub on:/permissions/concurrency surface-drift model — shared with
+# compliance-audit.sh so a stub the audit flags `stub-surface-drift-*` is one this
+# sweep re-syncs rather than skipping as "already compliant" (#1236).
+# shellcheck source=scripts/lib/stub-surface.sh
+source "$SCRIPT_DIR/lib/stub-surface.sh"
 
 # Global temp-file registry — cleaned up by EXIT trap even on premature exit.
 declare -a _TMPFILES=()
@@ -333,6 +338,70 @@ stub_has_s7635_marker() {
   grep -qE '^[[:space:]]*secrets:[[:space:]]+inherit[[:space:]].*NOSONAR\(githubactions:S7635\)'
 }
 
+# stub_has_only_surface_drift <workflow> <template> <existing_content> <repo> -> 0 if
+# the stub is pin-correct, marker-correct, but has surface drift; non-zero otherwise.
+# This distinguishes surface-drift-only failures from pin/marker issues (#1236).
+stub_has_only_surface_drift() {
+  local workflow="$1" template="$2" existing_content="$3" repo="$4"
+  # If pin is wrong, this is not a surface-drift-only case.
+  is_pin_compliant "$existing_content" "$template" "$repo" || return 1
+  # If marker is missing, this is not a surface-drift-only case.
+  if template_requires_s7635_marker "$template" \
+     && ! stub_has_s7635_marker <<< "$existing_content"; then
+    return 1
+  fi
+  # Only if both pin and marker are correct, check for surface drift.
+  stub_any_surface_drift "$workflow" "$(< "$template")" "$existing_content"
+}
+
+# merge_guarded_surfaces <workflow> <template> <existing_content> — merge the
+# template's guarded surfaces (on:/permissions/concurrency) into the existing stub
+# while preserving repo-specific customizations. Ensures missing surfaces are added
+# and drift-induced removals are restored without losing documented liberties like
+# pr-auto-review's workflow_run.workflows list (#1242). Outputs merged content.
+merge_guarded_surfaces() {
+  local workflow="$1" template="$2" existing_content="$3"
+  local surfaces surface result extracted_surface
+  local -a surface_list
+
+  # Start with the existing content
+  result="$existing_content"
+
+  # Get guarded surfaces for this workflow
+  surfaces="$(stub_guarded_surfaces "$workflow")" || return 0
+
+  local old_ifs="$IFS"
+  IFS=,
+  # shellcheck disable=SC2206  # intentional comma split of a fixed internal list
+  surface_list=($surfaces)
+  IFS="$old_ifs"
+
+  # For each guarded surface, replace it in the result with the template version
+  for surface in "${surface_list[@]}"; do
+    extracted_surface=$(stub_extract_blocks "$template" "$surface")
+    # Remove the surface from result (all blocks with this key at any depth)
+    result=$(printf '%s\n' "$result" | awk -v key="$surface" '
+      function indent(s,   n) { n = match(s, /[^ ]/); return n == 0 ? 0 : n - 1 }
+      {
+        if (skipping) {
+          if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+          if (indent($0) > keyindent) next
+          skipping = 0
+        }
+        if ($0 ~ ("^[[:space:]]*" key ":")) {
+          skipping = 1; keyindent = indent($0); next
+        }
+        print
+      }
+    ')
+    # Append the template version of the surface
+    result="$(printf '%s\n%s' "$result" "$extracted_surface")"
+  done
+
+  printf '%s' "$result"
+  return 0
+}
+
 # is_already_compliant <existing_content> <template> <repo> -> 0 if the deployed
 # stub needs no re-deploy. A stub is compliant only when it is BOTH pin-compliant
 # (is_pin_compliant, below) AND — when its template carries a real `secrets: inherit`
@@ -342,11 +411,27 @@ stub_has_s7635_marker() {
 # export, bmad-bgreat-suite, …) whose stubs merged marker-less during #857. Flagging
 # the missing marker as drift re-deploys and restores it. Kept targeted (pin + marker
 # presence), NOT a byte-compare, to avoid churn on cosmetic diffs.
+#
+# A pin-correct stub whose guarded `on:` / `permissions:` / `concurrency:` surface
+# differs from the template is ALSO drift (#1236): the audit flags it
+# `stub-surface-drift-*`, and skipping it here left the finding open every cycle
+# (e.g. stubs missing the `merge_group:` trigger the templates gained). The check
+# uses the audit's own comparison (lib/stub-surface.sh), so documented per-repo
+# liberties (`with:` inputs, cron values, pr-auto-review's workflow list) are not
+# drift. It is applied only where a redeploy actually rewrites the surface from the
+# template — never to a SKIP_REPO or a body-preserving workflow, which are re-pinned
+# from their OWN body (a surface diff there would re-flag forever, cf. #878; the
+# audit likewise exempts the meta-repos).
 is_already_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   is_pin_compliant "$existing_content" "$template" "$repo" || return 1
   if template_requires_s7635_marker "$template" \
      && ! stub_has_s7635_marker <<< "$existing_content"; then
+    return 1
+  fi
+  local workflow; workflow="${template##*/}"
+  if ! is_skipped_repo "$repo" && ! is_body_preserving_workflow "$workflow" \
+     && stub_any_surface_drift "$workflow" "$(< "$template")" "$existing_content"; then
     return 1
   fi
   return 0
@@ -559,6 +644,21 @@ deploy_repo() {
           printf '%s\n' "$existing_content" > "$repin_source"
         fi
       fi
+    elif [[ -n "$existing_sha" ]] && ! is_skipped_repo "$repo" && ! is_body_preserving_workflow "$workflow" \
+         && stub_has_only_surface_drift "$workflow" "$template" "$existing_content" "$repo"; then
+      # Surface drift detected but pin and marker are correct (#1236): merge the
+      # template's canonical guarded surfaces (on:/permissions/concurrency) into the
+      # existing stub to fix the drift while preserving repo-specific customizations
+      # like pr-auto-review's workflow_run.workflows list (#1242). This ensures
+      # missing triggers/permissions/concurrency fields are added and drift-induced
+      # removals are restored without losing documented per-repo liberties.
+      mode="surface-drift-repin"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        repin_source="$(mktemp)"; _TMPFILES+=("$repin_source")
+        merge_guarded_surfaces "$workflow" "$(< "$template")" "$existing_content" > "$repin_source"
+      else
+        repin_source="$template"
+      fi
     fi
 
     # When repin_source is a copy of existing_content (meta-repo consumer or body-
@@ -625,8 +725,9 @@ deploy_repo() {
     for (( i = 0; i < n; i++ )); do
       [[ -n "${emits[i]}" ]] && dry "$repo/${names[i]} would pin @${emits[i]}"
       case "${modes[i]}" in
-        seed)           dry "$repo/${names[i]} seed-if-absent: seeding fresh from template" ;;
-        repin-in-place) dry "$repo/${names[i]} re-pin uses in place — existing body/project_context preserved" ;;
+        seed)                dry "$repo/${names[i]} seed-if-absent: seeding fresh from template" ;;
+        repin-in-place)      dry "$repo/${names[i]} re-pin uses in place — existing body/project_context preserved" ;;
+        surface-drift-repin) dry "$repo/${names[i]} surface drift detected: re-pin existing stub to preserve repo-specific values" ;;
       esac
     done
     dry "Would open PR for $repo (branch $branch) — ${n} stub(s): $list"
