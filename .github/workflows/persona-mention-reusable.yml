@@ -380,7 +380,6 @@ jobs:
     permissions:
       contents: read        # actions/checkout of the tooling repo
       issues: read          # a PR's labels are read via the issues endpoint
-      pull-requests: read
     # The CHEAP pre-filter for the PR path, mirrored from pm_pr_should_route
     # (tests/persona_mention.bats). It runs BEFORE the job starts, so secrets are
     # never exposed to a run a bot, a marked PR body, or an untrusted author
@@ -570,7 +569,11 @@ jobs:
             # unlisted or disabled surface means it simply does not fire on PRs —
             # no default_mode fan-out (#756). This is the "not dispatched" branch,
             # decided from the manifest alone with no contract fetch.
-            read -r enabled mode opt_out <<<"$(pm_surface_decision "$manifest" pull_request)"
+            surface_decision="$(pm_surface_decision "$manifest" pull_request)" || {
+              echo "::error::manifest query for '${slug}' failed — refusing to route"
+              exit 1
+            }
+            read -r enabled mode opt_out <<<"$surface_decision"
             if [ "$enabled" != "true" ]; then
               echo "Persona '${slug}' does not declare an enabled pull_request surface (mode=${mode}). Skipping."
               echo "::endgroup::"; continue
