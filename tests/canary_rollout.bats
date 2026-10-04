@@ -5800,6 +5800,187 @@ GHEOF
   [ ! -s "$flag" ]
 }
 
+@test "_run_decision_class: a transient jobs-read failure is recorded UNRESOLVED, not read as 'no decision step' (#1244 item 3)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _run_decision_class org/legacy 201 'decision: ' '' dev-lead 2>/dev/null"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q "^org/legacy" "$flag"
+  grep -q "decision mix" "$flag"
+}
+
+@test "_run_decision_class: a failed read is NOT memoized — a same-sweep re-read fails again instead of reading as 'no decision step' (#1250 review)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e
+      _run_decision_class org/legacy 201 'decision: ' '' dev-lead >/dev/null 2>&1; r1=\$?
+      _run_decision_class org/legacy 201 'decision: ' '' dev-lead >/dev/null 2>&1; r2=\$?
+      echo \"\$r1 \$r2\""
+  [ "$status" -eq 0 ]
+  # A cached empty class would make the second call return 0.
+  [ "$output" = "1 1" ]
+}
+
+@test "_agent_run_json: an invalid CANARY_INGRESS_RUN_LIMIT is normalized before the fetch, not sent to gh (#1250 review)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_INGRESS_RUN_LIMIT=abc CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[301,302,303]" ]
+  grep -q -- "-L 5000" "$GH_LOG"
+  ! grep -q -- "-L abc" "$GH_LOG"
+}
+
+@test "_run_decision_class: a permanently gone run (404) is expected — contributes nothing, not UNRESOLVED (#1244 item 3)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _run_decision_class org/legacy 999 'decision: ' '' dev-lead 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_sample_decision_counts: a sustained jobs outage marks the member UNRESOLVED instead of silently thinning the mix (#1244 item 3)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _sample_decision_counts dev-lead 'decision: ' 5 '' '-' org/legacy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "{}" ]
+  grep -q "^org/legacy" "$flag"
+}
+
+@test "_agent_run_json: an ingress run list that hit CANARY_INGRESS_RUN_LIMIT before the window start is UNRESOLVED (#1244 item 11)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy lists 3 runs; a limit of 3 means the list may have been cut off. With no lower bound on
+  # the window it cannot be shown to reach back far enough, so the member is UNRESOLVED (fail closed).
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "CANARY_INGRESS_RUN_LIMIT" "$flag"
+}
+
+@test "_agent_run_json: a run list at its cap that reaches back BEFORE the window start is complete — not UNRESOLVED (#1244 item 11)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # The window starts today; the list's oldest run is from yesterday, so nothing in-window can be missing.
+  local since; since="$(date -u +%Y-%m-%dT00:00:00Z)"
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '$since' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[302,303]" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: the capped-list completeness check holds for a non-midnight since, and is conservative on an exact tie (#1250 review)" {
+  _ingress_stub
+  local y; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy's oldest listed run is yesterday 12:00:00Z (run 301). since and gh's createdAt are both
+  # Zulu ISO-8601, so the lexicographic comparison is sound at any time of day, not just midnight.
+  # since = yesterday 13:00:00Z is AFTER the oldest listed run → the capped list reaches back far
+  # enough: complete, not UNRESOLVED; only the two runs from today are in the window.
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '${y}T13:00:00Z' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[302,303]" ]
+  [ ! -s "$flag" ]
+  # since exactly equal to the oldest listed run does not PROVE the list reaches back before the window:
+  # stay conservative (UNRESOLVED), never fail open.
+  : > "$flag"
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '${y}T12:00:00Z' >/dev/null 2>&1"
+  [ "$status" -eq 0 ]
+  grep -q "CANARY_INGRESS_RUN_LIMIT" "$flag"
+}
+
+@test "_baseline_daily: a run list at its cap is a valid sample of the NEWEST days, not UNRESOLVED (#1244 item 11)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # Same shape as the jobs-cap baseline: the oldest listed day (yesterday) is the boundary and is kept
+  # because it has observed runs; anything older is unknown, not zero.
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; _baseline_daily dev-lead 3 org/busy 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2 1" ]
+  [ ! -s "$flag" ]
+}
+
+@test "_agent_run_json: a non-array ingress run list is UNRESOLVED, not read as 'no caller' (#1250 review)" {
+  _ingress_stub
+  local d2; d2="$(mktemp -d "$BATS_TEST_TMPDIR/stub3.XXXXXX")"; export PATH="$d2:$PATH"
+  cat > "$d2/gh" <<'GHEOF'
+#!/usr/bin/env bash
+wf=""; prev=""
+for a in "$@"; do [ "$prev" = "--workflow" ] && wf="$a"; prev="$a"; done
+case "$1 $2" in
+  "run list")
+    case "$wf" in
+      "Agent Ingress") echo '{"message":"unexpected body"}' ;;
+      *) echo "could not find any workflows named $wf" >&2; exit 1 ;;
+    esac ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$d2/gh"
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/weird '' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  grep -q "not a JSON array" "$flag"
+}
+
+@test "_agent_run_json: a job-less cancelled run is tolerated like an in-flight run — its jobs are re-read next sweep and the failure is then attributed (#1244 item 12)" {
+  _ingress_stub
+  local d2; d2="$(mktemp -d "$BATS_TEST_TMPDIR/stub2.XXXXXX")"; export PATH="$d2:$PATH"
+  export LAGFILE="$BATS_TEST_TMPDIR/lag-count"; : > "$LAGFILE"
+  cat > "$d2/gh" <<'GHEOF'
+#!/usr/bin/env bash
+wf=""; prev=""
+for a in "$@"; do [ "$prev" = "--workflow" ] && wf="$a"; prev="$a"; done
+case "$1 $2" in
+  "run list")
+    case "$wf" in
+      "Agent Ingress") echo '[{"conclusion":"cancelled","createdAt":"2026-01-02T00:00:00Z","databaseId":701,"workflowName":"Agent Ingress"}]' ;;
+      *) echo "could not find any workflows named $wf" >&2; exit 1 ;;
+    esac ;;
+  "run view")
+    n="$(cat "$LAGFILE" 2>/dev/null)"; n="${n:-0}"; echo $((n + 1)) > "$LAGFILE"
+    # First read: the jobs are not recorded yet (lag). Later reads: the role's job, which FAILED.
+    if [ "$n" -eq 0 ]; then echo '{"jobs":[]}'
+    else echo '{"jobs":[{"name":"dev-lead / run","conclusion":"failure","steps":[]}]}'; fi ;;
+  *) echo '{}' ;;
+esac
+GHEOF
+  chmod +x "$d2/gh"
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" LAGFILE="$LAGFILE" \
+    bash -c "source '$ORCH'; set +e
+      echo \"sweep1: \$(_agent_run_json dev-lead org/lag '' 2>/dev/null | jq -c 'map(.conclusion)')\"
+      echo \"sweep2: \$(_agent_run_json dev-lead org/lag '' 2>/dev/null | jq -c 'map(.conclusion)')\""
+  [ "$status" -eq 0 ]
+  # Sweep 1: nothing recorded and NOT unresolved (same as an in-flight run). Sweep 2: the failure shows.
+  [[ "$output" == *"sweep1: []"* ]]
+  [[ "$output" == *'sweep2: ["failure"]'* ]]
+  [ ! -s "$flag" ]
+}
+
+@test "_pair_state: the cut-date early return emits the full 18-field state line (#1244 item 13)" {
+  run bash -c "source '$ORCH'; set +e; candidate_cut_date() { echo ''; }; _pair_state dev-lead next ring0 abc1234 'next->ring0' 'next,ring0,ring1,stable' 'abc1234,-,-,-' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "abc1234 ring0 next->ring0 BLOCKED "* ]]
+  # cmd_sync_issues appends the datagap field, so a short line would shift it into `downgrade`.
+  [ "$(wc -w <<< "$output")" -eq 18 ]
+  [ "$(awk '{print $12}' <<< "$output")" = "-" ]
+}
+
 @test "_agent_run_json: the jobs-read circuit breaker stops after the first exhausted 5xx instead of retrying every run (#1224)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
