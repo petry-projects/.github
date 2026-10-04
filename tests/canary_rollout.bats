@@ -5811,6 +5811,30 @@ GHEOF
   grep -q "decision mix" "$flag"
 }
 
+@test "_run_decision_class: a failed read is NOT memoized — a same-sweep re-read fails again instead of reading as 'no decision step' (#1250 review)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env STUB_JOBS_FAIL=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e
+      _run_decision_class org/legacy 201 'decision: ' '' dev-lead >/dev/null 2>&1; r1=\$?
+      _run_decision_class org/legacy 201 'decision: ' '' dev-lead >/dev/null 2>&1; r2=\$?
+      echo \"\$r1 \$r2\""
+  [ "$status" -eq 0 ]
+  # A cached empty class would make the second call return 0.
+  [ "$output" = "1 1" ]
+}
+
+@test "_agent_run_json: an invalid CANARY_INGRESS_RUN_LIMIT is normalized before the fetch, not sent to gh (#1250 review)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  run env CANARY_INGRESS_RUN_LIMIT=abc CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[301,302,303]" ]
+  grep -q -- "-L 5000" "$GH_LOG"
+  ! grep -q -- "-L abc" "$GH_LOG"
+}
+
 @test "_run_decision_class: a permanently gone run (404) is expected — contributes nothing, not UNRESOLVED (#1244 item 3)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"

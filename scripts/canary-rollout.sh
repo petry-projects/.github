@@ -788,6 +788,16 @@ _run_jobs_json() {
   done
 }
 
+# _ingress_run_limit — CANARY_INGRESS_RUN_LIMIT (the `gh run list -L` for an ingress), normalized once so
+# the value sent to the API and the cap comparison in _ingress_agent_runs can never disagree (a
+# non-numeric or < 1 value falls back to the 5000 default instead of aborting the fetch).
+_ingress_run_limit() {
+  local n="${CANARY_INGRESS_RUN_LIMIT:-5000}"
+  case "$n" in ''|*[!0-9]*) n=5000 ;; esac
+  [ "$n" -lt 1 ] && n=5000
+  echo "$n"
+}
+
 # _ingress_agent_runs <agent> <repo> <role> <since_z>   (ingress runs JSON on stdin)
 # — the agent's runs on a collapsed repo, one record per completed ingress run in which the
 # <role> job ran: {conclusion, createdAt, databaseId, workflowName: <run_workflow>, role}.
@@ -813,9 +823,8 @@ _ingress_agent_runs() {
   # so a very busy ingress would look quieter than it is (#1244 item 11). Fail closed exactly like the
   # jobs cap: the BASELINE read records the oldest listed day (a valid sample of the newest days), a
   # gating window is UNRESOLVED. A list that reaches back before the window start is complete.
-  local list_max="${CANARY_INGRESS_RUN_LIMIT:-5000}" list_n list_oldest
-  case "$list_max" in ''|*[!0-9]*) list_max=5000 ;; esac
-  [ "$list_max" -lt 1 ] && list_max=5000
+  local list_max list_n list_oldest
+  list_max="$(_ingress_run_limit)"
   # `gh run list` output is passed through unchecked on success: a non-array body would count as 0 runs
   # (skipping the cap check) and iterate to nothing, reading as "no caller". Fail closed instead.
   if ! jq -e 'type == "array"' >/dev/null 2>&1 <<< "${iraw:-[]}"; then
@@ -830,7 +839,7 @@ _ingress_agent_runs() {
       if [ -n "$list_oldest" ] && [ -n "${_CANARY_INGRESS_TRUNC_FLAG:-}" ] && printf '%s\n' "${list_oldest:0:10}" >> "$_CANARY_INGRESS_TRUNC_FLAG" 2>/dev/null; then
         echo "::warning::$agent $repo: the ingress run list reached CANARY_INGRESS_RUN_LIMIT ($list_max) in the baseline window; using the newest days only." >&2
       else
-        _record_unresolved "$agent" "$repo" "the ingress run list reached CANARY_INGRESS_RUN_LIMIT ($list_max) before the window start; older in-window runs may be missing"
+        _record_unresolved "$agent" "$repo" "the ingress run list reached CANARY_INGRESS_RUN_LIMIT ($list_max) before the window start; older in-window runs may be missing (raise CANARY_INGRESS_RUN_LIMIT if this repo legitimately has that many runs)"
       fi
     fi
   fi
@@ -947,7 +956,7 @@ _agent_run_json() {
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
   if [ "$rc" -eq 3 ]; then
     rc=0; iwf="$(_ingress_workflow)"
-    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "${CANARY_INGRESS_RUN_LIMIT:-5000}")" || rc=$?
+    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$(_ingress_run_limit)")" || rc=$?
     case "$rc" in
       0)
         role="$(_jq -r --arg a "$agent" '(.agents[$a].ingress_job)? // empty' 2>/dev/null || true)"
