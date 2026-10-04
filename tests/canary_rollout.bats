@@ -5878,6 +5878,28 @@ GHEOF
   [ ! -s "$flag" ]
 }
 
+@test "_agent_run_json: the capped-list completeness check holds for a non-midnight since, and is conservative on an exact tie (#1250 review)" {
+  _ingress_stub
+  local y; y="$(date -u -d yesterday +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy's oldest listed run is yesterday 12:00:00Z (run 301). since and gh's createdAt are both
+  # Zulu ISO-8601, so the lexicographic comparison is sound at any time of day, not just midnight.
+  # since = yesterday 13:00:00Z is AFTER the oldest listed run → the capped list reaches back far
+  # enough: complete, not UNRESOLVED; only the two runs from today are in the window.
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '${y}T13:00:00Z' | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[302,303]" ]
+  [ ! -s "$flag" ]
+  # since exactly equal to the oldest listed run does not PROVE the list reaches back before the window:
+  # stay conservative (UNRESOLVED), never fail open.
+  : > "$flag"
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '${y}T12:00:00Z' >/dev/null 2>&1"
+  [ "$status" -eq 0 ]
+  grep -q "CANARY_INGRESS_RUN_LIMIT" "$flag"
+}
+
 @test "_baseline_daily: a run list at its cap is a valid sample of the NEWEST days, not UNRESOLVED (#1244 item 11)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
