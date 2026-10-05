@@ -27,6 +27,7 @@ Read the relevant standard *before* making changes that touch CI, repo settings,
 | **Ruleset remediation** | [`standards/ruleset-remediation-runbook.md`](https://github.com/petry-projects/.github/blob/main/standards/ruleset-remediation-runbook.md) | Manual admin-token procedure for ruleset bypass-actor + legacy-ruleset findings (snapshot → fix → migrate-then-delete → verify → rollback) |
 | **PR limits** | [`standards/pr-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/pr-limits.md) | Org-wide soft cap on concurrent open automation PRs: source-of-truth (`pr-limits.json`), source-side apply path (`pr-limit-gate.sh`), exempt-actor rationale, operator runbook |
 | **Agent rate limits** | [`standards/agent-rate-limits.md`](https://github.com/petry-projects/.github/blob/main/standards/agent-rate-limits.md) | Per-agent-type rate limits + circuit breakers and the org-wide Claude token-budget breaker: source-of-truth (`agent-rate-limits.json`), ADR decision record, exempt-actor rationale, operator runbook |
+| **Commercial support** | [`standards/commercial-support-standard.md`](https://github.com/petry-projects/.github/blob/main/standards/commercial-support-standard.md) | Standard commercial support, enterprise SLA, custom engineering, and dual-licensing language via CombSmith LLC |
 
 **When fixing a compliance finding, the rule is: read the standard, then copy
 the template — do not generate from scratch.** Anything generated from scratch

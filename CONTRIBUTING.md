@@ -12,6 +12,25 @@ guidelines for the `petry-projects` organization.
    are changing (CI workflows, Dependabot, repo settings, etc.).
 4. Open a pull request — CI (lint, YAML, actionlint, shellcheck) must pass before review.
 
+---
+
+## Contributor Licensing & Intellectual Property
+
+By submitting a pull request or contributing to any repository in the `petry-projects`
+organization, you agree that:
+
+1. **Open Source Grant:** Your contributions are licensed to the community under the repository's
+   declared open-source license (e.g., MIT, Apache 2.0, or AGPLv3).
+2. **Commercial & Dual-Licensing Right:** To support sustainable maintenance and commercial
+   services through [CombSmith LLC](https://combsmith.com), you grant `petry-projects` and
+   CombSmith LLC a perpetual, worldwide, non-exclusive, royalty-free license to use, modify,
+   re-license (including under commercial/proprietary terms), and distribute your contributions as
+   part of the project.
+3. **Developer Certificate of Origin (DCO):** You certify that your contributions are your
+   original creation, or that you have sufficient rights to submit them under these terms.
+
+---
+
 ## GitHub Projects — Initiatives board
 
 The org maintains a single **Initiatives project** at
