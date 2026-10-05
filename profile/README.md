@@ -80,6 +80,9 @@ All repositories in this org follow shared engineering standards defined in
 - **[Standards Versioning](https://github.com/petry-projects/.github/blob/main/standards/standards-versioning.md)** — The two tag forms; cutting a release;
   N-1 resolvability; opting in and staying out.
 
+- **[Commercial Support](https://github.com/petry-projects/.github/blob/main/standards/commercial-support-standard.md)** — Standard commercial support,
+  enterprise SLA tiers, custom MCP engineering, and dual-licensing language provided through CombSmith LLC.
+
 ---
 
 ## Reporting & Dashboards
@@ -94,6 +97,15 @@ Scheduled reports and dashboards post as issues or run summaries for org maintai
   — Weekly security-posture review across public repos; findings tracked as issues.
 - **[Standards Deploy](https://github.com/petry-projects/.github/blob/main/.github/workflows/standards-deploy.yml)**
   — Weekly fleet sweep that opens standards-sync PRs for repos drifted off the org-standard workflow stubs.
+
+---
+
+## Commercial Support & Enterprise Services
+
+Open-source tools across `petry-projects` are free for community use. For enterprise deployments,
+priority SLAs, custom MCP tool implementation, and commercial licensing, commercial support is
+available through [CombSmith LLC](https://combsmith.com). See the [Commercial Support Standard](https://github.com/petry-projects/.github/blob/main/standards/commercial-support-standard.md)
+for rate cards and adoption guidelines.
 
 ---
 
