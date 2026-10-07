@@ -3797,6 +3797,9 @@ main() {
       export _RUNS_CACHE_DIR
       _own_cache=1
     fi
+  else
+    # Caller-supplied cache dir: still emit the timing report, but never remove the dir.
+    trap '_timing_report' EXIT
   fi
   _CANARY_OWN_CACHE="$_own_cache"
   trap '_timing_report; [ "${_CANARY_OWN_CACHE:-0}" = 1 ] && rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
