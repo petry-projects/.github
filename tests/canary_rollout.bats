@@ -6067,6 +6067,229 @@ GHEOF
   [ "$(awk '{print $12}' <<< "$output")" = "-" ]
 }
 
+@test "registry preload: every memoized lookup equals the jq lookup it replaces, for EVERY agent in the real registry (#1259)" {
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH'; set +e
+    declare -A exp_wf exp_job
+    for a in \$(jq -r '.agents | keys[]' \"\$CANARY_RINGS\"); do
+      exp_wf[\$a]=\"\$(_agent_field \"\$a\" run_workflow)\"
+      exp_job[\$a]=\"\$(_jq -r --arg a \"\$a\" '(.agents[\$a].ingress_job)? // empty')\"
+    done
+    exp_iwf=\"\$(_ingress_workflow)\"; exp_missing_wf=\"\$(_agent_field no-such-agent run_workflow)\"
+    _registry_preload || { echo PRELOAD_FAILED; exit 1; }
+    bad=0; n=0
+    for a in \"\${!exp_wf[@]}\"; do
+      n=\$((n+1))
+      _reg_run_workflow \"\$a\"; [ \"\$_REG_VAL\" = \"\${exp_wf[\$a]}\" ] || { echo \"WF MISMATCH \$a: '\$_REG_VAL' vs '\${exp_wf[\$a]}'\"; bad=1; }
+      _reg_ingress_job \"\$a\";  [ \"\$_REG_VAL\" = \"\${exp_job[\$a]}\" ] || { echo \"JOB MISMATCH \$a: '\$_REG_VAL' vs '\${exp_job[\$a]}'\"; bad=1; }
+    done
+    _reg_ingress_wf; [ \"\$_REG_VAL\" = \"\$exp_iwf\" ] || { echo \"INGRESS WF MISMATCH\"; bad=1; }
+    [ \"\$(_ingress_workflow)\" = \"\$exp_iwf\" ] || { echo \"_ingress_workflow MISMATCH\"; bad=1; }
+    _reg_run_workflow no-such-agent; [ \"\$_REG_VAL\" = \"\$exp_missing_wf\" ] || { echo \"MISSING AGENT MISMATCH: '\$_REG_VAL' vs '\$exp_missing_wf'\"; bad=1; }
+    _reg_ingress_job no-such-agent; [ -z \"\$_REG_VAL\" ] || { echo \"MISSING JOB NOT EMPTY\"; bad=1; }
+    echo \"agents=\$n bad=\$bad\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bad=0"* ]]
+  # The registry has many agents; make sure the comparison was not vacuous.
+  [[ "$output" =~ agents=([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 10 ]
+}
+
+@test "registry preload: a map built for one registry is ignored once CANARY_RINGS points elsewhere (#1259)" {
+  local other="$BATS_TEST_TMPDIR/other-rings.json"
+  jq '.agents["dev-lead"].run_workflow = "Changed Workflow Name" | .ingress.workflow = "Changed Ingress"' "$RINGS" > "$other"
+  run env CANARY_RINGS="$RINGS" bash -c "source '$ORCH'; set +e
+    _registry_preload
+    _reg_run_workflow dev-lead; before=\"\$_REG_VAL\"; _reg_ingress_wf; before_i=\"\$_REG_VAL\"
+    export CANARY_RINGS='$other'
+    _reg_run_workflow dev-lead; after=\"\$_REG_VAL\"; _reg_ingress_wf; after_i=\"\$_REG_VAL\"
+    echo \"\$before|\$after|\$before_i|\$after_i\""
+  [ "$status" -eq 0 ]
+  [ "$output" != "" ]
+  [[ "$output" == *"|Changed Workflow Name|"* ]]
+  [[ "$output" == *"|Changed Ingress" ]]
+  [[ "$output" != "Changed Workflow Name|"* ]]
+}
+
+@test "hot path: a cached non-consumer lookup forks no jq and makes no gh call once the registry is preloaded (#1259)" {
+  _ingress_stub
+  local real_jq shim; real_jq="$(command -v jq)"
+  shim="$(mktemp -d "$BATS_TEST_TMPDIR/jqshim.XXXXXX")"
+  export JQ_LOG="$BATS_TEST_TMPDIR/jq.log"; : > "$JQ_LOG"
+  printf '#!/usr/bin/env bash\necho "$*" >> "$JQ_LOG"\nexec %q "$@"\n' "$real_jq" > "$shim/jq"; chmod +x "$shim/jq"
+  export PATH="$shim:$PATH"
+  local cache="$BATS_TEST_TMPDIR/cache-hot"; mkdir -p "$cache"
+  # PRELOADED: after the first (cache-priming) call, repeat calls cost no jq and no gh at all.
+  run env _RUNS_CACHE_DIR="$cache" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'; set +e; _registry_preload
+    _agent_run_json dev-lead org/none '' >/dev/null 2>&1
+    : > '$JQ_LOG'; : > '$GH_LOG'
+    for i in 1 2 3; do out=\"\$(_agent_run_json dev-lead org/none '' 2>/dev/null)\"; [ \"\$out\" = '[]' ] || echo \"BAD:\$out\"; done
+    echo \"jq=\$(wc -l < '$JQ_LOG' | tr -d ' ') gh=\$(wc -l < '$GH_LOG' | tr -d ' ')\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "jq=0 gh=0" ]
+  # CONTROL (not preloaded): the same calls DO parse the registry, so the assertion above is not vacuous.
+  cache="$BATS_TEST_TMPDIR/cache-hot-control"; mkdir -p "$cache"
+  run env -u CANARY_PRELOAD_REGISTRY _RUNS_CACHE_DIR="$cache" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'; set +e
+    _agent_run_json dev-lead org/none '' >/dev/null 2>&1
+    : > '$JQ_LOG'
+    out=\"\$(_agent_run_json dev-lead org/none '' 2>/dev/null)\"
+    echo \"jq=\$(wc -l < '$JQ_LOG' | tr -d ' ')\""
+  [ "$status" -eq 0 ]
+  [ "$output" != "jq=0" ]
+}
+
+@test "_cache_name: a fork-free, filesystem-safe, INJECTIVE encoding (A B vs A/B, multibyte, long keys) (#1259)" {
+  run bash -c "source '$ORCH'; set +e
+    declare -A seen; bad=0
+    for k in 'org/r//A B//1000' 'org/r//A/B//1000' 'org/r//A_B//1000' 'org/r//A%20B//1000' 'org/r//A+B//1000' \
+             'org/r//PR Review — Mention Trigger//1000' 'org/r//PR Review - Mention Trigger//1000' \
+             'jobs//org/r//123' 'org/r//jobs//123' '' '-' '.' '..' 'a' 'A' 'h_abc' 'h%5Fabc'; do
+      _cache_name \"\$k\"; n=\"\$_CACHE_NAME\"
+      [[ \"\$n\" =~ ^[A-Za-z0-9.%_-]*\$ ]] || { echo \"UNSAFE:[\$k]\"; bad=1; }
+      [ -z \"\${seen[n:\$n]+x}\" ] || { echo \"COLLIDE:[\$k] vs [\${seen[n:\$n]}]\"; bad=1; }   # n: prefix: bash rejects an empty assoc subscript
+      seen[\"n:\$n\"]=\"\$k\"
+    done
+    _cache_name 'x — y'; case \"\$_CACHE_NAME\" in *%E2%80%94*) ;; *) echo \"EMDASH NOT BYTE-ENCODED: \$_CACHE_NAME\"; bad=1 ;; esac
+    long1=\$(printf 'x%.0s' {1..300}); long2=\"\${long1}y\"
+    _cache_name \"\$long1\"; l1=\"\$_CACHE_NAME\"; _cache_name \"\$long2\"; l2=\"\$_CACHE_NAME\"
+    [ \"\${#l1}\" -le 80 ] && [ \"\${l1:0:2}\" = h_ ] || { echo \"LONG KEY NOT HASHED: \${#l1} \$l1\"; bad=1; }
+    [ \"\$l1\" != \"\$l2\" ] || { echo 'LONG KEYS COLLIDE'; bad=1; }
+    echo bad=\$bad"
+  [ "$status" -eq 0 ]
+  [ "$output" = "bad=0" ]
+}
+
+@test "_cat_file: byte-identical to cat on both sides of the in-shell threshold, unicode and trailing newlines included (#1259)" {
+  local d="$BATS_TEST_TMPDIR/catfiles"; mkdir -p "$d"
+  printf '[]' > "$d/tiny"
+  local n
+  for n in 63 64 65 4096; do head -c "$n" /dev/zero | tr '\0' 'a' > "$d/b$n"; done
+  head -c 300000 /dev/zero | tr '\0' 'z' > "$d/big"
+  printf 'caf\xc3\xa9 \xe2\x80\x94 "q" \\\\ \n  spaced  ' > "$d/uni"
+  printf 'line1\nline2\n\n\n' > "$d/trailing-newlines"
+  run bash -c "source '$ORCH'; set +e; bad=0
+    for f in tiny b63 b64 b65 b4096 big uni trailing-newlines; do
+      a=\"\$(_cat_file '$d'/\$f | od -An -tx1 | tr -d ' \n' | cksum)\"; b=\"\$(cat '$d'/\$f | od -An -tx1 | tr -d ' \n' | cksum)\"
+      [ \"\$a\" = \"\$b\" ] || { echo \"DIFFERENT: \$f\"; bad=1; }
+    done
+    echo bad=\$bad"
+  [ "$status" -eq 0 ]
+  [ "$output" = "bad=0" ]
+}
+
+@test "_repo_wf_runs_cached: a cache hit returns the cached bytes exactly — unicode, quotes, backslashes (#1259)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export CALLS="$BATS_TEST_TMPDIR/rt-calls"; : > "$CALLS"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+printf '%s' '[{"conclusion":"success","createdAt":"2026-01-10T00:00:00Z","databaseId":1,"workflowName":"PR Review — \"Trigger\" \\ back\\slash  "}]'
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+  run env _RUNS_CACHE_DIR="$BATS_TEST_TMPDIR/rc-bytes" bash -c "
+    mkdir -p \"\$_RUNS_CACHE_DIR\"; source '$ORCH'; set +e
+    live=\"\$(_repo_wf_runs_cached some/repo 'PR Review — Trigger' 0)\"
+    hit=\"\$(_repo_wf_runs_cached some/repo 'PR Review — Trigger' 0)\"
+    [ \"\$live\" = \"\$hit\" ] && echo SAME || echo DIFFERENT
+    printf '%s' \"\$hit\" | jq -r '.[0].workflowName'
+    echo \"calls=\$(wc -l < '$CALLS' | tr -d ' ')\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SAME"* ]]
+  [[ "$output" == *'PR Review — "Trigger" \ back\slash  '* ]]
+  [[ "$output" == *"calls=1"* ]]
+}
+
+@test "CANARY_TIMING: auto mode is on only for scheduled/dispatched runs in Actions; 1 and 0 override (#1259)" {
+  chk() { env -u CANARY_TIMING -u GITHUB_ACTIONS -u GITHUB_EVENT_NAME "$@" bash -c "source '$ORCH'; set +e; _timing_enabled && echo on || echo off"; }
+  [ "$(chk)" = "off" ]                                                                   # local / tests
+  [ "$(chk GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request)" = "off" ]                # CI test runs
+  [ "$(chk GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push)" = "off" ]
+  [ "$(chk GITHUB_ACTIONS=true GITHUB_EVENT_NAME=schedule)" = "on" ]                     # the cron sweep
+  [ "$(chk GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch)" = "on" ]
+  [ "$(chk CANARY_TIMING=1)" = "on" ]                                                    # forced on
+  [ "$(chk CANARY_TIMING=0 GITHUB_ACTIONS=true GITHUB_EVENT_NAME=schedule)" = "off" ]    # forced off
+}
+
+@test "CANARY_TIMING: the report counts gh calls and agent_run_json calls and writes the step summary (#1259)" {
+  _ingress_stub
+  run env CANARY_TIMING=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary.md" bash -c "
+    source '$ORCH'; set +e
+    export _RUNS_CACHE_DIR=\"\$(mktemp -d)\"; _TIMING_SUB=smoke; _registry_preload; _timing_start
+    for r in a b c; do _agent_run_json dev-lead org/\$r '' >/dev/null 2>&1; done
+    _timing_report 2>&1 >/dev/null
+    rm -rf \"\$_RUNS_CACHE_DIR\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canary timing [smoke]:"* ]]
+  [[ "$output" == *"gh_calls=6"* ]]                   # per-role + ingress lookup for each of 3 repos
+  [[ "$output" == *"agent_run_json_calls=3"* ]]
+  [[ "$output" == *"run list"* ]]
+  grep -q "canary timing (smoke)" "$BATS_TEST_TMPDIR/summary.md"
+}
+
+@test "_registry_preload: a delimiter in a registry value refuses the preload, and a failed reload drops the stale memo (#1259)" {
+  local good="$BATS_TEST_TMPDIR/good.json" bad="$BATS_TEST_TMPDIR/bad.json"
+  printf '%s' '{"ingress":{"workflow":"Agent Ingress"},"agents":{"a":{"run_workflow":"A"},"b":{"run_workflow":"B"}}}' > "$good"
+  jq -n '{ingress:{workflow:"Agent Ingress"},agents:{a:{run_workflow:"A\u001fX"},b:{run_workflow:"B"}}}' > "$bad"
+  jq -n '{ingress:{workflow:"Agent Ingress"},agents:{a:{run_workflow:"line1\nline2"}}}' > "$BATS_TEST_TMPDIR/nl.json"
+  run env CANARY_RINGS="$bad" bash -c "source '$ORCH'; _registry_preload && echo loaded || echo refused"
+  [ "$output" = "refused" ]
+  run env CANARY_RINGS="$BATS_TEST_TMPDIR/nl.json" bash -c "source '$ORCH'; _registry_preload && echo loaded || echo refused"
+  [ "$output" = "refused" ]
+  # good load, then a failing reload of the SAME path (made unreadable) must not leave the old arrays served
+  run env CANARY_RINGS="$good" bash -c "source '$ORCH'; _registry_preload || exit 9
+    _reg_run_workflow a; echo \"\$_REG_VAL\"
+    CANARY_RINGS='$bad'; _registry_preload || true; echo \"loaded_for=[\$_REG_LOADED_FOR]\"
+    CANARY_RINGS='$good'; _registry_preload || true; CANARY_RINGS='$BATS_TEST_TMPDIR/missing.json'; _registry_preload || echo reload_failed
+    echo \"loaded_for=[\$_REG_LOADED_FOR]\""
+  [ "${lines[0]}" = "A" ]
+  [ "${lines[1]}" = "loaded_for=[]" ]
+  [[ "$output" == *"reload_failed"* ]]
+  [ "${lines[3]}" = "loaded_for=[]" ]
+}
+
+@test "_cache_name: with no hasher installed, long keys keep their full (injective) encoding instead of an abbreviated name (#1259)" {
+  run bash -c "source '$ORCH'
+    sha256sum() { return 127; }; shasum() { return 127; }
+    long1=\$(printf 'x%.0s' {1..300}); long2=\"\${long1}y\"
+    _cache_name \"\$long1\"; a=\$_CACHE_NAME; _cache_name \"\$long2\"; b=\$_CACHE_NAME
+    [ \"\$a\" != \"\$b\" ] && [ \"\$a\" = \"\$long1\" ] && [ \"\$b\" = \"\$long2\" ] && echo distinct"
+  [ "$output" = "distinct" ]
+}
+
+@test "_timing_kind: gh api calls group by endpoint, not by repo/tag/id (#1259)" {
+  run bash -c "source '$ORCH'
+    k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
+    k run list -R o/r
+    k api repos/o/a/git/ref/tags/v1
+    k api -H 'Accept: x' repos/o/b/git/ref/tags/v2?per_page=1
+    k api --jq .x /repos/o/c/actions/runs/9
+    k api repos/o/d/commits/abc123
+    k api repos/o/e/commits/def456
+    k api repos/o/f/contents/a/b/c.txt
+    k api repos/o/g
+    k api /installation/repositories"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "run list" ]
+  [ "${lines[1]}" = "api repos/git/ref" ]
+  [ "${lines[2]}" = "api repos/git/ref" ]
+  [ "${lines[3]}" = "api repos/actions/runs" ]
+  [ "${lines[4]}" = "api repos/commits" ]             # an id in the 5th segment is dropped, not kept per call
+  [ "${lines[5]}" = "api repos/commits" ]
+  [ "${lines[6]}" = "api repos/contents" ]
+  [ "${lines[7]}" = "api repos/" ]
+  [ "${lines[8]}" = "api installation/" ]
+}
+
+@test "main: the timing report runs for a caller-supplied cache dir, which is not removed (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/callerdir"; mkdir -p "$d"
+  run env CANARY_TIMING=1 _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH'; cmd_drift() { gh run list -R org/a >/dev/null 2>&1; }; main drift 2>&1"
+  [ -d "$d" ]
+  [[ "$output" == *"canary timing [drift]:"* ]]
+  [ -z "$(ls -A "$d")" ]                               # per-process timing files are removed at exit
+}
+
 @test "_agent_run_json: the jobs-read circuit breaker stops after the first exhausted 5xx instead of retrying every run (#1224)" {
   _ingress_stub
   local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"

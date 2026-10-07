@@ -80,6 +80,94 @@ CANARY_PROMOTION_FAILURE_ESCALATE_AFTER="${CANARY_PROMOTION_FAILURE_ESCALATE_AFT
 _jq()  { jq "$@" "$CANARY_RINGS"; }
 _agent_field() { _jq -r --arg a "$1" ".agents[\$a].$2"; }
 
+# ── hot-path lookups without forks (#1259) ───────────────────────────────────────────────────────
+# _agent_run_json runs once per (agent, repo, window) — thousands of times per sweep, almost always
+# inside a `$(...)` subshell. Before this, each call forked jq three times to re-parse the whole
+# registry (run_workflow, the ingress workflow name, ingress_job) and twice more to hash cache keys,
+# which made a non-consumer lookup ~26 ms instead of ~10 ms (measured; see #1259).
+#
+# Registry memo: main() calls _registry_preload ONCE in the parent shell, before the fan-out forks its
+# subshells, which inherit the arrays. Outside main (tests that source this file) nothing is preloaded
+# and every accessor falls back to the original jq lookup, so behaviour is identical either way.
+declare -A _REG_RUN_WF=() _REG_INGRESS_JOB=()
+_REG_INGRESS_WF=""; _REG_LOADED_FOR=""; _REG_VAL=""
+
+# _registry_preload — load run_workflow, ingress_job and the ingress workflow name for every agent in a
+# SINGLE jq call. The unit separator (\x1f) is non-whitespace, so `read` keeps empty fields.
+_registry_preload() {
+  # Invalidate first so a failed (re)load falls back to the jq lookups instead of serving a stale memo.
+  _REG_LOADED_FOR=""; _REG_RUN_WF=(); _REG_INGRESS_JOB=(); _REG_INGRESS_WF=""
+  local path="${CANARY_RINGS:-}" dump agent wf job iwf
+  [ -n "$path" ] && [ -r "$path" ] || return 1
+  # A value containing a newline or U+001F would corrupt the framing; refuse to preload (jq errors) so
+  # every lookup uses the exact per-call jq path instead.
+  dump="$(jq -r 'def chk: if test("[\n\u001f]") then error("delimiter in registry value") else . end;
+                 ((.ingress?.workflow? // "") | tostring | chk),
+                 ((.agents // {}) | to_entries[]
+                  | [.key, (.value.run_workflow | tostring), ((.value.ingress_job // "") | tostring)]
+                  | map(chk) | join("\u001f"))' "$path" 2>/dev/null)" || return 1
+  _REG_RUN_WF=(); _REG_INGRESS_JOB=()
+  { IFS= read -r iwf || true
+    while IFS=$'\x1f' read -r agent wf job; do
+      [ -n "$agent" ] || continue
+      _REG_RUN_WF["$agent"]="$wf"; _REG_INGRESS_JOB["$agent"]="$job"
+    done; } <<< "$dump"
+  _REG_INGRESS_WF="${iwf:-Agent Ingress}"
+  _REG_LOADED_FOR="$path"
+}
+
+# Accessors set _REG_VAL (no command substitution, so no fork). Each returns the same value as the
+# jq lookup it replaces ("null" for a missing run_workflow, "" for a missing ingress_job).
+_reg_loaded() { [ -n "$_REG_LOADED_FOR" ] && [ "$_REG_LOADED_FOR" = "${CANARY_RINGS:-}" ]; }
+_reg_run_workflow() {
+  if _reg_loaded && [[ -v _REG_RUN_WF["$1"] ]]; then _REG_VAL="${_REG_RUN_WF[$1]}"
+  else _REG_VAL="$(_agent_field "$1" run_workflow)"; fi
+}
+_reg_ingress_job() {
+  if _reg_loaded && [[ -v _REG_INGRESS_JOB["$1"] ]]; then _REG_VAL="${_REG_INGRESS_JOB[$1]}"
+  else _REG_VAL="$(_jq -r --arg a "$1" '(.agents[$a].ingress_job)? // empty' 2>/dev/null || true)"; fi
+}
+_reg_ingress_wf() {
+  if _reg_loaded; then _REG_VAL="$_REG_INGRESS_WF"
+  else _REG_VAL="$(_jq -r '.ingress?.workflow? // empty' 2>/dev/null || true)"; _REG_VAL="${_REG_VAL:-Agent Ingress}"; fi
+}
+
+# _cat_file <file> — print a cache file's bytes. A small file is read in-shell (the hot case is a 2-byte "[]"
+# for a repo with no such workflow: a `cat` fork per hit adds up over thousands of calls); anything bigger
+# falls back to cat, because bash `read` is slower than cat on big files (measured: 670 KB, 19 ms vs 12 ms).
+# `read -n 64` returns 0 only when it stopped at the limit, i.e. the file may be larger.
+_cat_file() {
+  local _c=""
+  if IFS= read -r -d '' -n 64 _c < "$1"; then cat "$1"; else printf '%s' "$_c"; fi
+}
+
+# _cache_name <key> — set _CACHE_NAME to a filesystem-safe name for <key>, without forking for any key whose
+# encoding fits in a filename (the hot path: repo/workflow names are short). It is an
+# INJECTIVE byte-wise percent-encoding ([A-Za-z0-9.-] kept; every other byte, "%" and "_" included, as
+# %XX), so two distinct keys can never share a cache file — the property the sha256 names gave (a plain
+# char substitution would map a workflow "A B" and "A/B" on one repo to the same file and cross-
+# contaminate their run history). The old name cost three forks per lookup (printf | sha256sum | cut).
+# An encoding too long for a filename falls back to a sha256 prefixed "h_" (which an encoded name can
+# never start with: "_" is always encoded) — that case does fork. With no hasher installed it keeps the
+# full encoding instead: still injective, and a name over the filesystem limit only fails to cache.
+_cache_name() {
+  local LC_ALL=C
+  local key="$1" out="" c i n h
+  n=${#key}
+  for (( i=0; i<n; i++ )); do
+    c="${key:i:1}"
+    case "$c" in
+      [A-Za-z0-9.-]) out+="$c" ;;
+      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
+    esac
+  done
+  if [ "${#out}" -gt 200 ]; then
+    h="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)" || h=""
+    [ -z "$h" ] || out="h_${h}"
+  fi
+  _CACHE_NAME="$out"
+}
+
 # ordered_channels <agent> — e.g. "next,ring0,ring1,stable"
 ordered_channels() {
   _jq -r --arg a "$1" '.agents[$a].rings | sort_by(.order) | map(.channel) | join(",")'
@@ -601,7 +689,7 @@ _gh_retry_after() {
 # workflow but no runs" — the signal that a repo may be ADR-0007-collapsed. The not-found
 # verdict is cached alongside the [] (a `.nf` marker) so a strict cache hit still reports it.
 _repo_wf_runs_cached() {
-  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" out err summary ra delay span expo errfile cachef key keyhash
+  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" out err summary ra delay span expo errfile cachef key
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
@@ -610,23 +698,16 @@ _repo_wf_runs_cached() {
   # Cache hit? A non-empty cache file for this (repo, workflow) — including a cached "[]"
   # for a no-runs / not-found workflow, so it is never re-queried within the sweep.
   if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
-    # Hash the (repo, workflow) key into the filename so distinct pairs can never collide.
-    # A plain char-substitution (e.g. non-alnum → "_") would map a workflow named "A B" and
-    # one named "A/B" on the same repo to the same file — cross-contaminating their cached
-    # run history and so their gate health. Workflow display names carry spaces and em-dashes,
-    # so this is a real collision surface. sha256 (not sha1/md5 — those trip weak-hash linters
-    # and are collision-broken) keeps the mapping injective; fall back to substitution only if
-    # no hasher exists. This is a filename derivation, not a security context.
-    # The run limit is part of the key: a shorter list cached for the default limit must never serve
-    # the ingress read that asks for more runs (it would look like a quieter repo).
+    # Encode the (repo, workflow, limit) key into the filename so distinct keys can never collide
+    # (see _cache_name: injective, and fork-free for names that fit in a filename, #1259). A plain
+    # char-substitution would map a workflow "A B" and "A/B" on one repo to the same file and
+    # cross-contaminate their run history. The run limit is part of the key: a shorter list cached for
+    # the default limit must never serve the ingress read that asks for more runs.
     key="${repo}//${wf}//${limit}"
-    # sha256sum on Linux runners, shasum -a 256 on macOS; substitution only if neither
-    # exists (and then, at worst, the pre-existing collision surface — never a crash).
-    keyhash="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
-    [ -n "$keyhash" ] || keyhash="${key//[^A-Za-z0-9._-]/_}"
-    cachef="$_RUNS_CACHE_DIR/${keyhash}.json"
+    _cache_name "$key"
+    cachef="$_RUNS_CACHE_DIR/${_CACHE_NAME}.json"
     if [ -s "$cachef" ]; then
-      cat "$cachef"
+      _cat_file "$cachef"
       [ "$strict" = "1" ] && [ -e "${cachef}.nf" ] && return 3
       return 0
     fi
@@ -719,10 +800,88 @@ _run_json() {
 # .github checkout with no .github-private tree (the same constraint as the inline autocut,
 # #613/#1069). Keep the two in step if the attribution rules change.
 
+# ── CANARY_TIMING: where does a sweep spend its time? (#1259) ───────────────────────────────────────
+# CANARY_TIMING=1 forces it on, 0 forces it off; unset ("auto") it is on only for scheduled and
+# workflow_dispatch runs in GitHub Actions, so test and pull_request runs are untouched. When on,
+# `gh` is wrapped in a function (inherited by every command-substitution subshell) that appends
+# "<start>\t<end>\t<gh subcommand>" per call to a file, and _agent_run_json counts its calls. At exit
+# the parent prints one summary: wall time, time spent inside gh vs. in this script, calls by kind
+# and the slowest ones. Everything is best-effort and never changes the exit status.
+_timing_enabled() {
+  case "${CANARY_TIMING:-auto}" in
+    1|true|on) return 0 ;;
+    0|false|off) return 1 ;;
+  esac
+  [ "${GITHUB_ACTIONS:-}" = "true" ] || return 1
+  case "${GITHUB_EVENT_NAME:-}" in schedule|workflow_dispatch) return 0 ;; esac
+  return 1
+}
+
+_timing_start() {
+  _timing_enabled || return 0
+  [ -n "${EPOCHREALTIME:-}" ] && [ -n "${_RUNS_CACHE_DIR:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] || return 0
+  _TIMING_LOG="$_RUNS_CACHE_DIR/.gh-timing.$$.tsv"; _TIMING_CALLS="$_RUNS_CACHE_DIR/.agent-run-calls.$$"
+  : > "$_TIMING_LOG" 2>/dev/null || { unset _TIMING_LOG _TIMING_CALLS; return 0; }
+  : > "$_TIMING_CALLS" 2>/dev/null || true
+  _TIMING_T0="$EPOCHREALTIME"
+  gh() {
+    local t0="$EPOCHREALTIME" rc=0
+    command gh "$@" || rc=$?
+    _timing_kind "$@"
+    printf '%s\t%s\t%s\n' "$t0" "$EPOCHREALTIME" "$_TIMING_KIND" >> "$_TIMING_LOG" 2>/dev/null || true
+    return "$rc"
+  }
+}
+
+# Group calls by kind: "<cmd> <subcmd>", and for `gh api` the endpoint with owner/repo and the trailing id
+# (tag, run id, ...) dropped, so per-tag lookups share a row instead of each becoming its own.
+_timing_kind() {
+  _TIMING_KIND="${1:-} ${2:-}"
+  [ "${1:-}" = api ] || return 0
+  shift
+  local a skip=0 p
+  for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$a" in
+      -X|-H|-f|-F|-q|-t|--method|--header|--field|--raw-field|--jq|--template) skip=1; continue ;;
+      -*) continue ;;
+    esac
+    a="${a%%\?*}"; a="${a#/}"
+    IFS=/ read -r -a p <<< "$a"
+    # repos/<o>/<r>/<resource>[/<sub>[/<id>...]]: keep the resource, and the sub-resource only when an id
+    # follows it (so repos/o/r/commits/<sha> and .../contents/<path> collapse to one row each).
+    if [ "${#p[@]}" -ge 6 ] && [ "${p[3]:-}" != contents ]; then _TIMING_KIND="api ${p[0]:-}/${p[3]:-}/${p[4]:-}"
+    else _TIMING_KIND="api ${p[0]:-}/${p[3]:-}"; fi
+    return 0
+  done
+}
+
+_timing_report() {
+  [ -n "${_TIMING_LOG:-}" ] && [ -f "$_TIMING_LOG" ] || return 0
+  local calls=0 raw head kinds out
+  [ -f "${_TIMING_CALLS:-}" ] && calls="$(wc -c < "$_TIMING_CALLS" 2>/dev/null | tr -d ' ')"
+  raw="$(awk -F'\t' -v t0="${_TIMING_T0:-0}" -v t1="${EPOCHREALTIME:-0}" -v calls="${calls:-0}" -v subcmd="${_TIMING_SUB:-?}" '
+    function f(x) { gsub(",", ".", x); return x + 0 }
+    { d = f($2) - f($1); n++; sum += d; k[$3]++; ks[$3] += d; if (d > mx[$3]) mx[$3] = d }
+    END {
+      wall = f(t1) - f(t0); if (wall < 0.001) wall = 0.001
+      printf "H\t0\tcanary timing [%s]: wall=%.0fs gh_calls=%d gh_time=%.0fs (%.0f%% of wall) script_time=%.0fs agent_run_json_calls=%s\n", subcmd, wall, n, sum, 100 * sum / wall, wall - sum, calls
+      for (c in k) printf "K\t%.3f\t  %-22s calls=%-5d total=%7.1fs avg=%6.2fs max=%6.1fs\n", ks[c], c, k[c], ks[c], ks[c] / k[c], mx[c]
+    }' "$_TIMING_LOG" 2>/dev/null)" || return 0
+  head="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="H"{print $3}')"
+  [ -n "$head" ] || return 0
+  kinds="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="K"' | sort -t$'\t' -k2,2 -rn | cut -f3 | head -12)"
+  out="$head"; [ -n "$kinds" ] && out="$head"$'\n'"$kinds"
+  printf '%s\n' "$out" >&2
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '\n<details><summary>canary timing (%s)</summary>\n\n```\n%s\n```\n</details>\n' "${_TIMING_SUB:-?}" "$out" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # _ingress_workflow — the collapsed ingress workflow's display name (registry `.ingress.workflow`).
 _ingress_workflow() {
-  local w; w="$(_jq -r '.ingress?.workflow? // empty' 2>/dev/null || true)"
-  printf '%s' "${w:-Agent Ingress}"
+  _reg_ingress_wf; printf '%s' "$_REG_VAL"
 }
 
 # _record_unresolved <agent> <repo> <reason> — note a ring member whose runs could not be
@@ -757,16 +916,17 @@ _unresolved_flag_path() {
 # (deleted or expired — HTTP 404); 1 when the jobs endpoint stayed unreadable after the full backoff
 # (a transient/systemic failure — callers use that to stop reading, see _ingress_agent_runs).
 _run_jobs_json() {
-  local repo="$1" id="$2" cachef="" keyhash out attempt=1
+  local repo="$1" id="$2" cachef="" out attempt=1
   local attempts="${3:-${CANARY_GH_RETRIES:-6}}" base="${CANARY_GH_RETRY_SLEEP:-2}" delay span expo
   case "$attempts" in ''|*[!0-9]*) attempts=6 ;; esac
   case "$base" in ''|*[!0-9]*) base=2 ;; esac
   [ "$attempts" -lt 1 ] && attempts=1
   if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
-    keyhash="$(printf 'jobs//%s//%s' "$repo" "$id" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
-    [ -n "$keyhash" ] || keyhash="jobs_${repo//[^A-Za-z0-9._-]/_}_${id}"
-    cachef="$_RUNS_CACHE_DIR/${keyhash}.jobs.json"
-    [ -s "$cachef" ] && { cat "$cachef"; return 0; }
+    _cache_name "jobs//${repo}//${id}"
+    cachef="$_RUNS_CACHE_DIR/${_CACHE_NAME}.jobs.json"
+    if [ -s "$cachef" ]; then
+      _cat_file "$cachef"; return 0
+    fi
   fi
   local errf; errf="$(mktemp 2>/dev/null || echo /dev/null)"
   while :; do
@@ -795,7 +955,7 @@ _ingress_run_limit() {
   local n="${CANARY_INGRESS_RUN_LIMIT:-5000}"
   case "$n" in ''|*[!0-9]*) n=5000 ;; esac
   [ "$n" -lt 1 ] && n=5000
-  echo "$n"
+  _INGRESS_RUN_LIMIT="$n"   # a variable, not stdout: callers avoid a `$(...)` fork per call (#1259)
 }
 
 # _ingress_agent_runs <agent> <repo> <role> <since_z>   (ingress runs JSON on stdin)
@@ -807,7 +967,7 @@ _ingress_run_limit() {
 # every role) or unreadable jobs makes the member UNRESOLVED.
 _ingress_agent_runs() {
   local agent="$1" repo="$2" role="$3" since="$4" wf iraw id created rconc jobs rec recs=""
-  wf="$(_agent_field "$agent" run_workflow)"
+  _reg_run_workflow "$agent"; wf="$_REG_VAL"
   iraw="$(cat)"
   # Bound the per-run `gh run view` fan-out (#810/#819): read at most CANARY_INGRESS_JOBS_MAX
   # (default 300) of the newest in-window runs. Beyond that the member is UNRESOLVED (fail closed) —
@@ -824,7 +984,7 @@ _ingress_agent_runs() {
   # jobs cap: the BASELINE read records the oldest listed day (a valid sample of the newest days), a
   # gating window is UNRESOLVED. A list that reaches back before the window start is complete.
   local list_max list_n list_oldest
-  list_max="$(_ingress_run_limit)"
+  _ingress_run_limit; list_max="$_INGRESS_RUN_LIMIT"
   # `gh run list` output is passed through unchecked on success: a non-array body would count as 0 runs
   # (skipping the cap check) and iterate to nothing, reading as "no caller". Fail closed instead.
   if ! jq -e 'type == "array"' >/dev/null 2>&1 <<< "${iraw:-[]}"; then
@@ -951,15 +1111,16 @@ _ingress_agent_runs() {
 # A genuine fetch failure fails CLOSED (non-zero), exactly like _run_json.
 _agent_run_json() {
   local agent="$1" repo="$2" since="$3" wf iwf raw iraw role rc=0
+  [ -n "${_TIMING_CALLS:-}" ] && { printf . >> "$_TIMING_CALLS" 2>/dev/null || true; }   # call counter (CANARY_TIMING)
   if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
-  wf="$(_agent_field "$agent" run_workflow)"
+  _reg_run_workflow "$agent"; wf="$_REG_VAL"
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
   if [ "$rc" -eq 3 ]; then
-    rc=0; iwf="$(_ingress_workflow)"
-    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$(_ingress_run_limit)")" || rc=$?
+    rc=0; _reg_ingress_wf; iwf="$_REG_VAL"; _ingress_run_limit
+    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT")" || rc=$?
     case "$rc" in
       0)
-        role="$(_jq -r --arg a "$agent" '(.agents[$a].ingress_job)? // empty' 2>/dev/null || true)"
+        _reg_ingress_job "$agent"; role="$_REG_VAL"
         if [ -z "$role" ]; then
           _record_unresolved "$agent" "$repo" "no '$wf' workflow but '$iwf' is present and the agent registers no ingress_job"
           echo '[]'; return 0
@@ -3663,14 +3824,22 @@ main() {
   # (#819) — exported so subshells inherit the path, and reaped on exit. This trap lives in
   # the PARENT shell; _repo_wf_runs_cached's errfile trap lives in the per-call subshells, so
   # the two are in different shells and never clobber each other.
+  # The timing report runs on exit either way; only a directory main created is removed.
+  local _own_cache=0
   if [ -z "${_RUNS_CACHE_DIR:-}" ]; then
     _RUNS_CACHE_DIR="$(mktemp -d 2>/dev/null || true)"
     if [ -n "$_RUNS_CACHE_DIR" ]; then
       export _RUNS_CACHE_DIR
-      trap 'rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
+      _own_cache=1
     fi
   fi
+  _CANARY_OWN_CACHE="$_own_cache"
+  trap '_timing_report; rm -f "${_TIMING_LOG:-}" "${_TIMING_CALLS:-}"; [ "${_CANARY_OWN_CACHE:-0}" = 1 ] && rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
+  # Load the registry lookups ONCE, here in the parent shell, so the fan-out's subshells inherit them
+  # instead of re-parsing the registry per call (#1259). Failure just leaves the jq fallback in place.
+  _registry_preload || true
   local sub="${1:-}"; shift || true
+  _TIMING_SUB="$sub"; _timing_start || true
   case "$sub" in
     evaluate)     [ $# -ge 1 ] || { echo "usage: evaluate <agent>" >&2; return 2; }; cmd_evaluate "$@" ;;
     evaluate-all) cmd_evaluate_all ;;
@@ -3685,6 +3854,10 @@ main() {
     *) echo "::error::usage: canary-rollout.sh {autocut|drift|evaluate|evaluate-all|promote|promote-all|rollback|resolve|sync-issues|sync-promotion-failures} [args]" >&2; return 2 ;;
   esac
 }
+
+# Test hook: CANARY_PRELOAD_REGISTRY=1 preloads the registry lookups at source time, so the whole suite can
+# be re-run against the memoized path (it must behave identically; see tests/canary_rollout.bats).
+[ "${CANARY_PRELOAD_REGISTRY:-}" = "1" ] && { _registry_preload || true; }
 
 # Source-guard: tests source this file to exercise resolve_members etc. without running.
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
