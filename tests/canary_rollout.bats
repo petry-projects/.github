@@ -6161,6 +6161,15 @@ GHEOF
   [ "${lines[3]}" = "loaded_for=[]" ]
 }
 
+@test "_cache_name: with no hasher installed, long keys keep their full (injective) encoding instead of an abbreviated name (#1259)" {
+  run bash -c "source '$ORCH'
+    sha256sum() { return 127; }; shasum() { return 127; }
+    long1=\$(printf 'x%.0s' {1..300}); long2=\"\${long1}y\"
+    _cache_name \"\$long1\"; a=\$_CACHE_NAME; _cache_name \"\$long2\"; b=\$_CACHE_NAME
+    [ \"\$a\" != \"\$b\" ] && [ \"\$a\" = \"\$long1\" ] && [ \"\$b\" = \"\$long2\" ] && echo distinct"
+  [ "$output" = "distinct" ]
+}
+
 @test "_timing_kind: gh api calls group by endpoint, not by repo/tag/id (#1259)" {
   run bash -c "source '$ORCH'
     k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }

@@ -141,13 +141,15 @@ _cat_file() {
   if IFS= read -r -d '' -n 64 _c < "$1"; then cat "$1"; else printf '%s' "$_c"; fi
 }
 
-# _cache_name <key> — set _CACHE_NAME to a filesystem-safe name for <key>, WITHOUT forking. It is an
+# _cache_name <key> — set _CACHE_NAME to a filesystem-safe name for <key>, without forking for any key whose
+# encoding fits in a filename (the hot path: repo/workflow names are short). It is an
 # INJECTIVE byte-wise percent-encoding ([A-Za-z0-9.-] kept; every other byte, "%" and "_" included, as
 # %XX), so two distinct keys can never share a cache file — the property the sha256 names gave (a plain
 # char substitution would map a workflow "A B" and "A/B" on one repo to the same file and cross-
 # contaminate their run history). The old name cost three forks per lookup (printf | sha256sum | cut).
-# An encoding too long for a filename falls back to a sha256 prefixed "h_", which an encoded name can
-# never start with ("_" is always encoded).
+# An encoding too long for a filename falls back to a sha256 prefixed "h_" (which an encoded name can
+# never start with: "_" is always encoded) — that case does fork. With no hasher installed it keeps the
+# full encoding instead: still injective, and a name over the filesystem limit only fails to cache.
 _cache_name() {
   local LC_ALL=C
   local key="$1" out="" c i n h
@@ -160,8 +162,8 @@ _cache_name() {
     esac
   done
   if [ "${#out}" -gt 200 ]; then
-    h="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)"
-    out="h_${h:-${n}x${out:0:100}}"
+    h="$(printf '%s' "$key" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -d' ' -f1)" || h=""
+    [ -z "$h" ] || out="h_${h}"
   fi
   _CACHE_NAME="$out"
 }
@@ -697,7 +699,7 @@ _repo_wf_runs_cached() {
   # for a no-runs / not-found workflow, so it is never re-queried within the sweep.
   if [ -n "${_RUNS_CACHE_DIR:-}" ]; then
     # Encode the (repo, workflow, limit) key into the filename so distinct keys can never collide
-    # (see _cache_name: injective, and fork-free on the hot cache-hit path, #1259). A plain
+    # (see _cache_name: injective, and fork-free for names that fit in a filename, #1259). A plain
     # char-substitution would map a workflow "A B" and "A/B" on one repo to the same file and
     # cross-contaminate their run history. The run limit is part of the key: a shorter list cached for
     # the default limit must never serve the ingress read that asks for more runs.
