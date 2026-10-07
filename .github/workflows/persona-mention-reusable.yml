@@ -473,9 +473,15 @@ jobs:
           # definitive 200/404/other-4xx returns immediately, so a 404 is never
           # turned into wasted retries and the case-analysis below is unchanged.
           raw_fetch() {
-            local url="$1" out="$2" attempt=1 http
+            local url="$1" out="$2" attempt=1 http exit_code
+            # Source the helper functions again to ensure they're available in this subshell
+            # shellcheck source=scripts/lib/persona-mention.sh
+            source .persona-tooling/scripts/lib/persona-mention.sh
             while :; do
-              http="$(curl -sSL --max-time 20 -o "$out" -w '%{http_code}' "$url" || echo 000)"
+              http="$(curl -sSL --max-time 20 -o "$out" -w '%{http_code}' "$url")" || {
+                exit_code=$?
+                http="000"
+              }
               if ! pm_should_retry_status "$http" || [ "$attempt" -ge 3 ]; then
                 printf '%s' "$http"; return 0
               fi
