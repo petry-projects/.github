@@ -848,7 +848,10 @@ _timing_kind() {
     esac
     a="${a%%\?*}"; a="${a#/}"
     IFS=/ read -r -a p <<< "$a"
-    _TIMING_KIND="api ${p[0]:-}/${p[3]:-}/${p[4]:-}"
+    # repos/<o>/<r>/<resource>[/<sub>[/<id>...]]: keep the resource, and the sub-resource only when an id
+    # follows it (so repos/o/r/commits/<sha> and .../contents/<path> collapse to one row each).
+    if [ "${#p[@]}" -ge 6 ] && [ "${p[3]:-}" != contents ]; then _TIMING_KIND="api ${p[0]:-}/${p[3]:-}/${p[4]:-}"
+    else _TIMING_KIND="api ${p[0]:-}/${p[3]:-}"; fi
     return 0
   done
 }
@@ -3799,7 +3802,7 @@ main() {
     fi
   fi
   _CANARY_OWN_CACHE="$_own_cache"
-  trap '_timing_report; [ "${_CANARY_OWN_CACHE:-0}" = 1 ] && rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
+  trap '_timing_report; rm -f "${_TIMING_LOG:-}" "${_TIMING_CALLS:-}"; [ "${_CANARY_OWN_CACHE:-0}" = 1 ] && rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
   # Load the registry lookups ONCE, here in the parent shell, so the fan-out's subshells inherit them
   # instead of re-parsing the registry per call (#1259). Failure just leaves the jq fallback in place.
   _registry_preload || true

@@ -6176,12 +6176,22 @@ GHEOF
     k run list -R o/r
     k api repos/o/a/git/ref/tags/v1
     k api -H 'Accept: x' repos/o/b/git/ref/tags/v2?per_page=1
-    k api --jq .x /repos/o/c/actions/runs/9"
+    k api --jq .x /repos/o/c/actions/runs/9
+    k api repos/o/d/commits/abc123
+    k api repos/o/e/commits/def456
+    k api repos/o/f/contents/a/b/c.txt
+    k api repos/o/g
+    k api /installation/repositories"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "run list" ]
   [ "${lines[1]}" = "api repos/git/ref" ]
   [ "${lines[2]}" = "api repos/git/ref" ]
   [ "${lines[3]}" = "api repos/actions/runs" ]
+  [ "${lines[4]}" = "api repos/commits" ]             # an id in the 5th segment is dropped, not kept per call
+  [ "${lines[5]}" = "api repos/commits" ]
+  [ "${lines[6]}" = "api repos/contents" ]
+  [ "${lines[7]}" = "api repos/" ]
+  [ "${lines[8]}" = "api installation/" ]
 }
 
 @test "main: the timing report runs for a caller-supplied cache dir, which is not removed (#1259)" {
@@ -6191,6 +6201,7 @@ GHEOF
     bash -c "source '$ORCH'; cmd_drift() { gh run list -R org/a >/dev/null 2>&1; }; main drift 2>&1"
   [ -d "$d" ]
   [[ "$output" == *"canary timing [drift]:"* ]]
+  [ -z "$(ls -A "$d")" ]                               # per-process timing files are removed at exit
 }
 
 @test "_agent_run_json: the jobs-read circuit breaker stops after the first exhausted 5xx instead of retrying every run (#1224)" {
