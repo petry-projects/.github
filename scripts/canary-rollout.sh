@@ -95,12 +95,17 @@ _REG_INGRESS_WF=""; _REG_LOADED_FOR=""; _REG_VAL=""
 # _registry_preload — load run_workflow, ingress_job and the ingress workflow name for every agent in a
 # SINGLE jq call. The unit separator (\x1f) is non-whitespace, so `read` keeps empty fields.
 _registry_preload() {
+  # Invalidate first so a failed (re)load falls back to the jq lookups instead of serving a stale memo.
+  _REG_LOADED_FOR=""; _REG_RUN_WF=(); _REG_INGRESS_JOB=(); _REG_INGRESS_WF=""
   local path="${CANARY_RINGS:-}" dump agent wf job iwf
   [ -n "$path" ] && [ -r "$path" ] || return 1
-  dump="$(jq -r '((.ingress?.workflow? // "") | tostring),
+  # A value containing a newline or U+001F would corrupt the framing; refuse to preload (jq errors) so
+  # every lookup uses the exact per-call jq path instead.
+  dump="$(jq -r 'def chk: if test("[\n\u001f]") then error("delimiter in registry value") else . end;
+                 ((.ingress?.workflow? // "") | tostring | chk),
                  ((.agents // {}) | to_entries[]
                   | [.key, (.value.run_workflow | tostring), ((.value.ingress_job // "") | tostring)]
-                  | join("\u001f"))' "$path" 2>/dev/null)" || return 1
+                  | map(chk) | join("\u001f"))' "$path" 2>/dev/null)" || return 1
   _REG_RUN_WF=(); _REG_INGRESS_JOB=()
   { IFS= read -r iwf || true
     while IFS=$'\x1f' read -r agent wf job; do
@@ -813,7 +818,7 @@ _timing_enabled() {
 _timing_start() {
   _timing_enabled || return 0
   [ -n "${EPOCHREALTIME:-}" ] && [ -n "${_RUNS_CACHE_DIR:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] || return 0
-  _TIMING_LOG="$_RUNS_CACHE_DIR/.gh-timing.tsv"; _TIMING_CALLS="$_RUNS_CACHE_DIR/.agent-run-calls"
+  _TIMING_LOG="$_RUNS_CACHE_DIR/.gh-timing.$$.tsv"; _TIMING_CALLS="$_RUNS_CACHE_DIR/.agent-run-calls.$$"
   : > "$_TIMING_LOG" 2>/dev/null || { unset _TIMING_LOG _TIMING_CALLS; return 0; }
   : > "$_TIMING_CALLS" 2>/dev/null || true
   _TIMING_T0="$EPOCHREALTIME"

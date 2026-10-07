@@ -6140,6 +6140,27 @@ GHEOF
   grep -q "canary timing (smoke)" "$BATS_TEST_TMPDIR/summary.md"
 }
 
+@test "_registry_preload: a delimiter in a registry value refuses the preload, and a failed reload drops the stale memo (#1259)" {
+  local good="$BATS_TEST_TMPDIR/good.json" bad="$BATS_TEST_TMPDIR/bad.json"
+  printf '%s' '{"ingress":{"workflow":"Agent Ingress"},"agents":{"a":{"run_workflow":"A"},"b":{"run_workflow":"B"}}}' > "$good"
+  jq -n '{ingress:{workflow:"Agent Ingress"},agents:{a:{run_workflow:"A\u001fX"},b:{run_workflow:"B"}}}' > "$bad"
+  jq -n '{ingress:{workflow:"Agent Ingress"},agents:{a:{run_workflow:"line1\nline2"}}}' > "$BATS_TEST_TMPDIR/nl.json"
+  run env CANARY_RINGS="$bad" bash -c "source '$ORCH'; _registry_preload && echo loaded || echo refused"
+  [ "$output" = "refused" ]
+  run env CANARY_RINGS="$BATS_TEST_TMPDIR/nl.json" bash -c "source '$ORCH'; _registry_preload && echo loaded || echo refused"
+  [ "$output" = "refused" ]
+  # good load, then a failing reload of the SAME path (made unreadable) must not leave the old arrays served
+  run env CANARY_RINGS="$good" bash -c "source '$ORCH'; _registry_preload || exit 9
+    _reg_run_workflow a; echo \"\$_REG_VAL\"
+    CANARY_RINGS='$bad'; _registry_preload || true; echo \"loaded_for=[\$_REG_LOADED_FOR]\"
+    CANARY_RINGS='$good'; _registry_preload || true; CANARY_RINGS='$BATS_TEST_TMPDIR/missing.json'; _registry_preload || echo reload_failed
+    echo \"loaded_for=[\$_REG_LOADED_FOR]\""
+  [ "${lines[0]}" = "A" ]
+  [ "${lines[1]}" = "loaded_for=[]" ]
+  [[ "$output" == *"reload_failed"* ]]
+  [ "${lines[3]}" = "loaded_for=[]" ]
+}
+
 @test "_timing_kind: gh api calls group by endpoint, not by repo/tag/id (#1259)" {
   run bash -c "source '$ORCH'
     k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
