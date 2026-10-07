@@ -839,7 +839,7 @@ _timing_report() {
     }' "$_TIMING_LOG" 2>/dev/null)" || return 0
   head="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="H"{print $3}')"
   [ -n "$head" ] || return 0
-  kinds="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="K"' | sort -t"$(printf '\t')" -k2,2 -rn | cut -f3)"
+  kinds="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="K"' | sort -t$'\t' -k2,2 -rn | cut -f3)"
   out="$head"; [ -n "$kinds" ] && out="$head"$'\n'"$kinds"
   printf '%s\n' "$out" >&2
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -3761,13 +3761,17 @@ main() {
   # (#819) — exported so subshells inherit the path, and reaped on exit. This trap lives in
   # the PARENT shell; _repo_wf_runs_cached's errfile trap lives in the per-call subshells, so
   # the two are in different shells and never clobber each other.
+  # The timing report runs on exit either way; only a directory main created is removed.
+  local _own_cache=0
   if [ -z "${_RUNS_CACHE_DIR:-}" ]; then
     _RUNS_CACHE_DIR="$(mktemp -d 2>/dev/null || true)"
     if [ -n "$_RUNS_CACHE_DIR" ]; then
       export _RUNS_CACHE_DIR
-      trap '_timing_report; rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
+      _own_cache=1
     fi
   fi
+  _CANARY_OWN_CACHE="$_own_cache"
+  trap '_timing_report; [ "${_CANARY_OWN_CACHE:-0}" = 1 ] && rm -rf "${_RUNS_CACHE_DIR:-}"' EXIT
   # Load the registry lookups ONCE, here in the parent shell, so the fan-out's subshells inherit them
   # instead of re-parsing the registry per call (#1259). Failure just leaves the jq fallback in place.
   _registry_preload || true

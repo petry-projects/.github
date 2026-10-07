@@ -6064,7 +6064,7 @@ GHEOF
       seen[\"n:\$n\"]=\"\$k\"
     done
     _cache_name 'x — y'; case \"\$_CACHE_NAME\" in *%E2%80%94*) ;; *) echo \"EMDASH NOT BYTE-ENCODED: \$_CACHE_NAME\"; bad=1 ;; esac
-    long1=\$(printf 'x%.0s' \$(seq 300)); long2=\"\${long1}y\"
+    long1=\$(printf 'x%.0s' {1..300}); long2=\"\${long1}y\"
     _cache_name \"\$long1\"; l1=\"\$_CACHE_NAME\"; _cache_name \"\$long2\"; l2=\"\$_CACHE_NAME\"
     [ \"\${#l1}\" -le 80 ] && [ \"\${l1:0:2}\" = h_ ] || { echo \"LONG KEY NOT HASHED: \${#l1} \$l1\"; bad=1; }
     [ \"\$l1\" != \"\$l2\" ] || { echo 'LONG KEYS COLLIDE'; bad=1; }
@@ -6138,6 +6138,15 @@ GHEOF
   [[ "$output" == *"agent_run_json_calls=3"* ]]
   [[ "$output" == *"run list"* ]]
   grep -q "canary timing (smoke)" "$BATS_TEST_TMPDIR/summary.md"
+}
+
+@test "main: the timing report runs for a caller-supplied cache dir, which is not removed (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/callerdir"; mkdir -p "$d"
+  run env CANARY_TIMING=1 _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH'; cmd_drift() { gh run list -R org/a >/dev/null 2>&1; }; main drift 2>&1"
+  [ -d "$d" ]
+  [[ "$output" == *"canary timing [drift]:"* ]]
 }
 
 @test "_agent_run_json: the jobs-read circuit breaker stops after the first exhausted 5xx instead of retrying every run (#1224)" {
