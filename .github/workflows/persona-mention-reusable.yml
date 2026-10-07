@@ -380,7 +380,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read        # actions/checkout of the tooling repo
-      issues: read          # a PR's labels are read via the issues endpoint
     # The CHEAP pre-filter for the PR path, mirrored from pm_pr_should_route
     # (tests/persona_mention.bats). It runs BEFORE the job starts, so secrets are
     # never exposed to a run a bot, a marked PR body, or an untrusted author
@@ -488,9 +487,8 @@ jobs:
           }
 
           # gh_retry <gh-args...> — run `gh` with bounded retries, retrying on any
-          # non-zero exit (a failed GET read or a dispatch that did not go through;
-          # gh returns non-zero on an HTTP error, so a retried dispatch does not
-          # double-fire in the common case). Non-zero after the last attempt.
+          # non-zero exit. For idempotent GET reads ONLY — never the dispatch POST.
+          # Non-zero after the last attempt.
           gh_retry() {
             local attempt=1
             until gh "$@"; do
@@ -514,7 +512,7 @@ jobs:
           # unlike a discussion), and the labels back the opt-out, the stop-marker
           # check, and the write-mode gate. An unreadable label set must NEVER be
           # read as "no opt-out, no hold, no gate" — fail closed (#755).
-          if ! LABELS="$(gh_retry api "/repos/${SOURCE_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')"; then
+          if ! LABELS="$(gh_retry api --paginate "/repos/${SOURCE_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name')"; then
             echo "::error::could not read labels for ${SOURCE_REPO}#${PR_NUMBER} — refusing to route (an unreadable label set must never be read as 'no opt-out, no hold, no gate')"
             exit 1
           fi
@@ -646,7 +644,10 @@ jobs:
                 echo "Routing to '${slug}' (mode=${mode})."
                 # Forward the event action so the runner-side pre-gate
                 # (.github-private#1909) can pass it into persona-runner-reusable.yml.
-                gh_retry api \
+                # Deliberately NOT gh_retry: a transport failure can land after
+                # GitHub accepted the POST, and the payload has no idempotency key,
+                # so a retry could double-dispatch (and double-fire a write persona).
+                gh api \
                   --method POST \
                   --header "Accept: application/vnd.github+json" \
                   /repos/petry-projects/.github-private/dispatches \
