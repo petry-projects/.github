@@ -820,9 +820,30 @@ _timing_start() {
   gh() {
     local t0="$EPOCHREALTIME" rc=0
     command gh "$@" || rc=$?
-    printf '%s\t%s\t%s %s\n' "$t0" "$EPOCHREALTIME" "${1:-}" "${2:-}" >> "$_TIMING_LOG" 2>/dev/null || true
+    _timing_kind "$@"
+    printf '%s\t%s\t%s\n' "$t0" "$EPOCHREALTIME" "$_TIMING_KIND" >> "$_TIMING_LOG" 2>/dev/null || true
     return "$rc"
   }
+}
+
+# Group calls by kind: "<cmd> <subcmd>", and for `gh api` the endpoint with owner/repo and the trailing id
+# (tag, run id, ...) dropped, so per-tag lookups share a row instead of each becoming its own.
+_timing_kind() {
+  _TIMING_KIND="${1:-} ${2:-}"
+  [ "${1:-}" = api ] || return 0
+  shift
+  local a skip=0 p
+  for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$a" in
+      -X|-H|-f|-F|-q|-t|--method|--header|--field|--raw-field|--jq|--template) skip=1; continue ;;
+      -*) continue ;;
+    esac
+    a="${a%%\?*}"; a="${a#/}"
+    IFS=/ read -r -a p <<< "$a"
+    _TIMING_KIND="api ${p[0]:-}/${p[3]:-}/${p[4]:-}"
+    return 0
+  done
 }
 
 _timing_report() {
@@ -839,7 +860,7 @@ _timing_report() {
     }' "$_TIMING_LOG" 2>/dev/null)" || return 0
   head="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="H"{print $3}')"
   [ -n "$head" ] || return 0
-  kinds="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="K"' | sort -t$'\t' -k2,2 -rn | cut -f3)"
+  kinds="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="K"' | sort -t$'\t' -k2,2 -rn | cut -f3 | head -12)"
   out="$head"; [ -n "$kinds" ] && out="$head"$'\n'"$kinds"
   printf '%s\n' "$out" >&2
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -1080,7 +1101,7 @@ _ingress_agent_runs() {
 # A genuine fetch failure fails CLOSED (non-zero), exactly like _run_json.
 _agent_run_json() {
   local agent="$1" repo="$2" since="$3" wf iwf raw iraw role rc=0
-  [ -n "${_TIMING_CALLS:-}" ] && printf . >> "$_TIMING_CALLS" 2>/dev/null   # call counter (CANARY_TIMING)
+  [ -n "${_TIMING_CALLS:-}" ] && { printf . >> "$_TIMING_CALLS" 2>/dev/null || true; }   # call counter (CANARY_TIMING)
   if [ -z "$repo" ] || [ "$repo" = '*' ]; then echo '[]'; return 0; fi
   _reg_run_workflow "$agent"; wf="$_REG_VAL"
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?

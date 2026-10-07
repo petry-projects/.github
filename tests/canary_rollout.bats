@@ -6140,6 +6140,20 @@ GHEOF
   grep -q "canary timing (smoke)" "$BATS_TEST_TMPDIR/summary.md"
 }
 
+@test "_timing_kind: gh api calls group by endpoint, not by repo/tag/id (#1259)" {
+  run bash -c "source '$ORCH'
+    k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
+    k run list -R o/r
+    k api repos/o/a/git/ref/tags/v1
+    k api -H 'Accept: x' repos/o/b/git/ref/tags/v2?per_page=1
+    k api --jq .x /repos/o/c/actions/runs/9"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "run list" ]
+  [ "${lines[1]}" = "api repos/git/ref" ]
+  [ "${lines[2]}" = "api repos/git/ref" ]
+  [ "${lines[3]}" = "api repos/actions/runs" ]
+}
+
 @test "main: the timing report runs for a caller-supplied cache dir, which is not removed (#1259)" {
   _ingress_stub
   local d="$BATS_TEST_TMPDIR/callerdir"; mkdir -p "$d"
