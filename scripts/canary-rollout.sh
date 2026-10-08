@@ -994,6 +994,32 @@ _ingress_horizon() {
   return 0
 }
 
+# _ingress_runs_fetch <repo> <ingress_workflow> <since_z> — the ingress run list for one window: the
+# date-bounded list (_ingress_horizon) when that is provably complete for the window, else the unbounded
+# one. GitHub caps ANY workflow-run listing that uses a search parameter (`created`) at 1,000 results, so a
+# bounded response of 1,000 runs may have lost the older end silently, and CANARY_INGRESS_RUN_LIMIT's own
+# cap guard (default 5000) would not notice. A bounded list that reaches 1,000 is therefore trusted only if
+# it reaches back BEFORE the window start (everything newer than its oldest run is then in it); otherwise
+# the unbounded list is read instead (slower, but exactly the pre-bound behavior). Same exit codes as
+# _repo_wf_runs_cached (3 = the workflow does not exist).
+_INGRESS_BOUNDED_MAX=1000
+_ingress_runs_fetch() {
+  local repo="$1" iwf="$2" since="$3" out rc=0 n oldest
+  _ingress_run_limit; _ingress_horizon "$since"
+  out="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT" "$_INGRESS_FROM")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$_INGRESS_FROM" ]; then
+    n="$(jq 'if type == "array" then length else 0 end' <<< "${out:-[]}" 2>/dev/null || echo 0)"
+    if [ "${n:-0}" -ge "$_INGRESS_BOUNDED_MAX" ]; then
+      oldest="$(jq -r '[.[]? | (.createdAt // "")] | min // ""' <<< "$out" 2>/dev/null || true)"
+      if [ -z "$since" ] || [ -z "$oldest" ] || ! [[ "$oldest" < "$since" ]]; then
+        out="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT" "")" || rc=$?
+      fi
+    fi
+  fi
+  printf '%s\n' "$out"
+  return "$rc"
+}
+
 # _ingress_run_limit — CANARY_INGRESS_RUN_LIMIT (the `gh run list -L` for an ingress), normalized once so
 # the value sent to the API and the cap comparison in _ingress_agent_runs can never disagree (a
 # non-numeric or < 1 value falls back to the 5000 default instead of aborting the fetch).
@@ -1162,8 +1188,8 @@ _agent_run_json() {
   _reg_run_workflow "$agent"; wf="$_REG_VAL"
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
   if [ "$rc" -eq 3 ]; then
-    rc=0; _reg_ingress_wf; iwf="$_REG_VAL"; _ingress_run_limit; _ingress_horizon "$since"
-    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT" "$_INGRESS_FROM")" || rc=$?
+    rc=0; _reg_ingress_wf; iwf="$_REG_VAL"
+    iraw="$(_ingress_runs_fetch "$repo" "$iwf" "$since")" || rc=$?
     case "$rc" in
       0)
         _reg_ingress_job "$agent"; role="$_REG_VAL"

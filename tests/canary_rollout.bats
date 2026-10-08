@@ -6250,6 +6250,50 @@ GHEOF
   grep -q "CANARY_INGRESS_RUN_LIMIT" "$flag"
 }
 
+# A gh wrapper for the 1,000-result cap on date-filtered run listings: a bounded (--created) listing of
+# org/busy returns exactly 1000 runs whose oldest is <oldest_days> days old; everything else is the normal stub.
+_bounded_cap_stub() {
+  local oldest_days="$1"
+  mv "$STUB_BIN/gh" "$STUB_BIN/gh.real"
+  cat > "$STUB_BIN/gh" <<GHEOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" --repo org/busy "*"--workflow Agent Ingress"*"--created"*)
+    echo "\$*" >> "\$GH_LOG"
+    jq -nc --argjson days $oldest_days '[range(0;1000) | {conclusion:"success", databaseId:(5000+.), workflowName:"Agent Ingress",
+      createdAt:((now - (\$days*86400) + (.*60)) | strftime("%Y-%m-%dT%H:%M:%SZ"))}]'
+    exit 0 ;;
+esac
+exec "$STUB_BIN/gh.real" "\$@"
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+
+@test "_agent_run_json: a date-bounded ingress list that reaches GitHub's 1000-result search cap without reaching the window start falls back to the unbounded list (#1262 review)" {
+  _ingress_stub
+  _bounded_cap_stub 1      # 1000 runs spanning the last ~16h: does NOT reach back past a 3-day-old window start
+  local since; since="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '$since' 2>/dev/null | jq -c 'map(.databaseId)|sort'"
+  [ "$status" -eq 0 ]
+  # the result comes from the unbounded (normal stub) list of 3 runs, not from the 1000 junk runs
+  [ "$output" = "[301,302,303]" ]
+  [ "$(grep -c -- '--workflow Agent Ingress' "$GH_LOG")" -eq 2 ]
+  grep -- '--workflow Agent Ingress' "$GH_LOG" | sed -n 1p | grep -q -- '--created'
+  ! grep -- '--workflow Agent Ingress' "$GH_LOG" | sed -n 2p | grep -q -- '--created'
+}
+
+@test "_agent_run_json: a date-bounded ingress list at the cap that DOES reach back before the window start is trusted — no second fetch (#1262 review)" {
+  _ingress_stub
+  _bounded_cap_stub 5      # 1000 runs reaching back ~5 days: covers a window that started 3 days ago
+  local since; since="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)"
+  run env CANARY_INGRESS_JOBS_MAX=1 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$BATS_TEST_TMPDIR/flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '$since' >/dev/null 2>&1"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '--workflow Agent Ingress' "$GH_LOG")" -eq 1 ]
+  grep -- '--workflow Agent Ingress' "$GH_LOG" | grep -q -- '--created'
+}
+
 @test "_timing_kind: gh run list is labelled with its workflow, cap and whether it was date-bounded (#1259)" {
   run bash -c "source '$ORCH'
     k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
