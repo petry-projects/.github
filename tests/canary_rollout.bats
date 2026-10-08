@@ -6170,6 +6170,100 @@ GHEOF
   [ "$output" = "distinct" ]
 }
 
+@test "_ingress_horizon: snaps a window start to a fixed tier of days, or to no bound (#1259)" {
+  run bash -c "source '$ORCH'
+    d() { date -u -d \"-\$1 days\" +%Y-%m-%d; }
+    h() { _ingress_horizon \"\$1\"; echo \"[\$_INGRESS_FROM]\"; }
+    echo \"today=\$(h \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 8)]\"
+    echo \"d3=\$(h \"\$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 8)]\"
+    echo \"d10=\$(h \"\$(date -u -d '-10 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 15)]\"
+    echo \"d14=\$(h \"\$(date -u -d '-14 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 15)]\"
+    echo \"d30=\$(h \"\$(date -u -d '-30 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[]\"
+    echo \"empty=\$(h '') want=[]\"
+    echo \"junk=\$(h 'not-a-date') want=[]\"
+    echo \"tiers=\$(CANARY_INGRESS_HORIZON_TIERS='x 3 40' h \"\$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 40)]\""
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    got="${line#*=}"; got="${got%% want=*}"; want="${line##* want=}"
+    [ "$got" = "$want" ] || { echo "mismatch: $line"; return 1; }
+  done <<< "$output"
+}
+
+@test "_ingress_horizon: the bound always reaches back at least to the window start (#1259)" {
+  # Whatever tier is chosen, the horizon date must not be later than the window start's date.
+  run bash -c "source '$ORCH'
+    for n in 0 1 2 5 7 8 9 13 14 15; do
+      since=\$(date -u -d \"-\$n days\" +%Y-%m-%dT%H:%M:%SZ)
+      _ingress_horizon \"\$since\"
+      [ -z \"\$_INGRESS_FROM\" ] || [[ \"\$_INGRESS_FROM\" < \"\${since:0:10}\" || \"\$_INGRESS_FROM\" = \"\${since:0:10}\" ]] || echo \"BAD n=\$n from=\$_INGRESS_FROM since=\$since\"
+    done; echo done"
+  [ "$status" -eq 0 ]
+  [ "$output" = "done" ]
+}
+
+@test "_agent_run_json: the ingress run list is date-bounded for a recent window and unbounded for an old or empty one (#1259)" {
+  _ingress_stub
+  local recent old; recent="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)"; old="2026-01-01T00:00:00Z"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'; set +e
+    _agent_run_json dev-lead org/busy '$recent' >/dev/null 2>&1"
+  [ "$status" -eq 0 ]
+  local from; from="$(date -u -d '-8 days' +%Y-%m-%d)"
+  grep -q -- "run list --repo org/busy --workflow Agent Ingress -L 5000 --created >=$from " "$GH_LOG"
+  # the per-role workflow lookup is NOT date-bounded
+  ! grep -- "--workflow Dev-Lead Agent" "$GH_LOG" | grep -q -- "--created"
+  : > "$GH_LOG"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'; set +e
+    _agent_run_json dev-lead org/busy '$old' >/dev/null 2>&1
+    _agent_run_json dev-lead org/nojobs '' >/dev/null 2>&1"
+  [ "$status" -eq 0 ]
+  grep -q -- "--workflow Agent Ingress -L 5000 --json" "$GH_LOG"
+  ! grep -q -- "--created" "$GH_LOG"
+}
+
+@test "_agent_run_json: bounded ingress lists are cached per bound; windows in the same tier share one fetch (#1259)" {
+  _ingress_stub
+  export _RUNS_CACHE_DIR="$BATS_TEST_TMPDIR/cache"; mkdir -p "$_RUNS_CACHE_DIR"
+  local d1 d2 d12 old
+  d1="$(date -u -d '-1 days' +%Y-%m-%dT%H:%M:%SZ)"; d2="$(date -u -d '-4 days' +%Y-%m-%dT%H:%M:%SZ)"
+  d12="$(date -u -d '-12 days' +%Y-%m-%dT%H:%M:%SZ)"; old="2026-01-01T00:00:00Z"
+  run env _RUNS_CACHE_DIR="$_RUNS_CACHE_DIR" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
+    source '$ORCH'; set +e
+    for s in '$d1' '$d2' '$d12' '$old'; do _agent_run_json dev-lead org/busy \"\$s\" >/dev/null 2>&1; done
+    for s in '$d1' '$d2' '$d12' '$old'; do _agent_run_json dev-lead org/busy \"\$s\" >/dev/null 2>&1; done"
+  [ "$status" -eq 0 ]
+  # tiers: 8d (shared by d1 and d2), 15d (d12), unbounded (old) = 3 distinct ingress fetches, each once.
+  [ "$(grep -c -- '--workflow Agent Ingress' "$GH_LOG")" -eq 3 ]
+}
+
+@test "_agent_run_json: a date-bounded ingress list that hits the cap is judged exactly like an unbounded one (#1259)" {
+  _ingress_stub
+  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
+  # org/busy lists 3 runs (today x2, yesterday). Cap = 3 and a window that starts 3 days ago: the oldest
+  # listed run (yesterday) is NOT before the window start, so older in-window runs may be missing.
+  local since; since="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)"
+  run env CANARY_INGRESS_RUN_LIMIT=3 CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+    bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/busy '$since' 2>/dev/null"
+  [ "$status" -eq 0 ]
+  grep -q -- "--created" "$GH_LOG"
+  grep -q "CANARY_INGRESS_RUN_LIMIT" "$flag"
+}
+
+@test "_timing_kind: gh run list is labelled with its workflow, cap and whether it was date-bounded (#1259)" {
+  run bash -c "source '$ORCH'
+    k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
+    k run list --repo o/r --workflow 'Agent Ingress' -L 5000 --created '>=2026-01-01' --json x
+    k run list --repo o/r --workflow 'Agent Ingress' -L 5000 --json x
+    k run list --repo o/r --workflow 'Dev-Lead Agent' -L 1000 --json x
+    k run view 12"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "run list [Agent Ingress] L=5000 bounded" ]
+  [ "${lines[1]}" = "run list [Agent Ingress] L=5000" ]
+  [ "${lines[2]}" = "run list [Dev-Lead Agent] L=1000" ]
+  [ "${lines[3]}" = "run view" ]
+}
+
 @test "_timing_kind: gh api calls group by endpoint, not by repo/tag/id (#1259)" {
   run bash -c "source '$ORCH'
     k() { _timing_kind \"\$@\"; echo \"\$_TIMING_KIND\"; }
@@ -6183,7 +6277,7 @@ GHEOF
     k api repos/o/g
     k api /installation/repositories"
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "run list" ]
+  [ "${lines[0]}" = "run list [?] L=default" ]
   [ "${lines[1]}" = "api repos/git/ref" ]
   [ "${lines[2]}" = "api repos/git/ref" ]
   [ "${lines[3]}" = "api repos/actions/runs" ]
