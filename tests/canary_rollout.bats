@@ -6181,6 +6181,7 @@ GHEOF
     echo \"d30=\$(h \"\$(date -u -d '-30 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[]\"
     echo \"empty=\$(h '') want=[]\"
     echo \"junk=\$(h 'not-a-date') want=[]\"
+    echo \"empty_tiers=\$(CANARY_INGRESS_HORIZON_TIERS='' h \"\$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[]\"
     echo \"tiers=\$(CANARY_INGRESS_HORIZON_TIERS='x 3 40' h \"\$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)\") want=[\$(d 40)]\""
   [ "$status" -eq 0 ]
   while IFS= read -r line; do
@@ -6211,7 +6212,9 @@ GHEOF
   local from; from="$(date -u -d '-8 days' +%Y-%m-%d)"
   grep -q -- "run list --repo org/busy --workflow Agent Ingress -L 5000 --created >=$from " "$GH_LOG"
   # the per-role workflow lookup is NOT date-bounded
-  ! grep -- "--workflow Dev-Lead Agent" "$GH_LOG" | grep -q -- "--created"
+  run grep -- "--workflow Dev-Lead Agent" "$GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--created"* ]]
   : > "$GH_LOG"
   run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
     source '$ORCH'; set +e
@@ -6219,7 +6222,8 @@ GHEOF
     _agent_run_json dev-lead org/nojobs '' >/dev/null 2>&1"
   [ "$status" -eq 0 ]
   grep -q -- "--workflow Agent Ingress -L 5000 --json" "$GH_LOG"
-  ! grep -q -- "--created" "$GH_LOG"
+  run grep -q -- "--created" "$GH_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "_agent_run_json: bounded ingress lists are cached per bound; windows in the same tier share one fetch (#1259)" {
@@ -6280,7 +6284,10 @@ GHEOF
   [ "$output" = "[301,302,303]" ]
   [ "$(grep -c -- '--workflow Agent Ingress' "$GH_LOG")" -eq 2 ]
   grep -- '--workflow Agent Ingress' "$GH_LOG" | sed -n 1p | grep -q -- '--created'
-  ! grep -- '--workflow Agent Ingress' "$GH_LOG" | sed -n 2p | grep -q -- '--created'
+  run bash -c "grep -- '--workflow Agent Ingress' '$GH_LOG' | sed -n 2p"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--workflow Agent Ingress"* ]]
+  [[ "$output" != *"--created"* ]]
 }
 
 @test "_agent_run_json: a date-bounded ingress list at the cap that DOES reach back before the window start is trusted — no second fetch (#1262 review)" {

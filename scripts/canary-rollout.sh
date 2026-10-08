@@ -968,13 +968,13 @@ _run_jobs_json() {
 # _ingress_horizon <since_z> — set _INGRESS_FROM (no stdout, no fork beyond one `date`) to the oldest
 # date (YYYY-MM-DD, UTC) the ingress run list must reach to cover a window starting at <since_z>, or ""
 # for "no bound" (empty/unparseable since, or older than the largest tier). The horizon snaps to a few
-# fixed tiers (CANARY_INGRESS_HORIZON_TIERS, days, default "8 15": the candidate/correctness windows and
+# fixed tiers (CANARY_INGRESS_HORIZON_TIERS, days, default "8 15"; set it EMPTY to disable the bound: the candidate/correctness windows and
 # the 14-day baseline) so the run lists a sweep reads are shared across windows instead of being re-read
 # per distinct cut date. The bound only trims runs OLDER than every window that uses it: the caller still
 # cuts the list at its own `since`, and the "list reached CANARY_INGRESS_RUN_LIMIT" fail-closed guard
 # is unchanged (a bounded list that hits the cap is judged exactly like an unbounded one).
 _ingress_horizon() {
-  local since="$1" tiers="${CANARY_INGRESS_HORIZON_TIERS:-8 15}" s now days t
+  local since="$1" tiers="${CANARY_INGRESS_HORIZON_TIERS-8 15}" s now days t
   _INGRESS_FROM=""
   [ -n "$since" ] || return 0
   s="$(_epoch "$since")"
@@ -982,7 +982,7 @@ _ingress_horizon() {
   printf -v now '%(%s)T' -1
   # Whole days back, rounded UP (a partial day counts). The horizon DATE is the start (00:00Z) of the day
   # t days ago, which is never later than the instant t days ago, so t >= days is enough to cover <since>.
-  days=$(( (now - s) / 86400 + 1 ))
+  days=$(( (now - s + 86399) / 86400 ))
   [ "$days" -ge 1 ] || days=1
   for t in $tiers; do
     case "$t" in ''|*[!0-9]*) continue ;; esac
