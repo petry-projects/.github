@@ -684,12 +684,16 @@ _gh_retry_after() {
 # calling _run_json directly), every call fetches. Tunable via CANARY_GH_RETRIES /
 # CANARY_GH_RETRY_SLEEP (tests set 0). CANARY_GH_RETRY_AFTER_CAP caps server hints (default 900s).
 #
+# Optional 5th arg `from` (YYYY-MM-DD, #1259): bound the list server-side with `--created ">=<from>"`.
+# Used for the ingress list, whose newest-5000 read pages through ~50 pages per repo (~10 s each call)
+# although every window the gate samples starts at most ~2 weeks back (see _ingress_horizon).
+#
 # Optional 3rd arg `strict` (#1224): when "1", a not-found workflow returns [] with exit 3
 # instead of 0, so the caller can tell "this repo has no such workflow" from "it has the
 # workflow but no runs" — the signal that a repo may be ADR-0007-collapsed. The not-found
 # verdict is cached alongside the [] (a `.nf` marker) so a strict cache hit still reports it.
 _repo_wf_runs_cached() {
-  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" out err summary ra delay span expo errfile cachef key
+  local repo="$1" wf="$2" strict="${3:-0}" limit="${4:-1000}" from="${5:-}" out err summary ra delay span expo errfile cachef key
   local attempts="${CANARY_GH_RETRIES:-6}" base="${CANARY_GH_RETRY_SLEEP:-2}" attempt=1
   local ra_cap="${CANARY_GH_RETRY_AFTER_CAP:-900}"
   case "$ra_cap" in ''|*[!0-9]*) ra_cap=900 ;; esac
@@ -704,6 +708,7 @@ _repo_wf_runs_cached() {
     # cross-contaminate their run history. The run limit is part of the key: a shorter list cached for
     # the default limit must never serve the ingress read that asks for more runs.
     key="${repo}//${wf}//${limit}"
+    [ -z "$from" ] || key+="//${from}"   # a date-bounded list is a different list from the unbounded one
     _cache_name "$key"
     cachef="$_RUNS_CACHE_DIR/${_CACHE_NAME}.json"
     if [ -s "$cachef" ]; then
@@ -712,6 +717,8 @@ _repo_wf_runs_cached() {
       return 0
     fi
   fi
+  local -a cargs=()
+  [ -z "$from" ] || cargs=(--created ">=$from")
   errfile="$(mktemp)"
   declare -p tmpfiles &>/dev/null || declare -g -a tmpfiles=()
   tmpfiles+=("$errfile")
@@ -722,7 +729,7 @@ _repo_wf_runs_cached() {
   trap 'rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"' EXIT
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" \
-        -L "$limit" --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
+        -L "$limit" "${cargs[@]+"${cargs[@]}"}" --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
       rm -f "$errfile"; out="${out:-[]}"
       [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
       printf '%s\n' "$out"; return 0
@@ -837,6 +844,16 @@ _timing_start() {
 # (tag, run id, ...) dropped, so per-tag lookups share a row instead of each becoming its own.
 _timing_kind() {
   _TIMING_KIND="${1:-} ${2:-}"
+  if [ "${1:-}" = run ] && [ "${2:-}" = list ]; then
+    # Which list is slow: the workflow, the -L cap and whether it was date-bounded (#1259).
+    local w="" l="" b="" a prev=""
+    for a in "$@"; do
+      case "$prev" in --workflow) w="$a" ;; -L|--limit) l="$a" ;; --created) b=" bounded" ;; esac
+      prev="$a"
+    done
+    _TIMING_KIND="run list [${w:-?}] L=${l:-default}$b"
+    return 0
+  fi
   [ "${1:-}" = api ] || return 0
   shift
   local a skip=0 p
@@ -946,6 +963,61 @@ _run_jobs_json() {
     delay=$(( base + RANDOM % (span + 1) )); [ "$delay" -gt 30 ] && delay=30
     sleep "$delay"; attempt=$((attempt + 1))
   done
+}
+
+# _ingress_horizon <since_z> — set _INGRESS_FROM (no stdout, no fork beyond one `date`) to the oldest
+# date (YYYY-MM-DD, UTC) the ingress run list must reach to cover a window starting at <since_z>, or ""
+# for "no bound" (empty/unparseable since, or older than the largest tier). The horizon snaps to a few
+# fixed tiers (CANARY_INGRESS_HORIZON_TIERS, days, default "8 15"; set it EMPTY to disable the bound: the candidate/correctness windows and
+# the 14-day baseline) so the run lists a sweep reads are shared across windows instead of being re-read
+# per distinct cut date. The bound only trims runs OLDER than every window that uses it: the caller still
+# cuts the list at its own `since`, and the "list reached CANARY_INGRESS_RUN_LIMIT" fail-closed guard
+# is unchanged (a bounded list that hits the cap is judged exactly like an unbounded one).
+_ingress_horizon() {
+  local since="$1" tiers="${CANARY_INGRESS_HORIZON_TIERS-8 15}" s now days t
+  _INGRESS_FROM=""
+  [ -n "$since" ] || return 0
+  s="$(_epoch "$since")"
+  case "$s" in ''|*[!0-9]*|0) return 0 ;; esac
+  printf -v now '%(%s)T' -1
+  # Whole days back, rounded UP (a partial day counts). The horizon DATE is the start (00:00Z) of the day
+  # t days ago, which is never later than the instant t days ago, so t >= days is enough to cover <since>.
+  days=$(( (now - s + 86399) / 86400 ))
+  [ "$days" -ge 1 ] || days=1
+  for t in $tiers; do
+    case "$t" in ''|*[!0-9]*) continue ;; esac
+    if [ "$days" -le "$t" ]; then
+      _INGRESS_FROM="$(date -u -d "-${t} days" +%Y-%m-%d 2>/dev/null || date -u -v"-${t}d" +%Y-%m-%d 2>/dev/null || true)"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# _ingress_runs_fetch <repo> <ingress_workflow> <since_z> — the ingress run list for one window: the
+# date-bounded list (_ingress_horizon) when that is provably complete for the window, else the unbounded
+# one. GitHub caps ANY workflow-run listing that uses a search parameter (`created`) at 1,000 results, so a
+# bounded response of 1,000 runs may have lost the older end silently, and CANARY_INGRESS_RUN_LIMIT's own
+# cap guard (default 5000) would not notice. A bounded list that reaches 1,000 is therefore trusted only if
+# it reaches back BEFORE the window start (everything newer than its oldest run is then in it); otherwise
+# the unbounded list is read instead (slower, but exactly the pre-bound behavior). Same exit codes as
+# _repo_wf_runs_cached (3 = the workflow does not exist).
+_INGRESS_BOUNDED_MAX=1000
+_ingress_runs_fetch() {
+  local repo="$1" iwf="$2" since="$3" out rc=0 n oldest
+  _ingress_run_limit; _ingress_horizon "$since"
+  out="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT" "$_INGRESS_FROM")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$_INGRESS_FROM" ]; then
+    n="$(jq 'if type == "array" then length else 0 end' <<< "${out:-[]}" 2>/dev/null || echo 0)"
+    if [ "${n:-0}" -ge "$_INGRESS_BOUNDED_MAX" ]; then
+      oldest="$(jq -r '[.[]? | (.createdAt // "")] | min // ""' <<< "$out" 2>/dev/null || true)"
+      if [ -z "$since" ] || [ -z "$oldest" ] || ! [[ "$oldest" < "$since" ]]; then
+        out="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT" "")" || rc=$?
+      fi
+    fi
+  fi
+  printf '%s\n' "$out"
+  return "$rc"
 }
 
 # _ingress_run_limit — CANARY_INGRESS_RUN_LIMIT (the `gh run list -L` for an ingress), normalized once so
@@ -1116,8 +1188,8 @@ _agent_run_json() {
   _reg_run_workflow "$agent"; wf="$_REG_VAL"
   raw="$(_repo_wf_runs_cached "$repo" "$wf" 1)" || rc=$?
   if [ "$rc" -eq 3 ]; then
-    rc=0; _reg_ingress_wf; iwf="$_REG_VAL"; _ingress_run_limit
-    iraw="$(_repo_wf_runs_cached "$repo" "$iwf" 1 "$_INGRESS_RUN_LIMIT")" || rc=$?
+    rc=0; _reg_ingress_wf; iwf="$_REG_VAL"
+    iraw="$(_ingress_runs_fetch "$repo" "$iwf" "$since")" || rc=$?
     case "$rc" in
       0)
         _reg_ingress_job "$agent"; role="$_REG_VAL"
