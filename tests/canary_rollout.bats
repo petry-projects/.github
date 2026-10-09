@@ -6580,19 +6580,17 @@ _ingress_frontier() {
 }
 
 @test "canary-rollout.yml: the sweep shares one run-list cache dir across its steps (#1259)" {
-  run python3 - "$WORKFLOW" <<'PY'
-import sys, yaml
-steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["canary"]["steps"]
-names = [s.get("name", "") for s in steps]
-def idx(prefix):
-    return next(i for i, n in enumerate(names) if n.startswith(prefix))
-share, run, sync, drop = idx("Share run-list cache"), idx("Run canary-rollout"), idx("Sync blocker issues"), idx("Drop cached lookup failures")
-assert share < idx("Autocut") < run, names
-assert drop < sync and drop > run, names
-assert "_RUNS_CACHE_DIR" in steps[share]["run"] and "GITHUB_ENV" in steps[share]["run"]
-assert "sha_*" in steps[drop]["run"] and "-size 0" in steps[drop]["run"]
-PY
-  [ "$status" -eq 0 ]
+  # Line numbers of each step's `- name:` (no YAML parser: the test job installs only bats/shellcheck/jq).
+  _ln() { grep -n -m1 -- "- name: $1" "$WORKFLOW" | cut -d: -f1; }
+  local share autocut run drop sync
+  share="$(_ln 'Share run-list cache')"; autocut="$(_ln 'Autocut')"; run="$(_ln 'Run canary-rollout')"
+  drop="$(_ln 'Drop cached lookup failures')"; sync="$(_ln 'Sync blocker issues')"
+  [ -n "$share" ] && [ -n "$autocut" ] && [ -n "$run" ] && [ -n "$drop" ] && [ -n "$sync" ]
+  [ "$share" -lt "$autocut" ]; [ "$autocut" -lt "$run" ]
+  [ "$run" -lt "$drop" ]; [ "$drop" -lt "$sync" ]
+  # The share step exports the dir through GITHUB_ENV; the cleanup step drops only empty sha_* entries.
+  sed -n "${share},$((autocut - 1))p" "$WORKFLOW" | grep -q '_RUNS_CACHE_DIR=.*GITHUB_ENV'
+  sed -n "${drop},$((sync - 1))p" "$WORKFLOW" | grep -q -- "-name 'sha_\*' -size 0"
 }
 
 @test "cross-process: a second process sharing _RUNS_CACHE_DIR makes no run-list calls (#1259)" {
@@ -6611,5 +6609,6 @@ PY
   local d="$BATS_TEST_TMPDIR/keepdir"; mkdir -p "$d"
   run env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
     bash -c "source '$ORCH'; cmd_drift() { _agent_run_json dev-lead org/collapsed '' >/dev/null 2>&1; }; main drift 2>&1"
+  [ "$status" -eq 0 ]
   [ -n "$(ls -A "$d")" ]
 }
