@@ -269,5 +269,5 @@ refs/tags/dev-lead/v1-stable"
   export AUDIT_MATCHING_FAIL=1
   devlead_check broodminder-data dev-lead/v139-stable
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'FLAGGED:dev-lead-stub-pin:'
+  echo "$output" | grep -q 'FLAGGED:dev-lead-stub-pin:warning:'
 }
