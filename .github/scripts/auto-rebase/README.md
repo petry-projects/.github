@@ -82,7 +82,7 @@ polling. An unreadable configuration never causes a skip.
 
 Each behind PR gets exactly one log line:
 
-```
+```text
 PR #N (ref) is K commit(s) behind BASE — updating branch [gate: <condition>]
 PR #N (ref) is K commit(s) behind BASE — skipping update [gate: none applied (...)]
 ```
