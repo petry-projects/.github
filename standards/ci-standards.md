@@ -143,6 +143,10 @@ that names the pinned ref and the expected ref. Both use `ring_pin_current` in
 `scripts/lib/ring-pins.sh`, so they cannot disagree. If the tag listing cannot be
 read, both fail closed: nothing is declared compliant and nothing is re-pinned.
 
+Throughout this document, `@<name>/stable`, `@dev-lead/stable` and the matching
+`agent_ref` name the **tier** (`stable`); the ref a stub actually pins is that
+tier's current major-scoped ref `<name>/v<M>-<tier>` (e.g. `dev-lead/v139-stable`).
+
 #### Staged promotion through concentric rings
 
 `stable` is not a single hop. A release reaches full production by passing

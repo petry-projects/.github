@@ -318,5 +318,34 @@ refs/tags/agent-shield/v1-stable"
     uses: $R@agent-shield/v3-stable
     secrets: inherit"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:'
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:warning:'
+}
+
+# A tier with no channel tag while another tier has one: the fallback ref does not
+# resolve, so the stub is NOT compliant and that ref is never recommended.
+@test "#1267: tier has no channel tag but another does -> flagged, no unresolvable ref recommended" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v2-next
+refs/tags/agent-shield/v2-ring0"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v2-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:error:'
+  echo "$output" | grep -qF 'no resolvable ref to pin'
+  local rc=0
+  grep -qF 'delegates to' <<< "$output" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
+# Agent with no channel tag at all: the audit follows ring_pin_current (bare
+# <base>/<tier> is expected and accepted), same as the sweep.
+@test "#1267: agent with no channel tag -> bare <base>/<tier> pin is compliant (audit == sweep)" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v1.0.0"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }

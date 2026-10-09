@@ -349,7 +349,8 @@ ring_tier_channel_major() {
 # (check_centralized_workflow_stubs / check_dev_lead_stub) so "drift" and
 # "non-compliant" can never disagree (#1267). gh-backed; requires GH_TOKEN.
 #
-# Sets the global RING_EXPECTED_REF to the ref the stub should pin, and returns:
+# Sets the global RING_EXPECTED_REF to the ref the stub should pin (and
+# RING_EXPECTED_RESOLVABLE=0 when that ref is only a non-resolving fallback), and returns:
 #   0  compliant — <pinned-ref> is the expected ref
 #   1  drift     — anything else, incl. a tier-correct v-form on a SUPERSEDED major
 #                  (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable` exists)
@@ -369,6 +370,8 @@ ring_tier_channel_major() {
 ring_pin_current() {
   local host="$1" base="$2" repo="$3" pinned="$4" tier tokens major
   RING_EXPECTED_REF=""
+  # shellcheck disable=SC2034  # read by callers (audit/sweep)
+  RING_EXPECTED_RESOLVABLE=1
   declare -g -A _RING_CHANNEL_TOKENS_CACHE 2>/dev/null || true
   local cache_key="$host/$base"
   if [[ -n "${_RING_CHANNEL_TOKENS_CACHE[$cache_key]+isset}" ]]; then
@@ -381,11 +384,26 @@ ring_pin_current() {
     # Only a successful listing is cached, so a transient failure does not stick.
     _RING_CHANNEL_TOKENS_CACHE[$cache_key]="$tokens"
   fi
+  # Warm _RING_TIER_CACHE in THIS shell (a `$( )` call would discard the write and
+  # re-parse the registry every time), then read the now-cached answer.
+  ring_tier_for_repo "$base" "$repo" >/dev/null || return 2
   tier="$(ring_tier_for_repo "$base" "$repo")" || return 2
+  RING_EXPECTED_RESOLVABLE=1
   # shellcheck disable=SC2086
   major="$(ring_tier_channel_major "$tier" $tokens)"
-  # shellcheck disable=SC2086
-  [ -n "$major" ] || major="$(ring_highest_channel_major $tokens)"
+  if [ -z "$major" ]; then
+    # shellcheck disable=SC2086
+    major="$(ring_highest_channel_major $tokens)"
+    if [ -n "$major" ]; then
+      # The tier has no channel tag but the agent does: the fallback ref does not
+      # resolve, so it is recorded (the sweep's assert-exists refuses it) but is
+      # NEVER compliant and must not be recommended as a repair.
+      RING_EXPECTED_REF="${base}/v${major}-${tier}"
+      # shellcheck disable=SC2034
+      RING_EXPECTED_RESOLVABLE=0
+      return 1
+    fi
+  fi
   if [ -n "$major" ]; then
     RING_EXPECTED_REF="${base}/v${major}-${tier}"
     [ "$pinned" = "$RING_EXPECTED_REF" ] && return 0

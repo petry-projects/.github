@@ -396,7 +396,9 @@ is_pin_compliant() {
       # audit so the sweep and the audit cannot disagree.
       local host existing_ref
       host="$(cut -d/ -f1-2 <<< "$prefix")"
-      existing_ref=$(grep -oE "@${base}/[^[:space:]\"']+" <<< "$existing_content" | head -1 || true)
+      # Only a `uses:` line counts: a comment or `agent_ref:` carrying the current
+      # tag must not mask a stale `uses:` pin.
+      existing_ref=$(grep -E "^[[:space:]]*uses:" <<< "$existing_content" | grep -oE "@${base}/[^[:space:]\"']+" | head -1 || true)
       existing_ref="${existing_ref#@}"
       ring_pin_current "$host" "$base" "$repo" "$existing_ref" && return 0
       return 1

@@ -338,6 +338,14 @@ refs/tags/dev-lead/v1-stable"
   ! echo "$output" | grep -q 'Would open PR'
 }
 
+# refute_output_matches <grep-flags> <pattern> -> assert $output does NOT match:
+# grep must exit exactly 1. A bare `! grep` would also pass on a grep error (2).
+refute_output_matches() {
+  local rc=0
+  grep "$@" <<< "$output" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
 # ── #1267: a SUPERSEDED channel major is drift, re-pinned to the tier's current ──
 # Five consumers sat on dev-lead/v1-stable while promotion moved dev-lead/v139-*;
 # the sweep accepted any tier-correct major and reported them "already compliant".
@@ -354,7 +362,7 @@ devlead_v139_refs() {  # the live 2026-10-09 shape: an orphaned v1-stable + the 
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q 'already compliant'
+  refute_output_matches -q 'already compliant'
   echo "$output" | grep -qF 'would pin @dev-lead/v139-stable'
   echo "$output" | grep -qE 'Would open PR for broodminder-data .* dev-lead.yml'
 }
@@ -366,7 +374,7 @@ devlead_v139_refs() {  # the live 2026-10-09 shape: an orphaned v1-stable + the 
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'already compliant'
-  ! echo "$output" | grep -q 'Would open PR'
+  refute_output_matches -q 'Would open PR'
 }
 
 @test "#1267: a wrong-tier stub on the current major is still drift" {
@@ -392,7 +400,7 @@ partial_cut_refs() {
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'already compliant'
-  ! echo "$output" | grep -q 'Would open PR'
+  refute_output_matches -q 'Would open PR'
 }
 
 @test "#1267: partial major cut — a ring0 stub on v1-ring0 is drift → @dev-lead/v2-ring0" {
@@ -414,12 +422,12 @@ partial_cut_refs() {
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow dev-lead.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF 'would pin @dev-lead/v1-stable'
-  ! echo "$output" | grep -qF 'v2-stable'
+  refute_output_matches -qF 'v2-stable'
   # also under --force for a stub already on v1-stable
   GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-stable)"; export GH_CONTENT_B64
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo broodly --workflow dev-lead.yml
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -qF 'v2-stable'
+  refute_output_matches -qF 'v2-stable'
 }
 
 @test "#1267: a failed tag probe fails closed — not compliant, and no re-pin on a guess" {
@@ -428,7 +436,7 @@ partial_cut_refs() {
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
   [ "$status" -ne 0 ]
-  ! echo "$output" | grep -q 'already compliant'
-  ! echo "$output" | grep -q 'would pin'
-  ! echo "$output" | grep -q 'Would open PR'
+  refute_output_matches -q 'already compliant'
+  refute_output_matches -q 'would pin'
+  refute_output_matches -q 'Would open PR'
 }
