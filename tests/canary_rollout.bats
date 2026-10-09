@@ -6578,3 +6578,38 @@ _ingress_frontier() {
   run env _CANARY_UNRESOLVED_FLAG="$flag" ORCH="$ORCH" bash -c 'source "$ORCH" && printf() { if [ "$1" = "%s\n" ]; then return 1; fi; builtin printf "$@"; } && _record_unresolved dev-lead org/x blind 2>/dev/null'
   [ ! -e "$flag" ]
 }
+
+@test "canary-rollout.yml: the sweep shares one run-list cache dir across its steps (#1259)" {
+  run python3 - "$WORKFLOW" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["canary"]["steps"]
+names = [s.get("name", "") for s in steps]
+def idx(prefix):
+    return next(i for i, n in enumerate(names) if n.startswith(prefix))
+share, run, sync, drop = idx("Share run-list cache"), idx("Run canary-rollout"), idx("Sync blocker issues"), idx("Drop cached lookup failures")
+assert share < idx("Autocut") < run, names
+assert drop < sync and drop > run, names
+assert "_RUNS_CACHE_DIR" in steps[share]["run"] and "GITHUB_ENV" in steps[share]["run"]
+assert "sha_*" in steps[drop]["run"] and "-size 0" in steps[drop]["run"]
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "cross-process: a second process sharing _RUNS_CACHE_DIR makes no run-list calls (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/shared"; mkdir -p "$d"
+  local snippet="source '$ORCH'; set +e; _agent_run_json dev-lead org/collapsed '' >/dev/null 2>&1"
+  env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "$snippet"
+  [ "$(grep -c '^run list ' "$GH_LOG")" -ge 1 ]
+  : > "$GH_LOG"
+  env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "$snippet"
+  [ "$(grep -c '^run list ' "$GH_LOG")" -eq 0 ]
+}
+
+@test "main: a caller-supplied cache dir keeps its cache files at exit (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/keepdir"; mkdir -p "$d"
+  run env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH'; cmd_drift() { _agent_run_json dev-lead org/collapsed '' >/dev/null 2>&1; }; main drift 2>&1"
+  [ -n "$(ls -A "$d")" ]
+}
