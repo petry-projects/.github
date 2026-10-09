@@ -132,9 +132,18 @@ jobs:
     # The scheduled fleet sweep's runtime grows with the fleet (the gate reads
     # run-history owner-wide across every tier repo). Observed p50 877s / p95 988s
     # sat right at the old 15-min (900s) ceiling, so the tail of each sweep was
-    # being killed at the timeout (#939). 30 min keeps durable headroom over p95
+    # being killed at the timeout (#939). 30 min kept durable headroom over p95
     # while still bounding a genuine hang.
-    timeout-minutes: 30
+    #
+    # Raised 30 -> 60 (#1259): since the ingress collapse (#1238) the two gate steps
+    # take 12-25 min EACH depending on GitHub API latency, and the last 7 consecutive
+    # scheduled runs (2026-10-07 15:43Z onward) were killed at the 30 min timeout (the
+    # second gate step, sync-issues, never finished, so blocker issues and the fleet
+    # summary went stale). GitHub keeps no logs for a job
+    # cancelled by its timeout, so the per-step `canary timing` output could not even be
+    # read. 60 min lets a sweep finish and leave logs. Once the gate-step cost is back
+    # near its pre-#1238 ~10 min, consider lowering this again.
+    timeout-minutes: 60
     steps:
       # Mint a scoped GitHub App installation token (Contents/Deployments:write,
       # Actions/Metadata:read). owner-wide so the gate can read run history across all
