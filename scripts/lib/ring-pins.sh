@@ -411,7 +411,10 @@ ring_pin_current() {
   fi
   RING_EXPECTED_REF="${base}/${tier}"
   [ -n "$pinned" ] || return 1
-  ring_accepted_refs "$base" "$repo" | grep -qxF -- "$pinned" && return 0
+  # Capture first: streaming into an early-exiting `grep -q` closes the pipe mid-write.
+  local accepted
+  accepted="$(ring_accepted_refs "$base" "$repo")"
+  grep -qxF -- "$pinned" <<< "$accepted" && return 0
   ring_vform_tier_aligned "$pinned" "$base" "$repo" && return 0
   return 1
 }

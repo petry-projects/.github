@@ -398,7 +398,12 @@ is_pin_compliant() {
       host="$(cut -d/ -f1-2 <<< "$prefix")"
       # Only a `uses:` line counts: a comment or `agent_ref:` carrying the current
       # tag must not mask a stale `uses:` pin.
-      existing_ref=$(grep -E "^[[:space:]]*uses:" <<< "$existing_content" | grep -oE "@${base}/[^[:space:]\"']+" | head -1 || true)
+      # Strip inline YAML comments first and require the `<base>-reusable.yml@` ref,
+      # so a ref written in a comment or on an unrelated job's `uses:` is ignored.
+      # `sed -n 1p` (not `head -1`) reads the whole stream, so no writer sees a closed pipe.
+      existing_ref=$(sed -E 's/[[:space:]]+#.*$//' <<< "$existing_content" \
+        | grep -E "^[[:space:]]*(-[[:space:]]+)?uses:.*/${base}-reusable\.yml@${base}/" \
+        | grep -oE "@${base}/[^[:space:]\"']+" | sed -n 1p || true)
       existing_ref="${existing_ref#@}"
       ring_pin_current "$host" "$base" "$repo" "$existing_ref" && return 0
       return 1
