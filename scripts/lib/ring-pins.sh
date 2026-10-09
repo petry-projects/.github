@@ -334,12 +334,12 @@ ring_tier_channel_major() {
   shift
   for tok in "$@"; do
     [[ "$tok" =~ ^([0-9]+)-(.+)$ ]] || continue
-    [ "${BASH_REMATCH[2]}" = "$tier" ] || continue
-    if [ -z "$best" ] || [ "${BASH_REMATCH[1]}" -gt "$best" ]; then
+    [[ "${BASH_REMATCH[2]}" = "$tier" ]] || continue
+    if [[ -z "$best" ]] || [[ "${BASH_REMATCH[1]}" -gt "$best" ]]; then
       best="${BASH_REMATCH[1]}"
     fi
   done
-  [ -n "$best" ] && printf '%s' "$best"
+  [[ -n "$best" ]] && printf '%s' "$best"
   return 0
 }
 
@@ -391,10 +391,10 @@ ring_pin_current() {
   RING_EXPECTED_RESOLVABLE=1
   # shellcheck disable=SC2086
   major="$(ring_tier_channel_major "$tier" $tokens)"
-  if [ -z "$major" ]; then
+  if [[ -z "$major" ]]; then
     # shellcheck disable=SC2086
     major="$(ring_highest_channel_major $tokens)"
-    if [ -n "$major" ]; then
+    if [[ -n "$major" ]]; then
       # The tier has no channel tag but the agent does: the fallback ref does not
       # resolve, so it is recorded (the sweep's assert-exists refuses it) but is
       # NEVER compliant and must not be recommended as a repair.
@@ -404,13 +404,13 @@ ring_pin_current() {
       return 1
     fi
   fi
-  if [ -n "$major" ]; then
+  if [[ -n "$major" ]]; then
     RING_EXPECTED_REF="${base}/v${major}-${tier}"
-    [ "$pinned" = "$RING_EXPECTED_REF" ] && return 0
+    [[ "$pinned" = "$RING_EXPECTED_REF" ]] && return 0
     return 1
   fi
   RING_EXPECTED_REF="${base}/${tier}"
-  [ -n "$pinned" ] || return 1
+  [[ -n "$pinned" ]] || return 1
   # Capture first: streaming into an early-exiting `grep -q` closes the pipe mid-write.
   local accepted
   accepted="$(ring_accepted_refs "$base" "$repo")"

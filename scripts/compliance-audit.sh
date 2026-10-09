@@ -1823,7 +1823,7 @@ check_centralized_workflow_stubs() {
     #     fails closed (the stub is not declared compliant).
     local esc_reusable pinned_ref="" pin_rc=0
     esc_reusable=$(escape_ere "$reusable")
-    if [ "$is_ring" = 1 ]; then
+    if [[ "$is_ring" = 1 ]]; then
       pinned_ref=$(printf '%s\n' "$decoded" \
         | sed -nE "s#^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@([^[:space:]]+).*#\\1#p" \
         | head -n1)
@@ -1832,13 +1832,13 @@ check_centralized_workflow_stubs() {
     # With no channel tag cut yet, ring_pin_current expects (and accepts) the bare
     # `<base>/<tier>`; follow its verdict rather than also demanding the v-form.
     local bare_ok=0
-    [ "$is_ring" = 1 ] && [ "$pin_rc" -eq 0 ] && [[ "$RING_EXPECTED_REF" != */v[0-9]* ]] && bare_ok=1
-    if { [ "$is_ring" = 1 ] && [ "$pin_rc" -eq 0 ] && { [ "$bare_ok" = 1 ] || ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; } \
-      || { [ "$is_ring" != 1 ] && stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; }; then
+    [[ "$is_ring" = 1 ]] && [[ "$pin_rc" -eq 0 ]] && [[ "$RING_EXPECTED_REF" != */v[0-9]* ]] && bare_ok=1
+    if { [[ "$is_ring" = 1 ]] && [[ "$pin_rc" -eq 0 ]] && { [[ "$bare_ok" = 1 ]] || ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; } \
+      || { [[ "$is_ring" != 1 ]] && stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; }; then
       continue
     fi
 
-    if [ "$pin_rc" -eq 2 ]; then
+    if [[ "$pin_rc" -eq 2 ]]; then
       add_finding "$repo" "ci-workflows" "non-stub-$wf" "warning" \
         "Could not verify that centralized workflow \`$wf\` pins the current \`${chan}\` channel: the channel-tag listing on \`$ORG/.github\` could not be read. Failing closed — the stub is not treated as compliant. Re-run the audit once the tag listing is readable." \
         "standards/ci-standards.md#reusable-workflow-versioning--the-stable-channel"
@@ -1850,15 +1850,15 @@ check_centralized_workflow_stubs() {
     # (RING_EXPECTED_REF from ring_pin_current, #1267); non-ring keeps the fixed
     # canonical ref.
     local why expected_pin="$canonical"
-    [ "$is_ring" = 1 ] && expected_pin="$RING_EXPECTED_REF"
-    if [ "$is_ring" = 1 ] && [ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]; then
+    [[ "$is_ring" = 1 ]] && expected_pin="$RING_EXPECTED_REF"
+    if [[ "$is_ring" = 1 ]] && [[ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]]; then
       why="pins \`${pinned_ref}\`, but no \`${chan}\` channel tag has been cut for this repo's ring tier yet, so there is no resolvable ref to pin"
       add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
         "Centralized workflow \`$wf\` $why. Wait for a channel tag to be cut for this tier (or re-tier the repo); do not re-pin to another tier's channel." \
         "standards/ci-standards.md#centralization-tiers"
       continue
     fi
-    if [ "$is_ring" = 1 ] && ring_vform_tier_aligned "$pinned_ref" "$chan" "$repo"; then
+    if [[ "$is_ring" = 1 ]] && ring_vform_tier_aligned "$pinned_ref" "$chan" "$repo"; then
       why="pins \`${pinned_ref}\`; expected \`${expected_pin}\` — a superseded channel major is drift (promotion no longer moves it)"
     elif echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to the major-scoped channel \`@${expected_pin}\` (org standard — a bare \`@${canonical}\` tier pin is drift)"
@@ -1891,6 +1891,7 @@ check_centralized_workflow_stubs() {
 # ---------------------------------------------------------------------------
 check_dev_lead_stub() {
   local repo="$1"
+  local check_id="dev-lead-stub-pin"
 
   # .github holds the template (exercised by the reusable's own CI) and
   # .github-private runs the workflow inline rather than as a caller stub.
@@ -1917,23 +1918,23 @@ check_dev_lead_stub() {
   #    superseded major (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable`
   #    exists) or on another repo's tier is drift; a failed tag probe fails closed.
   if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/v[0-9]+-(stable|next|ring[0-9]+)([[:space:]]|$)"; then
-    add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+    add_finding "$repo" "ci-workflows" "$check_id" "error" \
       "The \`dev-lead.yml\` caller stub must pin a major-scoped \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v<M>-<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\` (a bare \`dev-lead/<channel>\` tier pin is drift). Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   else
     local dl_pinned dl_rc=0
     dl_pinned=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@(dev-lead/[^[:space:]]+).*#\1#p' | head -n1)
     ring_pin_current "$ORG/.github-private" "dev-lead" "$repo" "$dl_pinned" || dl_rc=$?
-    if [ "$dl_rc" -eq 1 ] && [ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]; then
-      add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+    if [[ "$dl_rc" -eq 1 ]] && [[ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]]; then
+      add_finding "$repo" "ci-workflows" "$check_id" "error" \
         "The \`dev-lead.yml\` caller stub pins \`${dl_pinned}\`, but no \`dev-lead\` channel tag has been cut for this repo's ring tier yet, so there is no resolvable ref to pin. Wait for a tag to be cut for this tier (or re-tier the repo); do not re-pin to another tier's channel." \
         "standards/ci-standards.md#dev-lead-agent"
-    elif [ "$dl_rc" -eq 1 ]; then
-      add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "error" \
+    elif [[ "$dl_rc" -eq 1 ]]; then
+      add_finding "$repo" "ci-workflows" "$check_id" "error" \
         "The \`dev-lead.yml\` caller stub pins \`${dl_pinned}\`; expected \`${RING_EXPECTED_REF}\` — the current \`dev-lead\` channel for this repo's ring tier. A superseded channel major (or another tier's channel) is drift: promotion no longer moves it, so the repo never receives a release. Re-sync from \`standards/workflows/dev-lead.yml\` (the standards sweep re-pins it in place)." \
         "standards/ci-standards.md#dev-lead-agent"
-    elif [ "$dl_rc" -eq 2 ]; then
-      add_finding "$repo" "ci-workflows" "dev-lead-stub-pin" "warning" \
+    elif [[ "$dl_rc" -eq 2 ]]; then
+      add_finding "$repo" "ci-workflows" "$check_id" "warning" \
         "Could not verify that the \`dev-lead.yml\` caller stub (\`${dl_pinned}\`) pins the current \`dev-lead\` channel: the channel-tag listing on \`$ORG/.github-private\` could not be read. Failing closed — the stub is not treated as compliant. Re-run the audit once the tag listing is readable." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
