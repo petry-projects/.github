@@ -289,9 +289,11 @@ ring_host_current_major() {
 # semver token like `14.0.0` is NOT a channel token and is ignored. Pure; always 0.
 #
 # This is the CALLER-CONTRACT major, deliberately distinct from ring_highest_major's
-# release major (#870): dev-lead ships releases `dev-lead/v14.0.0` but its channel
-# contract is `dev-lead/v1-<tier>`, so a pin must track the channel major (v1). A
-# `<base>/v<release>-<tier>` ref has no tag and fails to resolve — the #870 breakage.
+# release major (#870): an agent's release major and its channel major need not be
+# equal (e.g. releases `dev-lead/v14.0.0` once shipped on channel `dev-lead/v1-<tier>`),
+# so a pin must track the channel major. A `<base>/v<release>-<tier>` ref with no
+# channel tag fails to resolve — the #870 breakage. For the per-TIER current major a
+# stub must pin, see ring_tier_channel_major / ring_pin_current (#1267).
 ring_highest_channel_major() {
   local tok major best=""
   for tok in "$@"; do
@@ -320,6 +322,80 @@ ring_host_current_channel_major() {
   # shellcheck disable=SC2086
   ring_highest_channel_major $refs
   return 0
+}
+
+# ring_tier_channel_major <tier> <token>... -> the highest major M among CHANNEL
+# tokens `<M>-<tier>` for exactly THIS tier, or empty if the tier has no channel
+# tag. Pure; always 0. Per tier, not "highest major with any channel tag": when a
+# new major is cut at next/ring0 only, a stable repo's current major is still the
+# older one — pinning it to the uncut `v<new>-stable` would not resolve (#1267).
+ring_tier_channel_major() {
+  local tier="$1" tok best=""
+  shift
+  for tok in "$@"; do
+    [[ "$tok" =~ ^([0-9]+)-(.+)$ ]] || continue
+    [ "${BASH_REMATCH[2]}" = "$tier" ] || continue
+    if [ -z "$best" ] || [ "${BASH_REMATCH[1]}" -gt "$best" ]; then
+      best="${BASH_REMATCH[1]}"
+    fi
+  done
+  [ -n "$best" ] && printf '%s' "$best"
+  return 0
+}
+
+# ring_pin_current <host-repo> <channel-base> <repo> <pinned-ref> -> the single
+# verdict on whether a ring stub in <repo> pins the CURRENT channel for its tier.
+# Shared by the deploy sweep (is_pin_compliant / emit_ref_for) and the audit
+# (check_centralized_workflow_stubs / check_dev_lead_stub) so "drift" and
+# "non-compliant" can never disagree (#1267). gh-backed; requires GH_TOKEN.
+#
+# Sets the global RING_EXPECTED_REF to the ref the stub should pin, and returns:
+#   0  compliant — <pinned-ref> is the expected ref
+#   1  drift     — anything else, incl. a tier-correct v-form on a SUPERSEDED major
+#                  (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable` exists)
+#   2  the host's tag listing could not be read — fail CLOSED: nothing is compliant
+#      and RING_EXPECTED_REF is empty, so no caller re-pins on a guess.
+#
+# The expected ref is `<base>/v<M>-<tier>` where M is the highest major with a
+# channel tag for the repo's tier (ring_tier_channel_major). If the tier has no
+# channel tag but the agent has some, M falls back to the agent's highest channel
+# major — that ref does not resolve, so the sweep's assert-exists guard refuses it
+# (#870) rather than emitting a guess. If the agent has NO channel tag at all, the
+# expected ref is the bare `<base>/<tier>` and the pre-major grace still applies: any
+# ring_accepted_refs channel or a tier-aligned v-form is compliant (#861).
+#
+# Call it directly (not in `$( )`) to keep the per-process listing cache and the
+# RING_EXPECTED_REF result.
+ring_pin_current() {
+  local host="$1" base="$2" repo="$3" pinned="$4" tier tokens major
+  RING_EXPECTED_REF=""
+  declare -g -A _RING_CHANNEL_TOKENS_CACHE 2>/dev/null || true
+  local cache_key="$host/$base"
+  if [[ -n "${_RING_CHANNEL_TOKENS_CACHE[$cache_key]+isset}" ]]; then
+    tokens="${_RING_CHANNEL_TOKENS_CACHE[$cache_key]}"
+  else
+    tokens="$(_ring_fetch_version_tokens "$host" "$base")" || {
+      echo "Warning: failed to fetch matching refs for ${host}/${base}" >&2
+      return 2
+    }
+    # Only a successful listing is cached, so a transient failure does not stick.
+    _RING_CHANNEL_TOKENS_CACHE[$cache_key]="$tokens"
+  fi
+  tier="$(ring_tier_for_repo "$base" "$repo")" || return 2
+  # shellcheck disable=SC2086
+  major="$(ring_tier_channel_major "$tier" $tokens)"
+  # shellcheck disable=SC2086
+  [ -n "$major" ] || major="$(ring_highest_channel_major $tokens)"
+  if [ -n "$major" ]; then
+    RING_EXPECTED_REF="${base}/v${major}-${tier}"
+    [ "$pinned" = "$RING_EXPECTED_REF" ] && return 0
+    return 1
+  fi
+  RING_EXPECTED_REF="${base}/${tier}"
+  [ -n "$pinned" ] || return 1
+  ring_accepted_refs "$base" "$repo" | grep -qxF -- "$pinned" && return 0
+  ring_vform_tier_aligned "$pinned" "$base" "$repo" && return 0
+  return 1
 }
 
 # ring_tag_exists <host-repo> <ref> -> 0 iff refs/tags/<ref> resolves on <host>.
@@ -367,8 +443,9 @@ ring_repin_uses() {
 
 # ring_vform_tier_aligned <pinned-ref> <channel-base> <repo> -> 0 iff <pinned-ref>
 # is a major-scoped v-form `<base>/v<M>-<tier>` whose tier matches <repo>'s ring
-# tier (any major). A bare-tier ref (no `v<M>-`) or a wrong-tier v-form is not
-# aligned. Pure.
+# tier. A bare-tier ref (no `v<M>-`) or a wrong-tier v-form is not aligned. Pure.
+# This checks the FORM only, not that M is current — use ring_pin_current for the
+# compliance verdict (#1267).
 ring_vform_tier_aligned() {
   local ref="$1" base="$2" repo="$3" tier
   tier="$(ring_tier_for_repo "$base" "$repo")"

@@ -196,3 +196,78 @@ EOF
   run _agent_ref_matches_channel "$decoded" "$channel"
   [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# #1267 — integration: check_dev_lead_stub flags a SUPERSEDED channel major.
+# Five consumers sat on dev-lead/v1-stable while promotion moved dev-lead/v139-*;
+# the audit accepted any major. The real check is exercised here (script sourced,
+# gh_api + gh mocked) so the decision surfaces as a FINDING with its message.
+# ---------------------------------------------------------------------------
+AUDIT_SCRIPT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/scripts/compliance-audit.sh"
+DL_REFS_LIVE="refs/tags/dev-lead/v1-stable
+refs/tags/dev-lead/v139.50.2
+refs/tags/dev-lead/v139-stable
+refs/tags/dev-lead/v139-ring1
+refs/tags/dev-lead/v139-ring0
+refs/tags/dev-lead/v139-next"
+
+devlead_check() {  # <repo> <pinned-channel-ref> — run check_dev_lead_stub against a stub pinning it
+  local body="jobs:
+  dev-lead:
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@$2
+    with:
+      agent_ref: $2
+    secrets: inherit
+    permissions:
+      statuses: read"
+  FIXTURE_B64=$(printf '%s' "$body" | base64 | tr -d '\n'); export FIXTURE_B64
+  AUDIT_MATCHING_REFS="${AUDIT_MATCHING_REFS:-$DL_REFS_LIVE}"; export AUDIT_MATCHING_REFS
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    ORG=petry-projects
+    gh() {
+      case "$2" in
+        *matching-refs/tags/*)
+          if [ -n "${AUDIT_MATCHING_FAIL:-}" ]; then echo "HTTP 502" >&2; return 1; fi
+          printf "%s\n" "$AUDIT_MATCHING_REFS" ;;
+        *) return 1 ;;
+      esac
+    }
+    gh_api() { case "$1" in */contents/.github/workflows/dev-lead.yml) printf "%s" "$FIXTURE_B64" ;; esac; }
+    add_finding() { printf "FLAGGED:%s:%s:%s\n" "$3" "$4" "$5"; }
+    check_dev_lead_stub "$2"
+  ' _ "$AUDIT_SCRIPT" "$1"
+}
+
+@test "#1267: a stub on the superseded dev-lead/v1-stable is FLAGGED, naming pinned + expected refs" {
+  devlead_check broodminder-data dev-lead/v1-stable
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:dev-lead-stub-pin:error:'
+  echo "$output" | grep -qF 'pins `dev-lead/v1-stable`; expected `dev-lead/v139-stable`'
+}
+
+@test "#1267: a stub on the current dev-lead/v139-stable raises no finding" {
+  devlead_check broodminder-data dev-lead/v139-stable
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#1267: partial major cut — v1-stable (stable repo) and v1-ring1 (ring1 repo) are current" {
+  export AUDIT_MATCHING_REFS="refs/tags/dev-lead/v2-next
+refs/tags/dev-lead/v2-ring0
+refs/tags/dev-lead/v1-ring1
+refs/tags/dev-lead/v1-stable"
+  devlead_check broodly dev-lead/v1-stable
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # ring1 repo on v1-ring1 (v2 not cut at ring1) is current too
+  devlead_check TalkTerm dev-lead/v1-ring1
+  [ -z "$output" ]
+}
+
+@test "#1267: a failed tag probe fails closed — the dev-lead stub is not declared compliant" {
+  export AUDIT_MATCHING_FAIL=1
+  devlead_check broodminder-data dev-lead/v139-stable
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:dev-lead-stub-pin:'
+}
