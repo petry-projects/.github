@@ -5164,6 +5164,26 @@ WORKFLOW="$SCRIPT_DIR/.github/workflows/canary-rollout.yml"
   [ "$minutes" -ge 20 ]
 }
 
+@test "canary-rollout.yml: canary job timeout-minutes covers the observed sweep time (#1259)" {
+  # Since the ingress collapse (#1238) a scheduled sweep takes 20-42 min depending on GitHub API latency
+  # (the longest observed so far: 42.5 min); at the old 30 min the last 7 consecutive sweeps were killed,
+  # sync-issues never ran, and GitHub kept no logs for the cancelled jobs. Require >= 45 so the old 30-min
+  # value cannot return silently. Lowering this later (once the gate steps are back near ~10 min each)
+  # is a deliberate change to this floor, with the new measurements in the commit message.
+  local minutes
+  minutes="$(awk '
+    /^  canary:[[:space:]]*$/ { in_canary=1; next }
+    in_canary && /^  [^[:space:]]/ { in_canary=0 }
+    in_canary && /^[[:space:]]*timeout-minutes:[[:space:]]*[0-9]+[[:space:]]*(#.*)?$/ {
+      match($0, /[0-9]+/)
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+  ' "$WORKFLOW")"
+  [ -n "$minutes" ]
+  [ "$minutes" -ge 45 ]
+}
+
 # ── #1019: watched agent_ref paths (autocut covers scripts/prompts/personas) ────
 # Autocut previously compared ONLY the reusable FILE blob, so a script-only change (what the
 # reusable checks out at agent_ref) shipped nowhere. These pin the pure path-matcher core and
