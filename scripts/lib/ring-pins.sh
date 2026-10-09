@@ -335,7 +335,7 @@ ring_tier_channel_major() {
   for tok in "$@"; do
     [[ "$tok" =~ ^([0-9]+)-(.+)$ ]] || continue
     [[ "${BASH_REMATCH[2]}" = "$tier" ]] || continue
-    if [[ -z "$best" ]] || [[ "${BASH_REMATCH[1]}" -gt "$best" ]]; then
+    if [[ -z "$best" ]] || (( 10#${BASH_REMATCH[1]} > 10#$best )); then
       best="${BASH_REMATCH[1]}"
     fi
   done
