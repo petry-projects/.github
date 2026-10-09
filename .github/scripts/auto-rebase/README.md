@@ -6,7 +6,8 @@ lives here so it can be unit-tested with bats
 (`test/workflows/auto-rebase/`) instead of being trapped inline in YAML.
 
 The reusable workflow checks this repo out at `inputs.tooling_ref` and sources
-`lib/eligibility.sh` to decide which out-of-date PRs to update. `tooling_ref`
+`lib/eligibility.sh` to decide which out-of-date PRs are eligible, then
+`lib/update-gate.sh` to decide whether being behind actually blocks each one. `tooling_ref`
 defaults to empty, which resolves to the reusable's own commit
 (`github.job_workflow_sha`) so the predicate always matches the pinned
 workflow version. Set `tooling_ref` only to test a branch end-to-end.
@@ -47,3 +48,51 @@ whole step — starving every *other* open PR of its rebase in the same run. A
 best-effort notification must never be fatal to the core function of rebasing
 the other PRs, so this helper logs a warning and returns `0` on any
 comment-side error (comment cap, secondary rate limit, transient 5xx).
+
+## `lib/update-gate.sh`
+
+Decides whether a PR that is **behind** its base should actually be updated
+(issue #1272). Updating pushes a merge commit, which creates a new head SHA and
+restarts every review, test and bot-review cycle on the PR. That is only worth
+doing when being behind blocks something, so a behind PR is updated only if at
+least one of these holds:
+
+1. **Strict up-to-date required.** The base branch's *effective* rules require
+   branches to be up to date. The gate reads them through the API, from the
+   active rulesets (`GET /repos/{repo}/rules/branches/{branch}`,
+   `strict_required_status_checks_policy`) and from classic protection
+   (`GET /repos/{repo}/branches/{branch}/protection/required_status_checks`,
+   `.strict`). Nothing is hard-coded, so re-enabling the strict policy brings
+   back update-every-behind-PR with no code change.
+2. **Merge queue.** The PR is in the merge queue (`isInMergeQueue`), or is being
+   added to it (auto-merge enabled on a queue-enabled base).
+3. **Label.** A maintainer applied the `ready_label` input label (default
+   `auto-rebase:ready`; set the input to `''` to disable this condition).
+
+A PR in **merge conflict** (`mergeable: CONFLICTING`) is still attempted, so the
+existing conflict notice and dev-lead recovery still fire. While GitHub is
+still computing mergeability (`UNKNOWN`, common right after a base push), the
+gate re-polls a few times.
+
+**Fail safe.** If something can't be read, the PR is updated just as it was
+before the gate existed, and the log line says `could not evaluate`. That covers
+unreadable rules or protection (API error, 403 for a token without admin
+access), unreadable PR state, and mergeability that is still unknown after
+polling. An unreadable configuration never causes a skip.
+
+Each behind PR gets exactly one log line:
+
+```
+PR #N (ref) is K commit(s) behind BASE — updating branch [gate: <condition>]
+PR #N (ref) is K commit(s) behind BASE — skipping update [gate: none applied (...)]
+```
+
+| Function | Input | Returns |
+|----------|-------|---------|
+| `auto_rebase_strict_policy REPO BRANCH` | `owner/repo`, base branch | prints `true` / `false` / `unknown`; always `0` |
+| `auto_rebase_pr_gate_state REPO PR LABEL` | `owner/repo`, PR number, label | prints `IN_QUEUE HAS_LABEL MERGEABLE`; always `0` |
+| `auto_rebase_gate_decide STRICT IN_QUEUE HAS_LABEL MERGEABLE LABEL` | gathered state (pure) | prints the reason; `0` update, `1` skip, `3` mergeability pending |
+| `auto_rebase_update_decision STRICT REPO PR LABEL` | strict policy + PR | prints the reason; `0` update, `1` skip (polls while pending) |
+
+The polling tunables are `AUTO_REBASE_MERGEABLE_POLLS` (default `5`) and
+`AUTO_REBASE_MERGEABLE_POLL_SECONDS` (default `3`).

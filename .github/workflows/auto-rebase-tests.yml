@@ -8,8 +8,8 @@
 #   - standards/workflows/auto-rebase.yml
 #
 # Gates (all must pass before merge):
-#   1. shellcheck — static analysis for the eligibility lib
-#   2. bats       — unit tests for the eligibility predicate
+#   1. shellcheck — static analysis for the auto-rebase libs
+#   2. bats       — unit tests for the eligibility predicate and update gate
 #
 # Standard: this workflow enforces the contract documented in
 # .github/scripts/auto-rebase/README.md.
@@ -61,7 +61,8 @@ jobs:
           set -euo pipefail
           shellcheck -x \
             .github/scripts/auto-rebase/lib/eligibility.sh \
-            .github/scripts/auto-rebase/lib/comments.sh
+            .github/scripts/auto-rebase/lib/comments.sh \
+            .github/scripts/auto-rebase/lib/update-gate.sh
 
       - name: Run bats suite
         run: bats --print-output-on-failure test/workflows/auto-rebase/
