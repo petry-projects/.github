@@ -143,6 +143,9 @@ REQUIRED_SETTINGS_BOOL=(
   "has_discussions:true:error:Discussions must be enabled for ideation and community engagement"
 )
 
+# Finding categories (used across add_finding calls)
+CI_WORKFLOWS_CATEGORY="ci-workflows"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -287,6 +290,12 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 # shellcheck source=lib/agent-ingress.sh
 . "$SCRIPT_DIR/lib/agent-ingress.sh"
 
+# Verbatim-managed stub detection + full-content compare (VERBATIM_STUB_WORKFLOWS,
+# stub_verbatim_matches). Shared with deploy-standard-workflows.sh so the audit
+# and the sweep agree on whether such a stub has drifted (#1277).
+# shellcheck source=lib/stub-verbatim.sh
+. "$SCRIPT_DIR/lib/stub-verbatim.sh"
+
 # AGENTS.md structural linter — the pure, data-driven driver (amdl_lint) and its
 # default rule-set path (AMDL_DEFAULT_RULES). Sourced, not exec'd: agents-md-lint.sh
 # guards its CLI behind a BASH_SOURCE check, so sourcing only defines functions.
@@ -409,7 +418,7 @@ check_required_workflows() {
          && agent_ingress_has_role_job "$(agent_ingress_role_for_workflow "$wf")" <<< "$ingress_decoded"; then
         continue
       fi
-      add_finding "$repo" "ci-workflows" "missing-$wf" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "missing-$wf" "error" \
         "Required workflow \`$wf\` is missing" \
         "standards/ci-standards.md#required-workflows"
     fi
@@ -426,7 +435,7 @@ check_required_workflows() {
   if [ -n "$fi_content" ]; then
     fi_decoded=$(echo "$fi_content" | base64 -d 2>/dev/null || echo "")
     if [ -n "$fi_decoded" ] && feature_ideation_should_flag_placeholder "$repo" "$fi_decoded"; then
-      add_finding "$repo" "ci-workflows" "feature-ideation-placeholder-context" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "feature-ideation-placeholder-context" "warning" \
         "\`feature-ideation.yml\` is present but its \`project_context\` is still the seed template placeholder (\`TODO:\`/\`Example:\`) — replace it with a real per-repo project description so weekly ideation runs on real context" \
         "standards/ci-standards.md#required-workflows"
     fi
@@ -1315,7 +1324,7 @@ check_sonarcloud() {
   # Only check if sonarcloud.yml exists
   if gh_api "repos/$ORG/$repo/contents/.github/workflows/sonarcloud.yml" --jq '.name' > /dev/null 2>&1; then
     if ! gh_api "repos/$ORG/$repo/contents/sonar-project.properties" --jq '.name' > /dev/null 2>&1; then
-      add_finding "$repo" "ci-workflows" "missing-sonar-properties" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "missing-sonar-properties" "warning" \
         "SonarCloud workflow exists but \`sonar-project.properties\` is missing" \
         "standards/ci-standards.md#3-sonarcloud-analysis-sonarcloudyml"
     fi
@@ -1479,7 +1488,7 @@ check_sonar_s7637_exemption() {
     # No properties file. Flag only when a stub needs but lacks the inline marker
     # (a missing properties file itself is reported by check_sonarcloud).
     if [ "$inline_missing" -eq 1 ]; then
-      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "sonar-s7637-exemption-missing" "warning" \
         "First-party caller stub(s) carry a channel-pinned reusable ref (\`@<name>/stable\`, \`@v1\`/\`@v2\`) without the inline \`# NOSONAR(githubactions:S7637)\` marker, and there is no legacy \`sonar-project.properties\` exemption. SonarCloud will flag them as unpinned actions even though the org exempts them from SHA-pinning. Add the inline marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` entry." \
         "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
     fi
@@ -1496,13 +1505,13 @@ check_sonar_s7637_exemption() {
       # Only a real gap when a channel-pinned first-party stub actually lacks the
       # inline marker; with no such stub there is nothing for S7637 to fire on.
       if [ "$inline_missing" -eq 1 ]; then
-        add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-missing" "warning" \
+        add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "sonar-s7637-exemption-missing" "warning" \
           "No \`githubactions:S7637\` exemption found. SonarCloud will flag first-party reusable-ref caller stubs (\`@<name>/stable\`, \`@v1\`/\`@v2\`) as unpinned actions even though the org exempts them from SHA-pinning. Add the inline \`# NOSONAR(githubactions:S7637)\` marker to each channel-pinned first-party \`uses:\` line (canonical), or the legacy per-stub \`sonar.issue.ignore\` exemption in \`sonar-project.properties\`." \
           "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
       fi
       ;;
     too-broad)
-      add_finding "$repo" "ci-workflows" "sonar-s7637-exemption-too-broad" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "sonar-s7637-exemption-too-broad" "error" \
         "\`sonar-project.properties\` suppresses \`githubactions:S7637\` with a blanket workflow-path \`resourceKey\` (e.g. \`workflows/*.yml\` or \`**\`). This also exempts third-party actions in \`ci.yml\`/\`sonarcloud.yml\` from SHA-pin enforcement. Scope the exemption to the individual caller-stub files instead, or migrate to the inline \`# NOSONAR(githubactions:S7637)\` marker." \
         "standards/ci-standards.md#sonarcloud-exemption-first-party-reusable-ref-s7637"
       ;;
@@ -1555,7 +1564,7 @@ check_codeql_default_setup() {
       # with a token that carries security_events (or repo-admin) scope.
       info "  CodeQL default setup check skipped for $repo — audit token lacks required permissions (403)"
     else
-      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "codeql-default-setup-not-configured" "error" \
         "CodeQL default setup query returned no state — either the repo has code scanning disabled or the API call failed. Enable via \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
         "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
     fi
@@ -1563,7 +1572,7 @@ check_codeql_default_setup() {
     local state
     state=$(echo "$raw_response" | jq -r '.state // ""')
     if [ "$state" != "configured" ]; then
-      add_finding "$repo" "ci-workflows" "codeql-default-setup-not-configured" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "codeql-default-setup-not-configured" "error" \
         "CodeQL default setup is in state \`$state\` (expected \`configured\`). Run \`apply-repo-settings.sh $repo\` or \`gh api -X PATCH repos/$ORG/$repo/code-scanning/default-setup -F state=configured -F query_suite=default\`." \
         "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
     fi
@@ -1571,7 +1580,7 @@ check_codeql_default_setup() {
 
   # Stray workflow check: any codeql.yml under .github/workflows is drift.
   if gh_api "repos/$ORG/$repo/contents/.github/workflows/codeql.yml" --jq '.name' > /dev/null 2>&1; then
-    add_finding "$repo" "ci-workflows" "stray-codeql-workflow" "error" \
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "stray-codeql-workflow" "error" \
       "Repo still ships \`.github/workflows/codeql.yml\`. The org standard now uses GitHub-managed CodeQL default setup; per-repo workflow files are drift and run a duplicate analysis alongside default setup. Delete the file. If a documented exception applies (custom query pack, build mode, path filters), open a standards PR against \`standards/ci-standards.md\` to record the exception before re-adding the workflow." \
       "standards/ci-standards.md#2-codeql-analysis-github-managed-default-setup"
   fi
@@ -1615,7 +1624,7 @@ check_workflow_permissions() {
       local has_job_perms
       has_job_perms=$(echo "$decoded" | grep -cE '^    permissions:' || echo "0")
       if [ "$job_count" -gt 1 ] || [ "$has_job_perms" -eq 0 ]; then
-        add_finding "$repo" "ci-workflows" "missing-permissions-$wf" "warning" \
+        add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "missing-permissions-$wf" "warning" \
           "Workflow \`$wf\` missing top-level \`permissions:\` declaration (least-privilege policy)" \
           "standards/ci-standards.md#permissions-policy"
       fi
@@ -1650,7 +1659,7 @@ check_ci_concurrency() {
   # intentionally unbounded for reasons outside this check's scope).
   if echo "$decoded" | grep -qE '^concurrency:'; then
     if ! echo "$decoded" | grep -qE 'group:.*github\.sha'; then
-      add_finding "$repo" "ci-workflows" "ci-concurrency-missing-sha" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "ci-concurrency-missing-sha" "warning" \
         "The \`ci.yml\` concurrency group does not include \`github.sha\`. A per-ref group with \`cancel-in-progress: true\` can leave the HEAD commit with no CI results when pushes arrive in quick succession. Update to: \`group: ci-\${{ github.ref }}-\${{ github.sha }}\`." \
         "standards/ci-standards.md#1-ci-pipeline-ciyml"
     fi
@@ -1838,7 +1847,7 @@ check_centralized_workflow_stubs() {
     fi
 
     if [[ "$pin_rc" -eq 2 ]]; then
-      add_finding "$repo" "ci-workflows" "non-stub-$wf" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "non-stub-$wf" "warning" \
         "Could not verify that centralized workflow \`$wf\` pins the current \`${chan}\` channel: the channel-tag listing on \`$ORG/.github\` could not be read. Failing closed — the stub is not treated as compliant. Re-run the audit once the tag listing is readable." \
         "standards/ci-standards.md#reusable-workflow-versioning--the-stable-channel"
       continue
@@ -1852,7 +1861,7 @@ check_centralized_workflow_stubs() {
     [[ "$is_ring" = 1 ]] && expected_pin="$RING_EXPECTED_REF"
     if [[ "$is_ring" = 1 ]] && [[ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]]; then
       why="pins \`${pinned_ref}\`, but no \`${chan}\` channel tag has been cut for this repo's ring tier yet, so there is no resolvable ref to pin"
-      add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "non-stub-$wf" "error" \
         "Centralized workflow \`$wf\` $why. Wait for a channel tag to be cut for this tier (or re-tier the repo); do not re-pin to another tier's channel." \
         "standards/ci-standards.md#centralization-tiers"
       continue
@@ -1867,7 +1876,7 @@ check_centralized_workflow_stubs() {
       why="is an inline copy instead of a thin caller stub — re-sync from \`standards/workflows/${wf}\`"
     fi
 
-    add_finding "$repo" "ci-workflows" "non-stub-$wf" "error" \
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "non-stub-$wf" "error" \
       "Centralized workflow \`$wf\` $why. Replace with the canonical stub from \`standards/workflows/${wf}\` which delegates to \`petry-projects/.github/.github/workflows/${reusable}.yml@${expected_pin}\`." \
       "standards/ci-standards.md#centralization-tiers"
   done
@@ -1917,7 +1926,7 @@ check_dev_lead_stub() {
   #    superseded major (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable`
   #    exists) or on another repo's tier is drift; a failed tag probe fails closed.
   if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/(v[0-9]+-)?(stable|next|ring[0-9]+)([[:space:]]|$)"; then
-    add_finding "$repo" "ci-workflows" "$check_id" "error" \
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "$check_id" "error" \
       "The \`dev-lead.yml\` caller stub must pin a \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v<M>-<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\`. A bare \`dev-lead/<channel>\` tier pin is allowed when the agent has no channel tags. Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   else
@@ -1925,15 +1934,15 @@ check_dev_lead_stub() {
     dl_pinned=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@(dev-lead/[^[:space:]]+).*#\1#p' | head -n1)
     ring_pin_current "$ORG/.github-private" "dev-lead" "$repo" "$dl_pinned" || dl_rc=$?
     if [[ "$dl_rc" -eq 1 ]] && [[ "${RING_EXPECTED_RESOLVABLE:-1}" = 0 ]]; then
-      add_finding "$repo" "ci-workflows" "$check_id" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "$check_id" "error" \
         "The \`dev-lead.yml\` caller stub pins \`${dl_pinned}\`, but no \`dev-lead\` channel tag has been cut for this repo's ring tier yet, so there is no resolvable ref to pin. Wait for a tag to be cut for this tier (or re-tier the repo); do not re-pin to another tier's channel." \
         "standards/ci-standards.md#dev-lead-agent"
     elif [[ "$dl_rc" -eq 1 ]]; then
-      add_finding "$repo" "ci-workflows" "$check_id" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "$check_id" "error" \
         "The \`dev-lead.yml\` caller stub pins \`${dl_pinned}\`; expected \`${RING_EXPECTED_REF}\` — the current \`dev-lead\` channel for this repo's ring tier. A superseded channel major (or another tier's channel) is drift: promotion no longer moves it, so the repo never receives a release. Re-sync from \`standards/workflows/dev-lead.yml\` (the standards sweep re-pins it in place)." \
         "standards/ci-standards.md#dev-lead-agent"
     elif [[ "$dl_rc" -eq 2 ]]; then
-      add_finding "$repo" "ci-workflows" "$check_id" "warning" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "$check_id" "warning" \
         "Could not verify that the \`dev-lead.yml\` caller stub (\`${dl_pinned}\`) pins the current \`dev-lead\` channel: the channel-tag listing on \`$ORG/.github-private\` could not be read. Failing closed — the stub is not treated as compliant. Re-run the audit once the tag listing is readable." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
@@ -1947,7 +1956,7 @@ check_dev_lead_stub() {
   uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(v[0-9]+-(stable|next|ring[0-9]+))([[:space:]]|$).*#\1#p')
   if [ -n "$uses_channel" ]; then
     if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$uses_channel([[:space:]]|$)"; then
-      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "dev-lead-stub-agent-ref" "error" \
         "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$uses_channel\` to match the pinned channel \`$uses_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
@@ -1956,7 +1965,7 @@ check_dev_lead_stub() {
     bare_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p')
     if [[ -n "$bare_channel" ]] \
       && ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$bare_channel([[:space:]]|$)"; then
-      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "dev-lead-stub-agent-ref" "error" \
         "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$bare_channel\` to match the pinned channel \`$bare_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
@@ -1964,14 +1973,14 @@ check_dev_lead_stub() {
 
   # 3) No per-stub concurrency block — concurrency is owned by the reusable.
   if echo "$decoded" | grep -qE "^concurrency:"; then
-    add_finding "$repo" "ci-workflows" "dev-lead-stub-concurrency" "warning" \
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "dev-lead-stub-concurrency" "warning" \
       "The \`dev-lead.yml\` stub defines its own \`concurrency:\` block. Concurrency is centralized in the reusable (per-issue/per-PR lanes); a per-stub block drifts and can cancel issue pickups. Remove it — see petry-projects/.github#402." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
 
   # 4) Caller permissions must grant `statuses: read`.
   if ! echo "$decoded" | grep -qE "^[[:space:]]*statuses:[[:space:]]*read([[:space:]]|$)"; then
-    add_finding "$repo" "ci-workflows" "dev-lead-stub-statuses-perm" "error" \
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "dev-lead-stub-statuses-perm" "error" \
       "The \`dev-lead.yml\` stub is missing \`statuses: read\` in \`jobs.dev-lead.permissions\`. The reusable requests it (since #435), so without it every run fails at startup (\`startup_failure\`). Add \`statuses: read\`." \
       "standards/ci-standards.md#dev-lead-agent"
   fi
@@ -2144,10 +2153,63 @@ check_stub_surface_drift() {
       # breaks functionality, so those are errors.
       severity="error"
       [ "$surface" = "concurrency" ] && severity="warning"
-      add_finding "$repo" "ci-workflows" "stub-surface-drift-$wf-$surface" "$severity" \
+      add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "stub-surface-drift-$wf-$surface" "$severity" \
         "The \`$wf\` caller stub's \`$surface:\` surface has drifted from the canonical \`standards/workflows/$wf\`. These stubs are thin callers — the \`on:\` triggers, \`permissions:\` grants, and \`concurrency:\` block are owned centrally and are not repo-adjustable (only the documented \`with:\` inputs and the tier channel pin may differ per repo). Re-sync \`$surface:\` from \`standards/workflows/$wf\`." \
         "standards/ci-standards.md#centralization-tiers"
     done
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Check: verbatim-managed stubs match their template in full
+#
+# A stub that calls no reusable (initiative-driver.yml) has no pin to check: the
+# whole file is owned centrally and deployed verbatim. Compare it with the same
+# helper the deploy sweep uses (stub_verbatim_matches, CR-insensitive), so a stub
+# the sweep re-syncs is exactly a stub the audit flags (#1277). An absent stub is
+# left to check_required_workflows.
+# ---------------------------------------------------------------------------
+check_verbatim_stubs() {
+  local repo="$1"
+
+  # Both meta-repos self-manage these stubs (SKIP_SELF_MANAGED in
+  # deploy-standard-workflows.sh); the sweep never re-syncs them.
+  [[ "$repo" == ".github" ]] && return 0
+  [[ "$repo" == ".github-private" ]] && return 0
+
+  local workflow_list
+  if ! workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
+    echo "Error: failed to list workflows for $repo" >&2
+    mark_repo_inconclusive "$repo"
+    return 0
+  fi
+  [[ -z "$workflow_list" ]] && return 0
+
+  local wf template content deployed
+  for wf in "${VERBATIM_STUB_WORKFLOWS[@]}"; do
+    echo "$workflow_list" | grep -qxF "$wf" || continue
+    template="$STANDARDS_WF_DIR/$wf"
+    if [[ ! -f "$template" ]]; then
+      warn "No canonical template at $template — skipping verbatim check for $wf"
+      continue
+    fi
+    if ! content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null); then
+      echo "Error: failed to fetch $wf for $repo" >&2
+      mark_repo_inconclusive "$repo"
+      return 0
+    fi
+    # An empty body is a zero-byte stub: it falls through to the comparison and
+    # is reported as drift rather than skipped.
+    if ! deployed=$(printf '%s' "$content" | base64 -d 2>/dev/null); then
+      echo "Error: failed to decode $wf for $repo" >&2
+      mark_repo_inconclusive "$repo"
+      return 0
+    fi
+
+    stub_verbatim_matches "$deployed" "$template" && continue
+    add_finding "$repo" "$CI_WORKFLOWS_CATEGORY" "verbatim-stub-drift-$wf" "error" \
+      "The \`$wf\` stub differs from the canonical \`standards/workflows/$wf\`. It calls no reusable, so the whole file is owned centrally and must match the template byte for byte (line endings aside). Re-sync it from \`standards/workflows/$wf\` (the standards sweep re-deploys it)." \
+      "standards/ci-standards.md#centralization-tiers"
   done
 }
 
@@ -3469,6 +3531,7 @@ main() {
     check_centralized_workflow_stubs "$repo"
     check_dev_lead_stub "$repo"
     check_stub_surface_drift "$repo"
+    check_verbatim_stubs "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"
