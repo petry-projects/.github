@@ -24,6 +24,7 @@ teardown() { rm -rf "$TT_TMP"; }
 #                    major is derived from the CHANNEL tags (`<agent>/v<M>-<tier>`),
 #                    NOT the release tags (`<agent>/vX.Y.Z`) — the #870 fix. Unset/no
 #                    channel tag → the agent has no channel major → bare form.
+#   GH_MATCHING_FAIL non-empty → the matching-refs probe fails (fail-closed tests).
 #   GH_CONTENT_B64   base64 of the existing stub (unset → contents 404 = missing stub).
 #   GH_EXISTING_TAGS newline-separated `<agent>/<ref>` the assert-exists probe treats
 #                    as resolvable. UNSET → every ref resolves (legacy default, so a
@@ -44,6 +45,8 @@ if [ "${1:-}" = "api" ]; then
       printf 'Not Found\n' >&2
       exit 1 ;;
     *matching-refs/tags/*)
+      # GH_MATCHING_FAIL=1 simulates a failed tag probe (auth/rate-limit/5xx).
+      if [ -n "${GH_MATCHING_FAIL:-}" ]; then echo "HTTP 502" >&2; exit 1; fi
       [ -n "${GH_MATCHING_REFS:-}" ] && printf '%s\n' "${GH_MATCHING_REFS}"
       exit 0 ;;
     *contents/.github/workflows/agent-ingress.yml)
@@ -333,4 +336,108 @@ refs/tags/dev-lead/v1-stable"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'already compliant'
   ! echo "$output" | grep -q 'Would open PR'
+}
+
+# refute_output_matches <grep-flags> <pattern> -> assert $output does NOT match:
+# grep must exit exactly 1. A bare `! grep` would also pass on a grep error (2).
+refute_output_matches() {
+  local rc=0
+  grep "$@" <<< "$output" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
+# ── #1267: a SUPERSEDED channel major is drift, re-pinned to the tier's current ──
+# Five consumers sat on dev-lead/v1-stable while promotion moved dev-lead/v139-*;
+# the sweep accepted any tier-correct major and reported them "already compliant".
+# The current major is per TIER (highest M with a `<base>/v<M>-<tier>` tag).
+
+# Prints the live 2026-10-09 tag shape: an orphaned v1-stable plus the v139 family.
+devlead_v139_refs() {  # the live 2026-10-09 shape: an orphaned v1-stable + the v139 family
+  printf '%s\n' refs/tags/dev-lead/v1-stable refs/tags/dev-lead/v139.26.0 refs/tags/dev-lead/v139.50.2
+  channel_refs dev-lead 139
+}
+
+@test "#1267: a stable stub on a superseded major (v1-stable) is drift → re-pin @dev-lead/v139-stable" {
+  GH_MATCHING_REFS="$(devlead_v139_refs)"; export GH_MATCHING_REFS
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  refute_output_matches -q 'already compliant'
+  echo "$output" | grep -qF 'would pin @dev-lead/v139-stable'
+  echo "$output" | grep -qE 'Would open PR for broodminder-data .* dev-lead.yml'
+}
+
+@test "#1267: a stable stub already on the current major (v139-stable) stays compliant (no churn)" {
+  GH_MATCHING_REFS="$(devlead_v139_refs)"; export GH_MATCHING_REFS
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v139-stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  refute_output_matches -q 'Would open PR'
+}
+
+@test "#1267: a wrong-tier stub on the current major is still drift" {
+  GH_MATCHING_REFS="$(devlead_v139_refs)"; export GH_MATCHING_REFS
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v139-ring1)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'would pin @dev-lead/v139-stable'
+  echo "$output" | grep -qE 'Would open PR for broodminder-data .* dev-lead.yml'
+}
+
+# New major cut on some tiers only: X/v2-next, X/v2-ring0, X/v1-ring1, X/v1-stable.
+partial_cut_refs() {
+  printf 'refs/tags/dev-lead/%s\n' v2-next v2-ring0 v1-ring1 v1-stable
+}
+
+@test "#1267: partial major cut — a stable stub on v1-stable is compliant" {
+  GH_MATCHING_REFS="$(partial_cut_refs)"; export GH_MATCHING_REFS
+  GH_EXISTING_TAGS="$(partial_cut_refs | sed 's#^refs/tags/##')"; export GH_EXISTING_TAGS
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already compliant'
+  refute_output_matches -q 'Would open PR'
+}
+
+@test "#1267: partial major cut — a ring0 stub on v1-ring0 is drift → @dev-lead/v2-ring0" {
+  GH_MATCHING_REFS="$(partial_cut_refs)"; export GH_MATCHING_REFS
+  GH_EXISTING_TAGS="$(partial_cut_refs | sed 's#^refs/tags/##')"; export GH_EXISTING_TAGS
+  # .github is dev-lead's ring0 consumer (dev-lead is hosted in .github-private).
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-ring0)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo .github --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'would pin @dev-lead/v2-ring0'
+  echo "$output" | grep -qE 'Would open PR for \.github .* dev-lead.yml'
+}
+
+@test "#1267: partial major cut — the sweep never emits the uncut @dev-lead/v2-stable" {
+  GH_MATCHING_REFS="$(partial_cut_refs)"; export GH_MATCHING_REFS
+  GH_EXISTING_TAGS="$(partial_cut_refs | sed 's#^refs/tags/##')"; export GH_EXISTING_TAGS
+  install_gh_stub   # missing stub on a stable repo → fresh pin
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'would pin @dev-lead/v1-stable'
+  refute_output_matches -qF 'v2-stable'
+  # also under --force for a stub already on v1-stable
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-stable)"; export GH_CONTENT_B64
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo broodly --workflow dev-lead.yml
+  [ "$status" -eq 0 ]
+  refute_output_matches -qF 'v2-stable'
+}
+
+@test "#1267: a failed tag probe fails closed — not compliant, and no re-pin on a guess" {
+  export GH_MATCHING_FAIL=1
+  GH_CONTENT_B64="$(devlead_stub_pinning_with_marker dev-lead/v1-stable)"; export GH_CONTENT_B64
+  install_gh_stub
+  run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodminder-data --workflow dev-lead.yml
+  [ "$status" -ne 0 ]
+  refute_output_matches -q 'already compliant'
+  refute_output_matches -q 'would pin'
+  refute_output_matches -q 'Would open PR'
 }
