@@ -130,6 +130,23 @@ Where a reusable also checks out its own scripts or prompts, thread an
 `agent_ref`-style input pinned to the same channel, so logic **and** code run at
 the one validated version.
 
+**A superseded channel major is drift.** Ring channels are major-scoped
+(`<name>/v<M>-<tier>`), and a caller must pin the **current** major for its ring
+tier: the highest `M` for which `<name>/v<M>-<tier>` exists on the reusable's host
+repo. It is resolved per tier, so a major cut only at `next`/`ring0` does not yet
+move `stable` callers. Promotion only moves the current major's tags, so a stub
+left on an older family (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable`
+exists) never receives another release. The standards sweep
+(`scripts/deploy-standard-workflows.sh`) treats such a pin as drift and re-pins it
+in place to the current `<name>/v<M>-<tier>`. The compliance audit raises a finding
+that names the pinned ref and the expected ref. Both use `ring_pin_current` in
+`scripts/lib/ring-pins.sh`, so they cannot disagree. If the tag listing cannot be
+read, both fail closed: nothing is declared compliant and nothing is re-pinned.
+
+Throughout this document, `@<name>/stable`, `@dev-lead/stable` and the matching
+`agent_ref` name the **tier** (`stable`); the ref a stub actually pins is that
+tier's current major-scoped ref `<name>/v<M>-<tier>` (e.g. `dev-lead/v139-stable`).
+
 #### Staged promotion through concentric rings
 
 `stable` is not a single hop. A release reaches full production by passing
