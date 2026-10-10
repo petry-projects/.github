@@ -7147,6 +7147,7 @@ _wf_run_script() {
   [[ "$output" != *"fully rolled out"* ]]
   [[ "$output" == *"BLOCKED"* ]]
   run env GITHUB_REPOSITORY="petry-projects/.github-private" CANARY_RINGS="$RINGS" bash "$ORCH" promote dev-lead --allow-pre-existing --dry-run
+  [ "$status" -eq 0 ]
   [[ "$output" == *"cannot read tags for dev-lead on petry-projects/.github-private"* ]]
   [[ "$output" != *"fully rolled out"* ]]
   [[ "$output" != *"DRY-RUN"* ]]
