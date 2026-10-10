@@ -21,6 +21,7 @@ load 'helpers/setup'
 
 REUSABLE="${TT_REPO_ROOT}/.github/workflows/auto-rebase-reusable.yml"
 
+# setup — initialize test environment with temporary directories and gh stub
 setup() {
   tt_make_tmpdir
 
@@ -48,6 +49,7 @@ setup() {
   . "${TT_SCRIPTS_DIR}/lib/gate-facts.sh"
 }
 
+# teardown — clean up temporary directories after test
 teardown() {
   tt_cleanup_tmpdir
 }
@@ -59,6 +61,8 @@ teardown() {
 # PR number (`graphql_<n>`). A "<key>.rc" file makes the call fail with that
 # exit code (body still printed to stdout, `gh: <message>` to stderr — as the
 # real gh does). A missing fixture is a 404. `--jq` is applied with real jq.
+
+# _install_gh_stub — install fixture-driven gh command stub in test binary directory
 _install_gh_stub() {
   cat > "${TT_BIN}/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -208,8 +212,10 @@ _pr_state() {
     "$in_queue" "$queued_auto" "$auto" "$mergeable" "$labels" > "${FIX_DIR}/graphql_7.json"
 }
 
+# _updated — check if update-branch was called for PR #7
 _updated() { grep -q 'pulls/7/update-branch' "${FIX_DIR}/gh-calls.log"; }
 
+# _run_workflow — execute the auto-rebase update script with test environment
 _run_workflow() {
   run env \
     FIX_DIR="$FIX_DIR" \
@@ -291,6 +297,7 @@ _run_workflow() {
   _run_workflow
   [ "$status" -eq 0 ]
   _updated
+  rm -f "${FIX_DIR}/gh-calls.log"
   _pr_state false true MERGEABLE
   _run_workflow
   [ "$status" -eq 0 ]
