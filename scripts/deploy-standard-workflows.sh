@@ -62,13 +62,16 @@ STANDARDS_DIR="$REPO_ROOT/standards/workflows"
 SYNC_BRANCH_PREFIX="standards-sync"
 SYNC_LABEL="standards-sync"
 
+# Engine-host repo (self-manages its workflow fleet and hosts reusable engines).
+readonly ENGINE_HOST_REPO=".github-private"
+
 # Repos exempt from blanket standard-workflow deployment.
 #   .github         — self-host source of truth; its own callers use local refs
 #                     (e.g. add-to-project.yml pins ./.github/...), which a
 #                     channel-pinned stub must never overwrite.
 #   .github-private — self-manages its workflow fleet (dev-lead runs inline, etc).
 # A repo here may still opt into a *specific* workflow via SKIP_OVERRIDES below.
-SKIP_REPOS=(".github" ".github-private")
+SKIP_REPOS=(".github" "$ENGINE_HOST_REPO")
 
 # Per-workflow opt-ins for otherwise-skipped repos. Keyed by workflow filename;
 # value is a space-separated list of SKIP_REPOS that should still receive it.
@@ -85,8 +88,8 @@ SKIP_REPOS=(".github" ".github-private")
 # are already present (feature-ideation re-pinned in place as a channel consumer,
 # initiative-driver a verbatim self-managed stub), so only pr-auto-review opts in.
 declare -A SKIP_OVERRIDES=(
-  ["add-to-project.yml"]=".github-private"
-  ["pr-auto-review.yml"]=".github-private"
+  ["add-to-project.yml"]="$ENGINE_HOST_REPO"
+  ["pr-auto-review.yml"]="$ENGINE_HOST_REPO"
 )
 
 # Required workflows a SKIP_REPO satisfies by SELF-MANAGING the file in its own
@@ -112,7 +115,7 @@ declare -A SKIP_OVERRIDES=(
 #                   receives via the SKIP_OVERRIDES opt-in above (#847).
 declare -A SKIP_SELF_MANAGED=(
   [".github"]="dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml pr-auto-review.yml initiative-driver.yml"
-  [".github-private"]="dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml initiative-driver.yml"
+  ["$ENGINE_HOST_REPO"]="dev-lead.yml dependabot-automerge.yml dependency-audit.yml agent-shield.yml pr-review-mention.yml feature-ideation.yml initiative-driver.yml"
 )
 
 # Workflows deployable from standards/workflows/<name>.
@@ -175,7 +178,7 @@ readonly REPLACE_IF_PRESENT_WORKFLOWS=(
 # engine (grandfathered name, #1127; its own caller is pr-review-trigger.yml), so
 # the sweep must never read, replace or re-pin it.
 declare -A ENGINE_HOST_REPOS=(
-  ["pr-review.yml"]=".github-private"
+  ["pr-review.yml"]="$ENGINE_HOST_REPO"
 )
 
 # is_replace_if_present_workflow <name.yml> -> 0 if the workflow deploys only over
