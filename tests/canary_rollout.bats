@@ -7052,7 +7052,7 @@ _ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
 
 @test "_agent_run_json: windows of different ages share ONE per-role fetch, and a capped bounded list triggers no refetch (#1259 option B)" {
   _legacy_runs_stub
-  local cache="$BATS_TEST_TMPDIR/rc-legacy"; mkdir -p "$cache"
+  local cache="$BATS_TEST_TMPDIR/rc-legacy" recent; mkdir -p "$cache"
   run env _RUNS_CACHE_DIR="$cache" CANARY_RINGS="$RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
     source '$ORCH'; set +e
     for d in 2 7 11 14; do _agent_run_json dev-lead org/legacy \"\$(date -u -d \"-\$d days\" +%Y-%m-%dT%H:%M:%SZ)\" >/dev/null; done"
@@ -7060,7 +7060,9 @@ _ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
   [ "$(grep -c '^run list ' "$GH_LOG")" -eq 1 ]
   # A bounded list that fills the 1000 cap IS the newest-1000 (newest-first), so it is used as is: no second read.
   : > "$GH_LOG"; cache="$BATS_TEST_TMPDIR/rc-legacy-cap"; mkdir -p "$cache"
-  jq -c '[range(1000) as $i | {conclusion:"success",createdAt:"2026-10-09T10:00:00Z",databaseId:$i,workflowName:"Dev-Lead Agent"}]' <<< 'null' > "$FIXTURE"
+  # Dated relative to now: a fixed date would fall behind the stub's 15-day bound and filter every row out.
+  recent="$(date -u -d '-1 days' +%Y-%m-%dT10:00:00Z)"
+  jq -n -c --arg c "$recent" '[range(1000) as $i | {conclusion:"success",createdAt:$c,databaseId:$i,workflowName:"Dev-Lead Agent"}]' > "$FIXTURE"
   run env _RUNS_CACHE_DIR="$cache" CANARY_RINGS="$RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
     source '$ORCH'; set +e; _agent_run_json dev-lead org/legacy '$(_ago 5)' | jq 'length'"
   [ "$status" -eq 0 ]
