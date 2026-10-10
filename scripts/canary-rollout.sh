@@ -622,7 +622,9 @@ candidate_cut_date() {
   done < <(git for-each-ref \
              --format='%(refname)|%(objectname)|%(*objectname)|%(creatordate:iso-strict)' \
              "refs/tags/${agent}/v*" 2>/dev/null)
-  git log -1 --format=%cI "$commit" 2>/dev/null || echo ""
+  # Last resort: the local commit date. %cI keeps the committer's offset, so normalise it to Zulu like
+  # every other source — the window filters compare timestamps as strings (#1244 item 17).
+  _to_z "$(git log -1 --format=%cI "$commit" 2>/dev/null || true)"
 }
 
 # _gh_err_summary <stderr-text> — condense gh's stderr into a single line for the
@@ -730,9 +732,16 @@ _repo_wf_runs_cached() {
   while :; do
     if out="$(gh run list --repo "$repo" --workflow "$wf" \
         -L "$limit" "${cargs[@]+"${cargs[@]}"}" --json conclusion,createdAt,databaseId,workflowName 2>"$errfile")"; then
-      rm -f "$errfile"; out="${out:-[]}"
-      [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
-      printf '%s\n' "$out"; return 0
+      out="${out:-[]}"
+      # A 2xx whose body is not a JSON array (an error object, HTML from a proxy) is a failed fetch,
+      # not "no runs": passed through, the legacy per-role reducer maps it to [] and reads it as "no
+      # caller" (#1244 item 15). Fall into the retry / fail-closed path below instead.
+      if jq -e 'type == "array"' >/dev/null 2>&1 <<< "$out"; then
+        rm -f "$errfile"
+        [ -n "${cachef:-}" ] && [ -d "$_RUNS_CACHE_DIR" ] && printf '%s' "$out" > "$cachef" 2>/dev/null || true
+        printf '%s\n' "$out"; return 0
+      fi
+      printf '%s\n' "unexpected non-array run list body" > "$errfile"
     fi
     err=""
     if [ -r "$errfile" ]; then
