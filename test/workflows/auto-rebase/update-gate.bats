@@ -94,12 +94,13 @@ _serve() {
 
 if [ "$1" = "api" ]; then
   shift
-  endpoint="" jq_expr="" number=""
+  endpoint="" jq_expr="" number="" paginate=false slurp=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --jq) jq_expr="$2"; shift 2 ;;
       -X|-H) shift 2 ;;
-      --paginate|--slurp) shift ;;
+      --paginate) paginate=true; shift ;;
+      --slurp) slurp=true; shift ;;
       -f|-F)
         case "$2" in number=*) number="${2#number=}" ;; esac
         printf '%s\n' "$2" >> "${FIX_DIR}/gh-fields.log"
@@ -107,10 +108,38 @@ if [ "$1" = "api" ]; then
       *) endpoint="$1"; shift ;;
     esac
   done
+
+  # Serve the response, wrapping in a page array if both --paginate and --slurp are used
+  _serve_paginated() {
+    local key="$1" jq_expr="$2" paginate="$3" slurp="$4" body rc=0
+    if [ -f "${FIX_DIR}/${key}.json" ]; then
+      body="$(cat "${FIX_DIR}/${key}.json")"
+      [ -f "${FIX_DIR}/${key}.rc" ] && rc="$(cat "${FIX_DIR}/${key}.rc")"
+    else
+      body='{"message":"Not Found","status":"404"}'
+      rc=1
+    fi
+    if [ "$rc" -eq 0 ] && [ "$paginate" = "true" ] && [ "$slurp" = "true" ]; then
+      body="[$body]"
+    fi
+    if [ "$rc" -ne 0 ]; then
+      printf '%s\n' "$body"
+      printf 'gh: %s (HTTP %s)\n' \
+        "$(printf '%s' "$body" | jq -r '.message // "error"')" \
+        "$(printf '%s' "$body" | jq -r '.status // "500"')" >&2
+      exit "$rc"
+    fi
+    if [ -n "$jq_expr" ]; then
+      printf '%s' "$body" | jq -r "$jq_expr"
+    else
+      printf '%s\n' "$body"
+    fi
+  }
+
   case "$endpoint" in
     graphql) _serve "graphql_${number}" "$jq_expr" ;;
     */update-branch) _serve "$(_key "$endpoint")" "$jq_expr" ;;
-    *) _serve "$(_key "$endpoint")" "$jq_expr" ;;
+    *) _serve_paginated "$(_key "$endpoint")" "$jq_expr" "$paginate" "$slurp" ;;
   esac
   exit $?
 fi
