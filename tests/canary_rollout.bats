@@ -6612,3 +6612,50 @@ _ingress_frontier() {
   [ "$status" -eq 0 ]
   [ -n "$(ls -A "$d")" ]
 }
+
+# ── #1247 item 4: role scoping of the stale-release check in a shared ingress run ─────────────────────
+# `gh run view --log` of a collapsed ingress run interleaves every role's jobs. _run_reusable_sha is keyed
+# on the agent's own reusable (not the job name), so what another role pinned can only matter when it pins
+# the SAME reusable. These pin both cases; the same-reusable case fails closed (it can only keep a failure
+# COUNTING, never wrongly drop it as old-release).
+_shared_ingress_log_stub() {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  export SHARED_LOG="$BATS_TEST_TMPDIR/shared-ingress.log"
+  cat > "$STUB_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$*" in *"run view"*"--log"*) cat "$SHARED_LOG" ;; *) echo '{}' ;; esac
+GHEOF
+  chmod +x "$STUB_BIN/gh"
+}
+_uses_line() {   # <job> <reusable-path> <sha>
+  printf '%s\tUNKNOWN STEP\t2026-09-25T00:00:00.1234567Z Uses: %s@refs/tags/x (%s)\n' "$1" "$2" "$3"
+}
+
+@test "_run_is_stale: another role's pin to a DIFFERENT reusable in a shared ingress run is ignored (#1247 item 4a)" {
+  _shared_ingress_log_stub
+  local DL="petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml"
+  local OTHER="petry-projects/.github-private/.github/workflows/some-other-role-reusable.yml"
+  local old="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" cand="cccccccccccccccccccccccccccccccccccccccc"
+  { _uses_line dev-lead "$DL" "$old"; _uses_line other-role "$OTHER" "$cand"; } > "$SHARED_LOG"
+  run bash -c "source '$ORCH'; _run_reusable_sha dev-lead org/collapsed 1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$old" ]                                  # only this agent's own reusable is read
+  # dev-lead ran the OLD release; the other role running the candidate must not make it look current.
+  run bash -c "source '$ORCH'; _run_is_stale dev-lead '$cand' org/collapsed 2"
+  [ "$status" -eq 0 ]
+}
+
+@test "_run_is_stale: two roles on the SAME reusable at different pins — a candidate pin among them keeps the failure counting (#1247 item 4b)" {
+  _shared_ingress_log_stub
+  local DL="petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml"
+  local old="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" cand="cccccccccccccccccccccccccccccccccccccccc" other="dddddddddddddddddddddddddddddddddddddddd"
+  { _uses_line dev-lead "$DL" "$old"; _uses_line second-role "$DL" "$cand"; } > "$SHARED_LOG"
+  run bash -c "source '$ORCH'; _run_reusable_sha dev-lead org/collapsed 3 | sort | tr '\n' ' '"
+  [ "$output" = "$old $cand " ]                           # not role-scoped: both pins are collected
+  # The candidate is among the collected pins → NOT stale (the failure still counts: fail closed).
+  run bash -c "source '$ORCH'; _run_is_stale dev-lead '$cand' org/collapsed 3"
+  [ "$status" -eq 1 ]
+  # A candidate that NO job ran is stale, as before.
+  run bash -c "source '$ORCH'; _run_is_stale dev-lead '$other' org/collapsed 3"
+  [ "$status" -eq 0 ]
+}
