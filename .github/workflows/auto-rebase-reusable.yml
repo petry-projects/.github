@@ -178,10 +178,9 @@ jobs:
             fi
 
             # Update gate (#1272): being behind is only a reason to push when the
-            # base's rules require up-to-date branches, the PR is in/entering a
-            # merge queue, or the ready label is set. Conflicting PRs are still
-            # attempted (conflict notice below); an unreadable gate fails safe
-            # to updating.
+            # base's rules require up-to-date branches or the PR is in/entering a
+            # merge queue. Conflicting PRs are still attempted (conflict notice
+            # below); an unreadable gate fails safe to updating.
             if [[ -z "${STRICT_BY_BASE[$BASE_BRANCH]:-}" ]]; then
               STRICT_BY_BASE[$BASE_BRANCH]=$(auto_rebase_strict_policy "$REPO" "$BASE_BRANCH")
             fi
