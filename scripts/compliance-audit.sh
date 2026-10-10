@@ -1952,13 +1952,13 @@ check_dev_lead_stub() {
         "standards/ci-standards.md#dev-lead-agent"
     fi
   else
+    local bare_channel
     bare_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$).*#\1#p')
-    if [ -n "$bare_channel" ]; then
-      if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$bare_channel([[:space:]]|$)"; then
-        add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
-          "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$bare_channel\` to match the pinned channel \`$bare_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
-          "standards/ci-standards.md#dev-lead-agent"
-      fi
+    if [[ -n "$bare_channel" ]] \
+      && ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$bare_channel([[:space:]]|$)"; then
+      add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/$bare_channel\` to match the pinned channel \`$bare_channel\`. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "standards/ci-standards.md#dev-lead-agent"
     fi
   fi
 
