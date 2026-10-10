@@ -658,6 +658,37 @@ PR_EVENTS='    - surface: pull_request
   [ "$status" -ne 0 ]
 }
 
+# --- pm_persona_runtime_reusable (own-runtime personas are not router-served) --
+
+@test "pm_persona_runtime_reusable prints the path for a dev-lead-shaped manifest" {
+  m="$(manifest "$PR_ON")
+runtime:
+  reusable: .github/workflows/dev-lead-reusable.yml"
+  run pm_persona_runtime_reusable "$m"
+  [ "$status" -eq 0 ]
+  [ "$output" = ".github/workflows/dev-lead-reusable.yml" ]
+}
+
+@test "pm_persona_runtime_reusable prints nothing for runtime.identity only" {
+  m="$(manifest "$PR_ON")
+runtime:
+  identity: qa-lead"
+  run pm_persona_runtime_reusable "$m"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pm_persona_runtime_reusable prints nothing when there is no runtime block" {
+  run pm_persona_runtime_reusable "$(manifest "$PR_ON")"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pm_persona_runtime_reusable fails closed on an unparseable manifest" {
+  run pm_persona_runtime_reusable "id: [unclosed"
+  [ "$status" -ne 0 ]
+}
+
 # --- pm_pr_should_route (event pre-filter) ---------------------------------
 # Same two recursion axes and trust floor as pm_should_route, but WITHOUT the
 # @-mention requirement: a PR is derived, not addressed. A PR event must not

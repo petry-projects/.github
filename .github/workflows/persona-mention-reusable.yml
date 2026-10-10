@@ -535,6 +535,7 @@ jobs:
           fi
 
           dispatched=0
+          failed=0
           while IFS= read -r slug; do
             [ -n "$slug" ] || continue
             echo "::group::@petry-projects/${slug}"
@@ -555,7 +556,7 @@ jobs:
               *)
                 rm -f "$body_file"
                 echo "::error::fetching ${url} returned HTTP ${http} — refusing to treat a fetch failure as 'not a persona'"
-                exit 1 ;;
+                failed=1; echo "::endgroup::"; continue ;;
             esac
             rm -f "$body_file"
 
@@ -573,11 +574,23 @@ jobs:
             # decided from the manifest alone with no contract fetch.
             surface_decision="$(pm_surface_decision "$manifest" pull_request)" || {
               echo "::error::manifest query for '${slug}' failed — refusing to route"
-              exit 1
+              failed=1; echo "::endgroup::"; continue
             }
             read -r enabled mode opt_out <<<"$surface_decision"
             if [ "$enabled" != "true" ]; then
               echo "Persona '${slug}' does not declare an enabled pull_request surface (mode=${mode}). Skipping."
+              echo "::endgroup::"; continue
+            fi
+
+            # A persona with its own runtime.reusable (dev-lead, pr-review) is
+            # served on PRs by that workflow; dispatching it here would only start
+            # a pointless runner job. Fail closed on an unparseable manifest.
+            runtime_reusable="$(pm_persona_runtime_reusable "$manifest")" || {
+              echo "::error::manifest query for '${slug}' failed — refusing to route"
+              failed=1; echo "::endgroup::"; continue
+            }
+            if [ -n "$runtime_reusable" ]; then
+              echo "Persona '${slug}': skip served-by-own-runtime (${runtime_reusable})."
               echo "::endgroup::"; continue
             fi
 
@@ -612,16 +625,16 @@ jobs:
             ihttp="$(raw_fetch "$interaction_url" "$ibody_file")"
             case "$(pm_fetch_disposition "$ihttp")" in
               read)
-                interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; exit 1; }
+                interaction="$(cat "$ibody_file")" || { rm -f "$ibody_file"; failed=1; echo "::endgroup::"; continue; }
                 rm -f "$ibody_file" ;;
               absent)
                 rm -f "$ibody_file"
                 echo "::error::no interaction contract for '${slug}' at ${interaction_url} — a manifested persona must declare its stop markers; refusing to dispatch"
-                exit 1 ;;
+                failed=1; echo "::endgroup::"; continue ;;
               *)  # fail
                 rm -f "$ibody_file"
                 echo "::error::fetching ${interaction_url} returned HTTP ${ihttp} — refusing to treat a fetch failure as 'no stop markers'"
-                exit 1 ;;
+                failed=1; echo "::endgroup::"; continue ;;
             esac
 
             # The composed gauntlet (pure, unit-tested per branch): stop marker ->
@@ -632,9 +645,9 @@ jobs:
               :
             else
               case "$?" in
-                2) echo "::error::interaction contract for '${slug}' is unreadable or malformed — refusing to route (fail closed)"; exit 1 ;;
-                3) echo "::error::persona '${slug}' declares a write pull_request surface with no gate_label — refusing (schema violation: §4 rule 2)"; exit 1 ;;
-                *) echo "::error::routing verdict failed for '${slug}'"; exit 1 ;;
+                2) echo "::error::interaction contract for '${slug}' is unreadable or malformed — refusing to route (fail closed)"; failed=1; echo "::endgroup::"; continue ;;
+                3) echo "::error::persona '${slug}' declares a write pull_request surface with no gate_label — refusing (schema violation: §4 rule 2)"; failed=1; echo "::endgroup::"; continue ;;
+                *) echo "::error::routing verdict failed for '${slug}'"; failed=1; echo "::endgroup::"; continue ;;
               esac
             fi
 
@@ -669,3 +682,7 @@ jobs:
           done <<< "$personas"
 
           echo "Dispatched ${dispatched} persona(s)."
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::one or more personas failed to evaluate — see the errors above"
+            exit 1
+          fi

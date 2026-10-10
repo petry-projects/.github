@@ -500,6 +500,20 @@ pm_surface_declares_event() {
   return $?
 }
 
+# pm_persona_runtime_reusable <manifest-yaml> — print `.runtime.reusable`, or
+# nothing when the manifest declares none. A persona with its own reusable
+# workflow (dev-lead, pr-review) is served by that workflow on PRs, so the
+# router must not dispatch it. Returns 2 on an unparseable manifest so the
+# caller fails closed, same as pm_surface_decision.
+pm_persona_runtime_reusable() {
+  local manifest="$1" result
+  result="$(printf '%s' "$manifest" | pm_manifest_query '
+    ((.runtime // {}) | if type == "object" then (.reusable // "") else "" end)
+    | if type == "string" then . else "" end
+  ')" || return 2
+  printf '%s' "$result"
+}
+
 # pm_pr_should_route <author> <actor> <author_association> <body> — 0 if a
 # pull_request event is worth acting on. The CHEAP pre-filter for the PR path,
 # mirrored from pm_should_route but WITHOUT the @-mention requirement: a PR
