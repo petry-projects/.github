@@ -384,32 +384,28 @@ is_pin_compliant() {
     # the bare `<base>/<tier>` OR the major-scoped `<base>/v<M>-<tier>` form (#657
     # F5) — post-migration the templates pin the v-form, so both must enter here.
     if ring_is_ring_reusable "$base" && [[ "$ref_after" =~ ^${base}/(v[0-9]+-)?(stable|next|ring[0-9]+)$ ]]; then
-      # Major-scoped channels (#657 F5, #861, #870): the bare-tier grace is now
-      # major-AWARE, keyed on the CHANNEL major (the highest `<base>/v<M>-<tier>`
-      # channel tag that exists) — NOT the release major. A bare `<base>/<tier>`
-      # stub stays compliant only while the agent has NO channel tag (nothing to
-      # major-scope onto yet). Once a channel tag exists, a bare stub is drift and
-      # must migrate to the tier's `v<M>-<tier>` form. Using the channel major (not
-      # the release major) is what keeps dev-lead — release v14, channel v1 — pinned
-      # to the tag that actually resolves (@dev-lead/v1-<tier>, not @dev-lead/v14-…).
-      local host major
+      # Major-scoped channels (#657 F5, #861, #870, #1267): the stub is compliant
+      # only when it pins the CURRENT channel for its tier — `<base>/v<M>-<tier>`
+      # where M is the highest major with a channel tag for THAT tier (not the
+      # release major, and not "any major"). A stub left on a superseded major
+      # (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable` exists), a wrong-tier
+      # v-form, or a bare `<base>/<tier>` once a channel tag exists is drift and is
+      # re-pinned to the ref emit_ref_for computes from the same helper. While the
+      # agent has NO channel tag the bare-tier grace still applies. A failed tag
+      # probe fails closed (never compliant). ring_pin_current is shared with the
+      # audit so the sweep and the audit cannot disagree.
+      local host existing_ref
       host="$(cut -d/ -f1-2 <<< "$prefix")"
-      major="$(ring_host_current_channel_major "$host" "$base")" || return 1
-      if [[ -z "$major" ]]; then
-        local ref
-        while IFS= read -r ref; do
-          [[ -n "$ref" ]] && grep -qF "${prefix}@${ref}" <<< "$existing_content" && return 0
-        done < <(ring_accepted_refs "$base" "$repo")
-      fi
-      # A stub already pinned to the repo's tier-correct `v<M>-<tier>` form (any
-      # major) is compliant regardless of release state. A WRONG-tier v-form — or a
-      # bare stub once the agent has a release — is not accepted here and stays drift.
-      local existing_ref
-      existing_ref=$(grep -oE "@${base}/[^[:space:]\"']+" <<< "$existing_content" | head -1)
+      # Only a `uses:` line counts: a comment or `agent_ref:` carrying the current
+      # tag must not mask a stale `uses:` pin.
+      # Strip inline YAML comments first and require the `<base>-reusable.yml@` ref,
+      # so a ref written in a comment or on an unrelated job's `uses:` is ignored.
+      # `sed -n 1p` (not `head -1`) reads the whole stream, so no writer sees a closed pipe.
+      existing_ref=$(sed -E 's/[[:space:]]+#.*$//' <<< "$existing_content" \
+        | grep -E "^[[:space:]]*(-[[:space:]]+)?uses:.*/${base}-reusable\.yml@${base}/" \
+        | grep -oE "@${base}/[^[:space:]\"']+" | sed -n 1p || true)
       existing_ref="${existing_ref#@}"
-      if [[ -n "$existing_ref" ]] && ring_vform_tier_aligned "$existing_ref" "$base" "$repo"; then
-        return 0
-      fi
+      ring_pin_current "$host" "$base" "$repo" "$existing_ref" && return 0
       return 1
     fi
   fi
@@ -443,20 +439,21 @@ reusable_host_of() {
 # emit_ref_for <template> <repo> -> the channel ref a (re)deployed stub in <repo>
 # should pin (#657 F5). For a ring-managed reusable it is the repo's tier channel,
 # major-scoped `v<M>-<tier>` when the agent has a CHANNEL tag, else the bare `<tier>`
-# form. The major is the CHANNEL major (highest existing `<base>/v<M>-<tier>` tag),
-# NOT the release major — so dev-lead (release v14, channel v1) pins the resolving
-# `@dev-lead/v1-<tier>`, never the tagless `@dev-lead/v14-<tier>` (#870). Empty for
-# a non-ring template (deployed verbatim). Requires GH_TOKEN.
+# form. M is the CURRENT channel major for the repo's tier (highest existing
+# `<base>/v<M>-<tier>` tag for that tier, #1267) — never the release major (#870),
+# and never a major only cut on other tiers. It is RING_EXPECTED_REF from
+# ring_pin_current, the same helper is_pin_compliant uses, so the sweep never emits
+# a ref its own compliance check would reject. Empty for a non-ring template
+# (deployed verbatim). Returns 1 on a failed tag probe. Requires GH_TOKEN.
 emit_ref_for() {
-  local template="$1" repo="$2" base host major
+  local template="$1" repo="$2" base host rc=0
   base="$(reusable_base_of "$template")"
   [[ -z "$base" ]] && return 0
   ring_is_ring_reusable "$base" || return 0
   host="$(reusable_host_of "$template")"
-  if ! major="$(ring_host_current_channel_major "$host" "$base")"; then
-    return 1
-  fi
-  ring_canonical_ref "$base" "$repo" "$major"
+  ring_pin_current "$host" "$base" "$repo" "" || rc=$?
+  [[ "$rc" -eq 2 ]] && return 1
+  printf '%s' "$RING_EXPECTED_REF"
   return 0
 }
 
