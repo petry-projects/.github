@@ -132,10 +132,10 @@ MARKERS=(
 }
 
 @test "decision: a body full of glob/shell metacharacters is treated literally" {
-  run decide issue_comment OWNER don-petry '@donpetry-bot $(touch /tmp/pwned) * ? [a] `id`'
+  run decide issue_comment OWNER don-petry "@donpetry-bot \$(touch ${TT_TMP}/pwned) * ? [a] \`id\`"
   [ "$status" -eq 0 ]
   [ "$output" = "force trusted-human-comment-mention" ]
-  [ ! -e /tmp/pwned ]
+  [ ! -e "${TT_TMP}/pwned" ]
 }
 
 # ── shipped "Trigger review agent" step ──────────────────────────────────────
