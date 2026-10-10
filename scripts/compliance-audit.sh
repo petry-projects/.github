@@ -1828,11 +1828,9 @@ check_centralized_workflow_stubs() {
         | head -n1)
       ring_pin_current "$ORG/.github" "$chan" "$repo" "$pinned_ref" || pin_rc=$?
     fi
-    # With no channel tag cut yet, ring_pin_current expects (and accepts) the bare
-    # `<base>/<tier>`; follow its verdict rather than also demanding the v-form.
-    local bare_ok=0
-    [[ "$is_ring" = 1 ]] && [[ "$pin_rc" -eq 0 ]] && [[ "$RING_EXPECTED_REF" != */v[0-9]* ]] && bare_ok=1
-    if { [[ "$is_ring" = 1 ]] && [[ "$pin_rc" -eq 0 ]] && { [[ "$bare_ok" = 1 ]] || ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; }; } \
+    # RING pins must be in major-scoped v-form (ring_pin_current enforces this by
+    # rejecting bare <base>/<tier> pins as non-compliant, #1267).
+    if { [[ "$is_ring" = 1 ]] && [[ "$pin_rc" -eq 0 ]] && ring_major_form_acceptable "$decoded" "$reusable" "$chan" "$repo"; } \
       || { [[ "$is_ring" != 1 ]] && stub_pin_acceptable "$decoded" "$reusable" "$canonical" "$legacy"; }; then
       continue
     fi

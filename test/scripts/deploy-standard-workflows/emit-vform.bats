@@ -168,14 +168,13 @@ selfhost_stub() {  # <base> → base64 of a meta-repo SELF-HOST stub using a loc
   echo "$output" | grep -qE 'Would open PR for markets .* auto-rebase.yml'
 }
 
-@test "drift check keeps a BARE-tier stub compliant when the agent has NO channel major (#861)" {
-  unset GH_MATCHING_REFS   # no channel tag → no current major → bare tier stays compliant
+@test "drift check flags a BARE-tier stub as drift even when the agent has NO channel major (#861, #1267)" {
+  unset GH_MATCHING_REFS   # no channel tag → bare tier is drift (#1267: require v-form)
   GH_CONTENT_B64="$(stub_pinning auto-rebase/stable)"; export GH_CONTENT_B64
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo markets --workflow auto-rebase.yml
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'already compliant'
-  ! echo "$output" | grep -q 'Would open PR'
+  echo "$output" | grep -q 'Would open PR'
 }
 
 @test "drift check still flags a WRONG-tier v<M>-tier stub" {

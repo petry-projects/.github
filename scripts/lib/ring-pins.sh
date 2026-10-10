@@ -409,13 +409,10 @@ ring_pin_current() {
     [[ "$pinned" = "$RING_EXPECTED_REF" ]] && return 0
     return 1
   fi
+  # No channel major for this agent or tier: a bare <base>/<tier> pin is drift
+  # (#1267). The stub must pin a major-scoped v-form, which requires a channel
+  # tag to exist (cut by cut-release.sh).
   RING_EXPECTED_REF="${base}/${tier}"
-  [[ -n "$pinned" ]] || return 1
-  # Capture first: streaming into an early-exiting `grep -q` closes the pipe mid-write.
-  local accepted
-  accepted="$(ring_accepted_refs "$base" "$repo")"
-  grep -qxF -- "$pinned" <<< "$accepted" && return 0
-  ring_vform_tier_aligned "$pinned" "$base" "$repo" && return 0
   return 1
 }
 
