@@ -7,8 +7,7 @@
 #
 #   1. the base branch's effective rules require branches to be up to date
 #      (strict required status checks — from rulesets or classic protection);
-#   2. the PR is in, or is being added to, a merge queue;
-#   3. the PR carries the maintainer opt-in label (`ready_label` input).
+#   2. the PR is in, or is being added to, a merge queue.
 #
 # A conflicting PR is still attempted so the reusable's existing conflict
 # notice → dev-lead recovery path fires. Anything that cannot be read fails
@@ -50,7 +49,7 @@ auto_rebase_gate_decide() {
       return 0
       ;;
     MERGEABLE)
-      echo "none applied (strict up-to-date not required, not in a merge queue, no '${label:-<none>}' label)"
+      echo "none applied (strict up-to-date not required, not in a merge queue)"
       return 1
       ;;
     *)
