@@ -421,3 +421,91 @@ dev-lead/v1-stable"
   # `uses:`; the real pinned caller is the separate `pr-review-trigger.yml` stub.
   [ "$(ring_caller_stub pr-review)" = ".github/workflows/pr-review-trigger.yml" ]
 }
+
+# ── #1267: current channel major PER TIER — a superseded major is drift ─────────
+# "Any major" acceptance had no upper bound, so a stub left on an abandoned channel
+# family (dev-lead/v1-stable while promotion moves dev-lead/v139-*) read as healthy
+# forever. The current major is per TIER: when a new major is cut at next/ring0 only,
+# a stable repo's current major is still the older one.
+
+@test "ring_tier_channel_major: highest major whose channel tag exists for THAT tier (#1267)" {
+  [ "$(ring_tier_channel_major stable 1-stable 139-stable 139-next 139.50.2)" = "139" ]
+  # new major cut at next/ring0 only → stable stays on v1, ring0 moves to v2
+  [ "$(ring_tier_channel_major stable 2-next 2-ring0 1-ring1 1-stable)" = "1" ]
+  [ "$(ring_tier_channel_major ring0  2-next 2-ring0 1-ring1 1-stable)" = "2" ]
+  [ "$(ring_tier_channel_major ring1  2-next 2-ring0 1-ring1 1-stable)" = "1" ]
+  # no channel tag for the tier → empty; release semver and other tiers ignored
+  [ -z "$(ring_tier_channel_major ring1 1-stable 14.0.0)" ]
+  [ -z "$(ring_tier_channel_major stable)" ]
+  # ring1 must not match ring10
+  [ -z "$(ring_tier_channel_major ring1 3-ring10)" ]
+}
+
+@test "ring_pin_current: stale major is drift, current major is compliant (#1267)" {
+  export GH_MATCHING_REFS="refs/tags/dev-lead/v1-stable
+refs/tags/dev-lead/v139.50.2
+refs/tags/dev-lead/v139-stable
+refs/tags/dev-lead/v139-ring1
+refs/tags/dev-lead/v139-ring0
+refs/tags/dev-lead/v139-next"
+  _install_gh_stub
+  local rc=0
+  ring_pin_current petry-projects/.github-private dev-lead broodminder-data dev-lead/v1-stable || rc=$?
+  [ "$rc" -eq 1 ]
+  [ "$RING_EXPECTED_REF" = "dev-lead/v139-stable" ]
+  rc=0
+  ring_pin_current petry-projects/.github-private dev-lead broodminder-data dev-lead/v139-stable || rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$RING_EXPECTED_REF" = "dev-lead/v139-stable" ]
+  # wrong tier (current major) and bare tier are still drift
+  rc=0
+  ring_pin_current petry-projects/.github-private dev-lead broodminder-data dev-lead/v139-ring1 || rc=$?
+  [ "$rc" -eq 1 ]
+  rc=0
+  ring_pin_current petry-projects/.github-private dev-lead broodminder-data dev-lead/stable || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
+@test "ring_pin_current: new major cut on some tiers only is resolved per tier (#1267)" {
+  export GH_MATCHING_REFS="refs/tags/dev-lead/v2-next
+refs/tags/dev-lead/v2-ring0
+refs/tags/dev-lead/v1-ring1
+refs/tags/dev-lead/v1-stable"
+  _install_gh_stub
+  local rc=0
+  # stable repo on v1-stable: v2-stable does not exist → still current
+  ring_pin_current petry-projects/.github-private dev-lead markets dev-lead/v1-stable || rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$RING_EXPECTED_REF" = "dev-lead/v1-stable" ]
+  # a pin on the uncut v2-stable is drift, never "current"
+  rc=0
+  ring_pin_current petry-projects/.github-private dev-lead markets dev-lead/v2-stable || rc=$?
+  [ "$rc" -eq 1 ]
+  [ "$RING_EXPECTED_REF" = "dev-lead/v1-stable" ]
+  # ring0 repo (.github, for the .github-private-hosted dev-lead) on v1-ring0 → drift → v2-ring0
+  rc=0
+  ring_pin_current petry-projects/.github-private dev-lead .github dev-lead/v1-ring0 || rc=$?
+  [ "$rc" -eq 1 ]
+  [ "$RING_EXPECTED_REF" = "dev-lead/v2-ring0" ]
+}
+
+@test "ring_pin_current: a failed tag probe fails closed (rc 2, no expected ref) (#1267)" {
+  local bin="${BATS_TEST_TMPDIR}/failbin"
+  mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\necho "HTTP 502" >&2\nexit 1\n' > "$bin/gh"
+  chmod +x "$bin/gh"
+  PATH="${bin}:${PATH}"
+  local rc=0
+  ring_pin_current petry-projects/.github-private dev-lead broodly dev-lead/v1-stable 2>/dev/null || rc=$?
+  [ "$rc" -eq 2 ]
+  [ -z "$RING_EXPECTED_REF" ]
+}
+
+@test "ring_pin_current: no channel tag at all keeps the bare-tier grace (#1267, unchanged)" {
+  export GH_MATCHING_REFS="refs/tags/auto-rebase/v2.3.1"
+  _install_gh_stub
+  local rc=0
+  ring_pin_current petry-projects/.github auto-rebase markets auto-rebase/stable || rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$RING_EXPECTED_REF" = "auto-rebase/stable" ]
+}
