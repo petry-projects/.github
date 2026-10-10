@@ -493,7 +493,7 @@ GHEOF
 
 @test "_run_json: empty CANARY_GH_RETRY_SLEEP falls back to safe default (2)" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
-  printf '#!/usr/bin/env bash\necho "[{\"conclusion\":\"success\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"databaseId\":1,\"workflowName\":\"X\"}]"\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  printf '#!/usr/bin/env bash\necho '"'"'[{"conclusion":"success","createdAt":"2026-01-01T00:00:00Z","databaseId":1,"workflowName":"X"}]'"'"'\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
   cat > "$STUB_BIN/sleep" <<'SEOF'
 #!/usr/bin/env bash
 case "$1" in ''|*[!0-9]*) echo "bad sleep arg: $1" >&2; exit 1 ;; esac
@@ -507,7 +507,7 @@ SEOF
 
 @test "_run_json: non-integer CANARY_GH_RETRY_SLEEP falls back to safe default (2)" {
   STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
-  printf '#!/usr/bin/env bash\necho "[{\"conclusion\":\"success\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"databaseId\":1,\"workflowName\":\"X\"}]"\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  printf '#!/usr/bin/env bash\necho '"'"'[{"conclusion":"success","createdAt":"2026-01-01T00:00:00Z","databaseId":1,"workflowName":"X"}]'"'"'\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
   cat > "$STUB_BIN/sleep" <<'SEOF'
 #!/usr/bin/env bash
 case "$1" in ''|*[!0-9]*) echo "bad sleep arg: $1" >&2; exit 1 ;; esac
@@ -5932,7 +5932,7 @@ GHEOF
   [ ! -s "$flag" ]
 }
 
-@test "_agent_run_json: a non-array ingress run list is UNRESOLVED, not read as 'no caller' (#1250 review)" {
+@test "_agent_run_json: a non-array ingress run list is a failed fetch, not 'no caller' (#1250 review, #1244 item 15)" {
   _ingress_stub
   local d2; d2="$(mktemp -d "$BATS_TEST_TMPDIR/stub3.XXXXXX")"; export PATH="$d2:$PATH"
   cat > "$d2/gh" <<'GHEOF'
@@ -5949,12 +5949,43 @@ case "$1 $2" in
 esac
 GHEOF
   chmod +x "$d2/gh"
-  local flag="$BATS_TEST_TMPDIR/unresolved"; : > "$flag"
-  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_UNRESOLVED_FLAG="$flag" \
+  # The shared reader rejects a non-array 2xx body (retry, then fail closed with the fetch-failure flag), so
+  # the ingress read can no longer be mistaken for an empty window.
+  local ff="$BATS_TEST_TMPDIR/fetchfail"; : > "$ff"
+  run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_FETCH_FAIL_FLAG="$ff" \
     bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/weird '' 2>/dev/null"
+  [ "$status" -ne 0 ]
+  [ "$output" != "[]" ]
+  grep -q "org/weird" "$ff"
+}
+
+@test "_repo_wf_runs_cached: a non-array 2xx body on the legacy per-role path fails closed, never reads as 'no runs' (#1244 item 15)" {
+  STUB_BIN="$(mktemp -d "$BATS_TEST_TMPDIR/stub.XXXXXX")"; export PATH="$STUB_BIN:$PATH"
+  printf '#!/usr/bin/env bash\necho '"'"'{"message":"oops"}'"'"'\n' > "$STUB_BIN/gh"; chmod +x "$STUB_BIN/gh"
+  local cache="$BATS_TEST_TMPDIR/rc-nonarray"; mkdir -p "$cache"
+  run env _RUNS_CACHE_DIR="$cache" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 \
+    bash -c "source '$ORCH'; _run_json some/repo some-wf ''"
+  [ "$status" -eq 1 ]
+  [ -z "$(ls -A "$cache")" ]                      # the bad body is never cached
+  # A valid empty array is still "no runs".
+  printf '#!/usr/bin/env bash\necho "[]"\n' > "$STUB_BIN/gh"
+  run env _RUNS_CACHE_DIR="$cache" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=2 \
+    bash -c "source '$ORCH'; _run_json some/repo some-wf ''"
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
-  grep -q "not a JSON array" "$flag"
+}
+
+@test "candidate_cut_date: the local-host fallback is normalised to Zulu (#1244 item 17)" {
+  local repo="$BATS_TEST_TMPDIR/cutrepo"; git init -q "$repo"
+  # A committer date carrying a non-Zulu offset: %cI would print it verbatim.
+  GIT_COMMITTER_DATE="2026-03-04T10:00:00+05:00" git -C "$repo" -c user.name=t -c user.email=t@t \
+    commit -q --allow-empty -m c
+  [ "$(git -C "$repo" log -1 --format=%cI)" = "2026-03-04T10:00:00+05:00" ]
+  local sha; sha="$(git -C "$repo" rev-parse HEAD)"
+  # Host == this repo and no release tags, so the last-resort local fallback is the path under test.
+  run env CANARY_RINGS="$INGRESS_RINGS" bash -c "cd '$repo' && source '$ORCH' && THIS_REPO=\"\$(_agent_field dev-lead host)\" candidate_cut_date dev-lead '$sha'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-03-04T05:00:00Z" ]
 }
 
 @test "_agent_run_json: a job-less cancelled run is tolerated like an in-flight run — its jobs are re-read next sweep and the failure is then attributed (#1244 item 12)" {
