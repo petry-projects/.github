@@ -78,10 +78,11 @@ unreadable rules or protection (API error, 403 for a token without admin
 access), unreadable PR state, and mergeability that is still unknown after
 polling. An unreadable configuration never causes a skip.
 
-Each behind PR gets exactly one log line:
+Each behind PR gets exactly one gate-decision log line (followed by optional outcome messages):
 
 ```text
 PR #N (ref) is K commit(s) behind BASE — updating branch [gate: <condition>]
+  Branch updated
 PR #N (ref) is K commit(s) behind BASE — skipping update [gate: none applied (...)]
 ```
 
