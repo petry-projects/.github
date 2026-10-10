@@ -4,11 +4,9 @@
 # The reusable used to update-branch EVERY behind PR on every push to the base,
 # even where the base's rules do not require branches to be up to date — each
 # no-op merge commit restarted every review/CI cycle on every open PR. It now
-# updates a behind PR only when one of these holds:
-#
-#   1. the base branch's effective rules (rulesets + classic protection, read
-#      through the API) require branches to be up to date (strict checks);
-#   2. the PR is in, or is being added to, a merge queue.
+# updates a behind PR only when the base branch's effective rules (rulesets +
+# classic protection, read through the API) require branches to be up to date
+# (strict checks). Merge-queue / auto-merge state is NOT a condition.
 #
 # A conflicting PR is still attempted so the existing conflict notice fires,
 # and an unreadable gate fails safe to the old behaviour (update).
@@ -219,7 +217,6 @@ _run_workflow() {
     HAS_PAT="${HAS_PAT:-true}" \
     REPO="owner/repo" \
     ELIGIBILITY="all" \
-    READY_LABEL="${READY_LABEL-auto-rebase:ready}" \
     AUTO_REBASE_MERGEABLE_POLL_SECONDS=0 \
     bash --noprofile --norc -eo pipefail -c \
       "cd '${TT_WORK}' && exec bash --noprofile --norc -eo pipefail '${RUN_SCRIPT}'"
@@ -237,12 +234,12 @@ _run_workflow() {
   [[ "$output" == *"Branch updated"* ]]
 }
 
-@test "gate: strict not required, no queue, no label → does NOT update, logs that none applied" {
+@test "gate: strict not required → does NOT update, logs that none applied" {
   _seed_behind_pr
   _rules false
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
   [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — skipping update [gate: none applied"* ]]
   [[ "$output" != *"Branch updated"* ]]
 }
@@ -252,7 +249,7 @@ _run_workflow() {
   _fixture "repos/owner/repo/rules/branches/main?per_page=100" '[]'
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
   [[ "$output" == *"skipping update [gate: none applied"* ]]
 }
 
@@ -267,24 +264,38 @@ _run_workflow() {
   [[ "$output" == *"updating branch [gate: base branch rules require branches to be up to date]"* ]]
 }
 
-@test "gate: PR in a merge queue → updates, logging the merge-queue condition" {
+@test "gate: PR in a merge queue with strict off → does NOT update" {
   _seed_behind_pr
   _rules false
   _pr_state true false MERGEABLE
   _run_workflow
   [ "$status" -eq 0 ]
-  _updated
-  [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — updating branch [gate: PR is in or being added to a merge queue]"* ]]
+  if _updated; then false; fi
+  [[ "$output" == *"skipping update [gate: none applied"* ]]
 }
 
-@test "gate: PR being added to a merge queue (auto-merge with queue enabled) → updates" {
+@test "gate: auto-merge enabled on a queue-enabled base with strict off → does NOT update" {
   _seed_behind_pr
   _rules false
   _pr_state false true MERGEABLE
   _run_workflow
   [ "$status" -eq 0 ]
+  if _updated; then false; fi
+  [[ "$output" == *"skipping update [gate: none applied"* ]]
+}
+
+@test "gate: queued and auto-merge PRs ARE updated when strict is required" {
+  _seed_behind_pr
+  _rules true
+  _pr_state true false MERGEABLE
+  _run_workflow
+  [ "$status" -eq 0 ]
   _updated
-  [[ "$output" == *"updating branch [gate: PR is in or being added to a merge queue]"* ]]
+  _pr_state false true MERGEABLE
+  _run_workflow
+  [ "$status" -eq 0 ]
+  _updated
+  [[ "$output" == *"updating branch [gate: base branch rules require branches to be up to date]"* ]]
 }
 
 @test "gate: ready label alone does not trigger update" {
@@ -293,22 +304,8 @@ _run_workflow() {
   _pr_state false false MERGEABLE bug auto-rebase:ready
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
   [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — skipping update [gate: none applied"* ]]
-}
-
-@test "gate: a custom ready_label is honoured and the default one is then ignored" {
-  _seed_behind_pr
-  _rules false
-  _pr_state false false MERGEABLE auto-rebase:ready
-  READY_LABEL="keep-current" _run_workflow
-  [ "$status" -eq 0 ]
-  ! _updated
-  _pr_state false false MERGEABLE keep-current
-  READY_LABEL="keep-current" _run_workflow
-  [ "$status" -eq 0 ]
-  ! _updated
-  [[ "$output" == *"skipping update [gate: none applied"* ]]
 }
 
 @test "gate: fork PR is skipped as today (never gated, never updated)" {
@@ -319,7 +316,7 @@ _run_workflow() {
   ]'
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
   [[ "$output" == *"No open non-Dependabot same-repo PRs"* ]]
 }
 
@@ -345,7 +342,7 @@ _run_workflow() {
   [[ "$output" == *"updating branch [gate: could not evaluate"* ]]
 }
 
-@test "gate: PR queue/label state unreadable → updates with a 'could not evaluate' log line" {
+@test "gate: PR mergeability unreadable → updates with a 'could not evaluate' log line" {
   _seed_behind_pr
   _rules false
   rm -f "${FIX_DIR}/graphql_7.json"
@@ -361,9 +358,9 @@ _run_workflow() {
   _fixture "repos/owner/repo/compare/main...feature" '{"behind_by":0}'
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
   [[ "$output" == *"PR #7 (feature) is up to date — skipping"* ]]
-  ! grep -q 'rules/branches' "${FIX_DIR}/gh-calls.log"
+  if grep -q 'rules/branches' "${FIX_DIR}/gh-calls.log"; then false; fi
 }
 
 # ── AC2: the decision is derived from configuration ──────────────────────────
@@ -374,7 +371,7 @@ _run_workflow() {
   _rules false
   _run_workflow
   [ "$status" -eq 0 ]
-  ! _updated
+  if _updated; then false; fi
 
   _rules true
   _run_workflow
@@ -443,42 +440,31 @@ _run_workflow() {
 # ── unit: pure decision function ─────────────────────────────────────────────
 
 @test "decide: strict true → update" {
-  run auto_rebase_gate_decide true false false MERGEABLE auto-rebase:ready
+  run auto_rebase_gate_decide true MERGEABLE
   [ "$status" -eq 0 ]
   [[ "$output" == *"require branches to be up to date"* ]]
 }
 
 @test "decide: nothing applies and mergeable → skip" {
-  run auto_rebase_gate_decide false false false MERGEABLE auto-rebase:ready
-  [ "$status" -eq 1 ]
-  [[ "$output" == "none applied"* ]]
-}
-
-@test "decide: merge queue → update" {
-  run auto_rebase_gate_decide false true false MERGEABLE auto-rebase:ready
-  [ "$status" -eq 0 ]
-}
-
-@test "decide: label alone does not trigger update" {
-  run auto_rebase_gate_decide false false true MERGEABLE auto-rebase:ready
+  run auto_rebase_gate_decide false MERGEABLE
   [ "$status" -eq 1 ]
   [[ "$output" == "none applied"* ]]
 }
 
 @test "decide: strict unknown → update with could-not-evaluate (never skip on unreadable config)" {
-  run auto_rebase_gate_decide unknown false false MERGEABLE auto-rebase:ready
+  run auto_rebase_gate_decide unknown MERGEABLE
   [ "$status" -eq 0 ]
   [[ "$output" == "could not evaluate"* ]]
 }
 
 @test "decide: conflicting → update attempt (conflict notice path)" {
-  run auto_rebase_gate_decide false false false CONFLICTING auto-rebase:ready
+  run auto_rebase_gate_decide false CONFLICTING
   [ "$status" -eq 0 ]
   [[ "$output" == "merge conflict"* ]]
 }
 
 @test "decide: mergeability UNKNOWN with nothing else applying → pending (3)" {
-  run auto_rebase_gate_decide false false false UNKNOWN auto-rebase:ready
+  run auto_rebase_gate_decide false UNKNOWN
   [ "$status" -eq 3 ]
 }
 

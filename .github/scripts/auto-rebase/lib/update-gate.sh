@@ -3,11 +3,11 @@
 #
 # Pure decision (no external calls, no sleeps): decides whether a PR that is
 # BEHIND its base should actually be updated.
-# Being merely behind blocks nothing unless one of these holds:
-#
-#   1. the base branch's effective rules require branches to be up to date
-#      (strict required status checks — from rulesets or classic protection);
-#   2. the PR is in, or is being added to, a merge queue.
+# Being merely behind blocks nothing unless the base branch's effective rules
+# require branches to be up to date (strict required status checks — from
+# rulesets or classic protection). Merge-queue membership and auto-merge are
+# deliberately NOT conditions: with the strict policy off, being behind does not
+# stop a PR entering the queue, and the queue builds its own merge commit.
 #
 # A conflicting PR is still attempted so the reusable's existing conflict
 # notice → dev-lead recovery path fires. Anything that cannot be read fails
@@ -18,30 +18,21 @@
 # Tested by test/workflows/auto-rebase/update-gate.bats.
 # Contract: see .github/scripts/auto-rebase/README.md
 
-# auto_rebase_gate_decide STRICT IN_QUEUE HAS_LABEL MERGEABLE LABEL
+# auto_rebase_gate_decide STRICT MERGEABLE
 #   Pure decision. Prints the reason and returns:
-#     0  update (a blocking condition applies, the PR conflicts, or the gate
-#        could not be evaluated — fail safe to the pre-gate behaviour)
-#     1  skip (none applied)
-#     3  undecided: nothing else applies and mergeability is not yet computed
+#     0  update (strict is required, the PR conflicts, or the gate could not be
+#        evaluated — fail safe to the pre-gate behaviour)
+#     1  skip (strict up-to-date not required)
+#     3  undecided: strict is not required and mergeability is not yet computed
 auto_rebase_gate_decide() {
-  # shellcheck disable=SC2034 # HAS_LABEL and LABEL params in signature for API completeness; decision logic uses only STRICT, IN_QUEUE, MERGEABLE
-  local strict="$1" in_queue="$2" has_label="$3" mergeable="$4" label="$5"
+  local strict="$1" mergeable="$2"
 
   if [[ "$strict" == "true" ]]; then
     echo "base branch rules require branches to be up to date"
     return 0
   fi
-  if [[ "$in_queue" == "true" ]]; then
-    echo "PR is in or being added to a merge queue"
-    return 0
-  fi
   if [[ "$strict" != "false" ]]; then
     echo "could not evaluate (base branch rules unreadable) — updating as before"
-    return 0
-  fi
-  if [[ "$in_queue" != "false" ]]; then
-    echo "could not evaluate (PR merge-queue state unreadable) — updating as before"
     return 0
   fi
   case "$mergeable" in
@@ -50,7 +41,7 @@ auto_rebase_gate_decide() {
       return 0
       ;;
     MERGEABLE)
-      echo "none applied (strict up-to-date not required, not in a merge queue)"
+      echo "none applied (strict up-to-date not required)"
       return 1
       ;;
     *)

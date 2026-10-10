@@ -1111,9 +1111,9 @@ On each run the workflow:
 
 **Update gate (#1272):** being behind only matters if it blocks something, and
 each update restarts every review/CI cycle on the PR. A behind PR is updated only
-when at least one holds: (a) the base branch's *effective* rules (rulesets and
-classic protection, read via the API) require branches to be up to date;
-(b) the PR is in, or being added to, a merge queue. Conflicting PRs are still
+when the base branch's *effective* rules (rulesets and classic protection, read
+via the API) require branches to be up to date; merge-queue membership and
+auto-merge are not conditions. Conflicting PRs are still
 attempted so the conflict notice fires, and an unreadable gate fails safe to
 updating. The pure decision lives in `.github/scripts/auto-rebase/lib/update-gate.sh`;
 facts are gathered by `lib/gate-facts.sh`.

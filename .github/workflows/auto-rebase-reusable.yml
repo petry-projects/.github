@@ -13,15 +13,14 @@
 #   1. Finds all open non-Dependabot PRs from the same repo (no fork PRs)
 #   2. Keeps only the PRs eligible under the `eligibility` input (default
 #      `all`: every behind PR, including drafts)
-#   3. For each behind PR, updates it (merge method, not rebase) only if at
-#      least one of these holds:
-#        a. the base branch's EFFECTIVE rules require branches to be up to date
-#           (strict required status checks), read through the API from the
-#           rulesets and classic branch protection that apply to the PR's base
-#           — never hard-coded, so re-enabling the strict policy restores
-#           update-every-behind-PR with no code change;
-#        b. the PR is in, or is being added to, a merge queue (auto-merge
-#           enabled on a queue-enabled base).
+#   3. For each behind PR, updates it (merge method, not rebase) only if the
+#      base branch's EFFECTIVE rules require branches to be up to date (strict
+#      required status checks), read through the API from the rulesets and
+#      classic branch protection that apply to the PR's base — never
+#      hard-coded, so re-enabling the strict policy restores
+#      update-every-behind-PR with no code change. Merge-queue membership and
+#      auto-merge are not conditions: with strict off, being behind does not
+#      stop a PR entering the queue, and the queue builds its own merge commit.
 #      A PR in merge conflict is still attempted, so the conflict notice and
 #      dev-lead recovery below are unaffected. If the rules or PR state cannot
 #      be read (API error, missing permission), the PR is updated exactly as
@@ -125,7 +124,6 @@ jobs:
           HAS_PAT: ${{ (secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS) != '' }}
           REPO: ${{ github.repository }}
           ELIGIBILITY: ${{ inputs.eligibility }}
-          READY_LABEL: ${{ inputs.ready_label }}
         run: |
           # shellcheck source=/dev/null
           . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/eligibility.sh
@@ -174,15 +172,14 @@ jobs:
             fi
 
             # Update gate (#1272): being behind is only a reason to push when the
-            # base's rules require up-to-date branches or the PR is in/entering a
-            # merge queue. Conflicting PRs are still attempted (conflict notice
+            # base's rules require up-to-date branches. Conflicting PRs are still attempted (conflict notice
             # below); an unreadable gate fails safe to updating.
             if [[ -z "${STRICT_BY_BASE[$BASE_BRANCH]:-}" ]]; then
               STRICT_BY_BASE[$BASE_BRANCH]=$(auto_rebase_strict_policy "$REPO" "$BASE_BRANCH")
             fi
             GATE_RC=0
             GATE_REASON=$(auto_rebase_update_decision "${STRICT_BY_BASE[$BASE_BRANCH]}" \
-              "$REPO" "$PR_NUMBER" "$READY_LABEL") || GATE_RC=$?
+              "$REPO" "$PR_NUMBER") || GATE_RC=$?
             if [[ "$GATE_RC" -ne 0 ]]; then
               echo "PR #$PR_NUMBER ($HEAD_REF) is $BEHIND commit(s) behind $BASE_BRANCH — skipping update [gate: $GATE_REASON]"
               continue

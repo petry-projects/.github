@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Fact gathering for the auto-rebase update gate (issue #1272).
 #
-# I/O glue: reads the base branch's rules, the PR's merge-queue / label /
-# mergeability state through `gh`, and polls while GitHub computes
+# I/O glue: reads the base branch's rules and the PR's mergeability state through `gh`, and polls while GitHub computes
 # mergeability. It makes NO decision itself — the verdict comes from the pure
 # auto_rebase_gate_decide in update-gate.sh, which must be sourced alongside.
 #
@@ -53,59 +52,45 @@ auto_rebase_strict_policy() {
   return 0
 }
 
-# auto_rebase_pr_gate_state REPO PR_NUMBER LABEL
-#   Prints "IN_QUEUE HAS_LABEL MERGEABLE" for the PR, e.g. "false true MERGEABLE".
-#   IN_QUEUE / HAS_LABEL are true|false|unknown; MERGEABLE is the GraphQL
-#   MergeableState (MERGEABLE|CONFLICTING|UNKNOWN). IN_QUEUE is true when the
-#   PR is in the merge queue or has auto-merge enabled on a queue-enabled base
-#   (i.e. is being added to it). An empty LABEL disables the label condition.
-#   Always returns 0.
-auto_rebase_pr_gate_state() {
-  local repo="$1" pr="$2" label="$3" out state
+# auto_rebase_pr_mergeable REPO PR_NUMBER
+#   Prints the PR's GraphQL MergeableState (MERGEABLE|CONFLICTING|UNKNOWN);
+#   UNKNOWN when it cannot be read. Always returns 0.
+auto_rebase_pr_mergeable() {
+  local repo="$1" pr="$2" out state
   # shellcheck disable=SC2016 # GraphQL variables, not shell expansions
-  local query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue isMergeQueueEnabled autoMergeRequest{enabledAt} mergeable labels(first:100){nodes{name}}}}}'
+  local query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){mergeable}}}'
 
   if ! out=$(gh api graphql -f query="$query" -f owner="${repo%%/*}" \
       -f name="${repo#*/}" -F number="$pr" 2>/dev/null); then
-    echo "unknown unknown UNKNOWN"
+    echo UNKNOWN
     return 0
   fi
-  state=$(printf '%s' "$out" | jq -r --arg label "$label" '
-    .data.repository.pullRequest
-    | if type == "object" then
-        "\(.isInMergeQueue == true or (.isMergeQueueEnabled == true and .autoMergeRequest != null)) "
-        + "\($label != "" and ([.labels.nodes[]?.name] | index($label) != null)) "
-        + "\(.mergeable // "UNKNOWN")"
-      else "unknown unknown UNKNOWN" end' 2>/dev/null) || state=""
-  echo "${state:-unknown unknown UNKNOWN}"
+  state=$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.mergeable // "UNKNOWN"' 2>/dev/null) || state=""
+  echo "${state:-UNKNOWN}"
   return 0
 }
 
-# auto_rebase_update_decision STRICT REPO PR_NUMBER LABEL
-#   Gathers the PR's state and applies auto_rebase_gate_decide, re-polling
-#   while GitHub is still computing mergeability (common right after a base
-#   push). Prints the reason; returns 0 (update) or 1 (skip).
+# auto_rebase_update_decision STRICT REPO PR_NUMBER
+#   Applies auto_rebase_gate_decide, re-polling while GitHub is still computing
+#   mergeability (common right after a base push). Prints the reason; returns
+#   0 (update) or 1 (skip).
 #   Tunables: AUTO_REBASE_MERGEABLE_POLLS (default 5),
 #             AUTO_REBASE_MERGEABLE_POLL_SECONDS (default 3).
 auto_rebase_update_decision() {
-  local strict="$1" repo="$2" pr="$3" label="$4"
+  local strict="$1" repo="$2" pr="$3"
   local polls="${AUTO_REBASE_MERGEABLE_POLLS:-5}"
   local delay="${AUTO_REBASE_MERGEABLE_POLL_SECONDS:-3}"
-  local in_queue has_label mergeable reason rc i state rest
+  local mergeable reason rc i
 
-  if [[ "$strict" == "true" ]]; then
-    auto_rebase_gate_decide true "" "" "" "$label"
+  if [[ "$strict" != "false" ]]; then
+    auto_rebase_gate_decide "$strict" ""
     return 0
   fi
 
   for ((i = 1; i <= polls; i++)); do
-    state=$(auto_rebase_pr_gate_state "$repo" "$pr" "$label")
-    in_queue="${state%% *}"
-    rest="${state#* }"
-    has_label="${rest%% *}"
-    mergeable="${rest#* }"
+    mergeable=$(auto_rebase_pr_mergeable "$repo" "$pr")
     rc=0
-    reason=$(auto_rebase_gate_decide "$strict" "$in_queue" "$has_label" "$mergeable" "$label") || rc=$?
+    reason=$(auto_rebase_gate_decide "$strict" "$mergeable") || rc=$?
     if [[ "$rc" -ne 3 ]]; then
       echo "$reason"
       return "$rc"
