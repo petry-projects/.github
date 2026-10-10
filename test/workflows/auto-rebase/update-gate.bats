@@ -8,8 +8,7 @@
 #
 #   1. the base branch's effective rules (rulesets + classic protection, read
 #      through the API) require branches to be up to date (strict checks);
-#   2. the PR is in, or is being added to, a merge queue;
-#   3. the PR carries the `ready_label` label (default `auto-rebase:ready`).
+#   2. the PR is in, or is being added to, a merge queue.
 #
 # A conflicting PR is still attempted so the existing conflict notice fires,
 # and an unreadable gate fails safe to the old behaviour (update).
@@ -258,14 +257,14 @@ _run_workflow() {
   [[ "$output" == *"updating branch [gate: PR is in or being added to a merge queue]"* ]]
 }
 
-@test "gate: ready label present → updates, logging the label condition" {
+@test "gate: ready label alone does not trigger update" {
   _seed_behind_pr
   _rules false
   _pr_state false false MERGEABLE bug auto-rebase:ready
   _run_workflow
   [ "$status" -eq 0 ]
-  _updated
-  [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — updating branch [gate: label 'auto-rebase:ready' present]"* ]]
+  ! _updated
+  [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — skipping update [gate: none applied"* ]]
 }
 
 @test "gate: a custom ready_label is honoured and the default one is then ignored" {
@@ -277,8 +276,9 @@ _run_workflow() {
   ! _updated
   _pr_state false false MERGEABLE keep-current
   READY_LABEL="keep-current" _run_workflow
-  _updated
-  [[ "$output" == *"[gate: label 'keep-current' present]"* ]]
+  [ "$status" -eq 0 ]
+  ! _updated
+  [[ "$output" == *"skipping update [gate: none applied"* ]]
 }
 
 @test "gate: fork PR is skipped as today (never gated, never updated)" {
@@ -400,7 +400,6 @@ _run_workflow() {
   ]'
   _fixture "repos/owner/repo/pulls/8" '{"number":8,"base":{"ref":"main"}}'
   _fixture "repos/owner/repo/compare/main...other" '{"behind_by":1}'
-  _fixture "repos/owner/repo/pulls/8/update-branch" '{}'
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"isInMergeQueue":false,"isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeable":"MERGEABLE","labels":{"nodes":[{"name":"auto-rebase:ready"}]}}}}}' \
     > "${FIX_DIR}/graphql_8.json"
   _run_workflow
@@ -408,7 +407,7 @@ _run_workflow() {
   [ "$(grep -c '^PR #7 .*\[gate: ' <<< "$output")" -eq 1 ]
   [ "$(grep -c '^PR #8 .*\[gate: ' <<< "$output")" -eq 1 ]
   [[ "$output" == *"PR #7 (feature) is 3 commit(s) behind main — skipping update [gate: none applied"* ]]
-  [[ "$output" == *"PR #8 (other) is 1 commit(s) behind main — updating branch [gate: label 'auto-rebase:ready' present]"* ]]
+  [[ "$output" == *"PR #8 (other) is 1 commit(s) behind main — skipping update [gate: none applied"* ]]
 }
 
 # ── unit: pure decision function ─────────────────────────────────────────────
@@ -430,10 +429,10 @@ _run_workflow() {
   [ "$status" -eq 0 ]
 }
 
-@test "decide: label → update" {
+@test "decide: label alone does not trigger update" {
   run auto_rebase_gate_decide false false true MERGEABLE auto-rebase:ready
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"auto-rebase:ready"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == "none applied"* ]]
 }
 
 @test "decide: strict unknown → update with could-not-evaluate (never skip on unreadable config)" {

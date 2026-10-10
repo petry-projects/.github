@@ -505,7 +505,7 @@ computed from the persona manifests rather than hand-listed.
 | `enhancement` | `#a2eeef` (teal) | Feature requests |
 | `documentation` | `#0075ca` (blue) | Documentation changes |
 | `in-progress` | `#fbca04` (yellow) | An agent is actively working this issue |
-| `auto-rebase:ready` | `#c5def5` (light blue) | Maintainer opt-in: keep this PR up to date with its base on every push (auto-rebase update gate, #1272) |
+| `auto-rebase:ready` | `#c5def5` (light blue) | Selects PRs eligible for auto-rebase; update decisions are gated by rules, merge queue, or conflicts (auto-rebase update gate, #1272) |
 | `compliance-finding` | `#5319e7` (purple) | **Machine-owned.** Created and auto-closed by [`scripts/compliance-audit.sh`](../scripts/compliance-audit.sh). Do NOT hand-apply. |
 
 > **`compliance-finding` is machine-owned (issue #1036).** The compliance audit

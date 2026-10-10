@@ -1096,12 +1096,10 @@ On each run the workflow:
 each update restarts every review/CI cycle on the PR. A behind PR is updated only
 when at least one holds: (a) the base branch's *effective* rules (rulesets and
 classic protection, read via the API) require branches to be up to date;
-(b) the PR is in, or being added to, a merge queue; (c) a maintainer applied the
-`ready_label` label (default `auto-rebase:ready`, provisioned org-wide; `''`
-disables). Conflicting PRs are still attempted so the conflict notice fires, and
-an unreadable gate fails safe to updating. The pure decision lives in
-`.github/scripts/auto-rebase/lib/update-gate.sh`; facts are gathered by
-`lib/gate-facts.sh`.
+(b) the PR is in, or being added to, a merge queue. Conflicting PRs are still
+attempted so the conflict notice fires, and an unreadable gate fails safe to
+updating. The pure decision lives in `.github/scripts/auto-rebase/lib/update-gate.sh`;
+facts are gathered by `lib/gate-facts.sh`.
 
 **Eligibility:** Which behind PRs to update is selectable via a tunable
 `eligibility` input:

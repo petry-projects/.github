@@ -66,8 +66,6 @@ least one of these holds:
    back update-every-behind-PR with no code change.
 2. **Merge queue.** The PR is in the merge queue (`isInMergeQueue`), or is being
    added to it (auto-merge enabled on a queue-enabled base).
-3. **Label.** A maintainer applied the `ready_label` input label (default
-   `auto-rebase:ready`; set the input to `''` to disable this condition).
 
 A PR in **merge conflict** (`mergeable: CONFLICTING`) is still attempted, so the
 existing conflict notice and dev-lead recovery still fire. While GitHub is

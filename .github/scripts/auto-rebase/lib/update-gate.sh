@@ -36,16 +36,12 @@ auto_rebase_gate_decide() {
     echo "PR is in or being added to a merge queue"
     return 0
   fi
-  if [[ "$has_label" == "true" ]]; then
-    echo "label '${label}' present"
-    return 0
-  fi
   if [[ "$strict" != "false" ]]; then
     echo "could not evaluate (base branch rules unreadable) — updating as before"
     return 0
   fi
-  if [[ "$in_queue" != "false" || "$has_label" != "false" ]]; then
-    echo "could not evaluate (PR merge-queue/label state unreadable) — updating as before"
+  if [[ "$in_queue" != "false" ]]; then
+    echo "could not evaluate (PR merge-queue state unreadable) — updating as before"
     return 0
   fi
   case "$mergeable" in
