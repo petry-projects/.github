@@ -123,3 +123,9 @@ partial_refs() {  # <agent> — v2 cut at next/ring0 only
   assert_agree dev-lead broodminder-data dev-lead/v139-stable drift
   assert_agree agent-shield markets agent-shield/v139-stable drift
 }
+
+@test "#1267: sweep and audit agree on bare-pin grace when no channel tags exist" {
+  export MATCHING_REFS=""
+  assert_agree dev-lead broodminder-data dev-lead/stable compliant
+  assert_agree agent-shield markets agent-shield/stable compliant
+}

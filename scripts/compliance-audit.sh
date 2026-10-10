@@ -1916,9 +1916,9 @@ check_dev_lead_stub() {
   #    (ring_pin_current, the same verdict the deploy sweep uses). A pin on a
   #    superseded major (e.g. `dev-lead/v1-stable` once `dev-lead/v139-stable`
   #    exists) or on another repo's tier is drift; a failed tag probe fails closed.
-  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/v[0-9]+-(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+  if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github-private/\\.github/workflows/dev-lead-reusable\\.yml@dev-lead/(v[0-9]+-)?(stable|next|ring[0-9]+)([[:space:]]|$)"; then
     add_finding "$repo" "ci-workflows" "$check_id" "error" \
-      "The \`dev-lead.yml\` caller stub must pin a major-scoped \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v<M>-<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\` (a bare \`dev-lead/<channel>\` tier pin is drift). Re-sync from \`standards/workflows/dev-lead.yml\`." \
+      "The \`dev-lead.yml\` caller stub must pin a \`dev-lead\` channel tag — \`petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v<M>-<channel>\` where <channel> is \`stable\` (default), \`next\`, or \`ring<N>\`. A bare \`dev-lead/<channel>\` tier pin is allowed when the agent has no channel tags. Re-sync from \`standards/workflows/dev-lead.yml\`." \
       "standards/ci-standards.md#dev-lead-agent"
   else
     local dl_pinned dl_rc=0
@@ -1941,9 +1941,9 @@ check_dev_lead_stub() {
 
   # 2) agent_ref must be threaded through to pin the same channel inside the
   #    reusable's own script/prompt checkout (prevents split-brain on promotion).
-  #    Same major-scoped channel form as the uses: pin above; must match the uses:
-  #    channel exactly — including its major, so a `v3-stable` uses pin with a
-  #    `v2-stable` agent_ref is caught.
+  #    Must match the uses: channel exactly — including its major (if present).
+  #    When uses is a v-form (e.g. v3-stable), agent_ref must match it.
+  #    When uses is bare (e.g. stable), agent_ref must also be bare.
   uses_channel=$(printf '%s\n' "$decoded" | sed -nE 's#^[[:space:]]*uses:[[:space:]]*petry-projects/\.github-private/\.github/workflows/dev-lead-reusable\.yml@dev-lead/(v[0-9]+-(stable|next|ring[0-9]+))([[:space:]]|$).*#\1#p')
   if [ -n "$uses_channel" ]; then
     if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/$uses_channel([[:space:]]|$)"; then
@@ -1952,9 +1952,9 @@ check_dev_lead_stub() {
         "standards/ci-standards.md#dev-lead-agent"
     fi
   else
-    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/v[0-9]+-(stable|next|ring[0-9]+)([[:space:]]|$)"; then
+    if ! printf '%s\n' "$decoded" | grep -qE "^[[:space:]]*agent_ref:[[:space:]]*dev-lead/(stable|next|ring[0-9]+)([[:space:]]|$)"; then
       add_finding "$repo" "ci-workflows" "dev-lead-stub-agent-ref" "error" \
-        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/v<M>-<channel>\` (\`stable\`, \`next\`, or \`ring<N>\`) so the reusable checks out its own scripts/prompts from the same major-scoped channel. Re-sync from \`standards/workflows/dev-lead.yml\`." \
+        "The \`dev-lead.yml\` caller stub must pass \`with: agent_ref: dev-lead/<channel>\` to match the pinned channel (when there are no channel tags, both uses and agent_ref must be bare tier pins). Re-sync from \`standards/workflows/dev-lead.yml\`." \
         "standards/ci-standards.md#dev-lead-agent"
     fi
   fi
