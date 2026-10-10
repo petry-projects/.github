@@ -83,13 +83,15 @@ assert_agree() {
   sed -E 's/^([[:space:]]*ref:)[[:space:]].*$/\1 v1/' "$TEMPLATE" > "$TT_TMP/stub.yml"
   # Precondition: the variant still contains the template's checkout uses: line.
   grep -qF "$(grep -E '^[[:space:]]*uses:' "$TEMPLATE" | head -1)" "$TT_TMP/stub.yml"
-  ! cmp -s "$TEMPLATE" "$TT_TMP/stub.yml"
+  run cmp -s "$TEMPLATE" "$TT_TMP/stub.yml"
+  [ "$status" -eq 1 ]
   assert_agree "$TT_TMP/stub.yml" drift
 }
 
 @test "#1277: a one-line non-uses: edit is drift" {
   sed 's/timeout-minutes: 5/timeout-minutes: 30/' "$TEMPLATE" > "$TT_TMP/stub.yml"
-  ! cmp -s "$TEMPLATE" "$TT_TMP/stub.yml"
+  run cmp -s "$TEMPLATE" "$TT_TMP/stub.yml"
+  [ "$status" -eq 1 ]
   assert_agree "$TT_TMP/stub.yml" drift
 }
 
@@ -164,4 +166,9 @@ assert_agree() {
   echo "$output"
   [ "${lines[0]}" = compliant ]
   [ "${lines[1]}" = drift ]
+}
+
+@test "a lone CR inside a line is content, not a line ending (drift)" {
+  sed 's/timeout-minutes: 5/timeout-minutes:\r 5/' "$TEMPLATE" > "$TT_TMP/stub.yml"
+  assert_agree "$TT_TMP/stub.yml" drift
 }

@@ -2175,7 +2175,10 @@ check_verbatim_stubs() {
   [ "$repo" = ".github-private" ] && return 0
 
   local workflow_list
-  workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  if ! workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
+    echo "Error: failed to list workflows for $repo" >&2
+    return 2
+  fi
   [ -z "$workflow_list" ] && return 0
 
   local wf template content deployed
@@ -2186,10 +2189,16 @@ check_verbatim_stubs() {
       warn "No canonical template at $template — skipping verbatim check for $wf"
       continue
     fi
-    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
-    [ -z "$content" ] && continue
-    deployed=$(echo "$content" | base64 -d 2>/dev/null || echo "")
-    [ -z "$deployed" ] && continue
+    if ! content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null); then
+      echo "Error: failed to fetch $wf for $repo" >&2
+      return 2
+    fi
+    # An empty body is a zero-byte stub: it falls through to the comparison and
+    # is reported as drift rather than skipped.
+    if ! deployed=$(printf '%s' "$content" | base64 -d 2>/dev/null); then
+      echo "Error: failed to decode $wf for $repo" >&2
+      return 2
+    fi
 
     stub_verbatim_matches "$deployed" "$template" && continue
     add_finding "$repo" "ci-workflows" "verbatim-stub-drift-$wf" "error" \

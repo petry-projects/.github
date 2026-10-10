@@ -39,10 +39,10 @@ stub_is_verbatim_managed() {
 }
 
 # stub_verbatim_matches <existing_content> <template> -> 0 when the deployed stub
-# equals the template, ignoring CR characters only.
+# equals the template, ignoring CRLF line endings only (a lone CR mid-line is content).
 stub_verbatim_matches() {
   local template_content normalized_existing
-  template_content=$(tr -d '\r' < "$2")
-  normalized_existing=$(printf '%s' "$1" | tr -d '\r')
+  template_content=$(sed 's/\r$//' < "$2")
+  normalized_existing=$(printf '%s' "$1" | sed 's/\r$//')
   [[ "$normalized_existing" == "$template_content" ]]
 }
