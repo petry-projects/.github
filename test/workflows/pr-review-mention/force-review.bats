@@ -55,13 +55,16 @@ MARKERS=(
 
 @test "decision: MEMBER and COLLABORATOR comment mentions → force" {
   run decide issue_comment MEMBER alice '@donpetry-bot please review'
+  [ "$status" -eq 0 ]
   [ "$output" = "force trusted-human-comment-mention" ]
   run decide issue_comment COLLABORATOR bob '@donpetry-bot please review'
+  [ "$status" -eq 0 ]
   [ "$output" = "force trusted-human-comment-mention" ]
 }
 
 @test "decision: OWNER review-comment mention → force" {
   run decide pull_request_review_comment OWNER don-petry '@donpetry-bot look again'
+  [ "$status" -eq 0 ]
   [ "$output" = "force trusted-human-comment-mention" ]
 }
 
@@ -73,6 +76,7 @@ MARKERS=(
 
 @test "decision: review_requested stays plain even with a trusted-looking body" {
   run decide pull_request OWNER don-petry '@donpetry-bot please review'
+  [ "$status" -eq 0 ]
   [ "$output" = "plain review-requested" ]
 }
 
@@ -86,6 +90,7 @@ MARKERS=(
   local m
   for m in "${MARKERS[@]}"; do
     run decide issue_comment OWNER don-petry "${m} x -->"$'\n''@donpetry-bot review'
+    [ "$status" -eq 0 ]
     [ "$output" = "plain automation-marker" ] || {
       echo "marker not honoured: $m → $output"
       return 1
@@ -95,6 +100,7 @@ MARKERS=(
 
 @test "decision: a marker anywhere in the body (not just the start) → plain" {
   run decide issue_comment OWNER don-petry $'@donpetry-bot please review\n\n<!-- maintainer-resolve id=1 -->'
+  [ "$status" -eq 0 ]
   [ "$output" = "plain automation-marker" ]
 }
 
@@ -108,22 +114,26 @@ MARKERS=(
   local a
   for a in NONE FIRST_TIME_CONTRIBUTOR FIRST_TIMER MANNEQUIN ""; do
     run decide issue_comment "$a" mallory '@donpetry-bot please review'
+    [ "$status" -eq 0 ]
     [ "$output" = "none untrusted-association" ]
   done
 }
 
 @test "decision: comment by donpetry-bot itself → none" {
   run decide issue_comment OWNER donpetry-bot '@donpetry-bot please review'
+  [ "$status" -eq 0 ]
   [ "$output" = "none bot-author" ]
 }
 
 @test "decision: unknown event → none" {
   run decide workflow_dispatch OWNER don-petry '@donpetry-bot'
+  [ "$status" -eq 0 ]
   [ "$output" = "none unsupported-event" ]
 }
 
 @test "decision: a body full of glob/shell metacharacters is treated literally" {
   run decide issue_comment OWNER don-petry '@donpetry-bot $(touch /tmp/pwned) * ? [a] `id`'
+  [ "$status" -eq 0 ]
   [ "$output" = "force trusted-human-comment-mention" ]
   [ ! -e /tmp/pwned ]
 }
@@ -201,13 +211,16 @@ gh_log() { cat "$GH_STUB_LOG"; }
 
 @test "wiring: tooling is checked out from this reusable's own commit" {
   run yq -r '.jobs.handle-mention.steps[] | select(.name == "Checkout force-review tooling") | .with.ref' "$TT_WORKFLOW"
+  [ "$status" -eq 0 ]
   [ "$output" = '${{ github.job_workflow_sha }}' ]
   run yq -r '.jobs.handle-mention.steps[] | select(.name == "Checkout force-review tooling") | .with.path' "$TT_WORKFLOW"
+  [ "$status" -eq 0 ]
   [ "$output" = '.pr-review-mention-tooling' ]
 }
 
 @test "wiring: comment body reaches the trigger step via env, never inline \${{ }}" {
   run yq -r '.jobs.handle-mention.steps[] | select(.name == "Trigger review agent") | .env.COMMENT_BODY' "$TT_WORKFLOW"
+  [ "$status" -eq 0 ]
   [ "$output" = '${{ github.event.comment.body }}' ]
   run tt_step_run "Trigger review agent"
   [[ "$output" != *'${{'* ]]
@@ -215,4 +228,16 @@ gh_log() { cat "$GH_STUB_LOG"; }
 
 @test "wiring: the workflow header comment states the force_review rule" {
   head -40 "$TT_WORKFLOW" | grep -q 'force_review'
+}
+
+@test "decision: a [bot] account with a trusted association → none" {
+  run decide issue_comment COLLABORATOR 'some-app[bot]' '@donpetry-bot please review'
+  [ "$status" -eq 0 ]
+  [ "$output" = "none bot-author" ]
+}
+
+@test "wiring: tooling checkout is best-effort so a failure cannot suppress the dispatch" {
+  run yq -r '.jobs.handle-mention.steps[] | select(.name == "Checkout force-review tooling") | .["continue-on-error"]' "$TT_WORKFLOW"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
 }

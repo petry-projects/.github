@@ -57,7 +57,7 @@ pr_review_mention_force_decision() {
       ;;
   esac
 
-  if [ "$login" = "donpetry-bot" ]; then
+  if [ "$login" = "donpetry-bot" ] || [[ "$login" == *"[bot]" ]]; then
     echo "none bot-author"
     return 0
   fi

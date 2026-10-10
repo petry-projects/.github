@@ -210,6 +210,9 @@ jobs:
       # `contents:` permission.
       - name: Checkout force-review tooling
         if: steps.trust.outputs.trusted == 'true'
+        # Best-effort: a checkout failure must not suppress the review dispatch;
+        # the trigger step falls back to a plain (non-forced) dispatch.
+        continue-on-error: true
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: petry-projects/.github
@@ -230,12 +233,18 @@ jobs:
           COMMENT_USER: ${{ github.event.comment.user.login }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          # shellcheck source=/dev/null
-          . .pr-review-mention-tooling/.github/scripts/pr-review-mention/lib/force-review.sh
-
-          # Pure decision (see the header comment): force | plain | none.
-          read -r VERDICT RULE < <(pr_review_mention_force_decision \
-            "$EVENT_NAME" "$COMMENT_ASSOC" "$COMMENT_USER" "$COMMENT_BODY")
+          LIB=.pr-review-mention-tooling/.github/scripts/pr-review-mention/lib/force-review.sh
+          if [ -f "$LIB" ]; then
+            # shellcheck source=/dev/null
+            . "$LIB"
+            # Pure decision (see the header comment): force | plain | none.
+            read -r VERDICT RULE < <(pr_review_mention_force_decision \
+              "$EVENT_NAME" "$COMMENT_ASSOC" "$COMMENT_USER" "$COMMENT_BODY")
+          else
+            echo "::warning::force-review tooling unavailable — dispatching a plain review"
+            VERDICT=plain
+            RULE=tooling-unavailable
+          fi
 
           FORCE_ARGS=()
           case "$VERDICT" in
