@@ -6806,3 +6806,37 @@ _ingress_frontier() {
   run env _CANARY_UNRESOLVED_FLAG="$flag" ORCH="$ORCH" bash -c 'source "$ORCH" && printf() { if [ "$1" = "%s\n" ]; then return 1; fi; builtin printf "$@"; } && _record_unresolved dev-lead org/x blind 2>/dev/null'
   [ ! -e "$flag" ]
 }
+
+@test "canary-rollout.yml: the sweep shares one run-list cache dir across its steps (#1259)" {
+  # Line numbers of each step's `- name:` (no YAML parser: the test job installs only bats/shellcheck/jq).
+  _ln() { grep -n -m1 -- "- name: $1" "$WORKFLOW" | cut -d: -f1; }
+  local share autocut run drop sync
+  share="$(_ln 'Share run-list cache')"; autocut="$(_ln 'Autocut')"; run="$(_ln 'Run canary-rollout')"
+  drop="$(_ln 'Drop cached lookup failures')"; sync="$(_ln 'Sync blocker issues')"
+  [ -n "$share" ] && [ -n "$autocut" ] && [ -n "$run" ] && [ -n "$drop" ] && [ -n "$sync" ]
+  [ "$share" -lt "$autocut" ]; [ "$autocut" -lt "$run" ]
+  [ "$run" -lt "$drop" ]; [ "$drop" -lt "$sync" ]
+  # The share step exports the dir through GITHUB_ENV; the cleanup step drops only empty sha_* entries.
+  sed -n "${share},$((autocut - 1))p" "$WORKFLOW" | grep -q '_RUNS_CACHE_DIR=.*GITHUB_ENV'
+  sed -n "${drop},$((sync - 1))p" "$WORKFLOW" | grep -q -- "-name 'sha_\*' -size 0"
+}
+
+@test "cross-process: a second process sharing _RUNS_CACHE_DIR makes no run-list calls (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/shared"; mkdir -p "$d"
+  local snippet="source '$ORCH'; set +e; _agent_run_json dev-lead org/collapsed '' >/dev/null 2>&1"
+  env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "$snippet"
+  [ "$(grep -c '^run list ' "$GH_LOG")" -ge 1 ]
+  : > "$GH_LOG"
+  env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "$snippet"
+  [ "$(grep -c '^run list ' "$GH_LOG")" -eq 0 ]
+}
+
+@test "main: a caller-supplied cache dir keeps its cache files at exit (#1259)" {
+  _ingress_stub
+  local d="$BATS_TEST_TMPDIR/keepdir"; mkdir -p "$d"
+  run env _RUNS_CACHE_DIR="$d" CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 \
+    bash -c "source '$ORCH'; cmd_drift() { _agent_run_json dev-lead org/collapsed '' >/dev/null 2>&1; }; main drift 2>&1"
+  [ "$status" -eq 0 ]
+  [ -n "$(ls -A "$d")" ]
+}
