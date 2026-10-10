@@ -107,7 +107,8 @@ YAML
   grep -qF 'uses: petry-projects/.github-private/.github/workflows/pr-review.yml@pr-review/v1-stable  # NOSONAR(githubactions:S7637)' "$TEMPLATE"
   grep -qE '^      agent_ref: pr-review/v1-stable$' "$TEMPLATE"
   grep -qF "if: \${{ github.actor != 'dependabot[bot]' }}" "$TEMPLATE"
-  ! grep -qE '^concurrency:' "$TEMPLATE"
+  run grep -qE '^concurrency:' "$TEMPLATE"
+  [ "$status" -eq 1 ]
 }
 
 @test "pr-review.yml is deployable and in replace-if-present mode" {
@@ -123,9 +124,11 @@ YAML
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo .github-private --workflow pr-review.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF '.github-private/pr-review.yml (engine host'
-  ! echo "$output" | grep -qF 'Would open PR'
+  [[ "$output" != *"Would open PR"* ]]
   # The engine file is never even read.
-  ! grep -qF 'contents/.github/workflows/pr-review.yml' "$GH_LOG"
+  touch "$GH_LOG"
+  run grep -qF 'contents/.github/workflows/pr-review.yml' "$GH_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "guard: the engine-host check matches only pr-review.yml on .github-private" {
@@ -144,7 +147,7 @@ YAML
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --force --repo incubator --workflow pr-review.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF 'incubator/pr-review.yml (replace-if-present: no existing caller'
-  ! echo "$output" | grep -qF 'Would open PR'
+  [[ "$output" != *"Would open PR"* ]]
 }
 
 @test "guard: a full sweep of a repo with no caller never lists pr-review.yml" {
@@ -188,7 +191,7 @@ concurrency:\
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo TalkTerm --workflow pr-review.yml
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -qF 'already compliant'
+  [[ "$output" != *"already compliant"* ]]
   echo "$output" | grep -qE 'Would open PR for TalkTerm .* pr-review.yml'
 }
 
@@ -197,7 +200,7 @@ concurrency:\
   install_gh_stub
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow pr-review.yml
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -qF 'already compliant'
+  [[ "$output" != *"already compliant"* ]]
   echo "$output" | grep -qE 'Would open PR for broodly .* pr-review.yml'
 }
 
@@ -241,8 +244,10 @@ deploy_capture() {
   diff <(rendered_at pr-review/v1-ring1) "$OUT/pr-review.yml"
   grep -qF 'workflows/pr-review.yml@pr-review/v1-ring1  # NOSONAR(githubactions:S7637)' "$OUT/pr-review.yml"
   grep -qE '^      agent_ref: pr-review/v1-ring1$' "$OUT/pr-review.yml"
-  ! grep -qF 'pr-review/v1-stable' "$OUT/pr-review.yml"
-  ! grep -qE '^concurrency:' "$OUT/pr-review.yml"
+  run grep -qE '^ +(uses:.*@|agent_ref: )pr-review/v1-stable' "$OUT/pr-review.yml"
+  [ "$status" -eq 1 ]
+  run grep -qE '^concurrency:' "$OUT/pr-review.yml"
+  [ "$status" -eq 1 ]
 }
 
 @test "deploy: a second run over the replaced caller is a no-op" {
@@ -267,5 +272,5 @@ deploy_capture() {
   run env GH_TOKEN=x bash "$SCRIPT" --dry-run --repo broodly --workflow pr-review.yml
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF 'already compliant'
-  ! echo "$output" | grep -qF 'Would open PR'
+  [[ "$output" != *"Would open PR"* ]]
 }

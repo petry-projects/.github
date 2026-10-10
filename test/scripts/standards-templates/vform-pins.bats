@@ -27,7 +27,8 @@ channel_ref_lines() {
 # `pr-review.yml` reusable, and a grandfathered engine keeps its legacy name (pr-review's `pr-review.yml`,
 # #1127/#1125).
 ref_of() {
-  sed -E 's/.*\.yml@([^[:space:]]+).*/\1/' <<<"$1"
+  local tmp="${1#*.yml@}"
+  printf '%s' "${tmp%%[[:space:]]*}"
 }
 
 @test "every deployable template pins <agent>/v<M>-stable, never bare <agent>/stable" {
