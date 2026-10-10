@@ -6643,3 +6643,68 @@ _ingress_frontier() {
   [ "$status" -eq 0 ]
   [ -n "$(ls -A "$d")" ]
 }
+
+# ── #1246 item 10: static lint of the registry's `ingress_job` values ────────────────────────────────────
+# A runtime check cannot fail on "role absent from this member's ingress" — that is also what a legitimate
+# non-consumer looks like — so with an empty ingress window a misspelled `ingress_job` read as "no caller" and
+# `waive_sample_if_no_caller` could allow a dwell-only promotion. The typo is caught here instead, before it ships:
+# every registered `ingress_job` must be a job key of the canonical `agent-ingress.yml` template. Runtime keeps
+# treating an empty window as "no caller" (expected, not a failure).
+INGRESS_TEMPLATE="${CANARY_INGRESS_TEMPLATE:-$SCRIPT_DIR/standards/workflows/agent-ingress.yml}"
+
+# _ingress_registry_lint <registry.json> <template.yml> — prints one line per registered ingress_job the template
+# does NOT declare ("<agent>: <job>"); exit 1 if any, 0 if none.
+_ingress_registry_lint() {
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/scripts/lib/agent-ingress.sh"
+  local agent job bad=0
+  while IFS=$'\t' read -r agent job; do
+    agent_ingress_has_role_job "$job" < "$2" || { printf '%s: %s\n' "$agent" "$job"; bad=1; }
+  done < <(jq -r '.agents | to_entries[] | select(.value.ingress_job) | [.key, .value.ingress_job] | @tsv' "$1")
+  return "$bad"
+}
+
+@test "registry lint: every ingress_job is a plain job key and unique across agents (#1246 item 10)" {
+  run jq -r '[.agents[] | .ingress_job // empty] | (map(select(test("^[a-z0-9][a-z0-9-]*$") | not)) | join(",")) as $bad
+             | (group_by(.) | map(select(length > 1) | .[0]) | join(",")) as $dup
+             | "bad=[\($bad)] dup=[\($dup)]"' "$RINGS"
+  [ "$status" -eq 0 ]
+  [ "$output" = "bad=[] dup=[]" ]
+}
+
+@test "registry lint: every registered ingress_job is a job of the canonical agent-ingress.yml template (#1246 item 10)" {
+  if [ ! -f "$INGRESS_TEMPLATE" ]; then
+    skip "canonical template not published yet ($INGRESS_TEMPLATE; petry-projects/.github-private#1729 AC11(a)) — lint is dormant until it lands"
+  fi
+  run _ingress_registry_lint "$RINGS" "$INGRESS_TEMPLATE"
+  [ "$status" -eq 0 ] || { echo "ingress_job not declared by the canonical ingress:"; echo "$output"; return 1; }
+}
+
+@test "registry lint: a registered ingress_job the template lacks is reported by agent and job (#1246 item 10)" {
+  local tpl="$BATS_TEST_TMPDIR/ingress.yml" reg="$BATS_TEST_TMPDIR/reg.json"
+  cat > "$tpl" <<'YML'
+name: Agent Ingress
+jobs:
+  dev-lead:
+    uses: x/y/.github/workflows/dev-lead-reusable.yml@v1
+  "pr-review":
+    uses: x/y/.github/workflows/pr-review.yml@v1
+  pr-review-mention-ci:
+    uses: x/y/.github/workflows/z.yml@v1
+YML
+  jq -n '{agents:{
+    "dev-lead":{ingress_job:"dev-lead"},
+    "pr-review":{ingress_job:"pr-review"},
+    "pr-review-mention":{ingress_job:"pr-review-mention"},
+    "typo-agent":{ingress_job:"dev-leed"},
+    "legacy":{}}}' > "$reg"
+  run _ingress_registry_lint "$reg" "$tpl"
+  [ "$status" -eq 1 ]
+  # a role-name PREFIX (`pr-review-mention-ci:`) does not satisfy `pr-review-mention`; an agent without ingress_job is ignored
+  [ "$output" = "$(printf 'pr-review-mention: pr-review-mention\ntypo-agent: dev-leed')" ]
+  # and a template declaring all of them is clean
+  printf '  pr-review-mention:\n    uses: x\n  dev-leed:\n    uses: x\n' >> "$tpl"
+  run _ingress_registry_lint "$reg" "$tpl"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
