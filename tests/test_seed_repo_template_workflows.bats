@@ -37,11 +37,13 @@ RESEEDED_STUBS="dev-lead.yml auto-rebase.yml dependabot-automerge.yml"
   [ "$output" = "$(cat "${WF_DIR}/dev-lead.yml")" ]
 }
 
-@test "emitted dev-lead stub pins @dev-lead/v1-stable, never the bare tier tag" {
+# #1267: the template tracks dev-lead's CURRENT stable channel major (v139); the
+# orphaned v1-stable family no longer receives promotions.
+@test "emitted dev-lead stub pins @dev-lead/v139-stable, never the bare tier tag" {
   run emit dev-lead.yml
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qF 'dev-lead-reusable.yml@dev-lead/v1-stable'
-  echo "$output" | grep -qF 'agent_ref: dev-lead/v1-stable'
+  echo "$output" | grep -qF 'dev-lead-reusable.yml@dev-lead/v139-stable'
+  echo "$output" | grep -qF 'agent_ref: dev-lead/v139-stable'
   # The exact regression from repo-template#86 must be absent.
   ! echo "$output" | grep -qE '@dev-lead/stable([[:space:]]|$)'
   ! echo "$output" | grep -qE 'agent_ref:[[:space:]]*dev-lead/stable([[:space:]]|$)'

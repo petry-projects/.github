@@ -165,18 +165,40 @@ maj_accept() {
 # script and mocking gh_api so the pin decision surfaces as a FINDING, not just a
 # pure-helper return.
 # ---------------------------------------------------------------------------
+#
+# #1267: the RING acceptance is now also major-CURRENT — the pinned major must be
+# the highest `<agent>/v<M>-<tier>` channel tag that exists for the repo's tier, so
+# the check reads the host's channel tags through `gh api …/matching-refs`. A fake
+# `gh` serves AUDIT_MATCHING_REFS (default: the v3 channel family on every tier, so
+# the v3 fixtures below are current); AUDIT_MATCHING_FAIL=1 fails the probe.
+AUDIT_DEFAULT_REFS="refs/tags/agent-shield/v3-stable
+refs/tags/agent-shield/v3-ring1
+refs/tags/agent-shield/v3-ring0
+refs/tags/agent-shield/v3-next"
+# Args: workflow-yaml. Runs the centralized stub-pin check for a stable-tier repo (markets).
 stub_check() {  # <workflow-yaml> — run the check for a stable-tier repo (markets)
   FIXTURE_B64=$(printf '%s' "$1" | base64 | tr -d '\n'); export FIXTURE_B64
+  AUDIT_MATCHING_REFS="${AUDIT_MATCHING_REFS:-$AUDIT_DEFAULT_REFS}"; export AUDIT_MATCHING_REFS
   run bash -c '
     source "$1" >/dev/null 2>&1
     ORG=petry-projects
+    # Fake gh: serves the canned matching-refs tag list; any other call returns 1.
+    gh() {
+      case "$2" in
+        *matching-refs/tags/*)
+          if [ -n "${AUDIT_MATCHING_FAIL:-}" ]; then echo "HTTP 502" >&2; return 1; fi
+          printf "%s\n" "$AUDIT_MATCHING_REFS" ;;
+        *) return 1 ;;
+      esac
+    }
     gh_api() {
       case "$1" in
         */contents/.github/workflows) printf "agent-shield.yml\n" ;;
         */contents/.github/workflows/agent-shield.yml) printf "%s" "$FIXTURE_B64" ;;
       esac
     }
-    add_finding() { printf "FLAGGED:%s\n" "$3"; }
+    # Fake add_finding: records a finding by printing FLAGGED:<check>:<severity>:<message>.
+    add_finding() { printf "FLAGGED:%s:%s:%s\n" "$3" "$4" "$5"; }
     check_centralized_workflow_stubs markets
   ' _ "$SCRIPT"
 }
@@ -248,4 +270,85 @@ tier() {  # <agent> <repo>
   [ "$output" = "ring1" ]
   tier "dev-lead" "markets"
   [ "$output" = "stable" ]
+}
+
+# ---------------------------------------------------------------------------
+# #1267 — a tier-correct v-form on a SUPERSEDED channel major is a finding. The
+# message names the pinned ref and the expected (current-major) ref.
+# ---------------------------------------------------------------------------
+@test "#1267: a stale-major RING pin is FLAGGED with the pinned and expected refs" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v1-stable
+refs/tags/agent-shield/v139-stable
+refs/tags/agent-shield/v139-next"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v1-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:error:'
+  echo "$output" | grep -qF 'pins `agent-shield/v1-stable`; expected `agent-shield/v139-stable`'
+}
+
+@test "#1267: the current-major RING pin raises no finding" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v1-stable
+refs/tags/agent-shield/v139-stable
+refs/tags/agent-shield/v139-next"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v139-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#1267: partial major cut — a stable repo on v1-stable is current (v2 cut at next/ring0 only)" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v2-next
+refs/tags/agent-shield/v2-ring0
+refs/tags/agent-shield/v1-ring1
+refs/tags/agent-shield/v1-stable"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v1-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#1267: a failed tag probe fails closed — the stub is not declared compliant" {
+  export AUDIT_MATCHING_FAIL=1
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v3-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:warning:'
+}
+
+# A tier with no channel tag while another tier has one: the fallback ref does not
+# resolve, so the stub is NOT compliant and that ref is never recommended.
+@test "#1267: tier has no channel tag but another does -> flagged, no unresolvable ref recommended" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v2-next
+refs/tags/agent-shield/v2-ring0"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/v2-stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:error:'
+  echo "$output" | grep -qF 'no resolvable ref to pin'
+  local rc=0
+  grep -qF 'delegates to' <<< "$output" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
+# Agent with no channel tag at all: the audit follows ring_pin_current (bare
+# <base>/<tier> is expected and accepted), same as the sweep.
+@test "#1267: agent with no channel tag -> bare <base>/<tier> pin is compliant (audit == sweep)" {
+  export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v1.0.0"
+  stub_check "jobs:
+  agent-shield:
+    uses: $R@agent-shield/stable
+    secrets: inherit"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
