@@ -21,9 +21,7 @@
 #           — never hard-coded, so re-enabling the strict policy restores
 #           update-every-behind-PR with no code change;
 #        b. the PR is in, or is being added to, a merge queue (auto-merge
-#           enabled on a queue-enabled base);
-#        c. a maintainer applied the `ready_label` label (default
-#           `auto-rebase:ready`) to ask for it explicitly.
+#           enabled on a queue-enabled base).
 #      A PR in merge conflict is still attempted, so the conflict notice and
 #      dev-lead recovery below are unaffected. If the rules or PR state cannot
 #      be read (API error, missing permission), the PR is updated exactly as
@@ -73,10 +71,8 @@ on:
         type: string
       ready_label:
         description: |
-          Label a maintainer applies to a PR to ask for it to be kept up to date
-          with its base even when the base's rules do not require branches to
-          be up to date and the PR is not in a merge queue (issue #1272).
-          Set to '' to disable the label condition.
+          Deprecated (issue #1272 — label is no longer an update trigger).
+          Accepted for backwards compatibility but not used in the gate decision.
         required: false
         default: 'auto-rebase:ready'
         type: string
