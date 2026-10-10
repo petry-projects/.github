@@ -341,15 +341,14 @@ refs/tags/agent-shield/v2-ring0"
   [ "$rc" -eq 1 ]
 }
 
-# Agent with no channel tag: bare <base>/<tier> is still drift — RING pins
-# require major-scoped v-form. With no channel tag to cut a v-major, the pin
-# cannot be resolved to a compliant form yet (#1267).
-@test "#1267: agent with no channel tag -> bare <base>/<tier> pin is FLAGGED (drift)" {
+# Agent with no channel tag at all: the audit follows ring_pin_current (bare
+# <base>/<tier> is expected and accepted), same as the sweep.
+@test "#1267: agent with no channel tag -> bare <base>/<tier> pin is compliant (audit == sweep)" {
   export AUDIT_MATCHING_REFS="refs/tags/agent-shield/v1.0.0"
   stub_check "jobs:
   agent-shield:
     uses: $R@agent-shield/stable
     secrets: inherit"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'FLAGGED:non-stub-agent-shield.yml:error:'
+  [ -z "$output" ]
 }
