@@ -51,11 +51,11 @@ comment-side error (comment cap, secondary rate limit, transient 5xx).
 
 ## `lib/update-gate.sh` and `lib/gate-facts.sh`
 
-`lib/gate-facts.sh` is the I/O glue (reads rules, merge-queue/label/mergeability state, polls); `lib/update-gate.sh` is the pure decision. Together they decide whether a PR that is **behind** its base should actually be updated
-(issue #1272). Updating pushes a merge commit, which creates a new head SHA and
-restarts every review, test and bot-review cycle on the PR. That is only worth
-doing when being behind blocks something, so a behind PR is updated only if at
-least one of these holds:
+`lib/gate-facts.sh` is the I/O glue (reads rules, merge-queue/label/mergeability state, polls);
+`lib/update-gate.sh` is the pure decision. Together they decide whether a PR that is **behind** its
+base should actually be updated (issue #1272). Updating pushes a merge commit, which creates a new
+head SHA and restarts every review, test and bot-review cycle on the PR. That is only worth doing
+when being behind blocks something, so a behind PR is updated only if at least one of these holds:
 
 1. **Strict up-to-date required.** The base branch's *effective* rules require
    branches to be up to date. The gate reads them through the API, from the
