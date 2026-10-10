@@ -48,7 +48,7 @@ STANDARD_LABEL_SPECS=(
   "enhancement|a2eeef|Feature requests"
   "documentation|0075ca|Documentation changes"
   "in-progress|fbca04|An agent is actively working this issue"
-  "auto-rebase:ready|c5def5|Maintainer opt-in: keep this PR up to date with its base (auto-rebase)"
+  "auto-rebase:ready|c5def5|Reserved (issue #1272) — no longer used as an auto-rebase trigger; deprecated (see ci-standards.md)"
 )
 
 # ---------------------------------------------------------------------------
