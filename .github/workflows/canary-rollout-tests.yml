@@ -8,6 +8,10 @@
 #   - scripts/canary-rollout.sh          (orchestrator)
 #   - scripts/lib/canary-rollout.sh      (pure gate core)
 #   - tests/canary_rollout.bats          (the suite)
+#   - standards/canary-rings.json, standards/workflows/agent-ingress.yml,
+#     scripts/lib/agent-ingress.sh        (the registry and the canonical ingress it is
+#                                          linted against, #1246 item 10: a registry typo
+#                                          must trigger the suite that catches it)
 #   - .github/workflows/canary-rollout-tests.yml (this file)
 #
 # Gates (all must pass before merge):
@@ -26,6 +30,9 @@ on:
       - 'scripts/canary-rollout.sh'
       - 'scripts/lib/canary-rollout.sh'
       - 'tests/canary_rollout.bats'
+      - 'standards/canary-rings.json'
+      - 'standards/workflows/agent-ingress.yml'
+      - 'scripts/lib/agent-ingress.sh'
       - '.github/workflows/canary-rollout.yml'
       - '.github/workflows/canary-rollout-tests.yml'
   push:
@@ -35,6 +42,9 @@ on:
       - 'scripts/canary-rollout.sh'
       - 'scripts/lib/canary-rollout.sh'
       - 'tests/canary_rollout.bats'
+      - 'standards/canary-rings.json'
+      - 'standards/workflows/agent-ingress.yml'
+      - 'scripts/lib/agent-ingress.sh'
       - '.github/workflows/canary-rollout.yml'
       - '.github/workflows/canary-rollout-tests.yml'
 
