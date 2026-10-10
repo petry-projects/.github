@@ -50,11 +50,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install bats, shellcheck, jq, and yq
+      - name: Install bats, shellcheck, and jq (yq is preinstalled on the runner)
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bats shellcheck jq yq
+          sudo apt-get install -y --no-install-recommends bats shellcheck jq
 
       - name: shellcheck
         run: |

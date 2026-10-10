@@ -74,7 +74,7 @@ on:
           Deprecated (issue #1272 — label is no longer an update trigger).
           Accepted for backwards compatibility but not used in the gate decision.
         required: false
-        default: 'auto-rebase:ready'
+        default: ''
         type: string
       tooling_ref:
         description: |

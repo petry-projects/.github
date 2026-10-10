@@ -99,6 +99,7 @@ if [ "$1" = "api" ]; then
     case "$1" in
       --jq) jq_expr="$2"; shift 2 ;;
       -X|-H) shift 2 ;;
+      --paginate|--slurp) shift ;;
       -f|-F)
         case "$2" in number=*) number="${2#number=}" ;; esac
         printf '%s\n' "$2" >> "${FIX_DIR}/gh-fields.log"
@@ -459,4 +460,14 @@ _run_workflow() {
   _fixture "repos/owner/repo/rules/branches/main?per_page=100" ''
   run auto_rebase_strict_policy owner/repo main
   [ "$output" = "unknown" ]
+}
+
+@test "strict_policy: strict flag with an empty required_status_checks list is not strict" {
+  _fixture "repos/owner/repo/rules/branches/main?per_page=100" \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[]}}]'
+  _fixture "repos/owner/repo/branches/main/protection/required_status_checks" \
+    '{"message":"Branch not protected","status":"404"}' 1
+  run auto_rebase_strict_policy owner/repo main
+  [ "$status" -eq 0 ]
+  [ "$output" != "true" ]
 }

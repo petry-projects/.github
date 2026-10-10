@@ -18,14 +18,15 @@ auto_rebase_strict_policy() {
 
   # Rulesets: the effective (active) rules for the branch, from every ruleset
   # that targets it (repo- and org-level). Readable with read access.
-  if ! out=$(gh api "repos/${repo}/rules/branches/${branch}?per_page=100" 2>/dev/null); then
+  if ! out=$(gh api "repos/${repo}/rules/branches/${branch}?per_page=100" --paginate --slurp 2>/dev/null); then
     echo unknown
     return 0
   fi
   strict=$(printf '%s' "$out" | jq -r '
     if type == "array" then
-      [.[] | select(.type == "required_status_checks")
-           | .parameters.strict_required_status_checks_policy == true] | any
+      [flatten[] | select(.type == "required_status_checks")
+           | (.parameters.strict_required_status_checks_policy == true
+              and ((.parameters.required_status_checks // []) | length) > 0)] | any
     else "invalid" end' 2>/dev/null) || strict=""
   case "$strict" in
     true) echo true; return 0 ;;
