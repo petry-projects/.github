@@ -3646,8 +3646,34 @@ _gh_list_reusables() {
     ($reg | split("\n") | map(select(length>0))) as $regpaths
     | [ .[] | select(.type=="file")
         | .path as $p
-        | select(($p | endswith("-reusable.yml")) or any($regpaths[]; . == $p))
+        | select(($p | endswith("-reusable.yml"))
+                 or (($p | test("\\.ya?ml$")) and any($regpaths[]; . == $p)))
         | $p ] | .[]' 2>/dev/null <<< "$json" || true
+  return 0
+}
+
+# _reserved_tag_namespaces — tag prefixes that carry `<name>/v<M>-<tier>` channel tags on an infra
+# repo but are NOT canary-managed agents (e.g. `standards`, the standards-versioning release channel
+# #1091). Read from the registry's optional `.reserved_tag_namespaces` list so the allowlist is data,
+# not code, and the completeness sweep (#1106) never false-flags a non-agent namespace. One per line.
+_reserved_tag_namespaces() {
+  _jq -r '(.reserved_tag_namespaces // []) | .[]'
+}
+
+# _gh_list_channel_tag_agents <repo> — the distinct agent names that own a v-scoped channel tag
+# `<name>/v<M>-<tier>` or the bare `<name>/<tier>` (tier = next|ring<N>|stable) on <repo>, one per line, sorted. This is the
+# COMPLETENESS signal (#1106): a channel tag is the fingerprint of a deployed, release-managed
+# agent, so any name here that is absent from the registry is deployed-but-unmanaged. Same
+# enumerate-or-fail contract as _gh_list_reusables — non-zero when the tag listing could NOT be
+# read, so the caller does not mistake an API outage for "no channel tags". A release tag
+# `<name>/vX.Y.Z` is not a channel tag and is ignored.
+_gh_list_channel_tag_agents() {
+  local repo="$1" json
+  json="$(gh api "repos/$repo/git/matching-refs/tags" --paginate 2>/dev/null)" || return 1
+  jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
+  jq -r '.[]? | .ref // empty' 2>/dev/null <<< "$json" \
+    | sed -n -E 's#^refs/tags/(.+)/(v[0-9]+-)?(next|ring[0-9]+|stable)$#\1#p' \
+    | sort -u
   return 0
 }
 
@@ -3759,7 +3785,10 @@ cmd_drift() {
       u_total=$((u_total + 1))
       if [ "$emit_stub" = true ]; then stubs+="$(_drift_scaffold "$host" "$p")"$'\n'; fi
     done <<< "$unregistered"
-    # missing-file = registered in the registry but the file is gone from the host.
+    # missing-file = registered in the registry but the file is gone from the host. A registered reusable
+    # that keeps a legacy non-`-reusable.yml` name (the grandfathered pr-review.yml engine, #1166) is
+    # recognised as present by _gh_list_reusables (which filters to include registered paths), so it is
+    # correctly not flagged as missing.
     missing="$(set_difference "$registered" "$present")"
     while IFS= read -r p; do
       [ -z "$p" ] && continue
@@ -3876,6 +3905,87 @@ cmd_drift() {
     ctmd="$(printf '# Canary Rollout — channel-tag drift (missing v<M>-<tier>)\n\nLast updated: `%s` · %s tier(s) with a bare channel tag lacking its v-scoped counterpart.\n\n| agent | tier | missing ref | note |\n|---|---|---|---|\n%s\n> A ring-promotion bootstrap gap (#1065). A stub deploy keyed on the channel major pins `<agent>/v<M>-<tier>`; if it does not exist the fleet fails at startup. A maintainer backfills the tag at its bare counterpart'"'"'s commit.\n' "$ts" "$ct_total" "${ct_rows%$'\n'}")"
     printf '\n%s\n' "$ctmd" >> "$GITHUB_STEP_SUMMARY" \
       || echo "::warning::could not write the channel-tag drift job summary"
+  fi
+
+  # ── registry completeness: a channel-tag agent absent from the registry (#1106) ──────────────
+  # Registry SELF-CONSISTENCY (RING_REUSABLES == .agents == the dispatch enum) is enforced by unit
+  # tests, but it says nothing about COMPLETENESS: an agent can be fully deployed — carrying
+  # <agent>/v<M>-<tier> channel tags on its host — yet be MISSING from .agents{}, so nothing cuts,
+  # soaks, gates, or ships it. That is exactly how pr-review ran an 82-day-old build unnoticed
+  # (#1106): the *-reusable.yml scan above never saw it (its engine keeps the legacy pr-review.yml
+  # name) and every self-consistency test passed because the three registers agreed with each other.
+  # This sweep inventories the channel tags on BOTH infra repos (tags live in the agent's host repo)
+  # and flags any channel-tag agent that has no registry entry, excluding reserved non-agent
+  # namespaces (e.g. `standards`, the standards-versioning channel #1091). Report-only — registering
+  # needs human intent (ring topology/members); the check just makes the gap impossible to miss.
+  echo "----"
+  echo "== registry completeness: channel-tag agent absent from the registry (#1106) =="
+  local infra_repos ir reserved registered_agents rc_total=0 rc_rows="" rc_seen="" rc_incomplete=0 rc_registry_empty=0 max_attempts=3
+  infra_repos="$(_jq -r '(.org_infra_repos // []) | .[]')"
+  reserved="$(_reserved_tag_namespaces)"
+  registered_agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
+  if [ -z "$registered_agents" ]; then
+    # An unreadable/empty registry would flag EVERY channel-tagged agent as unregistered (false
+    # positives) — skip the sweep and mark it incomplete rather than report noise.
+    echo "::warning::registry completeness: .agents{} is empty or unreadable — skipping the sweep"
+    rc_incomplete=1
+    rc_registry_empty=1
+    infra_repos=""
+  fi
+  while IFS= read -r ir; do
+    [ -z "$ir" ] && continue
+    local tag_agents ta attempt
+    attempt=0
+    # Bounded retries for the tag enumeration: transient API failures should not silently miss
+    # completeness gaps. After exhaustion, skip the repo but track that completeness was incomplete.
+    while [ "$attempt" -lt "$max_attempts" ]; do
+      if tag_agents="$(_gh_list_channel_tag_agents "$ir")"; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      if [ "$attempt" -lt "$max_attempts" ]; then
+        echo "::notice::completeness $ir: tag enumeration failed (attempt $attempt/$max_attempts), retrying..."
+        sleep 2
+      fi
+    done
+    if [ "$attempt" -eq "$max_attempts" ]; then
+      # Could not read the repo's tags after retries — skip it rather than mistake an outage for "no channel
+      # tags" (which would silently miss a real completeness gap). Read-only + best-effort, but track incomplete.
+      echo "::warning::completeness $ir: could not enumerate channel tags after $max_attempts attempts (API error / no access) — skipping repo this cycle"
+      rc_incomplete=1
+      continue
+    fi
+    while IFS= read -r ta; do
+      [ -z "$ta" ] && continue
+      grep -qxF "$ta" <<< "$registered_agents" && continue           # registered → managed, fine
+      grep -qxF "$ta" <<< "$reserved" && continue                    # reserved non-agent namespace
+      grep -qxF "$ta" <<< "$rc_seen" && continue                     # already reported (tags on both repos)
+      rc_seen+="$ta"$'\n'
+      echo "::warning::DRIFT[registry-incomplete] $ir: '$ta' has <agent>/v*-<tier> channel tags but is NOT in canary-rings.json (.agents) — deployed but unmanaged (no cut/soak/gate/dashboard)"
+      rc_rows+="| \`$ta\` | \`$ir\` | channel-tagged but absent from \`.agents{}\` — register it (or add to \`reserved_tag_namespaces\` if it is not an agent) |"$'\n'
+      rc_total=$((rc_total + 1))
+    done <<< "$tag_agents"
+  done <<< "$infra_repos"
+  if [ "$rc_incomplete" -eq 1 ]; then
+    echo "registry-completeness summary: $rc_total agent(s) missing from registry; completeness check was INCOMPLETE (some repos could not be enumerated)"
+  else
+    echo "registry-completeness summary: $rc_total channel-tag agent(s) missing from the registry"
+  fi
+
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    if [ "$rc_total" -gt 0 ]; then
+      local rcmd
+      rcmd="$(printf '# Canary Rollout — registry completeness (channel-tagged but unregistered)\n\nLast updated: `%s` · %s channel-tag agent(s) with `<agent>/v*-<tier>` tags on an infra repo but no `.agents{}` entry.\n\n| agent | host | note |\n|---|---|---|\n%s\n> Registry self-consistency is not completeness (#1106). A channel-tagged agent absent from the registry ships with ZERO staged rollout — no cut/soak/gate/dashboard — exactly how pr-review ran an 82-day-old build unnoticed. Register it, or add a genuine non-agent namespace to `reserved_tag_namespaces`.\n' "$ts" "$rc_total" "${rc_rows%$'\n'}")"
+      printf '\n%s\n' "$rcmd" >> "$GITHUB_STEP_SUMMARY" \
+        || echo "::warning::could not write the registry-completeness job summary"
+    fi
+    if [ "$rc_registry_empty" -eq 1 ]; then
+      printf '\n> ⚠️ **Note:** Completeness sweep was skipped — the registry `.agents{}` is empty or unreadable, so no channel-tag agent could be checked. Fix the registry and re-run the check.\n' >> "$GITHUB_STEP_SUMMARY" \
+        || echo "::warning::could not write the completeness-skipped notice"
+    elif [ "$rc_incomplete" -eq 1 ]; then
+      printf '\n> ⚠️ **Note:** Completeness check was incomplete — one or more infra repos could not be enumerated after %s attempts (API errors or access issues). Some deployed agents may not have been detected. Investigate and re-run the check.\n' "$max_attempts" >> "$GITHUB_STEP_SUMMARY" \
+        || echo "::warning::could not write the completeness-incomplete notice"
+    fi
   fi
   return 0
 }
