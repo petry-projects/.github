@@ -226,6 +226,22 @@ jobs:
       # scheduled tick (before promote-all) so a freshly cut candidate begins soaking the same
       # tick. Gated by CANARY_AUTO_CUT (the single kill-switch) — the script no-ops unless it is
       # 'true'. Best-effort: a cut/detection hiccup must never fail the scheduled promotion run.
+      # One run-list cache for the whole sweep (#1259). promote-all and sync-issues are separate
+      # processes that evaluate the same fleet, and each re-read the same per-workflow run lists
+      # (`gh run list --workflow <role workflow> -L 1000`: 7-30 s per busy workflow, ~85% of each
+      # step's 12-16 min), so a full sweep paid that cost twice and ran past its timeout. Pointing
+      # every step at one directory lets later steps reuse the lists an earlier step already
+      # fetched. They are at most one step (~15 min) old, and the next sweep re-reads everything.
+      # Only run-history reads are cached: tags and refs are always read fresh, so tag moves made
+      # by promote-all are visible to sync-issues. The script never deletes a caller-supplied
+      # cache directory and keeps its per-process timing files apart.
+      - name: Share run-list cache across sweep steps
+        run: |
+          set -euo pipefail
+          d="${RUNNER_TEMP}/canary-runs-cache"
+          mkdir -p "$d"
+          echo "_RUNS_CACHE_DIR=$d" >> "$GITHUB_ENV"
+
       - name: Autocut new candidates (front end)
         if: github.event_name == 'schedule'
         env:
@@ -345,6 +361,17 @@ jobs:
       # snapshot — no dashboard issue, no Issues:write needed for it). Best-effort + always():
       # a GitHub-side hiccup must never fail the promotion run. The blocker ISSUES need the App
       # to carry Issues:write — if absent that part warns and continues; the summary still renders.
+      # An empty sha_* cache entry is a cached log-LOOKUP FAILURE from the promotion step (the
+      # script caches failures as empty, fail-closed). Within one process that is intended; across
+      # steps it would pin a transient failure into the issue sync, so drop them and let it retry.
+      - name: Drop cached lookup failures before the issue sync
+        if: always() && github.event_name == 'schedule'
+        run: |
+          set -uo pipefail
+          if [ -n "${_RUNS_CACHE_DIR:-}" ] && [ -d "${_RUNS_CACHE_DIR}" ]; then
+            find "${_RUNS_CACHE_DIR}" -maxdepth 1 -type f -name 'sha_*' -size 0 -delete || true
+          fi
+
       - name: Sync blocker issues + fleet-status summary
         if: always() && github.event_name == 'schedule'
         env:
