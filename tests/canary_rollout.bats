@@ -2672,8 +2672,9 @@ GITEOF
   cat > "$STUB_BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
 case "$*" in
-  *"git/matching-refs/tags"*)
-    # Return unregistered-agent tags on both .github and .github-private
+  *".github-private/git/matching-refs/tags"*) echo '[]' ;;
+  *"petry-projects/.github/git/matching-refs/tags"*)
+    # Unregistered-agent tags ONLY on the public .github repo: a sweep that skips it would pass vacuously
     cat <<'JSON'
 [{"ref":"refs/tags/unregistered-agent/v1-next"},{"ref":"refs/tags/unregistered-agent/v1-stable"},{"ref":"refs/tags/dev-lead/v1-next"}]
 JSON
@@ -2727,6 +2728,38 @@ GITEOF
   [[ "$output" == *"registry completeness: .agents{} is empty or unreadable"* ]]
   [[ "$output" == *"completeness check was INCOMPLETE"* ]]
   [[ "$output" != *"DRIFT[registry-incomplete]"* ]]
+}
+
+@test "orchestrator: drift with an empty registry and GITHUB_STEP_SUMMARY set exits 0 and names the skipped sweep" {
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-empty-summary.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"], agents: {}}' "$RINGS" > "$COMP_RINGS"
+  _completeness_stub '[]'
+  SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"; : > "$SUMMARY"
+  run env CANARY_RINGS="$COMP_RINGS" GITHUB_STEP_SUMMARY="$SUMMARY" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  grep -q "Completeness sweep was skipped" "$SUMMARY"
+  ! grep -q "attempts (API errors" "$SUMMARY"
+}
+
+@test "orchestrator: drift completeness flags an unregistered agent that has only bare channel tags (#1106)" {
+  COMP_RINGS="$BATS_TEST_TMPDIR/comp-bare.json"
+  jq '{version, description, org_infra_repos, member_tokens, reserved_tag_namespaces: ["standards"],
+       agents: {"dev-lead": .agents["dev-lead"]}}' "$RINGS" > "$COMP_RINGS"
+  _completeness_stub '[
+    {"ref":"refs/tags/bare-agent/stable"},
+    {"ref":"refs/tags/bare-agent/next"},
+    {"ref":"refs/tags/dev-lead/stable"},
+    {"ref":"refs/tags/standards/stable"},
+    {"ref":"refs/tags/release-only/v1.2.3"}
+  ]'
+  run env CANARY_RINGS="$COMP_RINGS" bash "$ORCH" drift
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT[registry-incomplete]"*"'bare-agent'"* ]]
+  # registered (dev-lead), reserved (standards) and release-only tags are not flagged
+  [[ "$output" != *"registry-incomplete] petry-projects/.github-private: 'dev-lead'"* ]]
+  [[ "$output" != *"registry-incomplete] petry-projects/.github-private: 'standards'"* ]]
+  [[ "$output" != *"release-only"* ]]
+  [[ "$output" == *"registry-completeness summary: 1"* ]]
 }
 
 @test "orchestrator: drift completeness ignores release tags that lack a channel tier (#1106)" {

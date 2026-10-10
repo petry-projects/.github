@@ -3629,7 +3629,7 @@ _reserved_tag_namespaces() {
 }
 
 # _gh_list_channel_tag_agents <repo> — the distinct agent names that own a v-scoped channel tag
-# `<name>/v<M>-<tier>` (tier = next|ring<N>|stable) on <repo>, one per line, sorted. This is the
+# `<name>/v<M>-<tier>` or the bare `<name>/<tier>` (tier = next|ring<N>|stable) on <repo>, one per line, sorted. This is the
 # COMPLETENESS signal (#1106): a channel tag is the fingerprint of a deployed, release-managed
 # agent, so any name here that is absent from the registry is deployed-but-unmanaged. Same
 # enumerate-or-fail contract as _gh_list_reusables — non-zero when the tag listing could NOT be
@@ -3640,7 +3640,7 @@ _gh_list_channel_tag_agents() {
   json="$(gh api "repos/$repo/git/matching-refs/tags" --paginate 2>/dev/null)" || return 1
   jq -e 'type=="array"' >/dev/null 2>&1 <<< "$json" || return 1
   jq -r '.[]? | .ref // empty' 2>/dev/null <<< "$json" \
-    | sed -n -E 's#^refs/tags/(.+)/v[0-9]+-(next|ring[0-9]+|stable)$#\1#p' \
+    | sed -n -E 's#^refs/tags/(.+)/(v[0-9]+-)?(next|ring[0-9]+|stable)$#\1#p' \
     | sort -u
   return 0
 }
@@ -3888,7 +3888,7 @@ cmd_drift() {
   # needs human intent (ring topology/members); the check just makes the gap impossible to miss.
   echo "----"
   echo "== registry completeness: channel-tag agent absent from the registry (#1106) =="
-  local infra_repos ir reserved registered_agents rc_total=0 rc_rows="" rc_seen="" rc_incomplete=0
+  local infra_repos ir reserved registered_agents rc_total=0 rc_rows="" rc_seen="" rc_incomplete=0 rc_registry_empty=0 max_attempts=3
   infra_repos="$(_jq -r '(.org_infra_repos // []) | .[]')"
   reserved="$(_reserved_tag_namespaces)"
   registered_agents="$(_jq -r '.agents? | keys[]?' 2>/dev/null || true)"
@@ -3897,11 +3897,12 @@ cmd_drift() {
     # positives) — skip the sweep and mark it incomplete rather than report noise.
     echo "::warning::registry completeness: .agents{} is empty or unreadable — skipping the sweep"
     rc_incomplete=1
+    rc_registry_empty=1
     infra_repos=""
   fi
   while IFS= read -r ir; do
     [ -z "$ir" ] && continue
-    local tag_agents ta attempt max_attempts=3
+    local tag_agents ta attempt
     attempt=0
     # Bounded retries for the tag enumeration: transient API failures should not silently miss
     # completeness gaps. After exhaustion, skip the repo but track that completeness was incomplete.
@@ -3946,7 +3947,10 @@ cmd_drift() {
       printf '\n%s\n' "$rcmd" >> "$GITHUB_STEP_SUMMARY" \
         || echo "::warning::could not write the registry-completeness job summary"
     fi
-    if [ "$rc_incomplete" -eq 1 ]; then
+    if [ "$rc_registry_empty" -eq 1 ]; then
+      printf '\n> ⚠️ **Note:** Completeness sweep was skipped — the registry `.agents{}` is empty or unreadable, so no channel-tag agent could be checked. Fix the registry and re-run the check.\n' >> "$GITHUB_STEP_SUMMARY" \
+        || echo "::warning::could not write the completeness-skipped notice"
+    elif [ "$rc_incomplete" -eq 1 ]; then
       printf '\n> ⚠️ **Note:** Completeness check was incomplete — one or more infra repos could not be enumerated after %s attempts (API errors or access issues). Some deployed agents may not have been detected. Investigate and re-run the check.\n' "$max_attempts" >> "$GITHUB_STEP_SUMMARY" \
         || echo "::warning::could not write the completeness-incomplete notice"
     fi
