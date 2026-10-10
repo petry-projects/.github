@@ -5954,7 +5954,7 @@ GHEOF
   local ff="$BATS_TEST_TMPDIR/fetchfail"; : > "$ff"
   run env CANARY_RINGS="$INGRESS_RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 _CANARY_FETCH_FAIL_FLAG="$ff" \
     bash -c "source '$ORCH'; set +e; _agent_run_json dev-lead org/weird '' 2>/dev/null"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [ "$output" != "[]" ]
   grep -q "org/weird" "$ff"
 }
@@ -5983,7 +5983,7 @@ GHEOF
   [ "$(git -C "$repo" log -1 --format=%cI)" = "2026-03-04T10:00:00+05:00" ]
   local sha; sha="$(git -C "$repo" rev-parse HEAD)"
   # Host == this repo and no release tags, so the last-resort local fallback is the path under test.
-  run env CANARY_RINGS="$INGRESS_RINGS" bash -c "cd '$repo' && source '$ORCH' && THIS_REPO=\"\$(_agent_field dev-lead host)\" candidate_cut_date dev-lead '$sha'"
+  run env CANARY_RINGS="$RINGS" bash -c "cd '$repo' && source '$ORCH' && THIS_REPO=\"\$(_agent_field dev-lead host)\" candidate_cut_date dev-lead '$sha'"
   [ "$status" -eq 0 ]
   [ "$output" = "2026-03-04T05:00:00Z" ]
 }
