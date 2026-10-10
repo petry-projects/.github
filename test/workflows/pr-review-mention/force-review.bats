@@ -223,6 +223,7 @@ gh_log() { cat "$GH_STUB_LOG"; }
   [ "$status" -eq 0 ]
   [ "$output" = '${{ github.event.comment.body }}' ]
   run tt_step_run "Trigger review agent"
+  [ "$status" -eq 0 ]
   [[ "$output" != *'${{'* ]]
 }
 
