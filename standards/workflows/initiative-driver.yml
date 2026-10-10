@@ -12,7 +12,7 @@
 #     is pure-bash (no claude-code-action), so this stub dispatches the central
 #     workflow_dispatch DIRECTLY with `gh workflow run`. No LLM runs here.
 #   • You MUST NOT change: the dispatch target
-#     (-R petry-projects/.github-private -f target_repo=${{ github.repository }}),
+#     (-R petry-projects/.github-private -f target_repo=<this repo>),
 #     the `initiative:auto` label filter, or the PAT guard.
 #   • If you need different release behaviour, open a PR against the central
 #     driver in petry-projects/.github-private — never by editing callers.
@@ -172,7 +172,11 @@ jobs:
         if: steps.arl_gate.outputs.decision != 'defer'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+          # Pass github.repository via env (not inline template expansion) to keep
+          # the workflow expression out of shell text (zizmor template-injection).
+          # The dispatch target value is unchanged — target_repo is still this repo.
+          TARGET_REPO: ${{ github.repository }}
         run: |
           gh workflow run initiative-driver.yml \
             -R petry-projects/.github-private \
-            -f target_repo=${{ github.repository }}
+            -f target_repo="${TARGET_REPO}"
