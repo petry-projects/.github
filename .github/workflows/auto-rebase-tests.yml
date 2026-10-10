@@ -62,7 +62,8 @@ jobs:
           shellcheck -x \
             .github/scripts/auto-rebase/lib/eligibility.sh \
             .github/scripts/auto-rebase/lib/comments.sh \
-            .github/scripts/auto-rebase/lib/update-gate.sh
+            .github/scripts/auto-rebase/lib/update-gate.sh \
+            .github/scripts/auto-rebase/lib/gate-facts.sh
 
       - name: Run bats suite
         run: bats --print-output-on-failure test/workflows/auto-rebase/

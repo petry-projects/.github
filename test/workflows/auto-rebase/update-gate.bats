@@ -48,6 +48,7 @@ setup() {
 
   # shellcheck source=/dev/null
   . "${TT_SCRIPTS_DIR}/lib/update-gate.sh"
+  . "${TT_SCRIPTS_DIR}/lib/gate-facts.sh"
 }
 
 teardown() {

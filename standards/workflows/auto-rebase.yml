@@ -22,12 +22,15 @@
 # To adopt: copy this file to .github/workflows/auto-rebase.yml in your repo.
 # No secrets required — uses GITHUB_TOKEN only.
 #
-# By default the reusable updates *every* behind PR (`eligibility: all`). The
+# By default the reusable considers every behind PR (`eligibility: all`) but
+# only updates one when being behind blocks it: the base's effective rules
+# require up-to-date branches, the PR is in/entering a merge queue, or it
+# carries the `ready_label` label (default `auto-rebase:ready`). The
 # `eligibility` input is a tunable extension point for future modes; to select
 # one, pass it to the reusable, e.g.:
 #
 #   with:
-#     eligibility: all  # default — update every behind PR
+#     eligibility: all  # default — every behind PR is considered
 #
 name: Auto-rebase non-Dependabot PRs
 

@@ -49,9 +49,9 @@ best-effort notification must never be fatal to the core function of rebasing
 the other PRs, so this helper logs a warning and returns `0` on any
 comment-side error (comment cap, secondary rate limit, transient 5xx).
 
-## `lib/update-gate.sh`
+## `lib/update-gate.sh` and `lib/gate-facts.sh`
 
-Decides whether a PR that is **behind** its base should actually be updated
+`lib/gate-facts.sh` is the I/O glue (reads rules, merge-queue/label/mergeability state, polls); `lib/update-gate.sh` is the pure decision. Together they decide whether a PR that is **behind** its base should actually be updated
 (issue #1272). Updating pushes a merge commit, which creates a new head SHA and
 restarts every review, test and bot-review cycle on the PR. That is only worth
 doing when being behind blocks something, so a behind PR is updated only if at

@@ -4,7 +4,7 @@
 # Sourced by scripts/apply-repo-settings.sh (provisions labels), scripts/
 # compliance-audit.sh (reports missing labels), and scripts/compliance-remediate.sh
 # (creates missing labels). Before this library each of those three scripts held
-# its OWN hardcoded copy of the seven fixed labels — and only the applier knew the
+# its OWN hardcoded copy of the eight fixed labels — and only the applier knew the
 # derived <id>:hands-off persona family — so the audit could not report a missing
 # persona label and the remediator could not create one (issue #1139, AC#2).
 #
@@ -48,6 +48,7 @@ STANDARD_LABEL_SPECS=(
   "enhancement|a2eeef|Feature requests"
   "documentation|0075ca|Documentation changes"
   "in-progress|fbca04|An agent is actively working this issue"
+  "auto-rebase:ready|c5def5|Maintainer opt-in: keep this PR up to date with its base (auto-rebase)"
 )
 
 # ---------------------------------------------------------------------------

@@ -137,6 +137,8 @@ jobs:
           . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/comments.sh
           # shellcheck source=/dev/null
           . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/update-gate.sh
+          # shellcheck source=/dev/null
+          . .auto-rebase-tooling/.github/scripts/auto-rebase/lib/gate-facts.sh
 
           # Effective strict-up-to-date policy per base branch (true|false|unknown),
           # read once per base from its rulesets + classic protection.
