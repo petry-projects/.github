@@ -25,6 +25,7 @@
 #     1  skip (none applied)
 #     3  undecided: nothing else applies and mergeability is not yet computed
 auto_rebase_gate_decide() {
+  # shellcheck disable=SC2034 # HAS_LABEL and LABEL params in signature for API completeness; decision logic uses only STRICT, IN_QUEUE, MERGEABLE
   local strict="$1" in_queue="$2" has_label="$3" mergeable="$4" label="$5"
 
   if [[ "$strict" == "true" ]]; then
