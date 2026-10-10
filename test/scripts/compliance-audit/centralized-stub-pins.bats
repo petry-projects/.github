@@ -175,12 +175,14 @@ AUDIT_DEFAULT_REFS="refs/tags/agent-shield/v3-stable
 refs/tags/agent-shield/v3-ring1
 refs/tags/agent-shield/v3-ring0
 refs/tags/agent-shield/v3-next"
+# Args: workflow-yaml. Runs the centralized stub-pin check for a stable-tier repo (markets).
 stub_check() {  # <workflow-yaml> — run the check for a stable-tier repo (markets)
   FIXTURE_B64=$(printf '%s' "$1" | base64 | tr -d '\n'); export FIXTURE_B64
   AUDIT_MATCHING_REFS="${AUDIT_MATCHING_REFS:-$AUDIT_DEFAULT_REFS}"; export AUDIT_MATCHING_REFS
   run bash -c '
     source "$1" >/dev/null 2>&1
     ORG=petry-projects
+    # Fake gh: serves the canned matching-refs tag list; any other call returns 1.
     gh() {
       case "$2" in
         *matching-refs/tags/*)
@@ -195,6 +197,7 @@ stub_check() {  # <workflow-yaml> — run the check for a stable-tier repo (mark
         */contents/.github/workflows/agent-shield.yml) printf "%s" "$FIXTURE_B64" ;;
       esac
     }
+    # Fake add_finding: records a finding by printing FLAGGED:<check>:<severity>:<message>.
     add_finding() { printf "FLAGGED:%s:%s:%s\n" "$3" "$4" "$5"; }
     check_centralized_workflow_stubs markets
   ' _ "$SCRIPT"

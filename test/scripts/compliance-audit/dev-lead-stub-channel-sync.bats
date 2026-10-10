@@ -211,6 +211,7 @@ refs/tags/dev-lead/v139-ring1
 refs/tags/dev-lead/v139-ring0
 refs/tags/dev-lead/v139-next"
 
+# Args: repo, pinned-channel-ref. Runs check_dev_lead_stub against a stub pinning that ref.
 devlead_check() {  # <repo> <pinned-channel-ref> — run check_dev_lead_stub against a stub pinning it
   local body="jobs:
   dev-lead:
@@ -225,6 +226,7 @@ devlead_check() {  # <repo> <pinned-channel-ref> — run check_dev_lead_stub aga
   run bash -c '
     source "$1" >/dev/null 2>&1
     ORG=petry-projects
+    # Fake gh: serves AUDIT_MATCHING_REFS for matching-refs/tags calls (fails if AUDIT_MATCHING_FAIL is set); else returns 1.
     gh() {
       case "$2" in
         *matching-refs/tags/*)
@@ -233,7 +235,9 @@ devlead_check() {  # <repo> <pinned-channel-ref> — run check_dev_lead_stub aga
         *) return 1 ;;
       esac
     }
+    # Fake gh_api: args are the API path; serves FIXTURE_B64 as the dev-lead.yml contents.
     gh_api() { case "$1" in */contents/.github/workflows/dev-lead.yml) printf "%s" "$FIXTURE_B64" ;; esac; }
+    # Fake add_finding: records a finding by printing FLAGGED:<check>:<severity>:<message>.
     add_finding() { printf "FLAGGED:%s:%s:%s\n" "$3" "$4" "$5"; }
     check_dev_lead_stub "$2"
   ' _ "$AUDIT_SCRIPT" "$1"

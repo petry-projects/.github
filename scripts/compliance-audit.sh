@@ -1731,7 +1731,6 @@ ring_major_form_acceptable() {
 # ring_tier_for_repo(), ring_canonical_ref() and ring_legacy_csv() are provided by
 # lib/ring-pins.sh (sourced above) — the single source of truth shared with the
 # deploy sweep so the audit and the deploy never disagree on a stub's pin (#482).
-
 check_centralized_workflow_stubs() {
   local repo="$1"
 

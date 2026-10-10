@@ -351,6 +351,7 @@ refute_output_matches() {
 # the sweep accepted any tier-correct major and reported them "already compliant".
 # The current major is per TIER (highest M with a `<base>/v<M>-<tier>` tag).
 
+# Prints the live 2026-10-09 tag shape: an orphaned v1-stable plus the v139 family.
 devlead_v139_refs() {  # the live 2026-10-09 shape: an orphaned v1-stable + the v139 family
   printf '%s\n' refs/tags/dev-lead/v1-stable refs/tags/dev-lead/v139.26.0 refs/tags/dev-lead/v139.50.2
   channel_refs dev-lead 139

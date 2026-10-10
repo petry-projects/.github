@@ -15,6 +15,8 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 # Fake gh shared by both paths: matching-refs serves MATCHING_REFS (or fails when
 # MATCHING_FAIL is set); contents of the stub under test serve FIXTURE_B64.
 _GH_FN='
+# Fake gh: serves AUDIT_MATCHING_REFS for matching-refs/tags calls (fails if
+# AUDIT_MATCHING_FAIL is set); any other call returns 1.
 gh() {
   case "$2" in
     *matching-refs/tags/*)
@@ -46,12 +48,14 @@ audit_verdict() {
     ORG=petry-projects
     eval "$2"
     AGENT="$3"
+    # Fake gh_api: args are the API path; lists the stub for AGENT, or serves FIXTURE_B64 as the file body.
     gh_api() {
       case "$1" in
         */contents/.github/workflows) printf "%s.yml\n" "$AGENT" ;;
         */contents/.github/workflows/*) printf "%s" "$FIXTURE_B64" ;;
       esac
     }
+    # Fake add_finding: prints FINDING for non-stub-* or dev-lead-stub-pin checks; ignores the rest.
     add_finding() { case "$3" in non-stub-*|dev-lead-stub-pin) echo FINDING ;; esac; }
     if [ "$3" = dev-lead ]; then out="$(check_dev_lead_stub "$4" 2>/dev/null)"
     else out="$(check_centralized_workflow_stubs "$4" 2>/dev/null)"; fi
@@ -59,6 +63,7 @@ audit_verdict() {
   ' _ "$REPO_ROOT" "$_GH_FN" "$1" "$2"
 }
 
+# Args: agent, ref. Prints the base64 of the agents TEMPLATE stub re-pinned to the ref.
 stub_b64() {  # <agent> <ref> -> base64 of a stub of the agent's TEMPLATE re-pinned to <ref>
   local agent="$1" ref="$2"
   bash -c 'source "$1/scripts/lib/ring-pins.sh"; ring_repin_uses "$2" "$3" < "$1/standards/workflows/$2.yml"' \
@@ -76,10 +81,12 @@ assert_agree() {
   [ "$s" = "$4" ]
 }
 
+# Args: agent. Prints tag refs: orphaned v1-stable plus the current v139 family on every tier.
 live_refs() {  # <agent> — orphaned v1-stable + the current v139 family on every tier
   local t
   for t in v1-stable v139.50.2 v139-stable v139-ring1 v139-ring0 v139-next; do printf 'refs/tags/%s/%s\n' "$1" "$t"; done
 }
+# Args: agent. Prints tag refs for a v2 cut at the next and ring0 channels only.
 partial_refs() {  # <agent> — v2 cut at next/ring0 only
   local t
   for t in v2-next v2-ring0 v1-ring1 v1-stable; do printf 'refs/tags/%s/%s\n' "$1" "$t"; done
