@@ -1859,7 +1859,7 @@ check_centralized_workflow_stubs() {
     fi
     if [[ "$is_ring" = 1 ]] && ring_vform_tier_aligned "$pinned_ref" "$chan" "$repo"; then
       why="pins \`${pinned_ref}\`; expected \`${expected_pin}\` — a superseded channel major is drift (promotion no longer moves it)"
-    elif echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
+    elif [[ "$bare_ok" = 0 ]] && echo "$decoded" | grep -qE "^[[:space:]]*uses:[[:space:]]*petry-projects/\\.github/\\.github/workflows/${esc_reusable}\\.yml@"; then
       why="references the reusable but is not pinned to the major-scoped channel \`@${expected_pin}\` (org standard — a bare \`@${canonical}\` tier pin is drift)"
     elif echo "$decoded" | grep -qF "petry-projects/.github/.github/workflows/${reusable}"; then
       why="references the reusable but the \`uses:\` line does not match the canonical stub"
