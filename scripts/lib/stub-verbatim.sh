@@ -6,7 +6,8 @@
 # and the compliance audit (check_verbatim_stubs in compliance-audit.sh), so the
 # two cannot disagree on whether a verbatim-managed stub has drifted (#1277).
 #
-# A stub that calls a `*-reusable.yml` is pin-managed: only its `uses:` pin is
+# A stub that calls a reusable workflow (a `uses:` naming a file under
+# `.github/workflows/`) is pin-managed: only its `uses:` pin is
 # compared, so a repo keeps its ring tier channel. Every other stub is
 # verbatim-managed. The test is the absence of a REUSABLE `uses:` line, not of
 # any `uses:` line: initiative-driver.yml dispatches the central driver directly
@@ -22,14 +23,14 @@
 VERBATIM_STUB_WORKFLOWS=(initiative-driver.yml)
 
 # stub_reusable_uses <template> -> the template's first `uses:` value that names a
-# `*-reusable.yml` workflow (org/repo/…/<base>-reusable.yml@<ref>), with the
+# reusable workflow (org/repo/.github/workflows/<name>.yml@<ref>), with the
 # inline comment and CR stripped. Empty when the template calls no reusable;
 # action-step `uses:` lines (e.g. actions/checkout@<sha>) never match.
 stub_reusable_uses() {
   grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$1" \
     | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//; s/[[:space:]]*#.*//' \
     | tr -d '\r' \
-    | grep -E -- '-reusable\.yml@' | sed -n 1p || true
+    | grep -E -- '/\.github/workflows/[^@[:space:]]+\.ya?ml@' | sed -n 1p || true
 }
 
 # stub_is_verbatim_managed <template> -> 0 when the template calls no reusable,

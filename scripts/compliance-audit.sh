@@ -2177,7 +2177,8 @@ check_verbatim_stubs() {
   local workflow_list
   if ! workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
     echo "Error: failed to list workflows for $repo" >&2
-    return 2
+    mark_repo_inconclusive "$repo"
+    return 0
   fi
   [ -z "$workflow_list" ] && return 0
 
@@ -2191,13 +2192,15 @@ check_verbatim_stubs() {
     fi
     if ! content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null); then
       echo "Error: failed to fetch $wf for $repo" >&2
-      return 2
+      mark_repo_inconclusive "$repo"
+      return 0
     fi
     # An empty body is a zero-byte stub: it falls through to the comparison and
     # is reported as drift rather than skipped.
     if ! deployed=$(printf '%s' "$content" | base64 -d 2>/dev/null); then
       echo "Error: failed to decode $wf for $repo" >&2
-      return 2
+      mark_repo_inconclusive "$repo"
+      return 0
     fi
 
     stub_verbatim_matches "$deployed" "$template" && continue

@@ -140,6 +140,30 @@ assert_agree() {
   [ -z "$output" ]
 }
 
+@test "stub_reusable_uses matches a reusable by its workflow path, not a -reusable suffix" {
+  printf '%s\n' 'jobs:' '  a:' '    steps:' '      - uses: actions/checkout@abc' \
+    '  b:' '    uses: org/repo/.github/workflows/pr-review.yml@pr-review/v1-stable' > "$TT_TMP/t.yml"
+  run bash -c 'source "$1/scripts/lib/stub-verbatim.sh"; stub_reusable_uses "$2"' _ "$REPO_ROOT" "$TT_TMP/t.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "org/repo/.github/workflows/pr-review.yml@pr-review/v1-stable" ]
+}
+
+@test "audit marks the repo inconclusive (rc 0, no finding) when the workflow listing fails, under set -e" {
+  run bash -c '
+    source "$1/scripts/compliance-audit.sh" >/dev/null 2>&1
+    set -e
+    gh_api() { return 1; }
+    add_finding() { echo FINDING; }
+    mark_repo_inconclusive() { echo "INCONCLUSIVE $1"; }
+    check_verbatim_stubs markets 2>/dev/null
+    echo reached-after
+  ' _ "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INCONCLUSIVE markets"* ]]
+  [[ "$output" != *FINDING* ]]
+  [[ "$output" == *reached-after* ]]
+}
+
 @test "VERBATIM_STUB_WORKFLOWS is exactly the deployable workflows with a verbatim-managed template" {
   run bash -c '
     source "$1/scripts/deploy-standard-workflows.sh" >/dev/null 2>&1
