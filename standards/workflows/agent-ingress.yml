@@ -1,0 +1,213 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent Ingress — thin caller (ADR-0007)
+# Standard:  petry-projects/.github/standards/ci-standards.md (ADR-0007 agent-ingress collapse)
+# Reusables: dev-lead, pr-review, ci-failure-analyst  (petry-projects/.github-private)
+#            pr-auto-review, pr-review-mention        (petry-projects/.github)
+#
+# ADOPTING THIS WORKFLOW (a repo that collapses its per-role Class-1 caller stubs):
+#   1. Copy this file verbatim to .github/workflows/agent-ingress.yml in your repo.
+#   2. In the SAME commit/PR delete the five per-role stubs it replaces: dev-lead.yml,
+#      pr-auto-review.yml, pr-review.yml, pr-review-mention.yml, ci-failure-analyst.yml.
+#      A stub left behind double-dispatches every event it also serves.
+#   3. Keep the carve-out stubs untouched: pull_request_target roles (add-to-project,
+#      dependabot-automerge, dependabot-rebase), repo-local (auto-rebase), Class-3 scheduled
+#      roles (feature-ideation, initiative-driver) and the required-check gates
+#      (agent-shield, dependency-audit).
+#   4. Secrets are the union of the roles' (`secrets: inherit` where the role takes them
+#      all, explicit mapping otherwise): CLAUDE_CODE_OAUTH_TOKEN, GH_PAT_WORKFLOWS (optional).
+#
+# THE ONE JOB PER ROLE CONTRACT. The canary-rollout gate attributes a run to a role by its JOB
+# KEY, and the registry (standards/canary-rings.json, `ingress_job`) names that key. A collapsed
+# repo's ingress must therefore carry a job for EVERY ring-registered role: the keys below are
+# `dev-lead`, `pr-auto-review`, `pr-review`, `pr-review-mention`, `ci-failure-analyst`. A repo
+# whose ingress lacks one holds the gate UNRESOLVED. Do not rename, merge or drop a job. CI
+# lints the registry's `ingress_job` values against THIS file (tests/canary_rollout.bats,
+# "registry lint").
+#
+# This file is copied VERBATIM and is full-file identical across every adopting repo, modulo the
+# per-repo ring/channel pin on each job's `uses:` ref and its matching `agent_ref` (below). Any
+# other diff is drift, not a repo-specific liberty: `on:`, `permissions:`, `concurrency:` and every
+# `if:` are NOT repo-adjustable. Behavior lives in the reusables; change it there (or via a
+# standards PR) and let the channel tag promote it centrally.
+#
+# EVERY job `if:` IS A PURE EVENT FILTER (ADR-0007): it may read only github.event_name,
+# github.event.action and delivered-event payload fields used as a predicate — never repo state
+# (vars, secrets, another job's outputs, hashFiles, repo identity, default_branch, the standing
+# labels array). Job-level `concurrency:` is bounded per ADR-0010: a role-prefixed literal head
+# plus event-payload parts only, and a literal `cancel-in-progress`.
+#
+# Each `uses:` line carries the inline `# NOSONAR(githubactions:S7637)` marker: the ref is a
+# first-party reusable pinned to a moving channel tag (see ci-standards.md, "SonarCloud exemption:
+# first-party reusable ref (S7637)"). The marker travels with this file on copy.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Agent Ingress
+
+on:
+  pull_request:
+    # opened/reopened/synchronize ← dev-lead(base=main), pr-auto-review, pr-review;
+    # ready_for_review ← pr-auto-review, pr-review; review_requested ← pr-review-mention.
+    types: [opened, reopened, synchronize, ready_for_review, review_requested]
+  pull_request_review:
+    # submitted ← dev-lead, pr-auto-review, pr-review; dismissed ← pr-auto-review, pr-review.
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+  check_run:
+    types: [completed]
+  check_suite:
+    types: [completed]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: "Optional: review a single PR URL instead of enumerating"
+        required: false
+        type: string
+      dry_run:
+        description: "If true, never submit reviews or comments"
+        required: false
+        default: "false"
+        type: string
+      force_review:
+        description: "If true, bypass idempotency and re-review at the same head SHA"
+        required: false
+        default: "false"
+        type: string
+  repository_dispatch:
+    types: [dev-lead-ci-failure, dev-lead-reviews-retry, dev-lead-issue-retry, pr-review-mention]
+
+# Top-level least privilege; each job re-grants only the scopes its role needs. A single
+# dispatching job is forbidden — it would need the UNION of every role's permissions.
+permissions: {}
+
+jobs:
+  # ── dev-lead ────────────────────────────────────────────────────────────────
+  dev-lead:
+    if: >-
+      (github.event_name == 'pull_request'
+        && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+        && github.event.pull_request.base.ref == 'main')
+      || (github.event_name == 'pull_request_review' && github.event.action == 'submitted')
+      || github.event_name == 'pull_request_review_comment'
+      || github.event_name == 'issue_comment'
+      || github.event_name == 'issues'
+      || github.event_name == 'check_run'
+      || (github.event_name == 'repository_dispatch'
+          && contains(fromJSON('["dev-lead-ci-failure","dev-lead-reviews-retry","dev-lead-issue-retry"]'), github.event.action))
+    uses: petry-projects/.github-private/.github/workflows/dev-lead-reusable.yml@dev-lead/v139-stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    with:
+      agent_ref: dev-lead/v139-stable
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+      statuses: read
+
+  # ── pr-auto-review ──────────────────────────────────────────────────────────
+  pr-auto-review:
+    if: >-
+      (github.event_name == 'pull_request'
+        && contains(fromJSON('["opened","reopened","synchronize","ready_for_review"]'), github.event.action))
+      || (github.event_name == 'pull_request_review'
+          && contains(fromJSON('["submitted","dismissed"]'), github.event.action))
+      || github.event_name == 'check_suite'
+      || github.event_name == 'workflow_run'
+    # Job-level concurrency (the source stub's workflow-level group), bounded per ADR-0010. PR events
+    # keep their per-PR slot; check_suite / workflow_run share one slot per head SHA (no run_id).
+    concurrency:
+      group: >-
+        pr-auto-review-ready-check-${{
+          (github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number))
+          || format('sha-{0}', github.event.check_suite.head_sha || github.event.workflow_run.head_sha)
+        }}
+      cancel-in-progress: true
+    permissions:
+      pull-requests: read
+      checks: read
+      actions: read
+    uses: petry-projects/.github/.github/workflows/pr-auto-review-reusable.yml@pr-auto-review/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    secrets:
+      GH_PAT_WORKFLOWS: ${{ secrets.GH_PAT_DON_PETRY || secrets.GH_PAT_WORKFLOWS }}
+
+  # ── pr-review ─────────────────────────────────────────────────────────────────
+  pr-review:
+    # Subscription filter AND the check_suite-with-no-PR skip, both pure event predicates over the
+    # delivered payload.
+    if: >-
+      (
+        (github.event_name == 'pull_request'
+          && contains(fromJSON('["ready_for_review","reopened","synchronize"]'), github.event.action))
+        || (github.event_name == 'pull_request_review'
+            && contains(fromJSON('["submitted","dismissed"]'), github.event.action))
+        || github.event_name == 'check_suite'
+        || github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'repository_dispatch' && github.event.action == 'pr-review-mention')
+      )
+      && (github.event_name != 'check_suite' || github.event.check_suite.pull_requests[0] != null)
+    # Job-level concurrency, bounded per ADR-0010: payload parts only (no inputs.*, no run_id). A sweep
+    # with no PR shares the 'enumerate' slot. The fallback is NOT 'batch', because the pinned reusable
+    # declares pr-review-batch.
+    concurrency:
+      group: >-
+        pr-review-${{
+          (github.event.pull_request && github.event.pull_request.number)
+          || (github.event.check_suite && github.event.check_suite.pull_requests[0] && github.event.check_suite.pull_requests[0].number)
+          || github.event.inputs.pr_url
+          || (github.event.client_payload && github.event.client_payload.pr_url)
+          || 'enumerate'
+        }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+    uses: petry-projects/.github-private/.github/workflows/pr-review.yml@pr-review/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    with:
+      agent_ref: pr-review/v1-stable
+      pr_url: ${{ inputs.pr_url || '' }}
+      dry_run: ${{ inputs.dry_run || '' }}
+      force_review: ${{ inputs.force_review || '' }}
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
+
+  # ── pr-review-mention ──────────────────────────────────────────────────────────
+  pr-review-mention:
+    if: >-
+      (
+        (github.event_name == 'pull_request' && github.event.action == 'review_requested')
+        || github.event_name == 'issue_comment'
+        || github.event_name == 'pull_request_review_comment'
+      )
+      && github.event.sender.type != 'Bot'
+    permissions:
+      pull-requests: write
+    uses: petry-projects/.github/.github/workflows/pr-review-mention-reusable.yml@pr-review-mention/v2-stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    secrets: inherit  # NOSONAR(githubactions:S7635) first-party trusted reusable
+
+  # ── ci-failure-analyst ─────────────────────────────────────────────────────────
+  ci-failure-analyst:
+    if: >-
+      github.event_name == 'check_run'
+      && github.event.check_run.conclusion == 'failure'
+      && !startsWith(github.event.check_run.name, 'CI Failure Analyst')
+    concurrency:
+      group: "ci-failure-analyst-${{ github.event.check_run.head_sha }}"
+      cancel-in-progress: false
+    permissions:
+      pull-requests: write
+      issues: write
+      actions: read
+      contents: read
+      checks: read
+    uses: petry-projects/.github-private/.github/workflows/ci-failure-analyst-reusable.yml@ci-failure-analyst/v1-stable  # NOSONAR(githubactions:S7637) first-party channel ref
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

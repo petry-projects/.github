@@ -26,9 +26,11 @@ channel_ref_lines() {
   grep -nE 'S7637\) first-party channel ref' "$1" || true
 }
 
-# Extract the `@<ref>` channel from a `uses: …-reusable.yml@<ref>  # …` line.
+# Extract the `@<ref>` channel from a `uses: …<workflow>.yml@<ref>  # …` line. Any workflow filename, not only
+# `*-reusable.yml`: the multi-job agent-ingress.yml template (ADR-0007) also calls the grandfathered
+# `pr-review.yml` reusable.
 ref_of() {
-  sed -E 's/.*-reusable\.yml@([^[:space:]]+).*/\1/' <<<"$1"
+  sed -E 's/.*\.yml@([^[:space:]]+).*/\1/' <<<"$1"
 }
 
 @test "every deployable template pins <agent>/v<M>-stable, never bare <agent>/stable" {
@@ -53,14 +55,19 @@ ref_of() {
 }
 
 @test "agent_ref is byte-equal to the uses: channel where present" {
-  local f name uses_ref agent_ref
+  # Pair each `agent_ref:` with the channel of the `uses:` line that precedes it in the same job. A single-stub
+  # template has one pair; the multi-job agent-ingress.yml template (ADR-0007) has one per job that forwards one.
+  local f name out
   for f in "${WF_DIR}"/*.yml; do
     name="$(basename "$f")"
     grep -qE '^[[:space:]]*agent_ref:' "$f" || continue
-    uses_ref="$(ref_of "$(channel_ref_lines "$f")")"
-    agent_ref="$(grep -oE 'agent_ref:[[:space:]]*[^[:space:]]+' "$f" | sed -E 's/agent_ref:[[:space:]]*//')"
-    [ "$agent_ref" = "$uses_ref" ] || {
-      echo "${name}: agent_ref='${agent_ref}' != uses channel='${uses_ref}'"
+    out="$(awk '
+      /S7637\) first-party channel ref/ { r = $0; sub(/.*\.yml@/, "", r); sub(/[[:space:]].*/, "", r); last = r; next }
+      /^[[:space:]]*agent_ref:/ { a = $0; sub(/.*agent_ref:[[:space:]]*/, "", a); sub(/[[:space:]].*/, "", a)
+        if (a != last) printf "agent_ref=%s != uses channel=%s\n", a, (last == "" ? "<none before it>" : last) }
+    ' "$f")"
+    [ -z "$out" ] || {
+      echo "${name}: ${out}"
       return 1
     }
   done

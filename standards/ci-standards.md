@@ -516,6 +516,18 @@ carries the mandatory per-repo `project_context`, so it always keeps its own
 stub, and a repo whose ingress lacks the `feature-ideation` job still needs the
 file.
 
+The canonical ingress is
+[`standards/workflows/agent-ingress.yml`](workflows/agent-ingress.yml): one job per
+ring-registered role (`dev-lead`, `pr-auto-review`, `pr-review`, `pr-review-mention`,
+`ci-failure-analyst`), a pure-event-filter `if:` on each, bounded job-level
+`concurrency:` per ADR-0010, and the per-job `<agent>/v<M>-stable` channel pin as the only
+per-repo difference. It is published as a standard, **not yet deployed**: it is not in
+`deploy-standard-workflows.sh`'s `DEPLOYABLE_WORKFLOWS`, so adopting it is a per-repo
+collapse PR (copy verbatim, delete the five stubs in the same commit). The canary registry's
+`ingress_job` values are linted against it in CI (`tests/canary_rollout.bats`, "registry lint",
+[#1246](https://github.com/petry-projects/.github/issues/1246) item 10), so a misspelled
+`ingress_job` is caught before it can read as "no caller".
+
 > **`feature-ideation.yml` — the `project_context` invariant.** Presence of the
 > file is necessary but **not** sufficient. The seed stub ships a `TODO:`/`Example:`
 > placeholder `project_context`; each adopting repo MUST replace it with a real
