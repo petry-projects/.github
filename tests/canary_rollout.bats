@@ -7018,12 +7018,15 @@ _ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
     source '$ORCH'; set +e; _agent_run_json dev-lead org/legacy '$(_ago 21)' | jq -r '[.[].databaseId] | join(\",\")'"
   [ "$status" -eq 0 ]
   [ "$output" = "1,2,3,4" ]
-  ! grep -q -- "--created" "$GH_LOG"
+  run grep -q -- "--created" "$GH_LOG"
+  [ "$status" -eq 1 ]
   : > "$GH_LOG"
   run env CANARY_RINGS="$RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
     source '$ORCH'; set +e; _agent_run_json dev-lead org/legacy '' | jq -r '[.[].databaseId] | join(\",\")'"
+  [ "$status" -eq 0 ]
   [ "$output" = "1,2,3,4" ]
-  ! grep -q -- "--created" "$GH_LOG"
+  run grep -q -- "--created" "$GH_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "_agent_run_json: CANARY_RUNS_HORIZON_TIERS='' disables the per-role bound (#1259 option B)" {
@@ -7032,7 +7035,8 @@ _ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
     source '$ORCH'; set +e; _agent_run_json dev-lead org/legacy '$(_ago 5)' | jq -r '[.[].databaseId] | join(\",\")'"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
-  ! grep -q -- "--created" "$GH_LOG"
+  run grep -q -- "--created" "$GH_LOG"
+  [ "$status" -eq 1 ]
 }
 
 @test "_agent_run_json: bounded and unbounded reads give the same runs for every window within the tier (#1259 option B)" {
@@ -7059,6 +7063,7 @@ _ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
   jq -c '[range(1000) as $i | {conclusion:"success",createdAt:"2026-10-09T10:00:00Z",databaseId:$i,workflowName:"Dev-Lead Agent"}]' <<< 'null' > "$FIXTURE"
   run env _RUNS_CACHE_DIR="$cache" CANARY_RINGS="$RINGS" CANARY_GH_RETRY_SLEEP=0 CANARY_GH_RETRIES=1 bash -c "
     source '$ORCH'; set +e; _agent_run_json dev-lead org/legacy '$(_ago 5)' | jq 'length'"
+  [ "$status" -eq 0 ]
   [ "$output" = "1000" ]
   [ "$(grep -c '^run list ' "$GH_LOG")" -eq 1 ]
 }
