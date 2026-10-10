@@ -287,6 +287,12 @@ RULESETS_SRC_DIR="${RULESETS_SRC_DIR:-$SCRIPT_DIR/../standards/rulesets}"
 # shellcheck source=lib/agent-ingress.sh
 . "$SCRIPT_DIR/lib/agent-ingress.sh"
 
+# Verbatim-managed stub detection + full-content compare (VERBATIM_STUB_WORKFLOWS,
+# stub_verbatim_matches). Shared with deploy-standard-workflows.sh so the audit
+# and the sweep agree on whether such a stub has drifted (#1277).
+# shellcheck source=lib/stub-verbatim.sh
+. "$SCRIPT_DIR/lib/stub-verbatim.sh"
+
 # AGENTS.md structural linter — the pure, data-driven driver (amdl_lint) and its
 # default rule-set path (AMDL_DEFAULT_RULES). Sourced, not exec'd: agents-md-lint.sh
 # guards its CLI behind a BASH_SOURCE check, so sourcing only defines functions.
@@ -2152,6 +2158,47 @@ check_stub_surface_drift() {
 }
 
 # ---------------------------------------------------------------------------
+# Check: verbatim-managed stubs match their template in full
+#
+# A stub that calls no reusable (initiative-driver.yml) has no pin to check: the
+# whole file is owned centrally and deployed verbatim. Compare it with the same
+# helper the deploy sweep uses (stub_verbatim_matches, CR-insensitive), so a stub
+# the sweep re-syncs is exactly a stub the audit flags (#1277). An absent stub is
+# left to check_required_workflows.
+# ---------------------------------------------------------------------------
+check_verbatim_stubs() {
+  local repo="$1"
+
+  # Both meta-repos self-manage these stubs (SKIP_SELF_MANAGED in
+  # deploy-standard-workflows.sh); the sweep never re-syncs them.
+  [ "$repo" = ".github" ] && return 0
+  [ "$repo" = ".github-private" ] && return 0
+
+  local workflow_list
+  workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null || echo "")
+  [ -z "$workflow_list" ] && return 0
+
+  local wf template content deployed
+  for wf in "${VERBATIM_STUB_WORKFLOWS[@]}"; do
+    echo "$workflow_list" | grep -qxF "$wf" || continue
+    template="$STANDARDS_WF_DIR/$wf"
+    if [ ! -f "$template" ]; then
+      warn "No canonical template at $template — skipping verbatim check for $wf"
+      continue
+    fi
+    content=$(gh_api "repos/$ORG/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null || echo "")
+    [ -z "$content" ] && continue
+    deployed=$(echo "$content" | base64 -d 2>/dev/null || echo "")
+    [ -z "$deployed" ] && continue
+
+    stub_verbatim_matches "$deployed" "$template" && continue
+    add_finding "$repo" "ci-workflows" "verbatim-stub-drift-$wf" "error" \
+      "The \`$wf\` stub differs from the canonical \`standards/workflows/$wf\`. It calls no reusable, so the whole file is owned centrally and must match the template byte for byte (line endings aside). Re-sync it from \`standards/workflows/$wf\` (the standards sweep re-deploys it)." \
+      "standards/ci-standards.md#centralization-tiers"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Check: required-status-check rulesets reference current names
 #
 # After centralizing workflows into reusables (#87, #88), GitHub composes
@@ -3469,6 +3516,7 @@ main() {
     check_centralized_workflow_stubs "$repo"
     check_dev_lead_stub "$repo"
     check_stub_surface_drift "$repo"
+    check_verbatim_stubs "$repo"
     check_centralized_check_names "$repo"
     check_claude_md "$repo"
     check_agents_md "$repo"

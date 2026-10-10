@@ -42,6 +42,10 @@ source "$SCRIPT_DIR/lib/ring-pins.sh"
 # job must never have its per-role stub re-seeded (#1226).
 # shellcheck source=scripts/lib/agent-ingress.sh
 source "$SCRIPT_DIR/lib/agent-ingress.sh"
+# Verbatim-managed stub detection + full-content compare — shared with
+# compliance-audit.sh so the sweep and the audit agree on drift (#1277).
+# shellcheck source=scripts/lib/stub-verbatim.sh
+source "$SCRIPT_DIR/lib/stub-verbatim.sh"
 
 # Global temp-file registry — cleaned up by EXIT trap even on premature exit.
 declare -a _TMPFILES=()
@@ -365,15 +369,13 @@ is_already_compliant() {
 is_pin_compliant() {
   local existing_content="$1" template="$2" repo="$3"
   local expected_uses
-  expected_uses=$(grep -E '^[[:space:]]*uses:' "$template" | head -1 | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true)
-  # Verbatim-managed template (no reusable uses: line — e.g. initiative-driver which
-  # dispatches directly via gh CLI). Compare full content (CRLF-normalized) so a
-  # correctly-deployed stub is never flagged as drifted on every sweep.
+  expected_uses="$(stub_reusable_uses "$template")"
+  # Verbatim-managed template (no REUSABLE uses: line — e.g. initiative-driver which
+  # dispatches directly via gh CLI). Its action-step uses: lines (the gate tooling
+  # checkout) are not a pin, so compare full content (CRLF-normalized): any other
+  # difference is drift (#1277), and a correctly-deployed stub is never flagged.
   if [[ -z "$expected_uses" ]]; then
-    local template_content normalized_existing
-    template_content=$(tr -d '\r' < "$template")
-    normalized_existing=$(printf '%s' "$existing_content" | tr -d '\r')
-    [[ "$normalized_existing" == "$template_content" ]] && return 0 || return 1
+    stub_verbatim_matches "$existing_content" "$template" && return 0 || return 1
   fi
 
   local prefix="${expected_uses%@*}" ref_after="${expected_uses##*@}" base
@@ -416,8 +418,7 @@ is_pin_compliant() {
 # reusable_uses_of <template> -> the template's first reusable `uses:` value
 # (org/repo/…/<base>-reusable.yml@<ref>), comment/CR stripped, or empty.
 reusable_uses_of() {
-  grep -E '^[[:space:]]*uses:' "$1" | head -1 \
-    | sed 's/^[[:space:]]*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '\r' || true
+  stub_reusable_uses "$1"
 }
 
 # reusable_base_of <template> -> the ring channel base (e.g. `auto-rebase`) of the

@@ -89,3 +89,13 @@ GATE_STEP='Agent rate-limit admission gate (enforcing)'
   run diff "$STUB" "$LIVE"
   [ "$status" -eq 0 ]
 }
+
+@test "stub: dispatch step passes github.repository via the TARGET_REPO env (#1277)" {
+  run yq -r ".jobs.dispatch.steps[] | select(.name == \"Dispatch central initiative-driver\") | .env.TARGET_REPO" "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ github.repository }}' ]
+  run yq -r ".jobs.dispatch.steps[] | select(.name == \"Dispatch central initiative-driver\") | .run" "$STUB"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'-f target_repo="${TARGET_REPO}"'* ]]
+  [[ "$output" != *'${{'* ]]
+}
