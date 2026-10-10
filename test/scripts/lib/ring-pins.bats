@@ -501,11 +501,11 @@ refs/tags/dev-lead/v1-stable"
   [ -z "$RING_EXPECTED_REF" ]
 }
 
-@test "ring_pin_current: no channel tag at all keeps the bare-tier grace (#1267, unchanged)" {
+@test "ring_pin_current: no channel tag at all rejects bare pins as non-compliant (#1267)" {
   export GH_MATCHING_REFS="refs/tags/auto-rebase/v2.3.1"
   _install_gh_stub
   local rc=0
   ring_pin_current petry-projects/.github auto-rebase markets auto-rebase/stable || rc=$?
-  [ "$rc" -eq 0 ]
+  [ "$rc" -eq 1 ]
   [ "$RING_EXPECTED_REF" = "auto-rebase/stable" ]
 }

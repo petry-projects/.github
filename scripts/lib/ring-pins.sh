@@ -362,8 +362,8 @@ ring_tier_channel_major() {
 # channel tag but the agent has some, M falls back to the agent's highest channel
 # major — that ref does not resolve, so the sweep's assert-exists guard refuses it
 # (#870) rather than emitting a guess. If the agent has NO channel tag at all, the
-# expected ref is the bare `<base>/<tier>` and the pre-major grace still applies: any
-# ring_accepted_refs channel or a tier-aligned v-form is compliant (#861).
+# expected ref is the bare `<base>/<tier>`, but bare pins are non-compliant (#1267):
+# RING stubs must pin a major-scoped v-form, which requires a channel tag to exist.
 #
 # Call it directly (not in `$( )`) to keep the per-process listing cache and the
 # RING_EXPECTED_REF result.
