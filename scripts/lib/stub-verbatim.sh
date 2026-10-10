@@ -27,23 +27,33 @@ VERBATIM_STUB_WORKFLOWS=(initiative-driver.yml)
 # inline comment and CR stripped. Empty when the template calls no reusable;
 # action-step `uses:` lines (e.g. actions/checkout@<sha>) never match.
 stub_reusable_uses() {
-  grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$1" \
+  local template="$1"
+  grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$template" \
     | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//; s/[[:space:]]*#.*//' \
     | tr -d '\r' \
     | grep -E -- '/\.github/workflows/[^@[:space:]]+\.ya?ml@' | sed -n 1p || true
+  return 0
 }
 
 # stub_is_verbatim_managed <template> -> 0 when the template calls no reusable,
 # so a deployed stub must match it in full.
 stub_is_verbatim_managed() {
-  [[ -z "$(stub_reusable_uses "$1")" ]]
+  local template="$1"
+  if [[ -z "$(stub_reusable_uses "$template")" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 # stub_verbatim_matches <existing_content> <template> -> 0 when the deployed stub
 # equals the template, ignoring CRLF line endings only (a lone CR mid-line is content).
 stub_verbatim_matches() {
+  local existing="$1" template="$2"
   local template_content normalized_existing
-  template_content=$(sed 's/\r$//' < "$2")
-  normalized_existing=$(printf '%s' "$1" | sed 's/\r$//')
-  [[ "$normalized_existing" == "$template_content" ]]
+  template_content=$(sed 's/\r$//' < "$template")
+  normalized_existing=$(printf '%s' "$existing" | sed 's/\r$//')
+  if [[ "$normalized_existing" == "$template_content" ]]; then
+    return 0
+  fi
+  return 1
 }

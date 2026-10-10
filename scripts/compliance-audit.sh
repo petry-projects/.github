@@ -2171,8 +2171,8 @@ check_verbatim_stubs() {
 
   # Both meta-repos self-manage these stubs (SKIP_SELF_MANAGED in
   # deploy-standard-workflows.sh); the sweep never re-syncs them.
-  [ "$repo" = ".github" ] && return 0
-  [ "$repo" = ".github-private" ] && return 0
+  [[ "$repo" == ".github" ]] && return 0
+  [[ "$repo" == ".github-private" ]] && return 0
 
   local workflow_list
   if ! workflow_list=$(gh_api "repos/$ORG/$repo/contents/.github/workflows" --jq '.[].name' 2>/dev/null); then
@@ -2180,13 +2180,13 @@ check_verbatim_stubs() {
     mark_repo_inconclusive "$repo"
     return 0
   fi
-  [ -z "$workflow_list" ] && return 0
+  [[ -z "$workflow_list" ]] && return 0
 
   local wf template content deployed
   for wf in "${VERBATIM_STUB_WORKFLOWS[@]}"; do
     echo "$workflow_list" | grep -qxF "$wf" || continue
     template="$STANDARDS_WF_DIR/$wf"
-    if [ ! -f "$template" ]; then
+    if [[ ! -f "$template" ]]; then
       warn "No canonical template at $template — skipping verbatim check for $wf"
       continue
     fi

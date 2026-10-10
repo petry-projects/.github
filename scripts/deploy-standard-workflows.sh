@@ -418,7 +418,9 @@ is_pin_compliant() {
 # reusable_uses_of <template> -> the template's first reusable `uses:` value
 # (org/repo/…/<base>-reusable.yml@<ref>), comment/CR stripped, or empty.
 reusable_uses_of() {
-  stub_reusable_uses "$1"
+  local template="$1"
+  stub_reusable_uses "$template"
+  return 0
 }
 
 # reusable_base_of <template> -> the ring channel base (e.g. `auto-rebase`) of the
